@@ -1,0 +1,19 @@
+{
+  "name": "@directivebench/agent-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capability-based agent harness contract, the deterministic Mock Agent and local CLI detection for Claude Code, Codex and Cursor Agent.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@directivebench/core": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}
