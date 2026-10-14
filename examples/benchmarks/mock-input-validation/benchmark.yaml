@@ -1,0 +1,107 @@
+# EXECUTABLE EXAMPLE — runs with the built-in deterministic Mock Agent (no AI, no API calls).
+#
+# The mock agent follows the playbook below. Steps guarded by `when.contextIncludes` only run
+# when the agent's loaded instructions contain that phrase — i.e. only in the candidate (GREEN)
+# workspace where the `validate-external-input` skill is installed. The resulting code is then
+# judged by real assertions, including hidden tests executed with `node --test`.
+#
+# This demonstrates the evaluation pipeline. It does not measure how a real AI agent behaves.
+schemaVersion: 1
+id: mock-input-validation
+name: Input validation (mock agent demo)
+description: >-
+  Implement parseAge() for user-supplied strings. Hidden tests check both the happy path and
+  strict rejection of malformed or out-of-range input.
+technologies: [javascript, node]
+categories: [security, code-quality]
+artifactTypes: [skill, instruction]
+
+execution:
+  agent: mock
+  environment:
+    kind: local-process
+  timeoutSeconds: 60
+  repetitions: 3
+
+scoring:
+  passThreshold: 1
+  minDelta: 0.05
+  stabilityThreshold: 0.1
+
+cases:
+  - id: implement-parse-age
+    name: Implement parseAge
+    prompt: |
+      Implement `parseAge(input)` in src/parse-age.js. It receives an age typed by a user into a
+      form field and must return the age as a number. Only modify files under src/.
+    fixture:
+      path: ./fixture
+    verification:
+      overlay: ./verification
+    assertions:
+      - id: basic-behaviour
+        type: command
+        description: Hidden happy-path tests pass.
+        command: [node, --test, test/parse-age.basic.test.js]
+        weight: 2
+      - id: rejects-invalid-input
+        type: command
+        description: Hidden validation tests pass (malformed and out-of-range input throws RangeError).
+        command: [node, --test, test/parse-age.validation.test.js]
+        weight: 2
+        required: true
+      - id: explicit-error-type
+        type: file-contains
+        description: The implementation raises a specific error type.
+        path: src/parse-age.js
+        pattern: "\\bRangeError\\b"
+        weight: 1
+      - id: scope
+        type: changed-files
+        description: Only files under src/ were modified.
+        allowed: ['src/**']
+        weight: 1
+    agentOptions:
+      mock:
+        playbook:
+          - id: implement
+            description: Implement parseAge with numeric coercion.
+            write:
+              path: src/parse-age.js
+              content: |
+                /**
+                 * Converts a user-supplied age string into a number.
+                 *
+                 * @param {string} input
+                 * @returns {number}
+                 */
+                export function parseAge(input) {
+                  return Number.parseInt(input, 10);
+                }
+          - id: validate
+            description: Replace coercion with strict validation, as instructed by the skill.
+            when:
+              contextIncludes: validate all external input
+            write:
+              path: src/parse-age.js
+              content: |
+                const AGE_PATTERN = /^\d{1,3}$/;
+
+                /**
+                 * Converts a user-supplied age string into a number.
+                 *
+                 * @param {string} input
+                 * @returns {number}
+                 * @throws {RangeError} when the input is not an integer between 0 and 150
+                 */
+                export function parseAge(input) {
+                  const value = typeof input === 'string' ? input.trim() : '';
+                  if (!AGE_PATTERN.test(value)) {
+                    throw new RangeError(`Invalid age: ${JSON.stringify(input)}`);
+                  }
+                  const age = Number(value);
+                  if (age > 150) {
+                    throw new RangeError(`Age out of range: ${age}`);
+                  }
+                  return age;
+                }
