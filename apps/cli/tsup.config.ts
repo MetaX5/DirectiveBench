@@ -12,4 +12,6 @@ export default defineConfig({
   // Internal workspace packages are bundled; third-party packages stay runtime dependencies.
   noExternal: [/^@directivebench\//],
   banner: { js: '#!/usr/bin/env node' },
+  // Keep `node:` prefixes: `node:sqlite` has no unprefixed alias.
+  removeNodeProtocol: false,
 });
