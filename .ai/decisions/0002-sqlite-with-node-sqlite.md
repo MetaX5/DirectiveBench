@@ -3,9 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Database schema](../specs/foundation/database-schema.md),
-  [Technology stack](../specs/foundation/technology-stack.md),
-  [Self-hosting architecture](../specs/foundation/self-hosting-architecture.md),
+- **Related:** [Database schema](../specs/2026-10-14-database-schema.md),
+  [Technology stack](../specs/2026-10-14-technology-stack.md),
+  [Self-hosting architecture](../specs/2026-10-14-self-hosting-architecture.md),
   [ADR-0001](0001-local-first-architecture.md), [ADR-0004](0004-native-cli-distribution.md),
   [ADR-0007](0007-local-runner-execution-and-isolation.md)
 

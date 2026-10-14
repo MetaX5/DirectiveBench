@@ -7,7 +7,7 @@ This directory holds the Architecture Decision Records (ADRs) for DirectiveBench
 | Location | Answers | Example |
 | --- | --- | --- |
 | `.ai/decisions/` (ADRs) | **Why** a significant technical decision was made, which alternatives were rejected, and what it costs us | "Why SQLite through `node:sqlite` and not PostgreSQL or better-sqlite3?" |
-| [`.ai/specs/`](../specs/) | **What** the system must do and how its parts behave | "Which tables exist and what are their constraints?" |
+| [`.ai/specs/`](../specs) | **What** the system must do and how its parts behave | "Which tables exist and what are their constraints?" |
 
 An ADR records a decision at a point in time. A spec describes the current intended behaviour and is
 updated as the system evolves. When a spec depends on a decision, it links to the ADR instead of
@@ -50,7 +50,7 @@ All ADRs above were written during project bootstrap and are pending maintainer 
 5. Do not rewrite the history of an Accepted ADR. To change a decision, write a new ADR that
    supersedes it, then set the old ADR's status to `Superseded by ADR-NNNN` (the only edit allowed
    on the old record besides fixing typos or broken links).
-6. Link the ADR from the affected specs in [`.ai/specs/`](../specs/), and link the specs from the ADR.
+6. Link the ADR from the affected specs in [`.ai/specs/`](../specs), and link the specs from the ADR.
 
 ## Template
 

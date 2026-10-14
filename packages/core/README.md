@@ -8,4 +8,4 @@ Domain vocabulary shared by every DirectiveBench package:
 - hashing, ID generation and secret redaction utilities
 
 It has no runtime dependencies on other workspace packages. See
-[`.ai/specs/foundation/domain-model.md`](../../.ai/specs/foundation/domain-model.md).
+[`.ai/specs/2026-10-14-domain-model.md`](../../.ai/specs/2026-10-14-domain-model.md).

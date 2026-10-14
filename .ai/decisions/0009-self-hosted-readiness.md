@@ -3,9 +3,9 @@
 - **Status:** Proposed
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Self-hosting architecture](../specs/foundation/self-hosting-architecture.md),
-  [System architecture](../specs/foundation/system-architecture.md),
-  [Runner management](../specs/features/runner-management.md),
+- **Related:** [Self-hosting architecture](../specs/2026-10-14-self-hosting-architecture.md),
+  [System architecture](../specs/2026-10-14-system-architecture.md),
+  [Runner management](../specs/2026-10-14-runner-management.md),
   [ADR-0001](0001-local-first-architecture.md), [ADR-0002](0002-sqlite-with-node-sqlite.md),
   [ADR-0007](0007-local-runner-execution-and-isolation.md),
   [ADR-0008](0008-secret-storage-and-authentication.md)

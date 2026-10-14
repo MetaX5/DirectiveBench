@@ -3,10 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Benchmark execution](../specs/features/benchmark-execution.md),
-  [Runner management](../specs/features/runner-management.md),
-  [Security and privacy](../specs/foundation/security-and-privacy.md),
-  [Database schema](../specs/foundation/database-schema.md),
+- **Related:** [Benchmark execution](../specs/2026-10-14-benchmark-execution.md),
+  [Runner management](../specs/2026-10-14-runner-management.md),
+  [Security and privacy](../specs/2026-10-14-security-and-privacy.md),
+  [Database schema](../specs/2026-10-14-database-schema.md),
   [ADR-0002](0002-sqlite-with-node-sqlite.md), [ADR-0009](0009-self-hosted-readiness.md)
 
 ## Context

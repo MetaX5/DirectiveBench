@@ -3,8 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [System architecture](../specs/foundation/system-architecture.md),
-  [Technology stack](../specs/foundation/technology-stack.md),
+- **Related:** [System architecture](../specs/2026-10-14-system-architecture.md),
+  [Technology stack](../specs/2026-10-14-technology-stack.md),
   [ADR-0004](0004-native-cli-distribution.md)
 
 ## Context

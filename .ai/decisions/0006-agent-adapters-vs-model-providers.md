@@ -3,11 +3,11 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Domain model](../specs/foundation/domain-model.md),
-  [Claude Code](../specs/integrations/claude-code.md),
-  [OpenAI Codex](../specs/integrations/openai-codex.md),
-  [Cursor](../specs/integrations/cursor.md),
-  [Custom model providers](../specs/integrations/custom-model-providers.md),
+- **Related:** [Domain model](../specs/2026-10-14-domain-model.md),
+  [Claude Code](../specs/2026-10-14-integration-claude-code.md),
+  [OpenAI Codex](../specs/2026-10-14-integration-openai-codex.md),
+  [Cursor](../specs/2026-10-14-integration-cursor.md),
+  [Custom model providers](../specs/2026-10-14-integration-custom-model-providers.md),
   [ADR-0005](0005-custom-benchmark-engine.md), [ADR-0008](0008-secret-storage-and-authentication.md)
 
 ## Context

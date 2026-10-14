@@ -1,0 +1,135 @@
+# AGENTS.md — instructions for AI coding agents
+
+This file is the **canonical** instruction set for every AI agent working in this repository
+(Claude Code, OpenAI Codex, Cursor, GitHub Copilot and others). Agent-specific files such as
+`CLAUDE.md` only point here and summarise; if they ever disagree, this file wins.
+
+DirectiveBench is a local-first, open-source workbench for discovering, organizing, testing and
+benchmarking AI agent skills, instructions and rules. Start with
+[`.ai/specs/README.md`](.ai/specs/README.md) and
+[`.ai/specs/2026-10-14-project-overview.md`](.ai/specs/2026-10-14-project-overview.md).
+
+## 1. The `.ai/` knowledge base (mandatory)
+
+```text
+.ai/
+├── specs/                    # specifications for spec-driven development (SDD)
+│   ├── README.md             # index, naming rules, lifecycle
+│   ├── YYYY-MM-DD-slug.md    # active specs (draft / approved)
+│   ├── implemented/          # specs whose acceptance criteria are verified
+│   └── archive/              # deprecated or superseded specs
+├── runs/                     # logs of autonomous AI runs: YYYY-MM-DD-slug.md
+├── lessons.md                # index of durable lessons (long-term memory)
+├── lessons/                  # one file per lesson: YYYY-MM-DD-slug.md
+├── decisions/                # architecture decision records (ADRs): NNNN-slug.md
+└── templates/                # templates for specs, proposals, run logs and lessons
+```
+
+- **Specs** say *what* the system must do. **ADRs** say *why* a decision was made.
+  **Run logs** say *what an AI run did*. **Lessons** keep *what we learned*. Code is *how*.
+- File names in `specs/`, `runs/` and `lessons/` **must** use `YYYY-MM-DD-slug.md`
+  (date = creation date, `slug` = lowercase kebab-case). Index files (`README.md`) are the only
+  exception. Do not create other specification directories (no `docs/specs/`, `ai/specs/`, …).
+
+## 2. Required workflow
+
+These rules are not optional. A task is not done until the applicable steps are complete.
+
+### Before you start
+
+1. Read this file, [`.ai/specs/README.md`](.ai/specs/README.md) and [`.ai/lessons.md`](.ai/lessons.md).
+2. Read the specs relevant to your task and the ADRs in [`.ai/decisions/`](.ai/decisions/README.md)
+   that they reference.
+3. For an **autonomous run** (multi-step work you plan and execute yourself), create
+   `.ai/runs/<today>-<slug>.md` from
+   [`.ai/templates/run-log.template.md`](.ai/templates/run-log.template.md) with
+   `status: in-progress`.
+
+### While working
+
+4. **Spec first.** A significant change (new feature, new integration, data-model, security, CLI
+   or public-interface change) needs a spec. Update the existing spec, or create a new draft as
+   `.ai/specs/<today>-<slug>.md` from a template in [`.ai/templates/`](.ai/templates/) and add it
+   to the index — before implementing it.
+5. Follow existing architecture and conventions. Do not contradict an `approved` spec; if it
+   must change, change the spec (and, for significant design changes, add an ADR) in the same
+   change set.
+6. Add tests for implemented behaviour. Tests must not require paid API calls or credentials;
+   use the deterministic mock agent.
+7. Do not add dependencies without a clear need; prefer the platform and existing packages.
+8. Keep changes focused: do not modify unrelated files.
+9. Keep DirectiveBench local-first: nothing may require a cloud service, account or hosted
+   database to run locally.
+10. Never commit secrets, credentials, personal data or local databases (`*.db`, `.env`).
+
+### Before you finish
+
+11. Run the quality gate and fix failures:
+    `pnpm lint && pnpm typecheck && pnpm test` — plus `pnpm build && pnpm verify:pack` when you
+    touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` for UI changes.
+12. Update the spec's **Implementation status** only for behaviour you verified. Move a spec to
+    `.ai/specs/implemented/` (status `implemented`) only when *all* acceptance criteria are
+    verified; move deprecated specs to `.ai/specs/archive/`. Never mark interfaces, stubs or
+    placeholder pages as implemented, and never set `approved` yourself.
+13. Record lessons: when you fixed a non-obvious bug, hit a misleading error or learned a
+    constraint, add `.ai/lessons/<today>-<slug>.md` (from
+    [`.ai/templates/lesson.template.md`](.ai/templates/lesson.template.md)) and a one-line entry in
+    [`.ai/lessons.md`](.ai/lessons.md). Update or delete lessons that turned out wrong.
+14. Finalise the run log: real verification results, deviations, what was **not** verified,
+    lessons recorded, follow-ups. Never claim unfinished or unverified work is complete.
+
+## 3. Git and GitHub workflow
+
+- Never commit directly to `main`. Create a branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`).
+- Use [Conventional Commits](https://www.conventionalcommits.org/) with a scope where useful,
+  e.g. `feat(benchmark-engine): …`, `fix(cli): …`, `docs(specs): …`. Make small, logical commits.
+- Use the GitHub CLI (`gh`) for pull requests and issues: `gh pr create`, `gh pr view`,
+  `gh issue create`. PR descriptions summarise the change, list verification commands with
+  results, and link the specs, ADRs and run log involved.
+- Commit the run log, spec updates and lessons together with the code they describe.
+
+## 4. Repository map
+
+| Path | Purpose |
+| --- | --- |
+| `apps/cli` | `directivebench` npm package: commands, lifecycle, embedded runner, packaging |
+| `apps/web` | Next.js App Router UI; reads SQLite, enqueues jobs, never executes benchmarks |
+| `packages/core` | Domain types, artifact parsers, config, hashing, redaction |
+| `packages/database` | Drizzle schema, migrations, `node:sqlite` client, repository functions |
+| `packages/agent-adapters` | Agent adapter contract, deterministic mock agent, CLI detection |
+| `packages/benchmark-engine` | Benchmark format, fixtures, assertions, scoring, RED/GREEN orchestration |
+| `packages/runner` | SQLite-backed job runner and example import |
+| `examples/` | Executable mock example and specification-only examples |
+| `scripts/verify-pack.mjs` | Packs, installs and smoke-tests the CLI tarball |
+
+Dependency direction: `core ← database`, `core ← agent-adapters ← benchmark-engine`,
+`{core, database, agent-adapters, benchmark-engine} ← runner`, `apps/* ← packages/*`. No cycles.
+
+## 5. Commands
+
+```bash
+pnpm install          # Node >= 22.16, pnpm via corepack or ~/.local/share/pnpm/bin
+pnpm dev              # CLI in dev mode: migrations, runner and `next dev`
+pnpm lint             # ESLint
+pnpm typecheck        # tsc / next typegen for every package
+pnpm test             # Vitest unit and integration tests
+pnpm test:e2e         # Playwright smoke test (builds required)
+pnpm build            # build web app and CLI bundle
+pnpm verify:pack      # pack, install and smoke-test the npm tarball
+```
+
+## 6. Conventions
+
+- TypeScript strict mode; avoid `any`; validate external input with Zod at boundaries.
+- Imported repositories and benchmark scripts are untrusted: never execute them automatically,
+  never disable TLS verification, keep commands argv-only with an environment allowlist.
+- The mock agent must always be labelled as a mock; never present mock results as AI results.
+- Incomplete features must be visibly marked as planned or not implemented.
+
+## 7. Other agents
+
+- **Codex** and **Cursor** read `AGENTS.md` natively.
+- **Claude Code** reads [`CLAUDE.md`](CLAUDE.md), which imports this file.
+- **GitHub Copilot**: if needed, add `.github/copilot-instructions.md` containing only a pointer to
+  this file — do not duplicate the rules.
+- Any other tool: configure it to read `AGENTS.md`; do not create competing instruction files.

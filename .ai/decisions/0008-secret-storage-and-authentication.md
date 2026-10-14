@@ -3,11 +3,11 @@
 - **Status:** Proposed
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Security and privacy](../specs/foundation/security-and-privacy.md),
-  [Settings and configuration](../specs/features/settings-and-configuration.md),
-  [Claude Code](../specs/integrations/claude-code.md),
-  [Anthropic API](../specs/integrations/anthropic-api.md),
-  [OpenAI API](../specs/integrations/openai-api.md),
+- **Related:** [Security and privacy](../specs/2026-10-14-security-and-privacy.md),
+  [Settings and configuration](../specs/2026-10-14-settings-and-configuration.md),
+  [Claude Code](../specs/2026-10-14-integration-claude-code.md),
+  [Anthropic API](../specs/2026-10-14-integration-anthropic-api.md),
+  [OpenAI API](../specs/2026-10-14-integration-openai-api.md),
   [ADR-0006](0006-agent-adapters-vs-model-providers.md), [ADR-0009](0009-self-hosted-readiness.md)
 
 ## Context

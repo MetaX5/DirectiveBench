@@ -8,6 +8,8 @@ export default tseslint.config(
   {
     ignores: [
       '**/node_modules/**',
+      '.agents/**',
+      '.claude/**',
       '**/dist/**',
       '**/.next/**',
       '**/.turbo/**',

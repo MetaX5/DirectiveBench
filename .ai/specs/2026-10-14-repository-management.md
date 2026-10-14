@@ -1,0 +1,239 @@
+---
+id: SPEC-104
+title: Repository Management
+status: draft
+created: 2026-10-14
+updated: 2026-10-14
+category: feature
+related: [SPEC-101, SPEC-102, SPEC-105, SPEC-006, SPEC-007, SPEC-008, SPEC-115, SPEC-201, SPEC-202, ADR-0008, ADR-0009]
+---
+
+# SPEC-104 — Repository Management
+
+## 1. Summary
+
+Repository management lets users register the sources DirectiveBench scans for artifacts: GitHub repositories, GitLab repositories (gitlab.com and self-managed instances), local git repositories and plain local directories. A repository record holds the provider, location, branch selection, an optional **credential reference** (never a secret) and per-repository discovery settings. Registration validates the connection without modifying anything: DirectiveBench treats every repository as **read-only**. Synchronisation itself is specified in [SPEC-105](2026-10-14-repository-synchronization.md).
+
+## 2. Motivation and problem statement
+
+Artifacts live in many repositories, some private, some on self-managed GitLab, some only on the local disk. Users need one place to declare those sources, choose which branch represents "the truth", and know whether DirectiveBench can reach them — without handing over credentials in plaintext or risking that the tool modifies their code.
+
+## 3. Goals
+
+- Register, edit, validate, disable and remove repositories of four kinds.
+- Branch selection with automatic default-branch detection.
+- Authentication by reference only: existing git credentials of the user, OS keychain entry, or environment variable ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)).
+- Clear connection status and actionable validation errors.
+- Strict read-only guarantee towards all repositories.
+
+## 4. Non-goals
+
+- Creating repositories, pushing, opening PRs/MRs (future, [SPEC-105](2026-10-14-repository-synchronization.md) §19).
+- Organisation-wide discovery ("import all repos of my GitHub org") — future.
+- Providers other than GitHub, GitLab, generic local git and local directories (Bitbucket, Gitea, Azure DevOps — future).
+- Storing secrets in the database or `config.json`.
+
+## 5. User stories
+
+- US-104-01: As a developer, I want to add `https://github.com/acme/agent-skills` and have DirectiveBench detect its default branch.
+- US-104-02: As an enterprise user, I want to add a project from `https://gitlab.acme.internal` using a token stored in my OS keychain.
+- US-104-03: As a skill author, I want to add `~/code/my-skills` (a local git repository) without any network access.
+- US-104-04: As a user, I want to add a plain folder of rules that is not under version control.
+- US-104-05: As a user, I want to see immediately if a repository is unreachable or my credential is missing, with a hint how to fix it.
+- US-104-06: As a security-conscious user, I want certainty that DirectiveBench never writes to my repositories.
+
+## 6. Functional requirements
+
+| ID | Requirement |
+|----|-------------|
+| FR-104-01 | Supported providers (values of `repositories.provider`): `github`, `gitlab`, `local-git`, `local-directory`. The value `bundled-examples` is internal (created by `demo`/example import) and SHALL NOT be user-creatable or editable. |
+| FR-104-02 | Registration by URL: HTTPS URLs (`https://github.com/<owner>/<repo>[.git]`, `https://<gitlab-host>/<group>/<subgroup…>/<project>[.git]`) and SSH URLs (`git@host:path.git`, `ssh://git@host/path.git`). Provider is inferred from the host (`github.com` → `github`, `gitlab.com` → `gitlab`); for other hosts the user selects `gitlab` (self-managed) and the `instance_url` is derived as `https://<host>` (editable, may include a path prefix). |
+| FR-104-03 | Registration by path: an absolute path (`~` expanded). If the path is inside a git work tree (`git rev-parse --show-toplevel` succeeds), the provider defaults to `local-git` and the location is normalised to the top-level directory; otherwise `local-directory`. The user may register a git work tree as `local-directory` explicitly (to scan the working tree including uncommitted changes). |
+| FR-104-04 | `location` SHALL be normalised (hosted: URL without credentials, without trailing `/` and `.git`; local: resolved absolute path) and unique per provider (`repositories_provider_location_unique`). Duplicate registration returns the existing repository. |
+| FR-104-05 | URLs containing embedded credentials (`https://user:token@…`) SHALL be rejected with an explanation; nothing from them is stored or logged. |
+| FR-104-06 | `name` defaults to `<owner>/<repo>` (hosted) or the directory basename (local); user-editable. |
+| FR-104-07 | **Branch selection**: for git providers, the default branch SHALL be detected on validation (`git ls-remote --symref <url> HEAD` for hosted; current symbolic `HEAD` of the repository for `local-git`) and stored in `default_branch`. `selected_branch` is optional; when null, sync uses `default_branch`. The UI offers the list of remote branches (`git ls-remote --heads`). Not applicable to `local-directory`. |
+| FR-104-08 | **Credential reference** (planned column `credential_ref`, JSON) SHALL be one of: `{ kind: 'git-default' }` (default — let `git` use the user's existing SSH agent / credential helper, DirectiveBench never reads them), `{ kind: 'keychain', account: string }` (OS credential store entry, service `directivebench`), `{ kind: 'env', variable: string }` (name of an environment variable). Inline secrets SHALL NOT be accepted by any API. |
+| FR-104-09 | Secrets resolved from `keychain`/`env` SHALL be passed to `git` only through the child process environment (e.g. `GIT_CONFIG_*` http extra header or a one-shot `GIT_ASKPASS` helper reading from env), never via argv or URL, and SHALL be registered for redaction ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). Exact mechanism — Assumption — requires validation per provider ([SPEC-201](2026-10-14-integration-github.md), [SPEC-202](2026-10-14-integration-gitlab.md)). |
+| FR-104-10 | **Connection validation** SHALL run on create, on credential/branch change and on demand ("Test connection"). Checks: hosted — `git ls-remote` succeeds within 30 s and the selected branch exists; `local-git` — path exists, is a git work tree, selected branch exists, `git` binary available; `local-directory` — path exists, is a directory, is readable. Result: `ok` or a typed error (§13). |
+| FR-104-11 | Validation and all other repository operations SHALL be read-only: no `git push`, `commit`, `checkout`, `reset`, `stash`, `config` writes, no index/worktree modification of local repositories, no file writes inside local directories. Hosted repositories are cloned only into the DirectiveBench cache ([SPEC-105](2026-10-14-repository-synchronization.md)). |
+| FR-104-12 | Git invocations SHALL disable features that execute repository-controlled code or prompt interactively: `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` (or platform equivalent), `-c protocol.ext.allow=never`, no LFS smudge (`GIT_LFS_SKIP_SMUDGE=1`), no submodule recursion. Only read-only plumbing commands (`ls-remote`, `rev-parse`, `ls-tree`, `cat-file`, `clone --depth`/`fetch --depth` into cache) are used. |
+| FR-104-13 | **Discovery settings** per repository (planned column `discovery`, JSON): `exclude` globs (added to defaults `.git/**`, `node_modules/**`), optional `include` roots (limit scanning to sub-paths, e.g. `skills/`). Used by [SPEC-102](2026-10-14-artifact-discovery.md). |
+| FR-104-14 | **Edit**: name, selected branch, credential reference, discovery settings, instance URL. Changing provider or location is not allowed (create a new repository instead). |
+| FR-104-15 | **Disable** (planned column `disabled_at`): excluded from "sync all", data kept. **Remove**: deletes the repository row; its occurrences are deleted by cascade but artifacts, versions (provenance `source_repository_id` set to null), categories, notes and evaluation results remain. Removal requires confirmation showing the number of affected artifacts; artifacts left without any occurrence are shown as "orphaned" (lifecycle `removed`). Cached clones are deleted. |
+| FR-104-16 | Repository list SHALL show: name, provider, location (hosted host/path or local path), branch (selected or default), last sync time, sync status (`never` / `ok` / `error`), artifact count (active occurrences), credential kind (never the secret). |
+| FR-104-17 | Repository status fields `last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error` are written only by synchronisation ([SPEC-105](2026-10-14-repository-synchronization.md)). |
+
+## 7. Non-functional requirements
+
+- NFR-104-01: Validation completes or times out within 30 s (hosted) / 2 s (local).
+- NFR-104-02: Works offline for `local-git` and `local-directory`.
+- NFR-104-03: Requires the `git` CLI (≥ 2.30 — Assumption — requires validation of the minimum version for `ls-remote --symref` and partial clone flags) for git providers; `directivebench doctor` reports its presence ([SPEC-009](2026-10-14-cli-architecture.md)).
+- NFR-104-04: Repository persistence goes through `@directivebench/database` repository functions ([ADR-0009](../decisions/0009-self-hosted-readiness.md)).
+
+## 8. Domain entities and contracts
+
+Bootstrap table `repositories` (`packages/database/src/schema.ts`): `id, provider, name, location, instance_url, default_branch, selected_branch, last_commit_sha, last_sync_at, sync_status ('never'|'ok'|'error'), sync_error, created_at, updated_at`. Planned columns: `credential_ref`, `discovery`, `disabled_at`.
+
+```ts
+type RepositoryProvider = 'github' | 'gitlab' | 'local-git' | 'local-directory' | 'bundled-examples';
+
+type CredentialRef =
+  | { kind: 'git-default' }                    // user's own git config / SSH agent / credential helper
+  | { kind: 'keychain'; account: string }      // OS credential store, service 'directivebench'
+  | { kind: 'env'; variable: string };         // e.g. 'GITLAB_TOKEN'
+
+interface RepositoryInput {                     // Zod-validated Server Action input
+  source: { url: string } | { path: string };
+  provider?: 'github' | 'gitlab' | 'local-git' | 'local-directory'; // override inference
+  name?: string;
+  instanceUrl?: string;                         // self-managed GitLab
+  selectedBranch?: string | null;
+  credentialRef?: CredentialRef;                // default { kind: 'git-default' }
+  discovery?: { exclude?: string[]; include?: string[] };
+}
+
+type ValidationResult =
+  | { ok: true; defaultBranch: string | null; branches?: string[]; headCommit?: string }
+  | { ok: false; code: RepositoryErrorCode; message: string; hint?: string };
+
+type RepositoryErrorCode =
+  | 'invalid-url' | 'credentials-in-url' | 'unsupported-provider'
+  | 'path-not-found' | 'not-a-directory' | 'not-a-git-repository' | 'permission-denied'
+  | 'git-not-installed' | 'unreachable' | 'auth-required' | 'auth-failed'
+  | 'branch-not-found' | 'timeout' | 'credential-missing';
+```
+
+A future `packages/git-providers` package (not created in bootstrap) will hold provider-specific logic behind:
+
+```ts
+interface GitSourceProvider {
+  id: 'github' | 'gitlab' | 'local-git' | 'local-directory';
+  parseLocation(input: string): { location: string; instanceUrl?: string; name: string } | null;
+  validate(repo: RepositoryRecord, ctx: { env: Record<string, string>; signal: AbortSignal }): Promise<ValidationResult>;
+  listBranches?(repo: RepositoryRecord, ctx: …): Promise<string[]>;
+  openTree(repo: RepositoryRecord, ref: string, ctx: …): Promise<{ commitSha: string | null; tree: FileTree }>; // SPEC-102 FileTree
+}
+```
+
+## 9. Data flow
+
+```mermaid
+sequenceDiagram
+  participant U as User (web UI)
+  participant SA as Server Action
+  participant G as git / filesystem (read-only)
+  participant K as Credential resolver
+  participant DB as SQLite
+  U->>SA: addRepository(RepositoryInput)
+  SA->>SA: Zod validate, normalise location, reject inline creds
+  SA->>K: resolve credentialRef (keychain/env) — value kept in memory only
+  SA->>G: ls-remote / rev-parse / stat (timeout, no prompts)
+  G-->>SA: default branch, branches | error
+  SA->>DB: insert repositories (sync_status='never')
+  SA-->>U: repository + validation result
+```
+
+Validation of hosted repositories involves network I/O of up to 30 s; it may run in the web process as a bounded operation (it does not execute repository content). Sync runs as a job in the runner ([SPEC-105](2026-10-14-repository-synchronization.md)).
+
+## 10. API and interface design
+
+Server Actions (Zod-validated, `{ ok, data | error }` per [SPEC-008](2026-10-14-api-architecture.md)):
+
+| Action | Input | Result |
+|--------|-------|--------|
+| `addRepository` | `RepositoryInput` | `{ repository, validation }` |
+| `updateRepository` | `{ id, name?, selectedBranch?, credentialRef?, discovery?, instanceUrl? }` | `{ repository, validation? }` |
+| `validateRepository` | `{ id }` | `ValidationResult` |
+| `listRepositoryBranches` | `{ id }` | `string[]` |
+| `setRepositoryDisabled` | `{ id, disabled }` | `{ repository }` |
+| `removeRepository` | `{ id, confirm: true }` | `{ removedOccurrences, orphanedArtifacts }` |
+
+Planned `/api/v1/repositories` resource with the same operations. Planned CLI: `directivebench repo add <url|path> [--branch] [--credential-env VAR]`, `repo list`, `repo remove` ([SPEC-009](2026-10-14-cli-architecture.md)).
+
+## 11. UI/UX considerations
+
+- Bootstrap: the Repositories page is an honest "Planned — not implemented" page linking to this spec and [SPEC-105](2026-10-14-repository-synchronization.md).
+- Planned list `/repositories`: table per FR-104-16, "Add repository" button, "Sync" and "Sync all" (SPEC-105), status badge with error tooltip.
+- Add dialog: single input accepting URL or path with live inference ("Detected: GitLab self-managed at https://gitlab.acme.internal"), branch picker after validation, credential selector (Use my git credentials / OS keychain entry / Environment variable) with explanatory text that DirectiveBench never stores the secret in its database.
+- Detail `/repositories/[id]`: settings, discovery settings, "Test connection", sync history ([SPEC-105](2026-10-14-repository-synchronization.md)), artifacts found.
+- Prominent "Read-only: DirectiveBench never writes to this repository" note.
+
+## 12. Security considerations
+
+See [SPEC-007](2026-10-14-security-and-privacy.md) and [ADR-0008](../decisions/0008-secret-storage-and-authentication.md).
+- No plaintext secrets in SQLite, `config.json`, logs, error messages or URLs (FR-104-05, FR-104-08).
+- Secrets passed to git via env only; output redacted with `@directivebench/core` redaction.
+- Hardened git invocation (FR-104-12): no hooks, no fsmonitor, no ext protocol, no LFS smudge, no submodules, no interactive prompts.
+- `argv`-based process spawning (no shell); URLs and branch names validated (branch names must not start with `-` to prevent option injection; `--` separator used).
+- Local paths: resolved and checked; symlinked repository roots are resolved once at registration and displayed.
+- `file://` and local-path URLs given as "URL" are treated as local providers, not passed to `git clone` as remote URLs.
+
+## 13. Error handling
+
+| Code | User message (example) | Hint |
+|------|------------------------|------|
+| `credentials-in-url` | "The URL contains credentials." | "Remove them and use a keychain entry or environment variable." |
+| `git-not-installed` | "git was not found on PATH." | "Install git and re-run `directivebench doctor`." |
+| `auth-required` / `auth-failed` | "The repository requires authentication / credentials were rejected." | "Configure a credential reference or log in with your git credential helper." |
+| `credential-missing` | "Environment variable GITLAB_TOKEN is not set." | — |
+| `unreachable` / `timeout` | "Could not reach gitlab.acme.internal within 30 s." | "Check VPN/proxy." |
+| `branch-not-found` | "Branch 'release' does not exist." | Branch picker shown. |
+| `not-a-git-repository` | "Path is not inside a git work tree." | "Register as local directory instead." |
+
+Validation failure on create still allows saving (status `never`, error shown) so users can fix credentials later; sync is blocked until validation succeeds.
+
+## 14. Edge cases
+
+- GitLab nested groups (`group/sub/sub2/project`) and self-managed instances under a path prefix (`https://host/gitlab/…`).
+- Repository renamed/moved upstream (HTTP redirect) → validation succeeds; location update suggested.
+- Default branch changed upstream → detected on next validation/sync; `selected_branch = null` follows it.
+- Empty repository (no commits) → validation ok with warning, sync finds nothing.
+- Local git repository with detached HEAD → default branch `null`; user must select a branch or use commit-less `local-directory` mode.
+- Local path on removable/network drive disappears → `path-not-found` on sync; data retained.
+- Same remote registered via HTTPS and SSH → two locations; UI warns "possibly duplicate" (same host + path).
+- Windows paths (`C:\…`) normalised; case-insensitive filesystems considered when checking duplicates.
+
+## 15. Testing strategy
+
+Per [SPEC-012](2026-10-14-testing-strategy.md):
+- Unit: URL/path parsing and provider inference table (GitHub HTTPS/SSH, gitlab.com, self-managed with prefix, credentials-in-URL rejection, `file://`), location normalisation, credential ref schema.
+- Integration: temporary local git repositories (`git init` in tmp) for `local-git` validation, branch listing, detached HEAD; local bare repository served via `file://` path to emulate a remote for `ls-remote` without network.
+- Security: a fixture repository with a malicious `core.fsmonitor` / hook that would create a marker file → never executed during validation.
+- No tests against real GitHub/GitLab in CI.
+
+## 16. Acceptance criteria
+
+- [ ] Adding a GitHub HTTPS URL stores provider `github`, normalised location, detected default branch.
+- [ ] Adding a self-managed GitLab URL stores provider `gitlab` and `instance_url`.
+- [ ] Adding a local git path stores `local-git` with the top-level directory; a plain folder stores `local-directory`.
+- [ ] A URL with embedded credentials is rejected and does not appear in any log.
+- [ ] No API accepts a secret value; only `CredentialRef` objects.
+- [ ] Validation errors are returned with the codes in §8 and human hints.
+- [ ] The malicious-hook fixture never executes during validation.
+- [ ] Removing a repository keeps artifacts, versions and evaluation results.
+
+## 17. Dependencies
+
+[SPEC-105](2026-10-14-repository-synchronization.md), [SPEC-102](2026-10-14-artifact-discovery.md), [SPEC-201](2026-10-14-integration-github.md), [SPEC-202](2026-10-14-integration-gitlab.md), [SPEC-115](2026-10-14-settings-and-configuration.md), [ADR-0008](../decisions/0008-secret-storage-and-authentication.md) (keychain library pending), `git` CLI, future `packages/git-providers`.
+
+## 18. Open questions
+
+- OQ-104-01: Should validation of hosted repositories run in the web process or as a short job in the runner (consistency with "web never executes")? Proposed: web process, since it executes no repository content; revisit for self-hosted mode.
+- OQ-104-02: Should `local-git` optionally scan the working tree (uncommitted changes) instead of the selected branch's commit? Currently: register as `local-directory` for that.
+- OQ-104-03: Use provider REST APIs (GitHub/GitLab) for metadata (description, visibility, default branch) in addition to git? Requires token scopes analysis.
+- OQ-104-04: Credential mechanism for HTTPS tokens with git (extra header vs askpass) — requires validation.
+
+## 19. Future extensions
+
+- Bulk import from a GitHub organisation / GitLab group.
+- Additional providers (Bitbucket, Gitea/Forgejo, Azure DevOps).
+- Write-capable mode for publishing artifact changes as PR/MR (explicit opt-in, separate permission).
+- Webhooks ([SPEC-105](2026-10-14-repository-synchronization.md)).
+- Shared repository registry in self-hosted mode with per-user credentials ([SPEC-011](2026-10-14-self-hosting-architecture.md)).
+
+## 20. Implementation status
+
+- **Implemented in bootstrap**: `repositories` table (provider enum incl. internal `bundled-examples`, location, instance URL, default/selected branch, sync status columns). The `bundled-examples` repository is used for example import (to be verified).
+- **Partially implemented**: none.
+- **Not implemented**: user registration of any provider, URL/path parsing, credential references (`credential_ref` column), discovery settings, disable/remove, connection validation, branch listing, hardened git execution, Repositories UI (page shows "Planned — not implemented"), `packages/git-providers`.

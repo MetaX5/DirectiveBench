@@ -3,11 +3,11 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Benchmark engine](../specs/features/benchmark-engine.md),
-  [Benchmark definition format](../specs/features/benchmark-definition-format.md),
-  [RED/GREEN evaluation](../specs/features/red-green-evaluation.md),
-  [Benchmark scoring](../specs/features/benchmark-scoring.md),
-  [Promptfoo (optional)](../specs/integrations/promptfoo-optional.md),
+- **Related:** [Benchmark engine](../specs/2026-10-14-benchmark-engine.md),
+  [Benchmark definition format](../specs/2026-10-14-benchmark-definition-format.md),
+  [RED/GREEN evaluation](../specs/2026-10-14-red-green-evaluation.md),
+  [Benchmark scoring](../specs/2026-10-14-benchmark-scoring.md),
+  [Promptfoo (optional)](../specs/2026-10-14-integration-promptfoo-optional.md),
   [ADR-0006](0006-agent-adapters-vs-model-providers.md)
 
 ## Context
@@ -38,7 +38,7 @@ provider comparison.
   verification overlay, setup commands, allowed changes, assertions and mock playbooks.
 - Treat **Promptfoo as an optional future adapter**, not a core dependency: possible export of
   DirectiveBench cases to Promptfoo configs and/or import of Promptfoo results/assertions where the
-  concepts map. Specified in [promptfoo-optional](../specs/integrations/promptfoo-optional.md); not
+  concepts map. Specified in [promptfoo-optional](../specs/2026-10-14-integration-promptfoo-optional.md); not
   implemented.
 
 ## Alternatives considered
@@ -71,7 +71,7 @@ provider comparison.
 
 ## Consequences
 
-- Scoring and verdict rules are specified in [benchmark-scoring](../specs/features/benchmark-scoring.md)
+- Scoring and verdict rules are specified in [benchmark-scoring](../specs/2026-10-14-benchmark-scoring.md)
   and are the engine's responsibility.
 - Any Promptfoo integration lives in a separate adapter module and must not leak into the engine's
   core types.

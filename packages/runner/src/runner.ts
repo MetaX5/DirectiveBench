@@ -59,7 +59,7 @@ const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefin
 /**
  * Executes benchmark jobs from the SQLite queue with bounded concurrency. It runs inside the CLI
  * process; the web UI only enqueues jobs. Remote runners will implement the same lifecycle over
- * an authenticated outbound connection (see .ai/specs/features/runner-management.md).
+ * an authenticated outbound connection (see .ai/specs/2026-10-14-runner-management.md).
  */
 export class LocalRunner {
   readonly runnerId = `runner_${randomBytes(6).toString('hex')}`;

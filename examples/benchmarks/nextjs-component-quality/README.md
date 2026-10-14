@@ -2,7 +2,7 @@
 
 **Status: specification only.** `benchmark.yaml` validates against the schema (checked in CI),
 but the fixture has not been built and the benchmark cannot run yet. It needs the planned
-`docker` environment and a real agent adapter (here Codex; see `.ai/specs/integrations/openai-codex.md`).
+`docker` environment and a real agent adapter (here Codex; see `.ai/specs/2026-10-14-integration-openai-codex.md`).
 
 Any code-quality skill, `AGENTS.md` instruction or Cursor rule can be evaluated against it.
 

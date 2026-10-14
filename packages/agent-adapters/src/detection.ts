@@ -5,7 +5,7 @@ import type { AgentDetection } from './contract';
 
 /**
  * Descriptor of a real agent harness. Only detection is implemented in this release;
- * execution adapters are specified in `.ai/specs/integrations/` (Milestone 4).
+ * execution adapters are specified in `.ai/specs/` (Milestone 4).
  */
 export interface CliAgentDescriptor {
   id: string;
@@ -21,21 +21,21 @@ export const CLI_AGENTS: readonly CliAgentDescriptor[] = [
     displayName: 'Claude Code',
     executable: 'claude',
     versionArgs: ['--version'],
-    specPath: '.ai/specs/integrations/claude-code.md',
+    specPath: '.ai/specs/2026-10-14-integration-claude-code.md',
   },
   {
     id: 'codex',
     displayName: 'OpenAI Codex CLI',
     executable: 'codex',
     versionArgs: ['--version'],
-    specPath: '.ai/specs/integrations/openai-codex.md',
+    specPath: '.ai/specs/2026-10-14-integration-openai-codex.md',
   },
   {
     id: 'cursor',
     displayName: 'Cursor Agent CLI',
     executable: 'cursor-agent',
     versionArgs: ['--version'],
-    specPath: '.ai/specs/integrations/cursor.md',
+    specPath: '.ai/specs/2026-10-14-integration-cursor.md',
   },
 ];
 

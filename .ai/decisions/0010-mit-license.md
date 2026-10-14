@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Project overview](../specs/foundation/project-overview.md),
+- **Related:** [Project overview](../specs/2026-10-14-project-overview.md),
   [`LICENSE`](../../LICENSE)
 
 ## Context

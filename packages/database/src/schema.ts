@@ -10,7 +10,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 
 /*
- * Portability rules (see .ai/specs/foundation/database-schema.md):
+ * Portability rules (see .ai/specs/2026-10-14-database-schema.md):
  * - timestamps are ISO-8601 UTC text, IDs are prefixed random text
  * - structured data is JSON stored as text and validated at the boundary
  * - no SQLite-only features are relied upon by repository code except RETURNING (also in PostgreSQL)

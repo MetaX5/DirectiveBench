@@ -10,4 +10,4 @@ CLI, which sets `DIRECTIVEBENCH_DATA_DIR`, migrates the database and runs the jo
   protection).
 
 Develop with `pnpm dev` from the repository root (starts the CLI in dev mode, which runs
-`next dev` and the runner). See `.ai/specs/features/dashboard-and-navigation.md`.
+`next dev` and the runner). See `.ai/specs/2026-10-14-dashboard-and-navigation.md`.

@@ -3,9 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [CLI architecture](../specs/foundation/cli-architecture.md),
-  [Local installation](../specs/foundation/local-installation.md),
-  [Technology stack](../specs/foundation/technology-stack.md),
+- **Related:** [CLI architecture](../specs/2026-10-14-cli-architecture.md),
+  [Local installation](../specs/2026-10-14-local-installation.md),
+  [Technology stack](../specs/2026-10-14-technology-stack.md),
   [ADR-0001](0001-local-first-architecture.md), [ADR-0002](0002-sqlite-with-node-sqlite.md),
   [ADR-0003](0003-monorepo-architecture.md)
 

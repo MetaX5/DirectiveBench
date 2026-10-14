@@ -3,10 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Deciders:** Project maintainers (bootstrap proposal — pending maintainer review)
-- **Related:** [Project overview](../specs/foundation/project-overview.md),
-  [System architecture](../specs/foundation/system-architecture.md),
-  [Security and privacy](../specs/foundation/security-and-privacy.md),
-  [Local installation](../specs/foundation/local-installation.md),
+- **Related:** [Project overview](../specs/2026-10-14-project-overview.md),
+  [System architecture](../specs/2026-10-14-system-architecture.md),
+  [Security and privacy](../specs/2026-10-14-security-and-privacy.md),
+  [Local installation](../specs/2026-10-14-local-installation.md),
   [ADR-0009](0009-self-hosted-readiness.md)
 
 ## Context

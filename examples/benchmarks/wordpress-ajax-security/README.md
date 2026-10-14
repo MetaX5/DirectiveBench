@@ -3,8 +3,8 @@
 **Status: specification only.** `benchmark.yaml` validates against the schema (this is checked in
 CI), but the fixture below has not been built and the benchmark cannot run yet. It needs:
 
-- the `docker` execution environment (planned; see `.ai/specs/features/benchmark-execution.md`)
-- a real agent adapter, e.g. Claude Code (planned, Milestone 4; see `.ai/specs/integrations/claude-code.md`)
+- the `docker` execution environment (planned; see `.ai/specs/2026-10-14-benchmark-execution.md`)
+- a real agent adapter, e.g. Claude Code (planned, Milestone 4; see `.ai/specs/2026-10-14-integration-claude-code.md`)
 
 The skill under test is [`examples/artifacts/wordpress-ajax-security`](../../artifacts/wordpress-ajax-security/SKILL.md).
 
