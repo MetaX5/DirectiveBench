@@ -1,0 +1,53 @@
+{
+  "name": "directivebench",
+  "version": "0.1.0",
+  "description": "Local-first workbench for discovering, organizing, testing and benchmarking AI agent skills, instructions and rules.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "directivebench": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "skills",
+    "benchmark",
+    "claude-code",
+    "codex",
+    "cursor",
+    "evaluation"
+  ],
+  "scripts": {
+    "dev": "tsx src/main.ts serve --dev --no-open",
+    "build": "tsup && node scripts/assemble-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "drizzle-orm": "^0.45.4",
+    "next": "16.4.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@directivebench/agent-adapters": "workspace:*",
+    "@directivebench/benchmark-engine": "workspace:*",
+    "@directivebench/core": "workspace:*",
+    "@directivebench/database": "workspace:*",
+    "@directivebench/runner": "workspace:*",
+    "@directivebench/web": "workspace:*",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15"
+  }
+}
