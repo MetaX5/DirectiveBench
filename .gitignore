@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.next/
+.turbo/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data — never commit databases or credentials
+*.db
+*.db-wal
+*.db-shm
+.directivebench/
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+test-results/
+playwright-report/
+*.tgz
+
+.DS_Store
+*.log
