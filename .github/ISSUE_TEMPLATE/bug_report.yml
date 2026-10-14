@@ -1,0 +1,28 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the command you ran and the actual output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `directivebench doctor`
+      description: Remove any paths or details you do not want to share. Never paste API keys or tokens.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: DirectiveBench version and OS
+      placeholder: 0.1.0, Ubuntu 24.04, Node 24.x

@@ -1,0 +1,24 @@
+{
+  "name": "@directivebench/benchmark-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Benchmark definition format, fixture snapshots, workspaces, assertions, scoring and RED/GREEN orchestration. Independent of the database and UI.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./definition": "./src/definition.ts",
+    "./load": "./src/load.ts",
+    "./scoring": "./src/scoring.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@directivebench/agent-adapters": "workspace:*",
+    "@directivebench/core": "workspace:*",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  }
+}

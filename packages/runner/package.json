@@ -1,0 +1,21 @@
+{
+  "name": "@directivebench/runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local SQLite-backed job runner: acquisition, heartbeats, cancellation, crash recovery and persistence of benchmark results.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@directivebench/agent-adapters": "workspace:*",
+    "@directivebench/benchmark-engine": "workspace:*",
+    "@directivebench/core": "workspace:*",
+    "@directivebench/database": "workspace:*"
+  }
+}

@@ -1,0 +1,96 @@
+# SPECIFICATION-ONLY EXAMPLE — not executable in this release.
+#
+# It validates against the benchmark definition schema (checked in CI), but it requires the
+# `docker` execution environment and a real coding agent, neither of which is implemented yet.
+# The fixture is specified in README.md and has not been built. See
+# .ai/specs/2026-10-14-benchmark-execution.md and .ai/specs/2026-10-14-implementation-roadmap.md.
+schemaVersion: 1
+id: wordpress-ajax-security
+name: WordPress AJAX handler hardening
+description: >-
+  Harden an insecure AJAX action in a small WordPress plugin. Measures whether a WordPress
+  security skill leads the agent to add nonce verification, capability checks, input
+  sanitisation and output escaping without breaking behaviour or touching unrelated files.
+technologies: [wordpress, php, phpunit]
+categories: [security, wordpress, php]
+artifactTypes: [skill, instruction, rule]
+
+execution:
+  agent: claude-code
+  model:
+    provider: anthropic
+    model: replace-with-a-model-supported-by-the-selected-agent
+  environment:
+    kind: docker
+    image: directivebench/fixture-wordpress-php83:planned
+  timeoutSeconds: 900
+  repetitions: 5
+
+scoring:
+  passThreshold: 0.8
+  minDelta: 0.1
+  stabilityThreshold: 0.15
+
+cases:
+  - id: harden-save-note-ajax
+    name: Harden the save-note AJAX action
+    prompt: |
+      The plugin in wp-content/plugins/team-notes registers the AJAX action `team_notes_save`.
+      Users report that notes can be changed by people who should not be able to. Review the
+      handler in includes/class-ajax.php and fix the security problems while keeping the
+      existing behaviour for authorised users. Do not modify tests.
+    fixture:
+      path: ./fixture
+    verification:
+      overlay: ./verification
+    setup:
+      - [composer, install, --no-interaction, --no-progress]
+    assertions:
+      - id: phpunit-behaviour
+        type: command
+        description: Existing behaviour for authorised editors is preserved.
+        command: [vendor/bin/phpunit, --testsuite, behaviour]
+        weight: 3
+        required: true
+      - id: phpunit-security
+        type: command
+        description: Hidden tests — missing/invalid nonce, subscriber role and anonymous requests are rejected.
+        command: [vendor/bin/phpunit, --testsuite, security]
+        weight: 4
+      - id: nonce-verified
+        type: file-contains
+        path: wp-content/plugins/team-notes/includes/class-ajax.php
+        pattern: "check_ajax_referer\\s*\\(|wp_verify_nonce\\s*\\("
+        weight: 1
+      - id: capability-checked
+        type: file-contains
+        path: wp-content/plugins/team-notes/includes/class-ajax.php
+        pattern: "current_user_can\\s*\\("
+        weight: 1
+      - id: no-raw-superglobals
+        type: file-contains
+        description: Request data is not used without sanitisation.
+        path: wp-content/plugins/team-notes/includes/class-ajax.php
+        pattern: "\\$_POST\\[['\"]note['\"]\\]\\s*\\)?\\s*;"
+        negate: true
+        weight: 1
+      - id: coding-standards
+        type: command
+        description: WordPress Coding Standards (security sniffs) pass.
+        command:
+          [
+            vendor/bin/phpcs,
+            --standard=WordPress-Extra,
+            '--sniffs=WordPress.Security.NonceVerification,WordPress.Security.ValidatedSanitizedInput,WordPress.Security.EscapeOutput',
+            wp-content/plugins/team-notes,
+          ]
+        weight: 2
+      - id: scope
+        type: changed-files
+        allowed:
+          [
+            'wp-content/plugins/team-notes/includes/**',
+            'wp-content/plugins/team-notes/team-notes.php',
+          ]
+        forbidden: ['tests/**', 'vendor/**']
+        weight: 1

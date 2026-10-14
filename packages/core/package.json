@@ -1,0 +1,19 @@
+{
+  "name": "@directivebench/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Domain types, Zod schemas, artifact format parsers, configuration and utilities shared by all DirectiveBench packages.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  }
+}

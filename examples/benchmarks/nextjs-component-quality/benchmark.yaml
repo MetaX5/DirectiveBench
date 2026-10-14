@@ -1,0 +1,75 @@
+# SPECIFICATION-ONLY EXAMPLE — not executable in this release.
+#
+# It validates against the benchmark definition schema (checked in CI), but it requires the
+# `docker` execution environment and a real coding agent, neither of which is implemented yet.
+# The fixture is specified in README.md and has not been built.
+schemaVersion: 1
+id: nextjs-component-quality
+name: Next.js component defect fix
+description: >-
+  Fix a defective React client component in a small Next.js App Router project. Measures
+  type correctness, behaviour, error handling, framework conventions and change scope.
+technologies: [nextjs, react, typescript, vitest]
+categories: [code-quality, frontend, react, nextjs, typescript]
+artifactTypes: [skill, instruction, rule]
+
+execution:
+  agent: codex
+  environment:
+    kind: docker
+    image: directivebench/fixture-node24-nextjs:planned
+  timeoutSeconds: 900
+  repetitions: 5
+
+scoring:
+  passThreshold: 0.85
+  minDelta: 0.1
+  stabilityThreshold: 0.15
+
+cases:
+  - id: fix-search-results
+    name: Fix the SearchResults component
+    prompt: |
+      The search page (app/search/page.tsx) renders <SearchResults /> from
+      components/search-results.tsx. Users report that results flicker, stale results appear
+      after typing quickly, and the page crashes when the API returns an error. Fix the
+      component. Keep the public props unchanged and do not modify tests.
+    fixture:
+      path: ./fixture
+    verification:
+      overlay: ./verification
+    setup:
+      - [npm, ci, --ignore-scripts, --no-audit, --no-fund]
+    assertions:
+      - id: typecheck
+        type: command
+        command: [npx, tsc, --noEmit]
+        weight: 2
+        required: true
+      - id: unit-tests
+        type: command
+        description: Hidden Vitest + Testing Library tests (race condition, error state, loading state).
+        command: [npx, vitest, run, --reporter=dot]
+        weight: 4
+      - id: lint
+        type: command
+        description: ESLint with eslint-plugin-react-hooks (exhaustive deps, rules of hooks).
+        command: [npx, eslint, components, app]
+        weight: 1
+      - id: client-directive
+        type: file-contains
+        description: The component that uses hooks stays a Client Component.
+        path: components/search-results.tsx
+        pattern: '^[''"]use client[''"]'
+        flags: m
+        weight: 1
+      - id: abort-stale-requests
+        type: file-contains
+        path: components/search-results.tsx
+        pattern: "AbortController|ignore\\s*=\\s*true|cancelled\\s*=\\s*true"
+        weight: 1
+      - id: scope
+        type: changed-files
+        allowed: ['components/**', 'lib/**']
+        forbidden: ['**/*.test.tsx', 'package.json', 'package-lock.json']
+        weight: 1
