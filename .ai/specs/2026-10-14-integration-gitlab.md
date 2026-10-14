@@ -34,7 +34,7 @@ normative here and are reused by any other user-configured host.
 | Option | Role | Evidence |
 |---|---|---|
 | **Git over HTTPS** (`ls-remote`, shallow clone/fetch into the cache) | **Primary transport** (as in SPEC-104) | Token auth over HTTPS: Confirmed ([L1], [L2], 2026-10-14) |
-| Git over SSH | Only with the `git-default` credential kind (the user's SSH agent) | Deploy tokens do not support SSH ([L4]) |
+| Git over SSH | Only with the `git-default` credential source (the user's SSH agent) | Deploy tokens do not support SSH ([L4]) |
 | **REST API v4** (`<instance>/api/v4`) | Optional enrichment and diagnostics: instance version, project metadata, branch list, token-scope diagnostics, cheap change detection | Confirmed ([L5], 2026-10-14) |
 | GraphQL API | Not used | — |
 
@@ -78,8 +78,8 @@ works.
 logs. **Git auth**: Basic `<username>:<token>`. For PAT, project and group tokens, GitLab accepts any non-blank
 username and does not validate it, so DirectiveBench sends a fixed placeholder. Deploy tokens use
 their own username ([L1], [L2], [L4]).
-The username for each credential is stored as non-secret `credentialRef` metadata (planned field
-`username`).
+The username for each credential is stored as non-secret metadata next to the `credentialRef`
+(planned field `username`); the `credentialRef` itself is the shared `SecretRef` shape.
 
 ## 4. Capability requirements
 
@@ -141,7 +141,7 @@ pagination is used where supported. Above 10,000 records, the total headers are 
 | Setting | Default | Notes |
 |---|---|---|
 | `instance_url` | `https://gitlab.com` | Editable for self-managed (SPEC-104 FR-104-02) |
-| `credentialRef` | `git-default` | `keychain` or `env`, plus non-secret `username` (deploy tokens) and `tokenKind` (`pat` / `project` / `group` / `deploy`) for hints |
+| `credentialRef` | `git-default` | `SecretRef` `{ source: 'keychain' \| 'env', name }`, plus non-secret `username` (deploy tokens) and `tokenKind` (`pat` / `project` / `group` / `deploy`) for hints |
 | `network.allowPrivateNetwork` | `false` | Must be set explicitly for LAN/VPN instances (§8) |
 | `network.allowInsecureHttp` | `false` | Explicit opt-in with a warning |
 | `network.caBundlePath` | none | PEM file. Added to the default trust store, never replacing it. |
@@ -281,9 +281,10 @@ by the administrator and are unknown to DirectiveBench. The client relies on 429
 
 - **Implemented in bootstrap:** nothing for GitLab. The `repositories` table has an `instance_url`
   column (SPEC-104 §8), but registration, validation and sync are not implemented.
-- **Partially implemented:** `redactSecrets` reportedly covers GitLab token patterns
-  ([SPEC-007 §3.1](2026-10-14-security-and-privacy.md)). It is not wired to any GitLab
-  integration. Verify against code.
+- **Partially implemented:** `redactSecrets` covers GitLab personal access tokens (`glpat-…`;
+  `packages/core/src/redact.ts`) ([SPEC-007 §3.1](2026-10-14-security-and-privacy.md)); other
+  GitLab token types (deploy, CI job tokens) are not matched. It is not wired to any GitLab
+  integration.
 - **Not implemented:** `packages/git-providers`, the instance network policy, CA handling, REST
   enrichment, credential storage, fine-grained PAT support.
 

@@ -230,6 +230,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md). No paid or authenticated calls i
 
 ## 13. Current implementation status
 
-- **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; verify against tests): detection descriptor `id: 'cursor'`, display name "Cursor Agent CLI", executable `cursor-agent`, `--version`, first output line stored, `auth: 'unknown'`, no credential files read.
+- **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; the missing-executable path is verified by `mock.test.ts` "detectCliAgent"; detection of an installed `cursor-agent` is not covered by a test): detection descriptor `id: 'cursor'`, display name "Cursor Agent CLI", executable `cursor-agent`, `--version`, first output line stored, `auth: 'unknown'`, no credential files read.
 - **Partially implemented:** version parsing (raw line only). There is no fallback to the `agent` binary name.
 - **Not implemented:** readiness check, artifact installation, execution, stream parsing, generated config, error normalization, secret handling (blocked on [ADR-0008](../decisions/0008-secret-storage-and-authentication.md)), validation of the Assumptions listed in §4/§6/§8, terms review.

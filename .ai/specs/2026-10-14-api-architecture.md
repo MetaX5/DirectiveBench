@@ -39,14 +39,14 @@ flowchart LR
 | Layer | Used for | Rules |
 | --- | --- | --- |
 | React Server Components | All reads for pages (dashboard counts, artifact/benchmark lists and detail, jobs, run detail) | Read via repository functions; render `dynamic` (no build-time caching of database content). |
-| Server Actions | UI mutations | Zod-validated input; return a typed result `{ ok: true, data } \| { ok: false, error }`; revalidate affected paths. |
+| Server Actions | UI mutations | Zod-validated input; return a typed result `{ ok: true, data } \| { ok: false, error }` (target; bootstrap actions return nothing, throw on invalid input and redirect/revalidate); revalidate affected paths. |
 | Route handlers (`app/api/**/route.ts`) | Machine-readable endpoints | JSON only; stable error envelope (§5). |
 
 ### 3.1 Server Actions (bootstrap scope)
 
 | Action | Effect | Notes |
 | --- | --- | --- |
-| Enqueue benchmark run | Inserts a `jobs` row (`pending`) for a benchmark suite version (+ artifact version) | Rejected if the suite version is not execution-approved or the environment kind is unsupported (e.g. `docker`), see [SPEC-110](2026-10-14-benchmark-execution.md). |
+| Enqueue benchmark run | Inserts a `jobs` row (`pending`) for a benchmark suite version and the latest version of the selected artifact, then redirects to `/executions` | Rejected if the suite or artifact version does not exist. Unapproved suites and unsupported environments (e.g. `docker`) are currently rejected by the runner (job `failed`), not at enqueue time — target: reject at enqueue, see [SPEC-110](2026-10-14-benchmark-execution.md). |
 | Cancel job | Sets `cancel_requested_at` on a `pending` or `running` job | Pending jobs become `cancelled` directly; running jobs are aborted by the runner ([SPEC-114](2026-10-14-runner-management.md)). |
 
 Further actions (category CRUD, repository registration, settings) are specified in their feature specs and are not part of bootstrap.
@@ -55,7 +55,7 @@ Further actions (category CRUD, repository registration, settings) are specified
 
 | Endpoint | Status | Contract |
 | --- | --- | --- |
-| `GET /api/health` | Implemented in bootstrap (target) | `200 {"status":"ok","version":"<cli version>"}`; used by the CLI startup probe ([SPEC-009](2026-10-14-cli-architecture.md)). Must not touch secrets; may report database reachability. |
+| `GET /api/health` | Implemented | `200 {"status":"ok","database":"ready"\|"not-initialized"}` with `cache-control: no-store`; used by the CLI startup probe ([SPEC-009](2026-10-14-cli-architecture.md)). Must not touch secrets. |
 | `/api/v1/*` | Planned | Versioned JSON API, see §4. |
 
 ## 4. Planned versioned JSON API (`/api/v1`)
@@ -86,7 +86,7 @@ All `/api` responses with status ≥ 400 use:
 | HTTP | `code` | When |
 | --- | --- | --- |
 | 400 | `validation_failed` | Zod parse failure (`details` lists issues) |
-| 400 | `invalid_host` | Rejected by the Host allowlist (§6) |
+| 403 | — | Rejected by the Host allowlist (§6); plain-text body `Forbidden: unexpected Host header`, not the envelope |
 | 401 / 403 | `unauthenticated` / `forbidden` | Future self-hosted mode only |
 | 404 | `not_found` | Unknown resource id |
 | 409 | `conflict` | Invalid state transition (e.g. cancel a completed job) |
@@ -98,7 +98,7 @@ Server Actions return the same `code` values in their `{ ok: false, error }` res
 ## 6. Request protection in local mode
 
 - **Binding:** the server listens on `127.0.0.1` by default; non-loopback binding requires `--allow-network-access` ([SPEC-009](2026-10-14-cli-architecture.md)).
-- **DNS-rebinding protection:** `apps/web/proxy.ts` (Next.js 16 replacement for middleware) rejects any request whose `Host` header is not in the allowlist: `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, plus the explicitly configured host when network access is allowed. The allowlist is passed from the CLI to the web child process via environment.
+- **DNS-rebinding protection:** `apps/web/proxy.ts` (Next.js 16 replacement for middleware) rejects (403) any request whose `Host` header host name (any port) is not in the allowlist: `localhost`, `127.0.0.1`, `[::1]`, plus the explicitly configured non-loopback host when network access is allowed. The extra host is passed from the CLI to the web child process in `DIRECTIVEBENCH_ALLOWED_HOSTS`.
 - **CSRF:** Server Actions rely on Next.js built-in Origin/Host comparison; route handlers that mutate state (future) must require `Content-Type: application/json` and check `Origin` against the allowlist.
 - **Authentication:** none in local mode (single user, loopback). `--allow-network-access` prints a warning that the instance is unauthenticated. Authentication and authorization for self-hosted deployments are future work ([SPEC-011](2026-10-14-self-hosting-architecture.md), [ADR-0008](../decisions/0008-secret-storage-and-authentication.md)).
 
@@ -130,6 +130,6 @@ sequenceDiagram
 
 ## 8. Implementation status
 
-- **Implemented in bootstrap (to be verified, see [SPEC-013](2026-10-14-implementation-roadmap.md) Milestone 0):** RSC reads through database repositories; Server Actions for enqueue benchmark run and cancel job; `GET /api/health`; Host allowlist in `proxy.ts`.
-- **Partially implemented:** error codes are used by Server Actions; the full `/api` error envelope applies only to existing endpoints.
-- **Not implemented:** `/api/v1/*` JSON API, pagination, idempotency keys, authentication/authorization, remote runner protocol.
+- **Implemented (verified by `pnpm verify:pack` on 2026-10-14):** `GET /api/health` returning `{"status":"ok","database":"ready"}`; Host allowlist in `proxy.ts` (foreign `Host` → 403); RSC pages reading through database repositories (`/results` and `/results/[id]` render the demo run).
+- **Partially implemented:** Server Actions for enqueue benchmark run and cancel job exist (`apps/web/lib/actions.ts`, Zod-validated) but return no typed result; enqueue is verified by `pnpm test:e2e` (Run → `/executions` → `completed`), cancel is not covered by a test; approval/environment checks happen in the runner instead of at enqueue time; no error envelope is used yet (there is no `/api` endpoint that can fail with 4xx).
+- **Not implemented:** `/api/v1/*` JSON API, error envelope, pagination, idempotency keys, authentication/authorization, remote runner protocol.

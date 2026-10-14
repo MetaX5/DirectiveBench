@@ -44,8 +44,10 @@ Future commands must not be registered as stubs that pretend to work; until impl
 | `--data-dir <path>` | `DIRECTIVEBENCH_DATA_DIR` | OS default ([SPEC-010](2026-10-14-local-installation.md#5-data-directory)) | all | Resolved to an absolute path. |
 | `--no-open` | — | open | serve | Do not open a browser. |
 | `--allow-network-access` | — | off | serve | Permits non-loopback `--host`; prints an "unauthenticated instance" warning ([SPEC-007](2026-10-14-security-and-privacy.md)). |
+| `--dev` | — | off | `serve` subcommand | Runs `next dev` instead of `next start`; only available from a source checkout (usage error otherwise). Used by `pnpm dev`. |
+| `--json` | — | off | doctor | Machine-readable output (`{ "checks": [{ name, status, detail }] }`). |
 
-Precedence: command-line option > environment variable > `config.json` > built-in default. All values are validated (Zod) before any side effect.
+Precedence: command-line option > environment variable > `config.json` > built-in default. All values are validated (Zod) before any side effect. `--data-dir` is a global option; serve options may be given with or without the `serve` subcommand.
 
 ## 4. `doctor` checks
 
@@ -81,9 +83,9 @@ The CLI process is the supervisor: it owns the runner and the web child. The web
 
 ## 6. Process supervision and shutdown
 
-- The web server runs as a child process (`node <next>/dist/bin/next start <dist/web>`), with stdout/stderr piped to the CLI (prefixed) and to `<dataDir>/logs/`.
+- The web server runs as a child process (`node <next>/dist/bin/next start <dist/web>`). Its stdout and stderr are appended to `<dataDir>/logs/web.log`; stderr is also echoed to the CLI's stderr (stdout only with `--dev`).
 - If the child exits unexpectedly, the CLI stops the runner, marks running jobs `interrupted`, and exits non-zero. No automatic restart in bootstrap.
-- Readiness: poll `GET /api/health` until `200` or 30 s timeout (then exit with an error).
+- Readiness: poll `GET /api/health` until `200` or 30 s timeout (then exit with an error). The health body is `{"status":"ok","database":"ready"|"not-initialized"}`.
 - **Graceful shutdown** on `SIGINT`/`SIGTERM` (and Windows Ctrl+C): stop acquiring jobs → abort running jobs via `AbortSignal` → mark them `interrupted` → terminate agent subprocesses → send `SIGTERM` to the web child (force kill after 5 s) → close the database → exit. A second signal forces immediate exit.
 
 ## 7. Browser opening
@@ -101,12 +103,12 @@ Before spawning the web server the CLI checks the port on the target host. If it
 | 0 | Success (including clean shutdown after a signal) |
 | 1 | Unexpected/runtime error |
 | 2 | Invalid usage or configuration (bad option, invalid `config.json`, non-loopback host without `--allow-network-access`) |
-| 3 | Unsupported runtime (Node.js version, missing `node:sqlite`) |
+| 3 | Unsupported runtime (Node.js older than 22.16.0). A missing `node:sqlite` is reported by `doctor` as a failing check (exit 6). |
 | 4 | Port in use |
 | 5 | Data directory or migration failure |
 | 6 | `doctor` found at least one failing check / `demo` benchmark did not produce the expected result |
 
-These values are a target contract; the implementation must match this table or this table must be updated.
+The implementation (`ExitCode` in `apps/cli/src/runtime.ts`) matches this table; changes must update both.
 
 ## 10. Packaging layout
 
@@ -117,7 +119,7 @@ directivebench/            # published npm package (apps/cli)
 ├── README.md
 └── dist/
     ├── cli.js             # tsup bundle with shebang; includes @directivebench/* workspace code
-    ├── web/               # prebuilt Next.js app: .next/ (build output), public/, next.config.mjs
+    ├── web/               # prebuilt Next.js app: .next/ (without cache, trace, types, diagnostics, *.nft.json, *.map), public/, next.config.mjs
     ├── migrations/        # SQL migrations + drizzle meta journal
     └── examples/          # bundled example artifacts and benchmarks used by `demo`
 ```
@@ -128,10 +130,10 @@ directivebench/            # published npm package (apps/cli)
 
 ## 11. Packaging verification
 
-`pnpm verify:pack` (`scripts/verify-pack.mjs`): build → `npm pack` in `apps/cli` → install the tarball into a fresh temp directory → run `directivebench --help` and `--version` → start `serve --no-open --port <free> --data-dir <temp>` and wait for `GET /api/health` → shut down via `SIGTERM` and assert a clean exit. It also asserts the tarball contains the paths in §10 and no source maps of private paths or `.env` files. Details in [SPEC-012](2026-10-14-testing-strategy.md).
+`pnpm verify:pack` (`scripts/verify-pack.mjs`, run after `pnpm build`): `pnpm pack` in `apps/cli` (rewrites the `workspace:` protocol) → check the tarball contents (paths in §10, no source maps, caches or `.env` files) → install the tarball with npm into an empty temp project → run `directivebench --help`, `--version` and `demo` → start `serve --no-open --port <free> --data-dir <temp>` and wait for `GET /api/health` → check that `/results` lists the demo run and the run detail shows its verdict → check that a request with a foreign `Host` header is rejected with 403 → shut down via `SIGTERM` and assert a clean exit. Details in [SPEC-012](2026-10-14-testing-strategy.md).
 
 ## 12. Implementation status
 
-- **Implemented in bootstrap (to be verified, see [SPEC-013](2026-10-14-implementation-roadmap.md) Milestone 0):** commands `directivebench`/`serve`, `init`, `doctor`, `demo`, `--help`, `--version`; options and env vars in §3; startup sequence; runner embedded in the CLI process; web child process; graceful shutdown; packaging layout and `verify:pack` script.
-- **Partially implemented / to reconcile:** the exact exit code values (§9) and port-conflict behaviour (§8) must be checked against the code.
+- **Implemented (verified by `apps/cli/test/cli.test.ts` and `pnpm verify:pack` on 2026-10-14, Node 24.21, Linux):** commands `directivebench` (= `serve`), `serve [--host --port --no-open --allow-network-access --dev]`, `init`, `doctor [--json]`, `demo`, `--help`, `--version`, global `--data-dir`; option precedence flag > env > config > default, invalid port and non-loopback host without `--allow-network-access` → exit 2 (`cli.test.ts`); Node version check (exit 3 below 22.16.0); startup sequence of §5 with the runner embedded in the CLI process; web child started with `node <next>/dist/bin/next start dist/web`, readiness poll of `/api/health` (30 s), `SIGTERM` to the child with `SIGKILL` after 5 s, second signal forces exit; port in use → exit 4 without picking another port; data-dir/migration failures → exit 5; `doctor` failures and a `demo` verdict other than `improved` → exit 6; browser opener skipped when `CI` is set or on Linux without `DISPLAY`/`WAYLAND_DISPLAY`; web log appended to `<dataDir>/logs/web.log`; packaging layout of §10 (`LICENSE` copied in, `required-server-files` paths rewritten, `next`/`react`/`react-dom` as runtime dependencies); `verify:pack` steps of §11 all passed. Nothing has been published to npm.
+- **Partially implemented:** `doctor` checks data-dir existence but not writability, and prints remediation hints only for some checks; port-in-use, signal handling and browser-opening behaviour are verified manually / by `verify:pack` (clean `SIGTERM` exit), not by dedicated unit tests. Windows Ctrl+C handling is unverified.
 - **Not implemented:** `sync`, `benchmark run|list`, `export`, `import`, `backup`, `restore`, `runner`; automatic restart of the web child; detection of an already running instance.

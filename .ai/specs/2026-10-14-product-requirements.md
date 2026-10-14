@@ -116,7 +116,7 @@ Controls are specified in [SPEC-007](2026-10-14-security-and-privacy.md).
 |---|---|---|
 | NFR-01 | Installation | Runs via `npx directivebench` with no native compilation (built-in `node:sqlite`), no Docker, no account. Engines `node >=22.16.0` (required by the `node:sqlite` APIs used; see [SPEC-004](2026-10-14-technology-stack.md#31-node-version-and-nodesqlite)). |
 | NFR-02 | Startup | Cold start to UI available in < 10 s on a typical laptop after package download (target; not yet measured). |
-| NFR-03 | Platforms | Linux, macOS, Windows paths supported by data-dir resolution; CI verifies Linux on Node 24 only (other platforms: Assumption — requires validation). |
+| NFR-03 | Platforms | Linux, macOS, Windows paths supported by data-dir resolution; verified so far only on Linux with Node 24.21; the CI workflow targets Linux on Node 24 only (other platforms: Assumption — requires validation). |
 | NFR-04 | Reliability | Job state survives process crash; stale running jobs become `interrupted`; no silent retries. |
 | NFR-05 | Data integrity | Immutable versions and fixture snapshots; forward-only migrations; atomic config writes. |
 | NFR-06 | Reproducibility | Every result stores the exact versions and environment metadata required to reproduce and compare ([SPEC-005](2026-10-14-domain-model.md)). |
@@ -173,6 +173,6 @@ Measured locally by the user or by the project via public signals; **no telemetr
 
 ## Implementation status
 
-- **Implemented in bootstrap (per brief; verify against code before changing status):** PR-CLI-01, PR-CLI-02, PR-CLI-03 (migrations at startup, interrupted marking); PR-BEN-01, PR-BEN-02, PR-BEN-03, PR-BEN-04, PR-BEN-06, PR-BEN-07; PR-UI-01–05, PR-UI-07–09; PR-SEC-01–04, PR-SEC-06; PR-REG-08 (bundled examples only).
-- **Partially:** PR-BEN-08 (Mock Agent + detection only; no real agent execution); PR-REG-07 (seeded predefined categories, read-only list); PR-REG-03/04 (artifact identity and immutable versions exist for imported examples; no discovery); PR-SEC-05 (no secrets are stored at all; keychain not implemented).
+- **Implemented (verified by package tests and `pnpm verify:pack` on 2026-10-14):** PR-CLI-01, PR-CLI-02, PR-CLI-03 (migrations at startup; graceful shutdown → `interrupted`, `runner.test.ts`); PR-BEN-02, PR-BEN-04, PR-BEN-06; PR-BEN-07 (persistent queue, cancellation, heartbeat, crash recovery; concurrency from config, default 1); PR-SEC-01, PR-SEC-03, PR-SEC-04, PR-SEC-06 (no telemetry: `NEXT_TELEMETRY_DISABLED=1`, no outbound calls); PR-REG-08 (bundled examples only).
+- **Partially:** PR-BEN-01 (YAML and JSON v1 validated with Zod; no published JSON Schema); PR-BEN-03 (RED/GREEN with the Mock Agent; uncontrolled-difference warnings limited to mock/non-sandboxed/repetitions); PR-BEN-08 (Mock Agent + detection only; no real agent execution); PR-SEC-02 (Host allowlist verified; server-action origin check relies on the Next.js default, untested); PR-UI-01–05, PR-UI-07–09 (pages exist in `apps/web`; dashboard, artifacts, run detail, Run → completed, planned page and theme toggle verified by `pnpm test:e2e`; executions cancel, agents and categories pages not covered by a test); PR-REG-07 (seeded predefined categories, read-only list); PR-REG-03/04 (artifact identity and immutable versions exist for imported examples; no discovery, no diffs); PR-SEC-05 (no secrets are stored at all; keychain not implemented).
 - **Not implemented:** PR-REG-01, 02, 05, 06; PR-BEN-05, 09–12; PR-UI-06; PR-CLI-04, 05; PR-SEC-07–09. NFR-02 and NFR-03 (non-Linux) are unmeasured.

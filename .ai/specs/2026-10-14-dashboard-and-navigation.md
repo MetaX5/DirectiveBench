@@ -63,7 +63,7 @@ DirectiveBench's scope is broad (repositories, artifacts, categories, benchmarks
 | Results | `/results`, `/runs/[id]` | Completed runs; run detail | [SPEC-113](2026-10-14-results-and-reporting.md) |
 | Agent Connections | `/agents` | Real CLI detection; execution "not implemented" | [SPEC-203](2026-10-14-integration-claude-code.md), [SPEC-204](2026-10-14-integration-openai-codex.md), [SPEC-205](2026-10-14-integration-cursor.md) |
 | Model Providers | `/model-providers` | Planned page | [SPEC-206](2026-10-14-integration-anthropic-api.md), [SPEC-211](2026-10-14-integration-custom-model-providers.md) |
-| Settings | `/settings` | Planned page with data dir path | [SPEC-115](2026-10-14-settings-and-configuration.md) |
+| Settings | `/settings` | Read-only data dir paths and effective configuration; editing planned | [SPEC-115](2026-10-14-settings-and-configuration.md) |
 
 Route names are indicative; the implementation in `apps/web/app` is authoritative once present.
 
@@ -175,7 +175,7 @@ flowchart LR
 
 ## 16. Acceptance criteria
 
-- [ ] Sidebar shows the 11 sections in order with "Planned" tags for Repositories, Benchmark Builder, Model Providers, Settings.
+- [ ] Sidebar shows the 11 sections in order with "Planned" tags for Repositories, Benchmark Builder, Model Providers.
 - [ ] Dashboard numbers equal SQL counts on seeded data; no hard-coded or sample values.
 - [ ] Each planned page shows "Planned — not implemented" and a link to its spec, and contains no non-link controls.
 - [ ] Dark/light theme follows OS by default and can be toggled; no theme flash.
@@ -201,8 +201,6 @@ flowchart LR
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap (per architecture):** sidebar with all sections; Dashboard with real counts and recent runs; Artifacts, Categories (read-only), Benchmarks, Executions, Run detail pages; Agent Connections with real CLI detection; "Planned — not implemented" pages for Repositories, Benchmark Builder, Model Providers, Settings linking to specs; dark/light theme; no decorative buttons.
-- **Partially implemented:** dashboard widgets — successful/failed evaluations and recent regressions depend on stored display statuses; version regressions are not implemented; last sync always "never" because sync is not implemented. Compact density and accessibility baseline to be verified with an automated scan.
-- **Not implemented:** collapsible sidebar persistence, network-exposure banner (verify), command palette, customizable widgets.
-
-At the time of writing, `apps/web/app` contained no code; verify against it before changing this spec's status.
+- **Implemented in `apps/web` (verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 6/6 passing against the built CLI) for the dashboard, artifact list/detail, run detail, benchmark Run → completed, a planned page and the theme toggle; by `pnpm verify:pack` for `/results`; other pages are present but not covered by a test):** sidebar with all sections (`nav.tsx`, planned entries marked); Dashboard with real counts and recent runs; Artifacts, Categories (read-only), Benchmarks (detail with Run button → enqueue server action), Executions (cancel, 2 s auto-refresh while active), Results and run detail pages; Agent Connections with real CLI detection and the Mock Agent; read-only Settings (data dir and effective config); "Planned — not implemented" pages for Repositories, Benchmark Builder and Model Providers linking to specs; dark/light theme (`next-themes`); no decorative buttons.
+- **Partially implemented:** dashboard widgets — successful/failed evaluations and recent regressions depend on stored verdicts; version regressions are not implemented; last sync always "never" because sync is not implemented. Compact density and accessibility baseline not yet checked by an automated scan.
+- **Not implemented:** collapsible sidebar persistence, network-exposure banner in the UI (the warning is printed by the CLI only), command palette, customizable widgets, axe accessibility scan.

@@ -16,7 +16,7 @@ related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, 
 2. **Deterministic by default.** The Mock Agent (`mock`, [ADR-0006](../decisions/0006-agent-adapters-vs-model-providers.md)) is the only agent used in automated end-to-end tests. Time, random IDs and temp paths are injectable where assertions depend on them.
 3. **Real execution where it is cheap.** Engine tests run real assertions (`node --test` inside fixture workspaces), not mocks of them.
 4. **Isolated state.** Every test that touches disk uses a fresh temp directory (data dir, workspaces) and cleans it up; tests never read the user's real data directory.
-5. **Acceptance criteria drive tests.** Spec acceptance criteria map to tests where practical; a spec is `implemented` only when those checks pass ([spec index](README.md#status-definitions)).
+5. **Acceptance criteria drive tests.** Spec acceptance criteria map to tests where practical; a spec is `implemented` only when those checks pass ([spec index](README.md#lifecycle-and-statuses)).
 
 ## 2. Test pyramid
 
@@ -60,12 +60,13 @@ Scoring and verdict logic additionally get table-driven tests covering every pre
 
 `pnpm verify:pack` ([SPEC-009 §11](2026-10-14-cli-architecture.md#11-packaging-verification)):
 
-1. `pnpm build`.
-2. `npm pack` in `apps/cli`; assert the tarball contains `dist/cli.js`, `dist/web/.next`, `dist/web/public`, `dist/web/next.config.mjs`, `dist/migrations`, `dist/examples`, and no `.env`, test files or workspace `src/`.
-3. Install the tarball into a new temp directory with `npm install <tarball>` (no workspace links).
+1. `pnpm build` (run beforehand; the script expects the build output).
+2. `pnpm pack` in `apps/cli` (rewrites `workspace:` dependencies); assert the tarball contains `package.json`, `LICENSE`, `README.md`, `dist/cli.js`, `dist/web/.next/BUILD_ID`, `dist/web/next.config.mjs`, `dist/migrations/meta/_journal.json` and the bundled mock example, and no `.env` files, Next.js build cache or source maps; the manifest is MIT-licensed and has no `workspace:` dependencies.
+3. Install the tarball with npm into an empty temp project (no workspace links).
 4. Run `directivebench --help` and `--version` (version equals `package.json`).
-5. Start `serve --no-open` with a temp data dir and free port, wait for `GET /api/health` → `200`, send `SIGTERM`, assert exit code `0` and no orphan child process.
-6. Optionally run `demo` and assert exit code `0`.
+5. Run `demo` with a temp data dir; assert verdict `improved` and the mock label.
+6. Start `serve --no-open` with that data dir and a free port, wait for `GET /api/health` → `{"database":"ready"}`, assert `/results` lists the demo run and its detail page shows verdict `improved`, and that a foreign `Host` header is rejected with 403.
+7. Send `SIGTERM` and assert exit code `0`.
 
 ## 6. Contract tests for future adapters and providers
 
@@ -83,7 +84,7 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 ## 8. CI (GitHub Actions)
 
-Triggered on pull requests and pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable).
+Workflow `.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable).
 
 1. Checkout; set up Node; `corepack enable`; `pnpm install --frozen-lockfile`.
 2. `pnpm format:check` and `pnpm lint`.
@@ -97,6 +98,7 @@ No secrets are configured for the default workflow.
 
 ## 9. Implementation status
 
-- **Implemented in bootstrap (to be verified, see [SPEC-013](2026-10-14-implementation-roadmap.md) Milestone 0):** Vitest setup per package with initial unit tests (e.g. `packages/core/test/`); scripts `test`, `test:e2e`, `verify:pack` declared in the root `package.json`.
-- **Partially implemented:** the coverage listed in §3–§5 is the target; which of these tests exist and pass must be confirmed in the Milestone 0 final verification.
+- **Implemented (verified on 2026-10-14, Node 24.21, Linux — all passing):** Vitest suites per package — `core` 36 tests (path classification, parsers, frontmatter, config schema and atomic save, data-dir resolution, hashing, redaction), `database` 7 (migrations idempotent, immutable artifact versions, category seeding, atomic FIFO job acquisition, cancellation, stale recovery), `agent-adapters` 8 (mock playbook baseline/candidate, installation, path escapes, missing-executable detection), `benchmark-engine` 21 (definition schema incl. all repository examples, fixture snapshotting and symlink rejection, `runCommand`, mock RED/GREEN end-to-end with real `node --test` verification, scoring and every verdict branch), `runner` 4 (import → enqueue → run → persist, unapproved suites, cancellation and orphan recovery, shutdown → interrupted), `cli` 5 (option precedence, port/host usage errors, Node version check, asset resolution); `pnpm verify:pack` (§5, all steps passed).
+- **Implemented (verified by `pnpm test:e2e`, 6/6 passing against the built CLI):** Playwright smoke test `apps/web/e2e/smoke.spec.ts` — dashboard counts and mock label, artifact list/detail, run detail RED vs GREEN (50% → 100%, +50 pts, `improved`, 6 agent runs), "Run" on the benchmark page enqueues a job that the runner completes, planned page label, theme toggle; `apps/web/playwright.config.ts` seeds a temp data dir with `demo` and starts the built CLI.
+- **Partially implemented:** the smoke test does not check the foreign-`Host` rejection (covered by `verify:pack`) or job cancellation from the UI. CI workflow added (`.github/workflows/ci.yml`: Node 24 on `ubuntu-latest`, `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:pack`, Playwright Chromium, `test:e2e`, report upload on failure) — it has not run yet. Unit tests for `proxy.ts`, Server Actions, runner concurrency > 1 and two-runner acquisition are missing; `cli` integration tests of `init`/`demo` are covered only by `verify:pack`.
 - **Not implemented:** adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS CI matrix.

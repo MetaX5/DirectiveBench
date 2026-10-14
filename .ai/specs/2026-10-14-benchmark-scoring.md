@@ -93,7 +93,7 @@ For case `c`, variant `v ∈ {baseline, candidate}`, let `N` be the number of at
 | FR-111-40 | Confidence SHALL be `low` if repetitions < 3; `medium` if 3–9, or ≥ 10 but the verdict is `unstable`; `high` if repetitions ≥ 10 and not `unstable`. Repetitions means the configured count per variant per case. |
 | FR-111-41 | Each assertion type SHALL declare `deterministic: boolean`. Each agent adapter SHALL declare `deterministic: boolean` (Mock Agent: true; real agents and the future harness: false). |
 | FR-111-42 | A benchmark run SHALL be flagged `nondeterministic` if its adapter or any of its assertions is nondeterministic. Results from a `nondeterministic` run with a single repetition SHALL be labelled "not conclusive". |
-| FR-111-43 | A run SHALL store `comparabilityKey = sha256(canonicalJson({ suiteVersionHash, fixtureHashes (sorted, incl. overlay hashes), adapterId, adapterVersion, model ({provider, model, parameters} or null), environmentKind, limits: {timeoutSeconds, maxOutputBytes}, harnessVersion? }))`. Artifact version and repetitions are **not** part of the key. |
+| FR-111-43 | A run SHALL store `comparabilityKey = sha256(canonicalJson({ cases, scoring, execution, fixtures, adapterId, adapterVersion }))`, where `cases`, `scoring` and `execution` are the validated definition sections (prompts, assertions, weights, thresholds, agent, model, environment, `timeoutSeconds`, `repetitions`, `maxOutputBytes`) and `fixtures` are the per-case fixture and overlay hashes. Because `cases + scoring + execution` are the definition content, this subsumes the suite version; suite metadata (name, description, categories) does not change the key. The artifact version is **not** part of the key. Future harness-specific dimensions (e.g. harness version) are added to the hashed object. Implemented as `comparabilityKey()` in `packages/benchmark-engine/src/orchestrator.ts`. |
 | FR-111-44 | Within one benchmark run the baseline and candidate SHALL share the key; if any agent run's actually-observed adapter version or environment differs, the comparability check fails → `not-comparable`. |
 | FR-111-45 | Results with different comparability keys SHALL never be aggregated, averaged, ranked or charted on one series. Cross-key views SHALL show them side by side with an explicit "not comparable" label. |
 | FR-111-46 | The system SHALL NOT compute or display global rankings across different suites. |
@@ -216,18 +216,18 @@ Unit tests for each function, plus golden tests reproducing these worked example
 
 ### Worked example A — deterministic (Mock Agent), `examples/benchmarks/mock-input-validation`
 
-One case, assertions (values from the brief's example; align with the actual example file once present):
+One case (`implement-parse-age`), assertions as in `examples/benchmarks/mock-input-validation/benchmark.yaml`:
 
 | Assertion | Type | Weight | Required |
 |---|---|---|---|
-| `tests-basic` | command (`node --test` basic) | 2 | no |
-| `tests-validation` | command (`node --test` validation) | 2 | **yes** |
-| `file-contains` | file-contains | 1 | no |
-| `changed-files` | changed-files | 1 | no |
+| `basic-behaviour` | command (`node --test test/parse-age.basic.test.js`) | 2 | no |
+| `rejects-invalid-input` | command (`node --test test/parse-age.validation.test.js`) | 2 | **yes** |
+| `explicit-error-type` | file-contains (`\bRangeError\b`) | 1 | no |
+| `scope` | changed-files (`src/**`) | 1 | no |
 
 `Σw = 6`, `passThreshold = 1`, `minDelta = 0.05`, `stabilityThreshold = 0.1`, repetitions = 3.
 
-Baseline (no artifact): `tests-basic` 1, `tests-validation` 0, `file-contains` 0, `changed-files` 1
+Baseline (no artifact): `basic-behaviour` 1, `rejects-invalid-input` 0, `explicit-error-type` 0, `scope` 1
 → `score = (2·1 + 2·0 + 1·0 + 1·1) / 6 = 3/6 = 0.5`; required failed → `passed = false`.
 
 Candidate (artifact installed): all 1 → `score = 6/6 = 1.0`, `passed = true`.
@@ -243,7 +243,7 @@ Deterministic → identical across 3 repetitions:
 
 ### Worked example B — nondeterministic variation (illustrative, real agent)
 
-Same case, 4 repetitions. Candidate scores: 1.0, 1.0, 0.5, 1.0 (third run failed `tests-validation` and `file-contains`). Baseline: 0.5 ×4.
+Same case, 4 repetitions. Candidate scores: 1.0, 1.0, 0.5, 1.0 (third run failed `rejects-invalid-input` and `explicit-error-type`). Baseline: 0.5 ×4.
 
 - candidate `meanScore = 3.5 / 4 = 0.875`
 - deviations: 0.125, 0.125, −0.375, 0.125; squares sum `3·0.015625 + 0.140625 = 0.1875`; population variance `0.1875 / 4 = 0.046875`; `stdDev ≈ 0.2165`
@@ -258,7 +258,7 @@ Candidate 4 repetitions: `completed` 1.0, `timeout`, `agent-error`, `timeout` �
 
 ### Worked example D — version regression
 
-Artifact v2 candidate meanScore 1.0 (stable, key K); v3 candidate meanScore 0.8333 (stable, key K; `changed-files` now fails: 5/6). `versionDelta = −0.1667 ≤ −0.05` and outcome `passed → failed` → **version regression**.
+Artifact v2 candidate meanScore 1.0 (stable, key K); v3 candidate meanScore 0.8333 (stable, key K; `scope` now fails: 5/6). `versionDelta = −0.1667 ≤ −0.05` and outcome `passed → failed` → **version regression**.
 
 ## 16. Acceptance criteria
 
@@ -291,8 +291,12 @@ Artifact v2 candidate meanScore 1.0 (stable, key K); v3 candidate meanScore 0.83
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap (per architecture):** run score, run pass, execution-status separation, case and suite aggregates (incl. population stdDev), delta, verdict precedence, candidate outcome, display status, confidence, comparability key — as pure functions in `@directivebench/benchmark-engine`.
-- **Partially implemented:** deterministic flags — only deterministic assertion types and the deterministic Mock Agent exist, so the `nondeterministic` path is untested against real agents.
-- **Not implemented:** version regression detection across artifact versions (FR-111-50…52) beyond what the UI derives, fractional assertion types, llm-judge, configurable outcome policies.
-
-Verify against `packages/benchmark-engine/src` before changing the status of this spec; adjust example A values to match `examples/benchmarks/mock-input-validation` if they differ.
+- **Implemented (verified by `packages/benchmark-engine/test/scoring.test.ts` and `engine.test.ts`):** `scoreRun` (weighted score, required gate, pass threshold), `aggregate` (valid runs, population stdDev, min/max, pass rate, error rate; non-completed runs excluded from quality), suite aggregates with equal case weighting, delta and `passRateDelta`, verdict precedence (`error > not-comparable > unstable > regressed > improved > unchanged`), candidate outcome, `displayStatus` mapping, `confidenceFor`, and `comparabilityKey` as defined in FR-111-43 (`src/scoring.ts`, `src/orchestrator.ts`).
+- **Verified worked example A:** the mock RED/GREEN run of `mock-input-validation` produces baseline 0.5 / pass rate 0, candidate 1.0 / pass rate 1, delta +0.5, `passRateDelta` +1, verdict `improved`, confidence `medium`, candidate outcome `passed` (`engine.test.ts`, `packages/runner/test/runner.test.ts`, `directivebench demo`).
+- **Partially implemented:**
+  - The implemented API differs from §8/§10: `scoreRun(assertions, passThreshold)`, `aggregate`, `summarize` (returns `ScoringSummary` with `deterministicAgent`, without `reasons`, `perCaseDelta` or a `nondeterministic` flag; the runner adds `displayStatus` when persisting), `confidenceFor`, `displayStatus`.
+  - Thresholds use values rounded to 6 decimals instead of an explicit `1e-9` epsilon (FR-111-06); `Σw = 0` cannot occur because the schema requires a weight > 0, so no warning is recorded (FR-111-03).
+  - FR-111-27: a case without valid runs is excluded from suite means instead of nulling them; the verdict becomes `error` only via the suite `errorRate > 0.5` rule.
+  - FR-111-42: only the adapter's `deterministic` capability is recorded (`deterministicAgent`); assertion-level determinism is stored per assertion result but not aggregated, and the "not conclusive" label is not implemented.
+  - FR-111-44: the comparability check compares the adapter version detected before and after the run; environment drift is not checked.
+- **Not implemented:** version regression detection across artifact versions (FR-111-50…52), fractional assertion types, llm-judge, configurable outcome policies, Example B–D golden tests.

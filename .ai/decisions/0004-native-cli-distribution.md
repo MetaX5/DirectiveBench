@@ -28,8 +28,9 @@ fragile.
 ## Decision
 
 - Distribute DirectiveBench as a **native npm package** `directivebench` (the only published
-  package), run with `npx directivebench` or a global install. Node 24 LTS is the supported runtime;
-  `directivebench doctor` validates it.
+  package), run with `npx directivebench` or a global install. `engines.node` is `>=22.16.0` (required by
+  the `node:sqlite` APIs used); Node 24 LTS is the verified runtime. Every command checks the Node
+  version (exit code 3), and `directivebench doctor` also checks `node:sqlite`.
 - **CLI bundle:** `apps/cli` is bundled with **tsup** into `dist/cli.js`, inlining the internal
   just-in-time packages ([ADR-0003](0003-monorepo-architecture.md)).
 - **Web UI:** the package ships the **Next.js production build output** (`.next`, copied to

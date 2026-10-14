@@ -59,7 +59,7 @@ Facts used throughout:
 | --- | --- | --- |
 | **M1 Import** | Promptfoo eval JSON → DirectiveBench "external evaluation" record attached to zero or more artifacts. Read-only display. | First (if built at all) |
 | **M2 Export results** | DirectiveBench benchmark run → Promptfoo-importable JSON, so users can browse it in `promptfoo view`. | Deferred. Blocked on the undocumented import schema |
-| **M3 Export suite** | DirectiveBench benchmark definition → `promptfooconfig.yaml` using P4/P5 providers. | Not planned. Lossy: fixture snapshots, hidden verification overlays, setup commands, `changed-files` assertions and RED/GREEN pairing have no direct Promptfoo equivalent. A proposal (PROP-NNN) is required before any work |
+| **M3 Export suite** | DirectiveBench benchmark definition → `promptfooconfig.yaml` using P4/P5 providers. | Not planned. Lossy: fixture snapshots, hidden verification overlays, setup commands, `changed-files` assertions and RED/GREEN pairing have no direct Promptfoo equivalent. A proposal (a draft spec created from [the proposal template](../templates/proposal.template.md)) is required before any work |
 
 ## 3. Authentication methods
 

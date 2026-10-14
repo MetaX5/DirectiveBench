@@ -36,7 +36,7 @@ GitHub Enterprise Server is future work (§10).
 | Option | Role in DirectiveBench | Evidence |
 |---|---|---|
 | **Git over HTTPS** (`git ls-remote`, shallow `git clone`/`fetch` into the data-dir cache) | **Primary transport** for validation and sync, as required by SPEC-104 (FR-104-07, FR-104-10, FR-104-12) | Tokens over HTTPS: Confirmed ([G1], 2026-10-14) |
-| Git over SSH (`git@github.com:…`) | Accepted only with the `git-default` credential kind. DirectiveBench uses the user's own SSH agent and never reads keys. | URL forms per SPEC-104 FR-104-02 |
+| Git over SSH (`git@github.com:…`) | Accepted only with the `git-default` credential source. DirectiveBench uses the user's own SSH agent and never reads keys. | URL forms per SPEC-104 FR-104-02 |
 | **REST API** (`https://api.github.com`) | Optional enrichment: visibility, archived flag, paginated branch list, token-permission diagnostics, cheap change detection | Confirmed ([G2]–[G6], 2026-10-14) |
 | GitHub App (installation access tokens) | **Future**, mainly for the self-hosted server ([ADR-0009](../decisions/0009-self-hosted-readiness.md)). Read-only permissions only. | Confirmed ([G7], [G8], 2026-10-14) |
 | GitHub CLI / Git Credential Manager | Not invoked by DirectiveBench. With `git-default`, `git` may use whatever helper the user configured. | GitHub recommends considering them before creating a token ([G1]) |
@@ -138,7 +138,7 @@ works as intended is an Assumption until it passes the transport tests in §11.
    FR-104-09. The token value is registered with `redactSecrets` before git starts.
 4. **Config isolation** (design): `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` pointing to an
    empty file. User hooks, filters, credential helpers and URL rewrites (`insteadOf`) therefore cannot
-   run or redirect traffic. Exception: credential kind `git-default` keeps the user's global config,
+   run or redirect traffic. Exception: credential source `git-default` keeps the user's global config,
    since its purpose is to use the user's helpers. This is shown in the UI.
 5. **No redirects**: `http.followRedirects=false` (default is `initial`, [G10]). A redirect fails
    validation with a message that tells the user to register the final URL.
@@ -178,7 +178,7 @@ settings:
 | Setting | Default | Notes |
 |---|---|---|
 | `location` | `https://github.com/<owner>/<repo>` (normalised) | Embedded credentials rejected (FR-104-05) |
-| `credentialRef` | `git-default` | `keychain` or `env` for a PAT, e.g. `{ kind: 'env', variable: 'GITHUB_TOKEN' }` |
+| `credentialRef` | `git-default` | `keychain` or `env` for a PAT, e.g. `{ source: 'env', name: 'GITHUB_TOKEN' }` |
 | `restEnrichment` | `true` when a token is configured, otherwise `false` | Avoids burning the 60/h anonymous budget |
 | `apiVersion` | `2026-03-10` | Profile constant. Changing it is a code change. |
 
@@ -277,9 +277,10 @@ GET costing 1 point ([G2]).
 
 - **Implemented in bootstrap:** nothing for GitHub. The `repositories` table exists (SPEC-104 §8), but
   registration, validation and sync are not implemented.
-- **Partially implemented:** `redactSecrets` in `@directivebench/core` reportedly covers GitHub token
-  patterns ([SPEC-007 §3.1](2026-10-14-security-and-privacy.md)). It is not wired to any git
-  integration. Verify against code.
+- **Partially implemented:** `redactSecrets` in `@directivebench/core` covers GitHub token shapes
+  (`gh[pousr]_…`, `github_pat_…`; `packages/core/src/redact.ts`, verified by the `core` redaction
+  test) ([SPEC-007 §3.1](2026-10-14-security-and-privacy.md)). It is not wired to any git
+  integration.
 - **Not implemented:** `packages/git-providers`, git transport rules, REST enrichment, credential
   storage, GitHub App, GHES.
 

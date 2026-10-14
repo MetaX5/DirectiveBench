@@ -51,7 +51,7 @@ Benchmarking instructions only means something if both variants run under contro
 
 | ID | Requirement |
 |---|---|
-| FR-110-01 | For each agent run the engine SHALL create a fresh directory `<os tmpdir>/directivebench/workspaces/<benchmarkRunId>/<caseId>/<variant>-<rep>/` that did not exist before. |
+| FR-110-01 | For each agent run the engine SHALL create a fresh directory `<os tmpdir>/directivebench/workspaces/<benchmarkRunId>/<caseId>/<variant>-<rep>/` that did not exist before, containing `workspace/` (the agent's working tree) and `home/` (the isolated `HOME` for commands). |
 | FR-110-02 | The engine SHALL copy the fixture snapshot `<dataDir>/fixtures/<sha256>/` into the workspace and verify the resulting file manifest hash equals the snapshot hash. |
 | FR-110-03 | Snapshotting (at import) and copying SHALL reject symlinks, hard-link tricks resolving outside the root, device files and paths escaping the root (`..`, absolute paths). |
 | FR-110-04 | The engine SHALL run the case's `setup` commands in order, under the command execution rules; a non-zero exit SHALL end the run with `infrastructure-error`. |
@@ -83,7 +83,7 @@ Benchmarking instructions only means something if both variants run under contro
 | ID | Requirement |
 |---|---|
 | FR-110-30 | `environment.kind: local-process` SHALL run commands and the agent as child processes of the runner with the user's OS permissions. It SHALL be recorded as `sandboxed: false` and labelled **"Not sandboxed"** in the UI. |
-| FR-110-31 | `environment.kind: docker` SHALL be rejected by the runner in the bootstrap with the error `Environment "docker" is not implemented yet (see SPEC-110)`; the agent run status is `infrastructure-error` and no command is executed. |
+| FR-110-31 | `environment.kind: docker` SHALL be rejected in the bootstrap before any workspace is created: `assertRunnable` throws `BenchmarkConfigurationError` (`Execution environment "docker" is not implemented yet; only "local-process" is available.`), the runner marks the job `failed`, and no command is executed. |
 | FR-110-32 | (Planned) `docker` SHALL use: network `none` by default (opt-in allowlist per suite), CPU/memory/pids limits, read-only mount of the fixture snapshot (copied into a writable container workspace), no host `HOME`, no SSH agent socket, no host credentials, non-root user, `--cap-drop=ALL`, `no-new-privileges`, and image digest pinning recorded in environment metadata. |
 | FR-110-33 | Running authenticated agent CLIs inside containers is an **open problem** (§18); no credential forwarding SHALL be implemented without an accepted ADR. |
 
@@ -93,11 +93,11 @@ Benchmarking instructions only means something if both variants run under contro
 |---|---|
 | FR-110-40 | Commands SHALL be argv arrays executed without a shell (`spawn(argv[0], argv.slice(1), { shell: false })`). |
 | FR-110-41 | `cwd` SHALL be the workspace root (or a subdirectory inside it; escapes rejected). |
-| FR-110-42 | Environment SHALL be built from an allowlist: `PATH`, `LANG`, `TZ` copied from the runner; `HOME` (and `XDG_*_HOME`, `TMPDIR`) pointed at a workspace-local temp dir outside the tracked tree; nothing else is inherited. Adapter-specific additions require an explicit adapter declaration. |
+| FR-110-42 | Environment SHALL be built from an allowlist: `PATH`, `LANG`, `LC_ALL`, `TZ` (plus `SystemRoot`, `PATHEXT`, `COMSPEC` on Windows) copied from the runner; `HOME`, `USERPROFILE`, `TMPDIR`, `TEMP`, `TMP` pointed at the per-run `home/` directory outside the tracked tree; `CI=true`, `NO_COLOR=1`; nothing else is inherited (`buildCommandEnv`). Adapter-specific additions require an explicit adapter declaration. |
 | FR-110-43 | Each command SHALL have a timeout (default: the case `timeoutSeconds`) and process-tree kill on expiry. |
 | FR-110-44 | stdout/stderr SHALL be captured up to `maxOutputBytes` each; excess is dropped with a `[truncated N bytes]` marker. |
 | FR-110-45 | Captured output SHALL pass through secret redaction (`@directivebench/core`) before persistence or display. |
-| FR-110-46 | Commands SHALL execute only if the suite version is execution-approved (`benchmark_suite_versions.execution_approved_at` set, `execution_approval_source` ∈ {`bundled-example`, `user`}); otherwise the job fails before workspace creation with "Suite version not approved for execution". Bundled examples are approved at import with approval source recorded. |
+| FR-110-46 | Commands SHALL execute only if the suite version is execution-approved (`benchmark_suite_versions.execution_approved_at` set, `execution_approval_source` ∈ {`bundled-example`, `user`}); otherwise a suite that runs commands fails before workspace creation with "This suite version runs commands but has not been approved for execution." Bundled examples are approved at import with approval source recorded. |
 
 ## 7. Non-functional requirements
 
@@ -292,8 +292,6 @@ Same `AgentRunInput`/`AgentRunResult` contracts executed by remote runners ([SPE
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap (per architecture):** `local-process` pipeline in `@directivebench/benchmark-engine` — fresh workspace from fixture snapshot, symlink/escape rejection, setup commands, candidate artifact installation via the Mock Agent convention, mock agent invocation with timeout/cancellation, file-change tracking, verification overlay, implemented assertion types (`command`, `file-exists`, `file-contains`, `changed-files`), scoring, trace capture, cleanup with `keepWorkspaces`; command rules (argv, env allowlist, HOME isolation, truncation, redaction); execution approval gate (bundled examples approved at import).
-- **Partially implemented:** execution approval — gate enforced, user approval UX not implemented.
-- **Not implemented:** `docker` environment (runner rejects it), real agent execution for Claude Code / Codex / Cursor (detection only), custom coding harness, remote execution, Windows-specific process-tree handling validation.
-
-These statements describe the intended bootstrap scope; verify against `packages/benchmark-engine/src` and `packages/runner/src` before changing spec status.
+- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` and `packages/runner/test/runner.test.ts`):** `local-process` pipeline in `runBenchmark` — fresh `workspace/` + `home/` per agent run under `<os tmpdir>/directivebench/workspaces/<runId>/<caseId>/<variant>-<rep>/`, fixture copy from the content-addressed snapshot with symlink/escape rejection, setup commands (failure → `infrastructure-error`), candidate-only artifact installation via the Mock Agent convention, agent invocation bounded by `timeoutSeconds` (+5 s grace for adapters ignoring the abort signal), cancellation (`cancelled`), before/after manifests and `changedFiles` excluding installed artifact files, verification overlay, the four assertion types, scoring, trace capture, cleanup unless `keepWorkspaces`; command rules (argv without shell, env allowlist of FR-110-42, isolated `HOME`, timeout with process-group `SIGKILL` on POSIX, per-stream truncation to `maxOutputBytes` with a `truncated` flag, redaction); execution approval gate (bundled examples approved at import); `docker` rejected before any workspace is created.
+- **Partially implemented:** execution approval — gate enforced, user approval UX not implemented; FR-110-02 — the copied workspace is not re-hashed against the snapshot; FR-110-08 — commands are killed with `SIGKILL` immediately (no `SIGTERM` grace); FR-110-15/17 — trace holds setup commands, adapter events and installed files, but no stage timestamps, and progress is reported only through `onAgentRun`; FR-110-44 — truncation sets a flag instead of appending a `[truncated N bytes]` marker.
+- **Not implemented:** `docker` environment, real agent execution for Claude Code / Codex / Cursor (detection only), custom coding harness (adapter id `harness`), remote execution, Windows-specific process-tree handling validation.

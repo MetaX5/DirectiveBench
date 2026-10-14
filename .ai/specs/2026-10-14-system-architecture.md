@@ -74,14 +74,14 @@ flowchart LR
   runner --> core & database & engine & agentAdapters
   web --> core & database
   web -.->|detection only| agentAdapters
-  web -.->|types only| engine
+  web -.->|subpaths: definition, load, scoring| engine
   cli --> core & database & agentAdapters & engine & runner
 ```
 
 Rules:
 - Arrows point from dependent to dependency. No cycles. `core` has no internal dependencies.
 - `benchmark-engine` never imports `database` or `runner`.
-- `web` imports `benchmark-engine` for **types** only (`import type`) and `agent-adapters` for detection only.
+- `web` imports `benchmark-engine` only through its side-effect-free subpath exports `./definition`, `./load` and `./scoring` (definition validation, `displayStatus`, types) — never the orchestrator — and `agent-adapters` for detection only.
 - Future `model-providers` depends on `core` only; future `git-providers` depends on `core` only; the registry sync service (in `runner` or a future `registry` package) composes them with `database`.
 - Internal packages are "just-in-time" TypeScript packages (`exports` → `src`); `web` transpiles them (`transpilePackages`), the CLI bundles them. Enforcement: lint rule or dependency check in CI ([SPEC-012](2026-10-14-testing-strategy.md)).
 
@@ -89,7 +89,7 @@ Rules:
 
 `directivebench serve` (default command) — full CLI behaviour in [SPEC-009](2026-10-14-cli-architecture.md):
 
-1. Validate runtime (Node version, `node:sqlite` availability).
+1. Validate runtime (Node version ≥ 22.16.0; `node:sqlite` availability is checked by `doctor`).
 2. Ensure data directory and `config.json` ([SPEC-010](2026-10-14-local-installation.md)).
 3. Open DB, enable WAL + `busy_timeout`, apply pending migrations.
 4. Seed predefined categories (idempotent).
@@ -116,12 +116,13 @@ sequenceDiagram
   participant FS as Workspace (tmp)
 
   U->>W: Run benchmark (suite version, artifact version, agent config)
-  W->>DB: INSERT job (pending) + benchmark_run (pending)
-  W-->>U: redirect to run detail (polls)
+  W->>DB: INSERT job (pending)
+  W-->>U: redirect to /executions
   loop poll
     R->>DB: UPDATE jobs SET status='running' WHERE status='pending' ... RETURNING
   end
-  R->>E: execute(definition, artifact version, adapter, AbortSignal)
+  R->>DB: INSERT benchmark_run (running)
+  R->>E: runBenchmark(definition, fixtures, artifact, adapter, AbortSignal, onAgentRun)
   loop each case × repetition × {RED, GREEN}
     E->>FS: copy fixture snapshot; GREEN installs artifact
     E->>FS: run setup commands (argv, env allowlist, timeout)
@@ -129,7 +130,7 @@ sequenceDiagram
     A-->>E: agent result + trace events
     E->>FS: copy verification overlay
     E->>FS: evaluate assertions
-    E-->>R: event (agentRunCompleted)
+    E-->>R: onAgentRun(record)
     R->>DB: INSERT agent_run, assertion_results
   end
   par heartbeat every 5 s
@@ -171,10 +172,10 @@ Spec: [SPEC-105](2026-10-14-repository-synchronization.md).
 
 ## 5. Cross-cutting concerns
 
-- **Events:** the engine emits typed events (`runStarted`, `agentRunStarted`, `agentRunCompleted`, `assertionEvaluated`, `warning`, `runCompleted`). The runner persists them; the UI reads persisted state (polling; SSE optional later).
+- **Events:** the engine reports progress through a single `onAgentRun(record)` callback per completed agent run and returns the scored outcome at the end; the runner persists both. A richer typed event set (`runStarted`, `agentRunStarted`, `assertionEvaluated`, `warning`, …) is planned. The UI reads persisted state (Executions and run detail pages refresh every 2 s while jobs run; SSE optional later).
 - **Errors:** engine distinguishes `agent-error`, `timeout`, `cancelled`, `infrastructure-error` per agent run; job `failed` is reserved for failures outside a single agent run.
 - **Configuration:** `config.json` (Zod) with CLI flags and env vars taking precedence ([SPEC-115](2026-10-14-settings-and-configuration.md)).
-- **Logging:** structured lines to `<dataDir>/logs/`; all captured process output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)).
+- **Logging:** the web child's output is appended to `<dataDir>/logs/web.log`; CLI and runner messages go to the terminal. Captured benchmark command output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)); structured log files are planned.
 
 ## 6. Extension points
 
@@ -182,16 +183,16 @@ All contracts are TypeScript interfaces in the listed package with Zod-validated
 
 | Extension point | Package | Contract (summary) | Status |
 |---|---|---|---|
-| **Agent adapter** | `agent-adapters` | `id`, `displayName`, `capabilities` (e.g. `execute`, `installSkill`, `modelSelection`, `tokenUsage`, `nonInteractive`), `detect(): {installed, version, path}`, `install(artifactVersion, workspace)` (adapter-specific convention, e.g. mock → `.agents/skills/<slug>/`), `run({prompt, workspace, model?, limits, signal}) → {status, outputs, trace, usage?}`. | Mock implemented; detection descriptors implemented; real execution not implemented. |
+| **Agent adapter** | `agent-adapters` | `packages/agent-adapters/src/contract.ts`: `id`, `displayName`, `capabilities` (`execution`, `headless`, `modelSelection`, `artifactInstallation`, `structuredOutput`, `usageReporting`, `deterministic`), `detect(): {adapterId, installed, version, executablePath, auth, notes}`, `installArtifact(workspaceDir, artifact)` (adapter-specific convention, e.g. mock → `.agents/skills/<slug>/`), `run({workspaceDir, prompt, timeoutMs, signal, model, options}) → {status, durationMs, summary, trace, usage, error}`. | Mock implemented; detection descriptors implemented; real execution not implemented. |
 | **Model provider** | `model-providers` (future) | `id`, `listModels()`, `complete/stream({model, messages, tools?, signal})`, `usage`, auth mode (`api-key` via keychain ref, `none` for local endpoints), base URL for compatible endpoints. | Not implemented. Integrations SPEC-206…211. |
 | **Git provider** | `git-providers` (future) | `kind` (local, github, gitlab), `validateHost(url)`, `listRepositories?()`, `fetch(repo, ref) → {commitSha, rootDir}`, auth via keychain ref. | Not implemented. Integrations SPEC-201, SPEC-202. |
 | **Artifact parser** | `core` | `classifyArtifactPath(relPath) → {format, type, rootDir} | null` (path-based; arbitrary Markdown is never an artifact) and `parseArtifactFile(relPath, content) → {name, description, activation, frontmatter, body, references, warnings}`. Built-in formats: `skill-md`, `agents-md`, `claude-md`, `claude-rule`, `copilot-instructions`, `copilot-path-instructions`, `cursor-rule`, `gitlab-duo-chat-rules`. Adding a format = extend `ARTIFACT_FORMATS`, classification and parse branch in `packages/core/src/artifacts.ts`. | Implemented (parsers); used for imports. |
 | **Assertion type** | `benchmark-engine` | Zod schema for config (discriminated by `type`) + `evaluate(ctx) → {score ∈ [0,1], passed, message, details}`; declares `deterministic: boolean`. | `command`, `file-exists`, `file-contains`, `changed-files` implemented; others planned. |
-| **Execution environment** | `benchmark-engine` | `kind`, `sandboxed: boolean`, `prepare`, `exec(argv, opts)`, `dispose`. | `local-process` implemented; `docker` rejected with clear error. |
+| **Execution environment** | `benchmark-engine` | `kind`, `sandboxed: boolean`, `prepare`, `exec(argv, opts)`, `dispose` (planned interface). | `local-process` implemented inline in the orchestrator (no environment interface yet); `docker` rejected with clear error. |
 
 ## 7. Future custom coding harness (design only)
 
-A DirectiveBench-owned harness lets benchmarks evaluate **models** directly (via model providers) under a fully controlled tool set, complementing third-party agent CLIs. It is exposed as just another agent adapter (`id: directivebench-harness`).
+A DirectiveBench-owned harness lets benchmarks evaluate **models** directly (via model providers) under a fully controlled tool set, complementing third-party agent CLIs. It is exposed as just another agent adapter (`id: harness`).
 
 ```mermaid
 flowchart LR
@@ -230,6 +231,6 @@ Full design: [SPEC-011](2026-10-14-self-hosting-architecture.md), [ADR-0009](../
 
 ## Implementation status
 
-- **Implemented in bootstrap (per brief; being written concurrently — verify against code):** package layout of §2 (core, database, agent-adapters, benchmark-engine, runner, web, cli); process model §3; job lifecycle §4.1 with polling acquisition, heartbeat, cancellation, interrupted recovery; Mock Agent and CLI detection; artifact parsers; four assertion types; `local-process` environment.
-- **Partially:** dependency-direction enforcement (convention; automated CI check not confirmed); engine event set (exact names to be aligned with `packages/benchmark-engine`).
-- **Not implemented:** repository sync flow §4.2; model providers; git providers; real agent execution; docker environment; custom coding harness §7; self-hosted mapping §8; SSE/live updates.
+- **Implemented (verified by the package test suites — core 36, agent-adapters 8, database 7, benchmark-engine 21, runner 4, cli 5 tests — and `pnpm verify:pack` on 2026-10-14):** package layout of §2 (`apps/cli`, `apps/web`, `packages/{core,database,agent-adapters,benchmark-engine,runner}`; `benchmark-engine` subpath exports `./definition`, `./load`, `./scoring`); process model §3 (CLI supervises runner and `next start` child; coordination only through the `jobs` table); job lifecycle §4.1 with polling acquisition (1 s), heartbeat (5 s, also reads the cancel flag), cancellation, stale (30 s) → `interrupted` recovery and shutdown → `interrupted`; Mock Agent and CLI detection (`claude-code`, `codex`, `cursor`); artifact parsers; four assertion types; `local-process` environment; Host allowlist in `proxy.ts` (403 for foreign hosts, `verify:pack`).
+- **Partially:** dependency-direction enforcement (convention only; no automated check); engine events reduced to the `onAgentRun` callback (§5); agent adapter capability names differ from earlier drafts (see §6, `contract.ts`).
+- **Not implemented:** repository sync flow §4.2; model providers; git providers; real agent execution; docker environment; custom coding harness §7; self-hosted mapping §8; SSE/live updates; structured log files.

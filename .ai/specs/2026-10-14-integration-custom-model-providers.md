@@ -81,10 +81,8 @@ Rules ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md), API K
 - The secret is referenced, never stored in SQLite or `config.json`. `secretRef` uses the
   `SecretRef` shape of [SPEC-115 FR-115-30](2026-10-14-settings-and-configuration.md):
   `{ source: 'keychain', name }` (OS credential store) or `{ source: 'env', name }` (the name of an
-  environment variable). Repository credentials currently use a different shape
-  (`{ kind, account | variable }`, [SPEC-104 FR-104-08](2026-10-14-repository-management.md)). The
-  two should be unified before implementation; this is an open inconsistency between SPEC-104 and
-  SPEC-115.
+  environment variable). Repository credentials use the same `SecretRef` shape
+  ([SPEC-104 FR-104-08](2026-10-14-repository-management.md)).
 - Secrets are sent only in headers, never in URL query strings.
 - Additional headers: a connection may define non-secret static headers (for example
   `anthropic-version`, `OpenAI-Project`). A header whose value is secret must also use a

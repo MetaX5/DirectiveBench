@@ -47,7 +47,7 @@ Users decide whether to keep, change or roll out an instruction based on what th
 | ID | Requirement |
 |---|---|
 | FR-113-01 | Result display statuses SHALL be exactly: `passed`, `failed`, `regression`, `unstable`, `error`, `not-tested`, `not-comparable`. |
-| FR-113-02 | Display status SHALL be derived by the scoring module ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-34) and stored on `benchmark_runs.verdict`; the UI SHALL NOT re-derive it differently. |
+| FR-113-02 | Display status SHALL be derived by the scoring module ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-34, `displayStatus()`); the verdict is stored on `benchmark_runs.verdict` and the display status in `benchmark_runs.summary.displayStatus`. The UI SHALL NOT re-derive it differently. |
 | FR-113-03 | `not-tested` SHALL be shown for an artifact version × assigned suite with no `completed` benchmark run. |
 | FR-113-04 | Benchmark run lifecycle states (`running`, `completed`, `error`, `cancelled`, `interrupted` — `benchmark_runs.status`) SHALL be shown separately from the display status; only `completed` benchmark runs have a display status. |
 | FR-113-05 | Each status SHALL have a text label and an icon; colour SHALL never be the only carrier of meaning. |
@@ -221,6 +221,7 @@ Repository functions (database package): `getRunDetail(id)`, `listRunsForArtifac
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap (per architecture):** display statuses derived by the scoring module and stored on `benchmark_runs.verdict`; Executions page (jobs list with cancel); run detail with RED vs GREEN comparison, per-assertion results, traces, environment; artifact detail with evaluation history; Mock Agent labelling; dashboard recent runs.
-- **Partially implemented:** artifact-level latest result and history (exact grouping by comparability key and worst-status aggregation to be verified in `apps/web`); warnings display.
-- **Not implemented:** report export (JSON/Markdown), version-regression highlighting, trend charts, results filtering beyond basic lists.
+- **Implemented (verified by `packages/runner/test/runner.test.ts` and `pnpm verify:pack` on 2026-10-14):** verdict stored on `benchmark_runs.verdict` and display status in `summary.displayStatus` (derived by `displayStatus()` in `@directivebench/benchmark-engine`); the comparability key stored on `benchmark_runs.comparability_key`; `/results` lists the demo run and the run detail page (`/results/[id]`) shows its verdict (`verify:pack`).
+- **Verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 6/6 passing against the built CLI):** run detail shows baseline 50% / candidate 100% / +50 pts / verdict `improved` and 6 agent runs; dashboard and artifact list show the mock label and display status `passed`.
+- **Partially implemented (present in `apps/web`, only partly covered by the tests above):** run detail with RED vs GREEN aggregates, per-agent-run assertion results, raw JSON trace, environment metadata, short comparability key, confidence with reason, warnings panel, "Mock agent — not an AI evaluation" and "Not sandboxed" badges; Executions page (jobs list with cancel); artifact detail with the latest RED/GREEN comparison and an evaluation history across versions — the history is a flat list (not grouped by comparability key) and the latest result is not broken down per assigned suite; dashboard recent runs. Tokens/cost "not reported" display is not implemented.
+- **Not implemented:** report export (JSON/Markdown), version-regression highlighting, worst-status aggregation across assigned suites (FR-113-23), trend charts, results filtering beyond basic lists.

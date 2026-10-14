@@ -264,6 +264,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap** (to be verified by tests): `ARTIFACT_TYPES`, `ARTIFACT_FORMATS`, `classifyArtifactPath`, `parseArtifactFile` (all eight formats, name/description/activation/references/warnings), `parseFrontmatter`, `hashManifest`, `slugify` in `packages/core/src`.
-- **Partially implemented**: file collection for directory-based skills exists only as far as needed to import bundled examples (to be verified).
-- **Not implemented**: binary file storage, `discoverArtifacts` tree walker, handler registry, exclude globs, size/count limits, binary detection, symlink policy for repository trees, `scopeDir`, `@path` import resolution, compatibility mapping per format, sync integration.
+- **Implemented (verified by `packages/core/test/artifacts.test.ts` and the `core` hashing tests):** `ARTIFACT_TYPES`, `ARTIFACT_FORMATS`, `classifyArtifactPath` (incl. Windows separators and `./`), `parseArtifactFile` (SKILL.md frontmatter/activation/references and missing-metadata fallback, Cursor rule globs/`alwaysApply`, Copilot `applyTo`, Claude rules; unknown paths rejected), `parseFrontmatter`, `hashManifest`, `slugify` in `packages/core/src`. Not every one of the eight formats has a dedicated test.
+- **Partially implemented:** file collection for a single local artifact (`loadLocalArtifact` in `packages/core/src/artifact-loader.ts`: sorted walk, symlinks skipped with a warning, limits of 200 files / 1 MiB) used to import bundled examples.
+- **Not implemented:** binary file storage, `discoverArtifacts` tree walker, handler registry, exclude globs, binary detection, symlink policy for repository trees, `scopeDir`, `@path` import resolution, compatibility mapping per format, sync integration.

@@ -44,7 +44,8 @@ graph LR
 ```
 
 Arrows point from dependency to dependent. `web` uses `agent-adapters` for CLI detection only and
-`benchmark-engine` for types only.
+`benchmark-engine` only through its side-effect-free subpath exports `./definition`, `./load` and
+`./scoring` (validation, display status, types), never the orchestrator.
 
 **Just-in-time internal packages:** internal packages are TypeScript-source packages whose
 `exports` point to `src/*.ts`. They have no build step of their own; `apps/web` transpiles them via

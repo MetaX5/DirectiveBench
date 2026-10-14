@@ -83,7 +83,7 @@ Entity overview (persistence mapping in [SPEC-006](2026-10-14-database-schema.md
 | Case | `BenchmarkCase` (prompt, fixture, verification, setup, assertions, agentOptions) | inside suite version `definition` |
 | Fixture | `case.fixture.path` / `case.verification.overlay` (authoring-time directories) | — |
 | FixtureVersion | `Snapshot { hash, dir, fileCount, totalBytes }` | `fixture_versions` (id = sha256) + `<dataDir>/fixtures/<sha256>/` |
-| ExecutionEnvironment | `definition.execution.environment { kind, image? }` + recorded `EnvironmentMetadata` | `benchmark_runs.environment` |
+| ExecutionEnvironment | `definition.execution.environment { kind, image? }` + recorded `EnvironmentMetadata` | `benchmark_runs.environment` (`{ kind }`), full `EnvironmentMetadata` in `benchmark_runs.summary.environment` |
 | Assertion | `AssertionDefinition` (discriminated union by `type`) | definition; results in `assertion_results` |
 | AgentConfiguration | `{ agent (adapter id), model: ModelSelection \| null, agentOptions[adapterId] }` + adapter `capabilities`, detected version | `benchmark_runs.agent_adapter_id`, `agent_version`, `model` |
 | AgentRun | one (case, variant, repetition) execution → `AgentRunRecord` | `agent_runs` |
@@ -267,7 +267,7 @@ flowchart LR
 ## 10. API and interface design
 
 - Package entry: `@directivebench/benchmark-engine` (`src/index.ts`, just-in-time TS package, bundled by the CLI).
-- Callers: `@directivebench/runner` (job handler), `apps/cli` `demo` (headless), tests. `apps/web` imports only types and `validateDefinition` (e.g. for future upload validation) — never runs benchmarks ([SPEC-008](2026-10-14-api-architecture.md)).
+- Callers: `@directivebench/runner` (job handler), `apps/cli` `demo` (headless), tests. `apps/web` imports only the subpath exports `./definition`, `./load` and `./scoring` (types, `validateDefinition`, `displayStatus`) — never runs benchmarks ([SPEC-008](2026-10-14-api-architecture.md)).
 - Errors exported: `DefinitionValidationError` (with `issues`), `UnsupportedSchemaVersionError`, `UnsafeFileError`, `BenchmarkConfigurationError` (environment, agent mismatch, capability, artifact type, approval, missing fixture), `BenchmarkCancelledError`; `UnsupportedCapabilityError`, `PathEscapeError` from adapters.
 
 ## 11. UI/UX considerations
@@ -325,7 +325,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 18. Open questions
 
-- OQ-107-01: `comparabilityKey` hashes `cases` (incl. prompts and assertions), `scoring`, `execution`, fixtures and adapter id/version — it does not take the suite version id; should the brief's definition (suite version + fixtures + adapter + model + environment + limits) be reconciled with [SPEC-111](2026-10-14-benchmark-scoring.md)?
+- OQ-107-01 (resolved 2026-10-14): `comparabilityKey` hashes `cases` (incl. prompts and assertions), `scoring`, `execution` (incl. model, environment, limits), fixture hashes and adapter id/version. Because `cases + scoring + execution` are the definition content, this subsumes the suite version; [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43 now states exactly this formula.
 - OQ-107-02: Regex execution timeout for `file-contains` (worker thread) vs size cap only.
 - OQ-107-03: Should partial-credit assertion types be allowed as `required`? (Proposed: `required` means `passed === true`.)
 - OQ-107-04: Should `llm-judge` results be excluded from verdicts by default and shown as a separate score?
@@ -340,7 +340,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap** (to be verified by tests): definition schema v1, YAML/JSON parsing, migration hook (rejects newer versions), `loadDefinitionFile`, file manifests/snapshots/diff, `runCommand`/`buildCommandEnv`, assertion types `command`, `file-exists`, `file-contains`, `changed-files`, scoring (`scoreRun`, `aggregate`, `summarize`, `confidenceFor`, `displayStatus`); Mock Agent adapter and contract in `@directivebench/agent-adapters`.
-- **Also implemented** (to be verified): `prepareSuiteImport`/`suiteContentHash`, `assertRunnable`, `comparabilityKey`, `runBenchmark` with `onAgentRun` callback (`src/import.ts`, `src/orchestrator.ts`).
-- **Partially implemented**: progress events (only per-agent-run callback; no stage/command-output events); capability checks (only `execution`, not `headless`/`artifactInstallation`/`modelSelection`).
-- **Not implemented**: `onEvent` stage events, exported `runAgentRun`, assertion plugin registry, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.
+- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` and `scoring.test.ts` — 21 tests — and `packages/runner/test/runner.test.ts`):** definition schema v1, YAML/JSON parsing, migration hook (rejects newer versions), `loadDefinitionFile` (all repository examples validate), file manifests/snapshots/diff with symlink rejection, `runCommand`/`buildCommandEnv` (no shell, no leaked environment, timeout, truncation, spawn errors), assertion types `command`, `file-exists`, `file-contains`, `changed-files`, scoring (`scoreRun`, `aggregate`, `summarize`, `confidenceFor`, `displayStatus`), `prepareSuiteImport`/`suiteContentHash`, `assertRunnable` (unapproved commands and `docker` rejected), `comparabilityKey`, `runBenchmark` with `onAgentRun` callback, alternating order and cancellation (`src/import.ts`, `src/orchestrator.ts`); Mock Agent adapter and contract in `@directivebench/agent-adapters` (`mock.test.ts`). Subpath exports `./definition`, `./load`, `./scoring`.
+- **Partially implemented:** progress events (only per-agent-run callback; no stage/command-output events); capability checks (only `execution`, not `headless`/`artifactInstallation`/`modelSelection`); FR-107-14 independence is respected by the package manifest but not enforced by a test or lint rule.
+- **Not implemented:** `onEvent` stage events, exported `runAgentRun`, assertion plugin registry, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.

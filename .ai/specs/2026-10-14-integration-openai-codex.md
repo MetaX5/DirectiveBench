@@ -237,6 +237,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md). No paid or authenticated calls i
 
 ## 13. Current implementation status
 
-- **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; verify against tests): detection descriptor `id: 'codex'`, executable `codex`, `--version`, first output line stored, `auth: 'unknown'`, no credential files read.
+- **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; the missing-executable path is verified by `mock.test.ts` "detectCliAgent"; detection of an installed `codex` is not covered by a test): detection descriptor `id: 'codex'`, executable `codex`, `--version`, first output line stored, `auth: 'unknown'`, no credential files read.
 - **Partially implemented:** version parsing (the raw line is stored; semver extraction is not).
 - **Not implemented:** readiness check, artifact installation, execution, JSONL parsing, usage, error normalization, secret handling (blocked on [ADR-0008](../decisions/0008-secret-storage-and-authentication.md)), custom providers / `--oss`, Codex SDK option, terms review (§3.2).

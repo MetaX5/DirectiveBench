@@ -53,7 +53,7 @@ Artifacts live in many repositories, some private, some on self-managed GitLab, 
 | FR-104-05 | URLs containing embedded credentials (`https://user:token@…`) SHALL be rejected with an explanation; nothing from them is stored or logged. |
 | FR-104-06 | `name` defaults to `<owner>/<repo>` (hosted) or the directory basename (local); user-editable. |
 | FR-104-07 | **Branch selection**: for git providers, the default branch SHALL be detected on validation (`git ls-remote --symref <url> HEAD` for hosted; current symbolic `HEAD` of the repository for `local-git`) and stored in `default_branch`. `selected_branch` is optional; when null, sync uses `default_branch`. The UI offers the list of remote branches (`git ls-remote --heads`). Not applicable to `local-directory`. |
-| FR-104-08 | **Credential reference** (planned column `credential_ref`, JSON) SHALL be one of: `{ kind: 'git-default' }` (default — let `git` use the user's existing SSH agent / credential helper, DirectiveBench never reads them), `{ kind: 'keychain', account: string }` (OS credential store entry, service `directivebench`), `{ kind: 'env', variable: string }` (name of an environment variable). Inline secrets SHALL NOT be accepted by any API. |
+| FR-104-08 | **Credential reference** (planned column `credential_ref`, JSON) SHALL be one of: `{ source: 'git-default' }` (default — let `git` use the user's existing SSH agent / credential helper, DirectiveBench never reads them) or a `SecretRef` as defined in [SPEC-115 FR-115-30](2026-10-14-settings-and-configuration.md): `{ source: 'keychain', name: string }` (OS credential store entry, service `directivebench`) or `{ source: 'env', name: string }` (name of an environment variable). Inline secrets SHALL NOT be accepted by any API. |
 | FR-104-09 | Secrets resolved from `keychain`/`env` SHALL be passed to `git` only through the child process environment (e.g. `GIT_CONFIG_*` http extra header or a one-shot `GIT_ASKPASS` helper reading from env), never via argv or URL, and SHALL be registered for redaction ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). Exact mechanism — Assumption — requires validation per provider ([SPEC-201](2026-10-14-integration-github.md), [SPEC-202](2026-10-14-integration-gitlab.md)). |
 | FR-104-10 | **Connection validation** SHALL run on create, on credential/branch change and on demand ("Test connection"). Checks: hosted — `git ls-remote` succeeds within 30 s and the selected branch exists; `local-git` — path exists, is a git work tree, selected branch exists, `git` binary available; `local-directory` — path exists, is a directory, is readable. Result: `ok` or a typed error (§13). |
 | FR-104-11 | Validation and all other repository operations SHALL be read-only: no `git push`, `commit`, `checkout`, `reset`, `stash`, `config` writes, no index/worktree modification of local repositories, no file writes inside local directories. Hosted repositories are cloned only into the DirectiveBench cache ([SPEC-105](2026-10-14-repository-synchronization.md)). |
@@ -61,7 +61,7 @@ Artifacts live in many repositories, some private, some on self-managed GitLab, 
 | FR-104-13 | **Discovery settings** per repository (planned column `discovery`, JSON): `exclude` globs (added to defaults `.git/**`, `node_modules/**`), optional `include` roots (limit scanning to sub-paths, e.g. `skills/`). Used by [SPEC-102](2026-10-14-artifact-discovery.md). |
 | FR-104-14 | **Edit**: name, selected branch, credential reference, discovery settings, instance URL. Changing provider or location is not allowed (create a new repository instead). |
 | FR-104-15 | **Disable** (planned column `disabled_at`): excluded from "sync all", data kept. **Remove**: deletes the repository row; its occurrences are deleted by cascade but artifacts, versions (provenance `source_repository_id` set to null), categories, notes and evaluation results remain. Removal requires confirmation showing the number of affected artifacts; artifacts left without any occurrence are shown as "orphaned" (lifecycle `removed`). Cached clones are deleted. |
-| FR-104-16 | Repository list SHALL show: name, provider, location (hosted host/path or local path), branch (selected or default), last sync time, sync status (`never` / `ok` / `error`), artifact count (active occurrences), credential kind (never the secret). |
+| FR-104-16 | Repository list SHALL show: name, provider, location (hosted host/path or local path), branch (selected or default), last sync time, sync status (`never` / `ok` / `error`), artifact count (active occurrences), credential source (never the secret). |
 | FR-104-17 | Repository status fields `last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error` are written only by synchronisation ([SPEC-105](2026-10-14-repository-synchronization.md)). |
 
 ## 7. Non-functional requirements
@@ -78,10 +78,11 @@ Bootstrap table `repositories` (`packages/database/src/schema.ts`): `id, provide
 ```ts
 type RepositoryProvider = 'github' | 'gitlab' | 'local-git' | 'local-directory' | 'bundled-examples';
 
+type SecretRef = { source: 'keychain' | 'env'; name: string }; // SPEC-115 FR-115-30
+
 type CredentialRef =
-  | { kind: 'git-default' }                    // user's own git config / SSH agent / credential helper
-  | { kind: 'keychain'; account: string }      // OS credential store, service 'directivebench'
-  | { kind: 'env'; variable: string };         // e.g. 'GITLAB_TOKEN'
+  | { source: 'git-default' }                  // user's own git config / SSH agent / credential helper
+  | SecretRef;                                 // keychain: OS credential store, service 'directivebench'; env: e.g. 'GITLAB_TOKEN'
 
 interface RepositoryInput {                     // Zod-validated Server Action input
   source: { url: string } | { path: string };
@@ -89,7 +90,7 @@ interface RepositoryInput {                     // Zod-validated Server Action i
   name?: string;
   instanceUrl?: string;                         // self-managed GitLab
   selectedBranch?: string | null;
-  credentialRef?: CredentialRef;                // default { kind: 'git-default' }
+  credentialRef?: CredentialRef;                // default { source: 'git-default' }
   discovery?: { exclude?: string[]; include?: string[] };
 }
 
@@ -234,6 +235,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap**: `repositories` table (provider enum incl. internal `bundled-examples`, location, instance URL, default/selected branch, sync status columns). The `bundled-examples` repository is used for example import (to be verified).
-- **Partially implemented**: none.
-- **Not implemented**: user registration of any provider, URL/path parsing, credential references (`credential_ref` column), discovery settings, disable/remove, connection validation, branch listing, hardened git execution, Repositories UI (page shows "Planned — not implemented"), `packages/git-providers`.
+- **Implemented (verified by `packages/runner/test/runner.test.ts` and `pnpm verify:pack`):** `repositories` table (provider enum incl. internal `bundled-examples`, location, instance URL, default/selected branch, sync status columns); `upsertRepository` creates the internal `bundled-examples` repository used by example import (`importBundledExample`).
+- **Partially implemented:** none.
+- **Not implemented:** user registration of any provider, URL/path parsing, credential references (`credential_ref` column, `CredentialRef`/`SecretRef` shape), discovery settings, disable/remove, connection validation, branch listing, hardened git execution, Repositories UI (page shows "Planned — not implemented"), `packages/git-providers`.

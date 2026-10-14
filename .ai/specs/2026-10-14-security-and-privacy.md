@@ -57,20 +57,20 @@ flowchart LR
 
 ## 3. Controls
 
-### 3.1 Implemented in bootstrap (per brief — verify against code)
+### 3.1 Implemented in bootstrap (see Implementation status for verification)
 
 | Control | Description |
 |---|---|
 | Loopback binding | Default host `127.0.0.1` (`DEFAULT_HOST`), port 4280. `isLoopbackHost()` gates the `--allow-network-access` requirement. |
 | `--allow-network-access` | Required for any non-loopback `--host`; prints a warning that there is no authentication. |
-| Host allowlist (`apps/web/proxy.ts`) | Requests whose `Host` header is not `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>` (plus the explicit `--host` value when network access is allowed) are rejected with 403. DNS-rebinding protection. |
-| Server action origin checks | Next.js server actions compare `Origin` with `Host`; mutating route handlers reject requests without a same-origin `Origin`. Do not configure `serverActions.allowedOrigins` beyond the allowlist. |
+| Host allowlist (`apps/web/proxy.ts`) | Requests whose `Host` header host name (any port) is not `localhost`, `127.0.0.1` or `[::1]` — plus the explicit non-loopback `--host` value, passed by the CLI in `DIRECTIVEBENCH_ALLOWED_HOSTS` — are rejected with 403. DNS-rebinding protection. |
+| Server action origin checks | Next.js server actions compare `Origin` with `Host` (framework default; `serverActions.allowedOrigins` is not configured). There are no mutating route handlers yet. |
 | argv-only commands | `spawn(argv[0], argv.slice(1), { shell: false })`; no string commands. |
-| Env allowlist | Commands receive only `PATH`, `LANG`, `TZ` and `HOME` (set to a workspace-local temp dir). Secret-like names (`isSecretEnvName`) are never forwarded. |
+| Env allowlist | Commands receive only `PATH`, `LANG`, `LC_ALL`, `TZ` (plus `SystemRoot`, `PATHEXT`, `COMSPEC` on Windows), `HOME`/`USERPROFILE`/`TMPDIR`/`TEMP`/`TMP` set to a per-run temp dir, `CI=true` and `NO_COLOR=1` (`buildCommandEnv`). No other variable — in particular no secret — is forwarded. |
 | Timeouts & output limits | Per-command timeout, process kill on timeout/cancel, output truncated to `maxOutputBytes`, then redacted. |
 | Execution approval | Commands run only if `benchmark_suite_versions.execution_approved_at` is set. Bundled examples are approved at import with `execution_approval_source = 'bundled-example'`. User approval UX is planned. |
 | Symlink & traversal rejection | Fixture and overlay snapshotting rejects symlinks and escaping paths. |
-| Redaction | `redactSecrets(text, knownSecrets)` in `packages/core/src/redact.ts` (provider key shapes, GitHub/GitLab/Slack tokens, AWS key IDs, bearer headers, private-key blocks) applied before persisting traces/logs. |
+| Redaction | `redactSecrets(text, knownSecrets)` in `packages/core/src/redact.ts` (provider key shapes, GitHub/GitLab/Slack tokens, AWS key IDs, bearer headers, private-key blocks) applied to captured command output before it is returned and persisted. Agent traces and `logs/web.log` are not redacted yet. |
 | No credentials stored | Bootstrap stores no secrets anywhere; mock agent needs none. |
 | Config file permissions | `config.json` written atomically with mode `0600`. |
 
@@ -79,7 +79,7 @@ flowchart LR
 - Execution approval UX: show the full list of commands (setup + assertions) with argv before approving; approval recorded per suite version; re-approval required for every new version.
 - OS keychain secret storage with DB-side references only ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)); known secret values passed to `redactSecrets`.
 - SSRF controls (T5), TLS policy (§7), Docker sandbox (§5.2).
-- Data-dir permission hardening (`0700` directory) and DB file `0600`.
+- Data-dir permission hardening: the data directory is created with `0700` (not re-applied to existing directories); DB file `0600` is planned.
 - Content-Security-Policy headers for the web UI (no inline scripts beyond Next.js needs).
 
 ## 4. Command execution rules (normative)
@@ -140,6 +140,6 @@ Real agents (Claude Code, Codex, Cursor Agent) authenticate with credentials sto
 
 ## Implementation status
 
-- **Implemented in bootstrap (verified in code 2026-10-14):** `DEFAULT_HOST = 127.0.0.1`, `isLoopbackHost`, `redactSecrets`, `isSecretEnvName`, atomic `config.json` writes with mode `0600` (`packages/core/src`).
-- **Implemented per brief, being written concurrently (verify before changing status):** `--allow-network-access` gate, Host allowlist in `proxy.ts`, server action origin checks, argv-only command execution with env allowlist/timeouts/truncation, execution approval flag (bundled examples auto-approved), fixture symlink/traversal rejection, "Not sandboxed" labelling.
-- **Not implemented:** approval UX, keychain secret storage, SSRF controls, custom CA configuration, `doctor` TLS warning, Docker sandbox, CSP headers, data-dir permission hardening, shared-server credential model.
+- **Implemented (verified by tests or `pnpm verify:pack` on 2026-10-14):** `DEFAULT_HOST = 127.0.0.1`, `isLoopbackHost`, atomic `config.json` writes with mode `0600` (`packages/core/test/config.test.ts`); `redactSecrets` (`core` tests); non-loopback host refused without `--allow-network-access` (`apps/cli/test/cli.test.ts`); Host allowlist in `proxy.ts` rejecting a foreign `Host` with 403 (`verify:pack`); argv-only command execution without a shell, env allowlist, timeouts, truncation and redaction (`benchmark-engine` "runCommand" tests); execution approval flag — unapproved suites do not run commands (`engine.test.ts`, `runner.test.ts`), bundled examples auto-approved at import; fixture symlink/traversal rejection (`engine.test.ts`); artifact install path-escape rejection (`agent-adapters` tests); "Not sandboxed" warning on every run; `NEXT_TELEMETRY_DISABLED=1` for the web child.
+- **Partially implemented:** server action origin checks rely on the Next.js default and are not covered by a test; "Not sandboxed" badge in the UI is not covered by a UI test; data directory `0700` only on creation.
+- **Not implemented:** approval UX, keychain secret storage, SSRF controls, custom CA configuration, `doctor` TLS warning, Docker sandbox, CSP headers, DB file permission hardening, redaction of agent traces and web logs, shared-server credential model.

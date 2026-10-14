@@ -152,11 +152,11 @@ flowchart TD
 
 ## 10. API and interface design
 
-CLI ([SPEC-009](2026-10-14-cli-architecture.md)): `serve [--host --port --data-dir --no-open --allow-network-access]`, `init [--data-dir]`, `doctor [--data-dir]`. Future: `backup`, `restore`, `export`, `import`, `config get|set` (Open question).
+CLI ([SPEC-009](2026-10-14-cli-architecture.md)): global `--data-dir`; `serve [--host --port --no-open --allow-network-access --dev]`, `init`, `doctor [--json]`, `demo`. Future: `backup`, `restore`, `export`, `import`, `config get|set` (Open question).
 
 ## 11. UI/UX considerations
 
-- Settings page (bootstrap): honest placeholder with data dir path and link to spec.
+- Settings page (bootstrap): read-only view of the data directory paths (root, database, fixtures, config) and the effective configuration (`config.json` merged with defaults), plus a "Planned" list; no editable controls.
 - Future: grouped sections (Server, Runner, Appearance, Secrets, Data), each value shows its source.
 - Appearance preferences (theme, density) are per-browser in the bootstrap ([SPEC-116](2026-10-14-dashboard-and-navigation.md)).
 
@@ -217,6 +217,6 @@ CLI ([SPEC-009](2026-10-14-cli-architecture.md)): `serve [--host --port --data-d
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap (verified in `packages/core/src/config.ts`):** `resolveDataDir` (flag > env > OS default, incl. XDG/LOCALAPPDATA fallbacks), `dataDirLayout`, strict Zod `configSchema` v1 with the keys in FR-115-14, `loadConfig` (missing → defaults, invalid → `ConfigError`), atomic `saveConfig` with mode `0600`, `isLoopbackHost`.
-- **Partially implemented (per architecture, CLI code not yet verified):** precedence merge for host/port in `serve`, `--allow-network-access` gate, data dir passed to web child, `doctor` output.
-- **Not implemented:** Settings UI (placeholder page only), secret references, backup/restore, import/export, config migrations beyond v1, `backups/` usage.
+- **Implemented (verified by `packages/core/test/config.test.ts` and `apps/cli/test/cli.test.ts` on 2026-10-14):** `resolveDataDir` (flag > env > OS default, incl. XDG fallback; macOS path unit-tested, Windows `LOCALAPPDATA` path untested), `dataDirLayout`, strict Zod `configSchema` v1 with the keys in FR-115-14 (unknown/invalid keys rejected), `loadConfig` (missing → defaults, invalid → `ConfigError` → CLI exit 2), atomic `saveConfig` with mode `0600`, `isLoopbackHost`; CLI precedence flag > env > config > default for host/port, invalid port → exit 2, non-loopback host without `--allow-network-access` → exit 2; `runner.concurrency`, `runner.keepWorkspaces` and `server.openBrowser` honoured by `serve` (`keepWorkspaces` also by `demo`); data dir passed to the web child via `DIRECTIVEBENCH_DATA_DIR` (`pnpm verify:pack`).
+- **Partially implemented:** read-only Settings page (data dir paths and effective config; FR-115-50 without the "Planned — not implemented" wording on the whole page) — not covered by a verified automated test; `doctor` reports config validity.
+- **Not implemented:** editable Settings UI, secret references (`SecretRef` shape defined in FR-115-30 and §8, used by SPEC-104 and the integration specs), backup/restore, import/export, config migrations beyond v1, `backups/` usage.

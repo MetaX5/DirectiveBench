@@ -87,7 +87,7 @@ Personas and use cases: [SPEC-002](2026-10-14-product-requirements.md).
 | **Agent harness** | The program that drives a model to edit code: Claude Code, Codex CLI, Cursor Agent, the deterministic Mock Agent, or a future custom DirectiveBench harness. Integrated via an **agent adapter**. |
 | **Model provider** | An API that serves models (Anthropic, OpenAI, DeepSeek, Z.AI GLM, Moonshot Kimi, OpenAI/Anthropic-compatible endpoints). Planned; contract in [SPEC-003](2026-10-14-system-architecture.md#6-extension-points). |
 | **RED / GREEN** | RED = baseline run without the artifact; GREEN = candidate run with the exact artifact version installed. Same fixture, prompt, adapter, model, limits; fresh workspaces. |
-| **Comparability** | Two results are comparable only if their comparability key — hash of suite version, fixture hashes, adapter id + version, model config, environment kind and limits — is equal. |
+| **Comparability** | Two results are comparable only if their comparability key — hash of the benchmark definition's cases, scoring and execution settings (incl. model, environment and limits), fixture hashes and adapter id + version — is equal. |
 
 ## 8. Related documents
 
@@ -99,6 +99,6 @@ Personas and use cases: [SPEC-002](2026-10-14-product-requirements.md).
 
 ## Implementation status
 
-- **Implemented in bootstrap:** none of this document is code by itself. Identity items (package name `directivebench`, MIT `LICENSE`) are defined; the monorepo and CLI are being created concurrently — verify against `apps/cli/package.json` before marking anything implemented.
+- **Implemented (verified by `pnpm verify:pack` on 2026-10-14):** identity items — npm package `directivebench` from `apps/cli` (the only publishable package; packed tarball installs and runs `--help`, `--version`, `demo` and `serve`), MIT `LICENSE` included in the tarball, pnpm + Turborepo monorepo, default bind `127.0.0.1:4280`. Nothing is published to npm yet (the name was unclaimed on 2026-10-14).
 - **Partially (bootstrap scope):** Benchmark Engine with the deterministic Mock Agent and local-process environment; Quality Dashboard sections listed in [SPEC-116](2026-10-14-dashboard-and-navigation.md); Artifact Registry limited to importing bundled examples.
 - **Not implemented:** repository registration/sync, discovery scanning, real agent execution, model providers, Docker sandbox, self-hosted server, teams features.

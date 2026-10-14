@@ -183,6 +183,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap** (to be verified): `PREDEFINED_CATEGORIES` (17 entries) in `packages/core/src/categories.ts`; `categories` and `artifact_categories` tables; `seedPredefinedCategories`, `listCategories`, `assignCategoriesBySlug` (existing non-archived slugs only; unknown slugs returned, not created) in `packages/database/src/repositories/`; seeding on startup; read-only Categories list page; category display on artifacts.
-- **Partially implemented**: category filtering in lists — to be verified.
-- **Not implemented**: create/edit/rename/slug change/archive/merge/bulk assign UI and actions, aliases, `merged_into_id`, suite category resolution warnings, AI-assisted categorisation.
+- **Implemented (verified by `packages/database/test/database.test.ts` "seeds predefined categories once" and `packages/runner/test/runner.test.ts` category assignment):** `PREDEFINED_CATEGORIES` (17 entries) in `packages/core/src/categories.ts`; `categories` and `artifact_categories` tables; `seedPredefinedCategories`, `listCategories`, `assignCategoriesBySlug` (existing non-archived slugs only; unknown slugs returned, not created) in `packages/database/src/repositories/`; seeding on `init`/`serve`/`demo`.
+- **Partially implemented:** read-only Categories page (links to `/artifacts?category=<slug>`), category badges on artifacts and the `category` filter on the artifacts list exist in `apps/web`, without a verified automated UI test.
+- **Not implemented:** create/edit/rename/slug change/archive/merge/bulk assign UI and actions, aliases, `merged_into_id`, suite category resolution warnings, AI-assisted categorisation.

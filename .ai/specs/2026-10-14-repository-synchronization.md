@@ -239,6 +239,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented in bootstrap**: repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`) exist in the schema; the job queue exists for `benchmark-run` jobs only.
-- **Partially implemented**: none.
-- **Not implemented**: `repository-sync` job type, fetching/cloning, cache, `planSync`/`applySyncPlan`, change detection, deletion handling, `sync_runs`/`sync_run_items` tables, sync UI and CLI `sync` command, dry run.
+- **Implemented (schema only, verified by `packages/database/test/database.test.ts` migrations):** repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`) exist; the job queue supports only the `benchmark-run` job type.
+- **Partially implemented:** none.
+- **Not implemented:** `repository-sync` job type, fetching/cloning, cache, `planSync`/`applySyncPlan`, change detection, deletion handling, `sync_runs`/`sync_run_items` tables, sync UI and CLI `sync` command, dry run.
