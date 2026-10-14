@@ -17,6 +17,8 @@ below. This file only adds a short summary; if anything here conflicts with `AGE
 - `.ai/decisions/` — ADRs for significant design decisions.
 - `.ai/templates/` — templates for specs, proposals, run logs and lessons.
 
-Every task: read specs and lessons first → spec before significant code → tests and quality gate →
-update implementation status only after verification → record lessons → finalise the run log →
-commit on a feature branch with Conventional Commits and open a PR with `gh`.
+Every task: read specs and lessons first → plan complex tasks in plan mode (re-plan when off
+track) → spec before significant code → tests and quality gate → prove it works and review the
+diff critically → update implementation status only after verification → record lessons (every
+correction is one) → finalise the run log → commit on a feature branch with Conventional Commits
+and open a PR with `gh`.

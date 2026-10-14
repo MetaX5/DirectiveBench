@@ -19,6 +19,10 @@ Write facts, not intentions. Never include secrets, tokens or personal data.
 
 What was asked, in one or two sentences, and the acceptance criteria used.
 
+## Plan
+
+The plan agreed before implementation (complex tasks), and any re-planning with its reason.
+
 ## Decisions
 
 Significant decisions made without asking, with the reason. Link ADRs or specs that record them.
