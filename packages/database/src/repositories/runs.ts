@@ -1,0 +1,187 @@
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { createId, nowIso } from '@directivebench/core';
+import { withTransaction, type Database, type DatabaseHandle } from '../client';
+import {
+  agentRuns,
+  artifacts,
+  artifactVersions,
+  assertionResults,
+  benchmarkRuns,
+  benchmarkSuites,
+  benchmarkSuiteVersions,
+} from '../schema';
+
+export type BenchmarkRunRecord = typeof benchmarkRuns.$inferSelect;
+export type AgentRunRecord = typeof agentRuns.$inferSelect;
+export type AssertionResultRecord = typeof assertionResults.$inferSelect;
+
+export interface CreateBenchmarkRunInput {
+  jobId: string | null;
+  suiteVersionId: string;
+  artifactVersionId: string;
+  agentAdapterId: string;
+  agentVersion: string | null;
+  model: { provider: string; model: string } | null;
+  environment: Record<string, unknown>;
+}
+
+export async function createBenchmarkRun(
+  db: Database,
+  input: CreateBenchmarkRunInput,
+): Promise<string> {
+  const id = createId('run');
+  await db.insert(benchmarkRuns).values({
+    id,
+    ...input,
+    status: 'running',
+    startedAt: nowIso(),
+  });
+  return id;
+}
+
+export interface AgentRunInput {
+  benchmarkRunId: string;
+  caseId: string;
+  variant: 'baseline' | 'candidate';
+  repetition: number;
+  fixtureVersionId: string;
+  executionStatus: AgentRunRecord['executionStatus'];
+  score: number | null;
+  passed: boolean | null;
+  durationMs: number;
+  changedFiles: AgentRunRecord['changedFiles'];
+  trace: unknown[];
+  usage: Record<string, number> | null;
+  error: string | null;
+  assertions: Omit<AssertionResultRecord, 'id' | 'agentRunId'>[];
+}
+
+/** Persists one agent run with its assertion results atomically. */
+export async function insertAgentRun(
+  handle: DatabaseHandle,
+  input: AgentRunInput,
+): Promise<string> {
+  const { assertions, ...run } = input;
+  const id = createId('arun');
+  await withTransaction(handle, async (db) => {
+    await db.insert(agentRuns).values({ id, ...run, createdAt: nowIso() });
+    for (const assertion of assertions) {
+      await db
+        .insert(assertionResults)
+        .values({ id: createId('ares'), agentRunId: id, ...assertion });
+    }
+  });
+  return id;
+}
+
+export interface FinishBenchmarkRunInput {
+  status: Exclude<BenchmarkRunRecord['status'], 'running'>;
+  verdict: string | null;
+  summary: Record<string, unknown> | null;
+  comparabilityKey: string | null;
+  warnings: string[];
+  error: string | null;
+}
+
+export async function finishBenchmarkRun(
+  db: Database,
+  runId: string,
+  input: FinishBenchmarkRunInput,
+): Promise<void> {
+  await db
+    .update(benchmarkRuns)
+    .set({ ...input, finishedAt: nowIso() })
+    .where(eq(benchmarkRuns.id, runId));
+}
+
+export interface BenchmarkRunListItem {
+  run: BenchmarkRunRecord;
+  suite: { id: string; name: string; version: number };
+  artifact: { id: string; name: string; version: number };
+}
+
+export async function listBenchmarkRuns(
+  db: Database,
+  options: { limit?: number; suiteId?: string } = {},
+): Promise<BenchmarkRunListItem[]> {
+  const query = db
+    .select({
+      run: benchmarkRuns,
+      suiteId: benchmarkSuites.id,
+      suiteName: benchmarkSuites.name,
+      suiteVersion: benchmarkSuiteVersions.version,
+      artifactId: artifacts.id,
+      artifactName: artifacts.name,
+      artifactVersion: artifactVersions.version,
+    })
+    .from(benchmarkRuns)
+    .innerJoin(benchmarkSuiteVersions, eq(benchmarkRuns.suiteVersionId, benchmarkSuiteVersions.id))
+    .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
+    .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
+    .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
+    .orderBy(desc(benchmarkRuns.startedAt))
+    .limit(options.limit ?? 50);
+  const rows = options.suiteId
+    ? await query.where(eq(benchmarkSuites.id, options.suiteId))
+    : await query;
+  return rows.map((r) => ({
+    run: r.run,
+    suite: { id: r.suiteId, name: r.suiteName, version: r.suiteVersion },
+    artifact: { id: r.artifactId, name: r.artifactName, version: r.artifactVersion },
+  }));
+}
+
+export async function getBenchmarkRunDetail(db: Database, runId: string) {
+  const row = await db
+    .select({
+      run: benchmarkRuns,
+      suiteVersion: benchmarkSuiteVersions,
+      suite: benchmarkSuites,
+      artifactVersion: artifactVersions,
+      artifact: artifacts,
+    })
+    .from(benchmarkRuns)
+    .innerJoin(benchmarkSuiteVersions, eq(benchmarkRuns.suiteVersionId, benchmarkSuiteVersions.id))
+    .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
+    .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
+    .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
+    .where(eq(benchmarkRuns.id, runId))
+    .get();
+  if (!row) return null;
+  const runs = await db
+    .select()
+    .from(agentRuns)
+    .where(eq(agentRuns.benchmarkRunId, runId))
+    .orderBy(asc(agentRuns.caseId), asc(agentRuns.repetition), asc(agentRuns.variant));
+  const ids = runs.map((r) => r.id);
+  const assertions =
+    ids.length === 0
+      ? []
+      : await db.select().from(assertionResults).where(inArray(assertionResults.agentRunId, ids));
+  return {
+    ...row,
+    agentRuns: runs.map((run) => ({
+      ...run,
+      assertions: assertions.filter((a) => a.agentRunId === run.id),
+    })),
+  };
+}
+
+export type BenchmarkRunDetail = NonNullable<Awaited<ReturnType<typeof getBenchmarkRunDetail>>>;
+
+export async function countRunsByVerdict(db: Database): Promise<Record<string, number>> {
+  const rows = await db
+    .select({
+      verdict: benchmarkRuns.verdict,
+      status: benchmarkRuns.status,
+      count: sql<number>`count(*)`,
+    })
+    .from(benchmarkRuns)
+    .groupBy(benchmarkRuns.verdict, benchmarkRuns.status);
+  const result: Record<string, number> = {};
+  for (const row of rows) {
+    const key = row.verdict ?? row.status;
+    result[key] = (result[key] ?? 0) + Number(row.count);
+  }
+  return result;
+}
