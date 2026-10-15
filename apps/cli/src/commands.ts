@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
   CLI_AGENTS,
   createExecutableAdapters,
@@ -31,27 +32,70 @@ interface Check {
   name: string;
   status: CheckStatus;
   detail: string;
+  /** Remediation hint; present for every check that is not `ok`. */
+  hint?: string;
+}
+
+function isWritable(path: string): boolean {
+  try {
+    accessSync(path, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The directory `init` would create the data directory in. */
+function nearestExistingDir(path: string): string {
+  let current = path;
+  while (!existsSync(current) && dirname(current) !== current) current = dirname(current);
+  return current;
 }
 
 /** Read-only diagnostics; never creates or migrates anything. */
 export async function doctorCommand(flags: { dataDir?: string; json?: boolean }): Promise<number> {
   const checks: Check[] = [];
-  const add = (name: string, status: CheckStatus, detail: string) =>
-    checks.push({ name, status, detail });
+  const add = (name: string, status: CheckStatus, detail: string, hint?: string) =>
+    checks.push({ name, status, detail, ...(status === 'ok' ? {} : { hint }) });
 
   const node = checkNodeVersion();
-  add('node', node.ok ? 'ok' : 'fail', node.message);
+  add(
+    'node',
+    node.ok ? 'ok' : 'fail',
+    node.message,
+    'Install Node.js 22.16 or newer (Node 24 LTS recommended).',
+  );
   const sqlite = await checkSqlite();
-  add('sqlite', sqlite.ok ? 'ok' : 'fail', sqlite.message);
+  add(
+    'sqlite',
+    sqlite.ok ? 'ok' : 'fail',
+    sqlite.message,
+    'Use an official Node.js build >= 22.16; node:sqlite is built in.',
+  );
 
   const layout = dataDirLayout(resolveDataDir({ flag: flags.dataDir }));
-  add(
-    'data-dir',
-    existsSync(layout.root) ? 'ok' : 'warn',
-    existsSync(layout.root)
-      ? layout.root
-      : `${layout.root} does not exist yet (run \`directivebench init\`)`,
-  );
+  if (existsSync(layout.root)) {
+    const writable = isWritable(layout.root);
+    add(
+      'data-dir',
+      writable ? 'ok' : 'fail',
+      `${layout.root}${writable ? '' : ' is not writable'}`,
+      'Fix the directory permissions or choose another location with --data-dir / DIRECTIVEBENCH_DATA_DIR.',
+    );
+  } else {
+    const parent = nearestExistingDir(layout.root);
+    const writable = isWritable(parent);
+    add(
+      'data-dir',
+      writable ? 'warn' : 'fail',
+      writable
+        ? `${layout.root} does not exist yet`
+        : `${layout.root} cannot be created: ${parent} is not writable`,
+      writable
+        ? 'Run `directivebench init` (or just start `directivebench`) to create it.'
+        : 'Choose a writable location with --data-dir / DIRECTIVEBENCH_DATA_DIR.',
+    );
+  }
 
   let config;
   try {
@@ -62,7 +106,12 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
       existsSync(layout.config) ? layout.config : 'defaults (no config.json yet)',
     );
   } catch (error) {
-    add('config', 'fail', (error as Error).message);
+    add(
+      'config',
+      'fail',
+      (error as Error).message,
+      `Fix or delete ${layout.config}; defaults are used when it is absent.`,
+    );
   }
 
   try {
@@ -71,11 +120,11 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
       'web-build',
       assets.mode === 'packaged' || existsSync(`${assets.webDir}/.next/BUILD_ID`) ? 'ok' : 'warn',
       `${assets.mode}: ${assets.webDir}`,
+      'Run `pnpm build` in the repository (source checkouts only), or use `serve --dev`.',
     );
     if (existsSync(layout.database)) {
       const handle = openDatabase(layout.database, { readOnly: true });
       try {
-        const { readdirSync } = await import('node:fs');
         const expected = readdirSync(assets.migrationsDir).filter((f) => f.endsWith('.sql')).length;
         const row = handle.sqlite
           .prepare(
@@ -92,16 +141,22 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
         add(
           'database',
           applied === expected ? 'ok' : 'warn',
-          `${applied}/${expected} migrations applied${applied === expected ? '' : ' (run `directivebench init`)'}`,
+          `${applied}/${expected} migrations applied`,
+          'Run `directivebench init` to apply pending migrations.',
         );
       } finally {
         handle.close();
       }
     } else {
-      add('database', 'warn', 'not created yet (run `directivebench init`)');
+      add('database', 'warn', 'not created yet', 'Run `directivebench init` to create it.');
     }
   } catch (error) {
-    add('installation', 'fail', (error as Error).message);
+    add(
+      'installation',
+      'fail',
+      (error as Error).message,
+      'Reinstall DirectiveBench (`npx directivebench@latest`).',
+    );
   }
 
   if (config) {
@@ -112,9 +167,15 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
         'port',
         free ? 'ok' : 'warn',
         `${host}:${port} ${free ? 'is free' : 'is in use (another instance running?)'}`,
+        'Stop the other process or start with --port <port>.',
       );
     } catch (error) {
-      add('port', 'fail', (error as Error).message);
+      add(
+        'port',
+        'fail',
+        (error as Error).message,
+        'Fix server.host / server.port in config.json or the DIRECTIVEBENCH_HOST / DIRECTIVEBENCH_PORT variables.',
+      );
     }
   }
 
@@ -132,8 +193,10 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
   if (flags.json) {
     console.log(JSON.stringify({ checks }, null, 2));
   } else {
-    for (const check of checks)
+    for (const check of checks) {
       console.log(`${check.status.padEnd(4)}  ${check.name.padEnd(18)} ${check.detail}`);
+      if (check.hint) console.log(`      → ${check.hint}`);
+    }
   }
   return checks.some((c) => c.status === 'fail') ? ExitCode.CheckFailed : ExitCode.Ok;
 }
