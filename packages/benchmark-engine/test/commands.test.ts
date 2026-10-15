@@ -57,13 +57,17 @@ describe('buildCommandEnv (environment allowlist)', () => {
   });
 });
 
+// Variables the operating system adds to every process it starts, whatever the parent passes.
+// macOS (CoreFoundation) sets __CF_USER_TEXT_ENCODING; it does not come from the parent's env.
+const OS_INJECTED_ENV = process.platform === 'darwin' ? ['__CF_USER_TEXT_ENCODING'] : [];
+
 describe('runCommand', () => {
   it('runs in the given working directory with exactly the given environment', async () => {
     const opts = options({ env: { PATH: process.env.PATH ?? '', ONLY_THIS: '1' } });
-    const result = await runCommand(
-      nodeScript('console.log(JSON.stringify({ cwd: process.cwd(), env: process.env }))'),
-      opts,
-    );
+    // Print variable names only: a developer PATH can exceed maxOutputBytes and truncate the output.
+    const script =
+      'console.log(JSON.stringify({ cwd: process.cwd(), names: Object.keys(process.env), onlyThis: process.env.ONLY_THIS }))';
+    const result = await runCommand(nodeScript(script), opts);
     expect(result).toMatchObject({
       exitCode: 0,
       signal: null,
@@ -73,13 +77,13 @@ describe('runCommand', () => {
       error: null,
       stderr: '',
     });
-    const parsed = JSON.parse(result.stdout) as { cwd: string; env: Record<string, string> };
+    const parsed = JSON.parse(result.stdout) as { cwd: string; names: string[]; onlyThis: string };
     expect(parsed.cwd).toBe(realpathSync(opts.cwd));
     // Only the explicit environment reaches the child; nothing is inherited from the parent.
-    expect(Object.keys(parsed.env).sort()).toEqual(['ONLY_THIS', 'PATH']);
-    expect(result.command).toEqual(
-      nodeScript('console.log(JSON.stringify({ cwd: process.cwd(), env: process.env }))'),
-    );
+    const names = parsed.names.filter((name) => !OS_INJECTED_ENV.includes(name));
+    expect(names.sort()).toEqual(['ONLY_THIS', 'PATH']);
+    expect(parsed.onlyThis).toBe('1');
+    expect(result.command).toEqual(nodeScript(script));
   });
 
   it('rejects an empty command without spawning anything', async () => {
