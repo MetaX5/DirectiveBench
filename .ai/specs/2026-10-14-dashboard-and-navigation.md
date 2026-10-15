@@ -3,7 +3,7 @@ id: SPEC-116
 title: Dashboard and Navigation
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-101, SPEC-104, SPEC-106, SPEC-107, SPEC-109, SPEC-113, SPEC-114, SPEC-115, SPEC-203, SPEC-206, SPEC-008]
 ---
@@ -201,6 +201,6 @@ flowchart LR
 
 ## 20. Implementation status
 
-- **Implemented in `apps/web` (verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 6/6 passing against the built CLI) for the dashboard, artifact list/detail, run detail, benchmark Run → completed, a planned page and the theme toggle; by `pnpm verify:pack` for `/results`; other pages are present but not covered by a test):** sidebar with all sections (`nav.tsx`, planned entries marked); Dashboard with real counts and recent runs; Artifacts, Categories (read-only), Benchmarks (detail with Run button → enqueue server action), Executions (cancel, 2 s auto-refresh while active), Results and run detail pages; Agent Connections with real CLI detection and the Mock Agent; read-only Settings (data dir and effective config); "Planned — not implemented" pages for Repositories, Benchmark Builder and Model Providers linking to specs; dark/light theme (`next-themes`); no decorative buttons.
+- **Implemented in `apps/web` (verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 7/7 passing against the built CLI on 2026-10-15) for the dashboard, artifact list/detail, run detail, benchmark Run → completed, the server-side approval re-check on Run, a planned page and the theme toggle; by `pnpm verify:pack` for `/results`; other pages are present but not covered by a test):** sidebar with all sections (`nav.tsx`, planned entries marked); Dashboard with real counts and recent runs; Artifacts, Categories (read-only), Benchmarks (detail with Run button → enqueue server action; Run is disabled and the execution blockers are listed when the suite version cannot run, and enqueue errors are shown with `role="alert"`), Executions (cancel, 2 s auto-refresh while active), Results and run detail pages; Agent Connections with real CLI detection and the Mock Agent; read-only Settings (data dir and effective config, header badge "Planned — not implemented: settings editor", spec path named); "Planned — not implemented" pages for Repositories, Benchmark Builder and Model Providers linking to specs; dark/light theme (`next-themes`); no decorative buttons.
 - **Partially implemented:** dashboard widgets — successful/failed evaluations and recent regressions depend on stored verdicts; version regressions are not implemented; last sync always "never" because sync is not implemented. Compact density and accessibility baseline not yet checked by an automated scan.
 - **Not implemented:** collapsible sidebar persistence, network-exposure banner in the UI (the warning is printed by the CLI only), command palette, customizable widgets, axe accessibility scan.

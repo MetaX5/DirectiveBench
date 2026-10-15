@@ -3,7 +3,7 @@ id: SPEC-115
 title: Settings and Configuration
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-009, SPEC-010, SPEC-007, SPEC-114, SPEC-110, SPEC-116, SPEC-011]
 ---
@@ -218,5 +218,6 @@ CLI ([SPEC-009](2026-10-14-cli-architecture.md)): global `--data-dir`; `serve [-
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/core/test/config.test.ts` and `apps/cli/test/cli.test.ts` on 2026-10-14):** `resolveDataDir` (flag > env > OS default, incl. XDG fallback; macOS path unit-tested, Windows `LOCALAPPDATA` path untested), `dataDirLayout`, strict Zod `configSchema` v1 with the keys in FR-115-14 (unknown/invalid keys rejected), `loadConfig` (missing → defaults, invalid → `ConfigError` → CLI exit 2), atomic `saveConfig` with mode `0600`, `isLoopbackHost`; CLI precedence flag > env > config > default for host/port, invalid port → exit 2, non-loopback host without `--allow-network-access` → exit 2; `runner.concurrency`, `runner.keepWorkspaces` and `server.openBrowser` honoured by `serve` (`keepWorkspaces` also by `demo`); data dir passed to the web child via `DIRECTIVEBENCH_DATA_DIR` (`pnpm verify:pack`).
-- **Partially implemented:** read-only Settings page (data dir paths and effective config; FR-115-50 without the "Planned — not implemented" wording on the whole page) — not covered by a verified automated test; `doctor` reports config validity.
+- **Implemented (FR-115-50, verified in code on 2026-10-15; no automated UI test):** the Settings page header shows the badge "Planned — not implemented: settings editor", the page shows the resolved data directory paths and the effective read-only configuration with no editable controls, and names this spec's path (`.ai/specs/2026-10-14-settings-and-configuration.md`, shown as text because the repository is not served by the app).
+- **Implemented (verified by `apps/cli/test/cli.test.ts` on 2026-10-15):** `doctor` reports config validity and data-directory writability, with a remediation hint for every non-`ok` check ([SPEC-009](2026-10-14-cli-architecture.md) §4).
 - **Not implemented:** editable Settings UI, secret references (`SecretRef` shape defined in FR-115-30 and §8, used by SPEC-104 and the integration specs), backup/restore, import/export, config migrations beyond v1, `backups/` usage.

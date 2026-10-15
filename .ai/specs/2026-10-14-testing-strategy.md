@@ -3,7 +3,7 @@ id: SPEC-012
 title: Testing Strategy
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, SPEC-111, SPEC-112, ADR-0005, ADR-0006]
 ---
@@ -86,7 +86,7 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 Workflow `.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable).
 
-1. Checkout; set up Node; `corepack enable`; `pnpm install --frozen-lockfile`.
+1. Checkout; set up Node; `corepack enable`; `pnpm install --frozen-lockfile`; `pnpm audit --prod`.
 2. `pnpm format:check` and `pnpm lint`.
 3. `pnpm typecheck`.
 4. `pnpm test` (unit + integration via Turborepo).
@@ -98,7 +98,8 @@ No secrets are configured for the default workflow.
 
 ## 9. Implementation status
 
-- **Implemented (verified on 2026-10-14, Node 24.21, Linux — all passing):** Vitest suites per package — `core` 36 tests (path classification, parsers, frontmatter, config schema and atomic save, data-dir resolution, hashing, redaction), `database` 7 (migrations idempotent, immutable artifact versions, category seeding, atomic FIFO job acquisition, cancellation, stale recovery), `agent-adapters` 8 (mock playbook baseline/candidate, installation, path escapes, missing-executable detection), `benchmark-engine` 21 (definition schema incl. all repository examples, fixture snapshotting and symlink rejection, `runCommand`, mock RED/GREEN end-to-end with real `node --test` verification, scoring and every verdict branch), `runner` 4 (import → enqueue → run → persist, unapproved suites, cancellation and orphan recovery, shutdown → interrupted), `cli` 5 (option precedence, port/host usage errors, Node version check, asset resolution); `pnpm verify:pack` (§5, all steps passed).
-- **Implemented (verified by `pnpm test:e2e`, 6/6 passing against the built CLI):** Playwright smoke test `apps/web/e2e/smoke.spec.ts` — dashboard counts and mock label, artifact list/detail, run detail RED vs GREEN (50% → 100%, +50 pts, `improved`, 6 agent runs), "Run" on the benchmark page enqueues a job that the runner completes, planned page label, theme toggle; `apps/web/playwright.config.ts` seeds a temp data dir with `demo` and starts the built CLI.
-- **Partially implemented:** the smoke test does not check the foreign-`Host` rejection (covered by `verify:pack`) or job cancellation from the UI. CI workflow added (`.github/workflows/ci.yml`: Node 24 on `ubuntu-latest`, `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:pack`, Playwright Chromium, `test:e2e`, report upload on failure) — it has not run yet. Unit tests for `proxy.ts`, Server Actions, runner concurrency > 1 and two-runner acquisition are missing; `cli` integration tests of `init`/`demo` are covered only by `verify:pack`.
-- **Not implemented:** adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS CI matrix.
+- **Implemented (verified on 2026-10-15, Node 24.21, Linux — 95 tests, all passing):** Vitest suites per package — `core` 36 tests (path classification, parsers, frontmatter, config schema and atomic save, data-dir resolution, hashing, redaction), `database` 7 (migrations idempotent, immutable artifact versions, category seeding, atomic FIFO job acquisition, cancellation, stale recovery), `agent-adapters` 8 (mock playbook baseline/candidate, installation, path escapes, missing-executable detection), `benchmark-engine` 30 (definition schema incl. all repository examples, fixture snapshotting and symlink rejection, `runCommand` incl. `SIGTERM` → `SIGKILL` grace, mock RED/GREEN end-to-end with real `node --test` verification, execution blockers, equivalence mismatches, tampered fixture store, capability checks, scoring with every verdict branch, epsilon thresholds, FR-111-27, verdict reasons and "not conclusive"), `runner` 6 (import → enqueue → run → persist, unapproved suites, cancellation and orphan recovery, shutdown → interrupted, runner id format, capped shutdown), `cli` 7 (option precedence, port/host usage errors, Node version check, asset resolution, `doctor` data-dir hints and writability; `apps/cli/vitest.config.ts` limits collection to `test/**/*.test.ts` because `dist/examples` contains fixture `*.test.js` files); `pnpm build && pnpm verify:pack` (§5, all steps passed).
+- **Implemented (verified by `pnpm test:e2e`, 7/7 passing against the built CLI):** Playwright smoke test `apps/web/e2e/smoke.spec.ts` — dashboard counts and mock label, artifact list/detail, run detail RED vs GREEN (50% → 100%, +50 pts, `improved`, verdict reasons, 6 agent runs), "Run" on the benchmark page enqueues a job that the runner completes, server-side approval re-check before enqueueing (FR-114-02), planned page label, theme toggle; `apps/web/playwright.config.ts` seeds a temp data dir with `demo` and starts the built CLI.
+- **Implemented — CI (§8):** `.github/workflows/ci.yml` (Node 24 on `ubuntu-latest`: install, `pnpm audit --prod`, `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:pack`, Playwright Chromium, `test:e2e`, report upload on failure) ran green on PR #1 on 2026-10-14; the `pnpm audit --prod` step was added on 2026-10-15 (clean locally) and has not run in CI yet.
+- **Partially implemented:** the smoke test does not check the foreign-`Host` rejection (covered by `verify:pack`), job cancellation from the UI, or the Settings page. Unit tests for `proxy.ts`, Server Actions, runner concurrency > 1 and two-runner acquisition are missing; `cli` integration tests of `init`/`demo` are covered only by `verify:pack`.
+- **Not implemented:** adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS / Node 22 CI matrix.

@@ -3,7 +3,7 @@ id: SPEC-113
 title: Results and Reporting
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-111, SPEC-112, SPEC-110, SPEC-114, SPEC-101, SPEC-103, SPEC-116, SPEC-007, SPEC-006]
 ---
@@ -71,7 +71,7 @@ Users decide whether to keep, change or roll out an instruction based on what th
 | FR-113-12 | A per-assertion table SHALL show for each case and assertion: id, type, weight, required, deterministic, and per variant the pass count over valid runs (e.g. `0/3`, `3/3`) with links to individual results. |
 | FR-113-13 | Per agent run, the view SHALL show execution status, score, passed, changed files, assertion results with messages, and the trace (stage timeline, commands with argv, exit code, duration, truncated/redacted stdout/stderr). |
 | FR-113-14 | Environment metadata (platform, arch, node version, adapter version, environment kind, sandboxed) SHALL be shown. |
-| FR-113-15 | Warnings (uncontrolled differences, `Σw = 0`, cleanup failures, overlay collisions, single nondeterministic run "not conclusive") SHALL be listed prominently. |
+| FR-113-15 | Warnings (uncontrolled differences, cleanup failures, overlay collisions, single nondeterministic run "not conclusive") SHALL be listed prominently. |
 | FR-113-16 | When the adapter is the Mock Agent, the view SHALL show a persistent banner "Mock agent — not an AI evaluation" with a one-sentence explanation and link to [SPEC-112](2026-10-14-red-green-evaluation.md). |
 | FR-113-17 | Tokens, cost and model usage SHALL only be shown when reported by the adapter; otherwise "not reported" (never zero, never estimated). |
 
@@ -222,6 +222,6 @@ Repository functions (database package): `getRunDetail(id)`, `listRunsForArtifac
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/runner/test/runner.test.ts` and `pnpm verify:pack` on 2026-10-14):** verdict stored on `benchmark_runs.verdict` and display status in `summary.displayStatus` (derived by `displayStatus()` in `@directivebench/benchmark-engine`); the comparability key stored on `benchmark_runs.comparability_key`; `/results` lists the demo run and the run detail page (`/results/[id]`) shows its verdict (`verify:pack`).
-- **Verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 6/6 passing against the built CLI):** run detail shows baseline 50% / candidate 100% / +50 pts / verdict `improved` and 6 agent runs; dashboard and artifact list show the mock label and display status `passed`.
-- **Partially implemented (present in `apps/web`, only partly covered by the tests above):** run detail with RED vs GREEN aggregates, per-agent-run assertion results, raw JSON trace, environment metadata, short comparability key, confidence with reason, warnings panel, "Mock agent — not an AI evaluation" and "Not sandboxed" badges; Executions page (jobs list with cancel); artifact detail with the latest RED/GREEN comparison and an evaluation history across versions — the history is a flat list (not grouped by comparability key) and the latest result is not broken down per assigned suite; dashboard recent runs. Tokens/cost "not reported" display is not implemented.
+- **Verified by `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 7/7 passing against the built CLI on 2026-10-15):** run detail shows baseline 50% / candidate 100% / +50 pts / verdict `improved`, the verdict reasons list (`data-testid="verdict-reasons"`, "delta +0.5 is at or above 0.05 (minDelta)", FR-113-10) and 6 agent runs; dashboard and artifact list show the mock label and display status `passed`.
+- **Partially implemented (present in `apps/web`, only partly covered by the tests above):** run detail with RED vs GREEN aggregates, per-agent-run assertion results, raw JSON trace, environment metadata, short comparability key, confidence with reason, a "Not conclusive — single nondeterministic repetition" badge when `summary.conclusive` is false (FR-113-15; not covered by a UI test because the mock agent is deterministic), warnings panel, "Mock agent — not an AI evaluation" and "Not sandboxed" badges; Executions page (jobs list with cancel); artifact detail with the latest RED/GREEN comparison and an evaluation history across versions — the history is a flat list (not grouped by comparability key) and the latest result is not broken down per assigned suite; dashboard recent runs. Tokens/cost "not reported" display is not implemented.
 - **Not implemented:** report export (JSON/Markdown), version-regression highlighting, worst-status aggregation across assigned suites (FR-113-23), trend charts, results filtering beyond basic lists.

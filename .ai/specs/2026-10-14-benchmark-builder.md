@@ -3,7 +3,7 @@ id: SPEC-109
 title: Benchmark Builder
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-106, SPEC-005, SPEC-006, SPEC-007, SPEC-008, SPEC-116]
 ---
@@ -62,7 +62,7 @@ Writing benchmark definitions by hand is error-prone: case ids must be unique, a
 | FR-109-08 | Assertions SHALL support all implemented types (`command`, `file-exists`, `file-contains`, `changed-files`) with `id`, `description`, `weight` (≥ 0, default 1), `required` (default false). Planned types SHALL appear disabled with a "Planned" label, never as working options. |
 | FR-109-09 | Command fields (`setup`, `command` assertions) SHALL be edited as argv arrays, never as a shell string. |
 | FR-109-10 | Scoring settings SHALL edit `passThreshold` (0..1, default 1), `minDelta` (default 0.05), `stabilityThreshold` (default 0.1). |
-| FR-109-11 | A preview panel SHALL show per-case normalized weights (w / Σw), required assertions, the max achievable score and a warning when Σw = 0 or when `passThreshold` can never be reached without required assertions. |
+| FR-109-11 | A preview panel SHALL show per-case normalized weights (w / Σw), required assertions, the max achievable score and a validation error when Σw = 0 (the definition schema rejects it, [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-03) or a warning when `passThreshold` can never be reached without required assertions. |
 | FR-109-12 | Validation SHALL use the exact Zod schema exported by `@directivebench/benchmark-engine`; errors SHALL map to the field path in both visual and raw views. |
 | FR-109-13 | The raw view SHALL support YAML and JSON. Switching views SHALL be lossless for every schema-valid document (see round-trip guarantees, §8). |
 | FR-109-14 | Saving SHALL create a new immutable suite version (`benchmark_suite_versions`), with sequential version number and content hash; saving identical content SHALL NOT create a new version. |

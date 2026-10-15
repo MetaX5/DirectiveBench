@@ -3,7 +3,7 @@ id: SPEC-112
 title: RED/GREEN Evaluation
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-107, SPEC-110, SPEC-111, SPEC-113, SPEC-103, SPEC-203, SPEC-204, SPEC-205]
 ---
@@ -49,7 +49,7 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 | FR-112-04 | Both variants SHALL use the same fixture snapshot hash (same commit for repository-sourced fixtures), verification overlay hash, prompt, adapter id and version, model config, tool permissions, environment kind and limits (`timeoutSeconds`, `maxOutputBytes`). |
 | FR-112-05 | Each agent run SHALL use an independent fresh workspace ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-01); no files, processes, caches or HOME directories are shared between agent runs. |
 | FR-112-06 | Adapter-level state (sessions, conversation ids, caches the adapter controls) SHALL be reset per agent run; adapters SHALL declare which state they cannot reset. |
-| FR-112-07 | Environment metadata SHALL be recorded per agent run: adapter id/version, node version, platform/arch, environment kind, `sandboxed` flag, model config, start/end time. |
+| FR-112-07 | Environment metadata (adapter id/version, node version, platform/arch, environment kind, `sandboxed` flag, model config, limits) SHALL be recorded once per benchmark run; it is identical for all agent runs of that run by construction (one runner process, one adapter detection, one suite version — [SPEC-005](2026-10-14-domain-model.md)). Each agent run SHALL record the fixture snapshot hash it started from, its duration and its creation time. |
 | FR-112-08 | After execution, the engine SHALL verify that recorded metadata of baseline and candidate match on all equivalence fields; a mismatch SHALL make the comparison `not-comparable`. The equivalence fields of FR-112-04 are also what the benchmark run's comparability key hashes (definition `cases`, `scoring`, `execution`, fixture hashes, adapter id and version — [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43). |
 | FR-112-09 | Known uncontrolled differences SHALL be recorded as warnings on the benchmark run, at minimum: ambient user-level skills/instructions that cannot be excluded for real agents; provider-side model updates behind an alias; non-pinned model versions; network access on `local-process`. |
 | FR-112-10 | Execution order SHALL interleave variants: for repetition r, run baseline and candidate back to back, alternating which goes first (r odd → baseline first; r even → candidate first). Cases are processed in definition order. |
@@ -66,6 +66,12 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 - Transparency: every warning and equivalence field is visible in the run detail and exports.
 
 ## 8. Domain entities and contracts
+
+The interfaces below are the conceptual model. The implemented contracts are `RunBenchmarkInput`,
+`BenchmarkOutcome`, `AgentRunRecord` and `EnvironmentMetadata` in
+`packages/benchmark-engine/src/orchestrator.ts`, plus `CaseSummary` / `ScoringSummary`
+([SPEC-111](2026-10-14-benchmark-scoring.md) §8); there is no separate `BenchmarkRunPlan` object —
+the interleaved order of FR-112-10 is produced inside `runBenchmark`.
 
 ```ts
 interface BenchmarkRunPlan {
@@ -113,7 +119,7 @@ sequenceDiagram
   participant A as AgentAdapter
   U->>DB: enqueue job (suiteVersion, artifactVersion)
   R->>DB: acquire job
-  R->>E: plan(case × repetition × variant, interleaved)
+  R->>E: runBenchmark(input) — case × repetition × variant, interleaved
   loop each case, repetition r
     alt r odd
       E->>A: RED baseline (fresh workspace, no artifact)
@@ -136,11 +142,13 @@ sequenceDiagram
 
 ## 10. API and interface design
 
-Engine:
+Engine (`@directivebench/benchmark-engine`, implemented):
 
-- `planRun(definition, artifactVersion, repetitions): BenchmarkRunPlan`
-- `runBenchmark(plan, deps: { adapter, fixtures, signal, emit }): Promise<BenchmarkRunResult>`
-- `checkEquivalence(runs: AgentRunResult[]): { comparable: boolean; mismatches: string[] }`
+- `assertRunnable(input)` — throws `BenchmarkConfigurationError` before any workspace is created when the suite cannot run (environment, execution approval, agent id, adapter capabilities `execution`, `headless`, `artifactInstallation`, artifact type, missing fixture snapshots).
+- `executionBlockers(definition, executionApproved): string[]` — the adapter-independent subset of those checks (environment, approval), shared by the web app before enqueueing and by `assertRunnable`.
+- `runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkOutcome>` — `input` carries the definition, per-case fixture hashes, fixture store, artifact bundle, adapter, work root, `executionApproved`, an `AbortSignal` and `onAgentRun(record)` (called after each agent run so the runner persists incrementally). The outcome holds the `ScoringSummary`, `comparabilityKey`, `environment`, `warnings` and all `AgentRunRecord`s.
+- `equivalenceIssues(fixtures, agentRuns, adapterVersionBefore, adapterVersionAfter): string[]` — the post-run equivalence check of FR-112-08; an empty list means comparable. A non-empty list is passed to `summarize({ comparable: false, comparabilityIssues })`, which yields verdict `not-comparable` with the issues as its reasons.
+- `comparabilityKey(definition, fixtures, adapterId, adapterVersion)` and the scoring functions of [SPEC-111](2026-10-14-benchmark-scoring.md) §10.
 
 Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `model`, `environment`, `comparability_key`, `verdict`, `summary`, `warnings`) and child `agent_runs` with `case_id`, `variant`, `repetition`, `fixture_version_id` columns ([SPEC-006](2026-10-14-database-schema.md)).
 
@@ -209,9 +217,10 @@ Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `mod
 
 ## 20. Implementation status
 
-- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` "runBenchmark (mock agent, RED/GREEN)" and `packages/runner/test/runner.test.ts`):** RED/GREEN orchestration in `runBenchmark` (`packages/benchmark-engine/src/orchestrator.ts`) with the Mock Agent: one baseline and one candidate per case × repetition; alternating order (baseline first on odd repetitions, candidate first on even); artifact installed for the candidate only; fresh workspace and `HOME` per agent run; environment metadata and comparability key recorded per benchmark run; comparison via SPEC-111 (baseline 0.5 → candidate 1.0, verdict `improved`); warnings for the mock agent ("not an AI evaluation"), the non-sandboxed `local-process` environment and fewer than 3 repetitions with a nondeterministic adapter.
+- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` "runBenchmark (mock agent, RED/GREEN)" and `packages/runner/test/runner.test.ts`):** RED/GREEN orchestration in `runBenchmark` (`packages/benchmark-engine/src/orchestrator.ts`) with the Mock Agent: one baseline and one candidate per case × repetition; alternating order (baseline first on odd repetitions, candidate first on even); artifact installed for the candidate only; fresh workspace and `HOME` per agent run; environment metadata recorded once per benchmark run (FR-112-07, `benchmark_runs.summary.environment`) and the fixture hash per agent run (`agent_runs.fixture_version_id`); comparability key per benchmark run; comparison via SPEC-111 (baseline 0.5 → candidate 1.0, verdict `improved`); warnings for the mock agent ("not an AI evaluation"), the non-sandboxed `local-process` environment and fewer than 3 repetitions with a nondeterministic adapter.
+- **FR-112-08 (equivalence check):** `equivalenceIssues` returns a mismatch list (agent run fixture hash vs. the recorded snapshot, adapter version before vs. after the run); mismatches become warnings and make the verdict `not-comparable` with the mismatches as reasons (test "detects fixture and agent-version mismatches (FR-112-08)"). The copied workspace itself is verified against the snapshot hash before the agent starts ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-02).
+- **Capability checks:** `assertRunnable` requires `headless` and `artifactInstallation` in addition to `execution` (test "requires headless execution and artifact installation capabilities").
+- **FR-112-14:** a single repetition of a nondeterministic run is flagged `conclusive = false`, warned about and labelled "Not conclusive" on the run detail page ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-42).
 - **Partially implemented:**
-  - FR-112-07: environment metadata is recorded once per benchmark run (`benchmark_runs.summary.environment`; the `environment` column holds only `{ kind }`), not per agent run.
-  - FR-112-08: the equivalence check only compares the adapter version detected before and after the run; there is no `checkEquivalence` with a mismatch list. The API is `runBenchmark(input)`; `planRun`/`checkEquivalence` (§10) do not exist.
   - FR-112-09: only the warnings above exist; ambient-configuration and unpinned-model warnings for real agents are not implemented.
 - **Not implemented:** real agent RED/GREEN runs, tokens/cost metrics (the Mock Agent reports none), detection of an artifact already present in the fixture, concurrent pair scheduling, A/B mode.

@@ -32,11 +32,14 @@ fragile.
   the `node:sqlite` APIs used); Node 24 LTS is the verified runtime. Every command checks the Node
   version (exit code 3), and `directivebench doctor` also checks `node:sqlite`.
 - **CLI bundle:** `apps/cli` is bundled with **tsup** into `dist/cli.js`, inlining the internal
-  just-in-time packages ([ADR-0003](0003-monorepo-architecture.md)).
+  just-in-time packages ([ADR-0003](0003-monorepo-architecture.md)) and the pure-JS libraries
+  (`commander`, `drizzle-orm`, `yaml`, `zod`). The bundle starts with a banner that defines
+  `require` via `createRequire(import.meta.url)`, because bundled CommonJS dependencies (`yaml`)
+  call `require()` inside the ESM output.
 - **Web UI:** the package ships the **Next.js production build output** (`.next`, copied to
   `dist/web`) together with drizzle migrations and bundled examples. At runtime the CLI spawns
   `next start` as a child process on `127.0.0.1:4280`, passing `DIRECTIVEBENCH_DATA_DIR`.
-- `next`, `react` and `react-dom` are **regular runtime `dependencies`** of the `directivebench`
+- `next`, `react` and `react-dom` are the **only runtime `dependencies`** of the `directivebench`
   package, resolved by npm on install, instead of being vendored through standalone output.
 - No native modules in the dependency tree (SQLite via `node:sqlite`, see
   [ADR-0002](0002-sqlite-with-node-sqlite.md)), so installs need no compiler or prebuilt binaries.

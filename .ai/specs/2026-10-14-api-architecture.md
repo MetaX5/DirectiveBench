@@ -3,7 +3,7 @@ id: SPEC-008
 title: API Architecture
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-007, SPEC-009, SPEC-011, SPEC-110, SPEC-114, ADR-0001, ADR-0007, ADR-0008, ADR-0009]
 ---
@@ -46,7 +46,7 @@ flowchart LR
 
 | Action | Effect | Notes |
 | --- | --- | --- |
-| Enqueue benchmark run | Inserts a `jobs` row (`pending`) for a benchmark suite version and the latest version of the selected artifact, then redirects to `/executions` | Rejected if the suite or artifact version does not exist. Unapproved suites and unsupported environments (e.g. `docker`) are currently rejected by the runner (job `failed`), not at enqueue time — target: reject at enqueue, see [SPEC-110](2026-10-14-benchmark-execution.md). |
+| Enqueue benchmark run | Inserts a `jobs` row (`pending`) for a benchmark suite version and the latest version of the selected artifact, then redirects to `/executions` | Rejected if the suite or artifact version does not exist. Before enqueueing, the stored definition is validated and `executionBlockers` (unapproved suites that run commands, unsupported environments such as `docker`) is checked; on blockers the action redirects to `/benchmarks/<suiteId>?error=…` and nothing is enqueued ([SPEC-114](2026-10-14-runner-management.md) FR-114-02). The runner re-checks when it executes the job. |
 | Cancel job | Sets `cancel_requested_at` on a `pending` or `running` job | Pending jobs become `cancelled` directly; running jobs are aborted by the runner ([SPEC-114](2026-10-14-runner-management.md)). |
 
 Further actions (category CRUD, repository registration, settings) are specified in their feature specs and are not part of bootstrap.
@@ -131,5 +131,6 @@ sequenceDiagram
 ## 8. Implementation status
 
 - **Implemented (verified by `pnpm verify:pack` on 2026-10-14):** `GET /api/health` returning `{"status":"ok","database":"ready"}`; Host allowlist in `proxy.ts` (foreign `Host` → 403); RSC pages reading through database repositories (`/results` and `/results/[id]` render the demo run).
-- **Partially implemented:** Server Actions for enqueue benchmark run and cancel job exist (`apps/web/lib/actions.ts`, Zod-validated) but return no typed result; enqueue is verified by `pnpm test:e2e` (Run → `/executions` → `completed`), cancel is not covered by a test; approval/environment checks happen in the runner instead of at enqueue time; no error envelope is used yet (there is no `/api` endpoint that can fail with 4xx).
+- **Implemented (verified by `pnpm test:e2e` on 2026-10-15):** approval/environment checks at enqueue time — the enqueue action validates the stored definition and calls `executionBlockers` before inserting the job, and reports blockers on the benchmark page (`data-testid="enqueue-error"`; Playwright test "enqueueing re-checks execution approval on the server (FR-114-02)").
+- **Partially implemented:** Server Actions for enqueue benchmark run and cancel job exist (`apps/web/lib/actions.ts`, Zod-validated) but return no typed result (errors are reported via redirect query parameters); enqueue is verified by `pnpm test:e2e` (Run → `/executions` → `completed`), cancel is not covered by a test; no error envelope is used yet (there is no `/api` endpoint that can fail with 4xx).
 - **Not implemented:** `/api/v1/*` JSON API, error envelope, pagination, idempotency keys, authentication/authorization, remote runner protocol.
