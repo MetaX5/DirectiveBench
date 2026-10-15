@@ -165,6 +165,33 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Pr
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * The agent's abort signal: aborts when `cancel` aborts or after `timeoutMs`. `cancel` must not
+ * be aborted yet. Deliberately a plain controller signal rather than
+ * `AbortSignal.any([cancel, AbortSignal.timeout(timeoutMs)])`: Node follows a composite signal's
+ * sources only through weak references until someone listens to it, so once the fired timeout
+ * signal is garbage-collected, an adapter that polls `signal.aborted` would read `false` forever.
+ */
+function agentAbortSignal(
+  cancel: AbortSignal,
+  timeoutMs: number,
+): { signal: AbortSignal; dispose: () => void } {
+  const controller = new AbortController();
+  const onCancel = () => controller.abort(cancel.reason);
+  cancel.addEventListener('abort', onCancel, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new DOMException('The agent run timed out', 'TimeoutError')),
+    timeoutMs,
+  );
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      cancel.removeEventListener('abort', onCancel);
+    },
+  };
+}
+
 async function executeAgentRun(
   input: RunBenchmarkInput,
   benchmarkCase: BenchmarkCase,
@@ -249,28 +276,35 @@ async function executeAgentRun(
 
     // Snapshot after installation so only the agent's own changes are tracked.
     const before = await buildManifest(workspaceDir);
+    // Never start the agent after cancellation; also a precondition of agentAbortSignal.
+    if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     stage('agent');
-    const agentSignal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
-    const agentResult: AgentRunResult = await withTimeout(
-      adapter.run({
-        workspaceDir,
-        prompt: benchmarkCase.prompt,
-        timeoutMs,
-        signal: agentSignal,
-        model: definition.execution.model,
-        options: benchmarkCase.agentOptions[adapter.id],
-      }),
-      // Grace period for adapters that ignore the abort signal.
-      timeoutMs + 5000,
-      () => ({
-        status: 'timeout',
-        durationMs: timeoutMs,
-        summary: 'Timed out',
-        trace: [],
-        usage: null,
-        error: 'Agent did not stop after timeout',
-      }),
-    );
+    const agentAbort = agentAbortSignal(input.signal, timeoutMs);
+    let agentResult: AgentRunResult;
+    try {
+      agentResult = await withTimeout(
+        adapter.run({
+          workspaceDir,
+          prompt: benchmarkCase.prompt,
+          timeoutMs,
+          signal: agentAbort.signal,
+          model: definition.execution.model,
+          options: benchmarkCase.agentOptions[adapter.id],
+        }),
+        // Grace period for adapters that ignore the abort signal.
+        timeoutMs + 5000,
+        () => ({
+          status: 'timeout',
+          durationMs: timeoutMs,
+          summary: 'Timed out',
+          trace: [],
+          usage: null,
+          error: 'Agent did not stop after timeout',
+        }),
+      );
+    } finally {
+      agentAbort.dispose();
+    }
     trace.push(...agentResult.trace);
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     if (agentResult.status !== 'completed') {

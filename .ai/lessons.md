@@ -18,6 +18,7 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-15] **Don't hand out `AbortSignal.any()` built from `AbortSignal.timeout()`**: once the fired timeout signal is garbage-collected, `.aborted` reads `false` forever if nobody listens for `abort`. Use a controller, and use `collectGarbage()` in tests. → [lessons/2026-10-15-abortsignal-any-loses-gc-collected-timeout.md](lessons/2026-10-15-abortsignal-any-loses-gc-collected-timeout.md)
 - [2026-10-15] **Keep 100% branch coverage deterministic** — comparators over `readdir` order and ordering by random IDs make coverage and tests machine-dependent. → [lessons/2026-10-15-deterministic-full-coverage.md](lessons/2026-10-15-deterministic-full-coverage.md)
 - [2026-10-15] **Reset lifecycle flags before the first `await`** — `LocalRunner.start()` undid a concurrent `stop()`. → [lessons/2026-10-15-reset-lifecycle-flags-before-await.md](lessons/2026-10-15-reset-lifecycle-flags-before-await.md)
 - [2026-10-15] **Use `regex`, not `group` negations, to allow subpaths in `no-restricted-imports`** — gitignore semantics cannot re-include a subpath of an excluded package, and later rule entries replace earlier ones. → [lessons/2026-10-15-eslint-restricted-import-negation.md](lessons/2026-10-15-eslint-restricted-import-negation.md)
