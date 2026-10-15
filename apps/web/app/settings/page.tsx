@@ -27,7 +27,8 @@ export default function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Read-only view. Editing settings in the UI is planned; edit config.json or use CLI flags."
+        description="Read-only view of the resolved data directory and effective configuration. Edit config.json or use CLI flags."
+        actions={<Badge variant="muted">Planned — not implemented: settings editor</Badge>}
       />
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -58,6 +59,10 @@ export default function SettingsPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Planned</CardTitle>
+            <CardDescription>
+              Specification:{' '}
+              <span className="font-mono">.ai/specs/2026-10-14-settings-and-configuration.md</span>
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2 text-sm">
             {[

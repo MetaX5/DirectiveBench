@@ -1,3 +1,4 @@
+import { executionBlockers } from '@directivebench/benchmark-engine/definition';
 import { validateDefinition } from '@directivebench/benchmark-engine/load';
 import { getSuiteDetail, listBenchmarkRuns } from '@directivebench/database';
 import { Play } from 'lucide-react';
@@ -34,7 +35,13 @@ import { formatDate, formatDelta } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmark' };
 
-export default async function BenchmarkPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function BenchmarkPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
   const { id } = await params;
@@ -45,6 +52,8 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ id: 
   const runs = await listBenchmarkRuns(handle.db, { suiteId: id, limit: 20 });
   const definition = parsed.success ? parsed.definition : null;
   const approved = Boolean(version.executionApprovedAt);
+  const blockers = definition ? executionBlockers(definition, approved) : [];
+  const { error } = await searchParams;
 
   return (
     <>
@@ -124,12 +133,17 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ id: 
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {!approved ? (
-                <p className="text-xs text-warning">
-                  This suite version runs commands but is not approved for execution. Approval in
-                  the UI is planned.
+              {error ? (
+                <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
+                  {error}
                 </p>
               ) : null}
+              {blockers.map((blocker) => (
+                <p key={blocker} className="text-xs text-warning">
+                  {blocker}
+                  {blocker.includes('approved') ? ' Approval in the UI is planned.' : ''}
+                </p>
+              ))}
               {detail.assignedArtifacts.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   No artifacts are assigned to this suite.
@@ -146,7 +160,7 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ id: 
                   <Link href={`/artifacts/${artifact.id}`} className="truncate hover:underline">
                     {artifact.name}
                   </Link>
-                  <Button size="sm" type="submit" disabled={!approved || !definition}>
+                  <Button size="sm" type="submit" disabled={!definition || blockers.length > 0}>
                     <Play aria-hidden /> Run
                   </Button>
                 </form>
