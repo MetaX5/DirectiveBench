@@ -4,6 +4,9 @@ export type Variant = 'baseline' | 'candidate';
 export type ExecutionStatus =
   'completed' | 'agent-error' | 'timeout' | 'cancelled' | 'infrastructure-error';
 
+/** Tolerance for threshold comparisons; scores are stored at full precision (FR-111-06). */
+export const SCORE_EPSILON = 1e-9;
+
 export interface ScoredAssertion {
   passed: boolean;
   score: number;
@@ -24,9 +27,8 @@ export function scoreRun(
     totalWeight === 0
       ? 0
       : assertions.reduce((sum, a) => sum + a.weight * a.score, 0) / totalWeight;
-  const rounded = Math.round(score * 1e6) / 1e6;
   const requiredOk = assertions.every((a) => !a.required || a.passed);
-  return { score: rounded, passed: requiredOk && rounded >= passThreshold };
+  return { score, passed: requiredOk && score >= passThreshold - SCORE_EPSILON };
 }
 
 export interface RunOutcome {
@@ -71,15 +73,19 @@ export interface ScoringSummary {
   delta: number | null;
   passRateDelta: number | null;
   verdict: Verdict;
+  /** Human-readable explanation of the verdict. */
+  reasons: string[];
   candidateOutcome: 'passed' | 'failed' | null;
   confidence: { level: ConfidenceLevel; reason: string };
   deterministicAgent: boolean;
+  /** True when the adapter or any assertion is nondeterministic (FR-111-42). */
+  nondeterministic: boolean;
+  /** False for a single repetition of a nondeterministic run ("not conclusive"). */
+  conclusive: boolean;
   cases: CaseSummary[];
   scoring: BenchmarkDefinition['scoring'];
   repetitions: number;
 }
-
-const round = (value: number) => Math.round(value * 1e6) / 1e6;
 
 function mean(values: readonly number[]): number | null {
   return values.length === 0 ? null : values.reduce((s, v) => s + v, 0) / values.length;
@@ -95,26 +101,28 @@ export function aggregate(runs: readonly RunOutcome[]): Aggregate {
   return {
     totalRuns: runs.length,
     validRuns: valid.length,
-    meanScore: avg === null ? null : round(avg),
-    stdDev: variance === null ? null : round(Math.sqrt(variance)),
+    meanScore: avg,
+    stdDev: variance === null ? null : Math.sqrt(variance),
     minScore: scores.length ? Math.min(...scores) : null,
     maxScore: scores.length ? Math.max(...scores) : null,
-    passRate: valid.length ? round(valid.filter((r) => r.passed).length / valid.length) : null,
-    errorRate: runs.length ? round((runs.length - valid.length) / runs.length) : 0,
+    passRate: valid.length ? valid.filter((r) => r.passed).length / valid.length : null,
+    errorRate: runs.length ? (runs.length - valid.length) / runs.length : 0,
     meanDurationMs: durations === null ? null : Math.round(durations),
   };
 }
 
-/** Suite-level variant aggregate: equal weight per case, computed from case aggregates. */
+/**
+ * Suite-level variant aggregate: equal weight per case, computed from case aggregates. If any
+ * case has no valid runs, the suite mean is undefined (null) instead of silently skipping the
+ * case (FR-111-27).
+ */
 function combine(cases: readonly Aggregate[], runs: readonly RunOutcome[]): Aggregate {
   const all = aggregate(runs);
-  const scored = cases.filter((c) => c.meanScore !== null);
-  const meanScore = mean(scored.map((c) => c.meanScore as number));
-  const passRate = mean(scored.map((c) => c.passRate as number));
+  const complete = cases.every((c) => c.meanScore !== null);
   return {
     ...all,
-    meanScore: meanScore === null ? null : round(meanScore),
-    passRate: passRate === null ? null : round(passRate),
+    meanScore: complete ? mean(cases.map((c) => c.meanScore as number)) : null,
+    passRate: complete ? mean(cases.map((c) => c.passRate as number)) : null,
     // Spread across cases is not a stability measure; stability is judged per case.
     stdDev: null,
   };
@@ -145,8 +153,53 @@ export interface SummarizeOptions {
   caseIds: readonly string[];
   scoring: BenchmarkDefinition['scoring'];
   repetitions: number;
+  /** Result of the equivalence check; its mismatches become the verdict reasons. */
   comparable: boolean;
+  comparabilityIssues?: readonly string[];
   deterministicAgent: boolean;
+  /** True when any assertion of the suite is nondeterministic (e.g. a future llm-judge). */
+  nondeterministicAssertions?: boolean;
+}
+
+const fmt = (value: number) => String(Math.round(value * 1000) / 1000);
+
+function errorReasons(
+  baseline: Aggregate,
+  candidate: Aggregate,
+  cases: readonly CaseSummary[],
+): string[] {
+  const reasons: string[] = [];
+  if (baseline.errorRate > 0.5) {
+    reasons.push(`baseline error rate ${fmt(baseline.errorRate)} exceeds 0.5`);
+  }
+  if (candidate.errorRate > 0.5) {
+    reasons.push(`candidate error rate ${fmt(candidate.errorRate)} exceeds 0.5`);
+  }
+  for (const c of cases) {
+    if (c.baseline.validRuns === 0) reasons.push(`case ${c.caseId}: no valid baseline runs`);
+    if (c.candidate.validRuns === 0) reasons.push(`case ${c.caseId}: no valid candidate runs`);
+  }
+  return reasons;
+}
+
+function instabilityReasons(cases: readonly CaseSummary[], stabilityThreshold: number): string[] {
+  const reasons: string[] = [];
+  for (const c of cases) {
+    for (const [label, a] of [
+      ['baseline', c.baseline],
+      ['candidate', c.candidate],
+    ] as const) {
+      if (a.stdDev !== null && a.stdDev > stabilityThreshold + SCORE_EPSILON) {
+        reasons.push(
+          `case ${c.caseId}: ${label} score stdDev ${fmt(a.stdDev)} exceeds ${stabilityThreshold}`,
+        );
+      }
+      if (a.passRate !== null && a.passRate > SCORE_EPSILON && a.passRate < 1 - SCORE_EPSILON) {
+        reasons.push(`case ${c.caseId}: ${label} pass rate ${fmt(a.passRate)} is mixed`);
+      }
+    }
+  }
+  return reasons;
 }
 
 /**
@@ -161,7 +214,7 @@ export function summarize(runs: readonly RunOutcome[], options: SummarizeOptions
     const candidate = aggregate(forCase.filter((r) => r.variant === 'candidate'));
     const delta =
       baseline.meanScore !== null && candidate.meanScore !== null
-        ? round(candidate.meanScore - baseline.meanScore)
+        ? candidate.meanScore - baseline.meanScore
         : null;
     return { caseId, baseline, candidate, delta };
   });
@@ -176,33 +229,50 @@ export function summarize(runs: readonly RunOutcome[], options: SummarizeOptions
   );
   const delta =
     baseline.meanScore !== null && candidate.meanScore !== null
-      ? round(candidate.meanScore - baseline.meanScore)
+      ? candidate.meanScore - baseline.meanScore
       : null;
   const passRateDelta =
     baseline.passRate !== null && candidate.passRate !== null
-      ? round(candidate.passRate - baseline.passRate)
+      ? candidate.passRate - baseline.passRate
       : null;
 
-  const isUnstable = (a: Aggregate) =>
-    (a.stdDev !== null && a.stdDev > scoring.stabilityThreshold) ||
-    (a.passRate !== null && a.passRate > 0 && a.passRate < 1);
-  const unstable = cases.some((c) => isUnstable(c.baseline) || isUnstable(c.candidate));
-  const errored = baseline.errorRate > 0.5 || candidate.errorRate > 0.5 || delta === null;
+  const errors = errorReasons(baseline, candidate, cases);
+  const instability = instabilityReasons(cases, scoring.stabilityThreshold);
 
   let verdict: Verdict;
-  if (errored) verdict = 'error';
-  else if (!options.comparable) verdict = 'not-comparable';
-  else if (unstable) verdict = 'unstable';
-  else if ((delta as number) <= -scoring.minDelta) verdict = 'regressed';
-  else if ((delta as number) >= scoring.minDelta) verdict = 'improved';
-  else verdict = 'unchanged';
+  let reasons: string[];
+  if (errors.length > 0 || delta === null) {
+    verdict = 'error';
+    reasons = errors.length > 0 ? errors : ['no comparable scores were produced'];
+  } else if (!options.comparable) {
+    verdict = 'not-comparable';
+    reasons = options.comparabilityIssues?.length
+      ? [...options.comparabilityIssues]
+      : ['equivalence check failed'];
+  } else if (instability.length > 0) {
+    verdict = 'unstable';
+    reasons = instability;
+  } else if (delta <= -scoring.minDelta + SCORE_EPSILON) {
+    verdict = 'regressed';
+    reasons = [`delta ${fmt(delta)} is at or below −${scoring.minDelta} (minDelta)`];
+  } else if (delta >= scoring.minDelta - SCORE_EPSILON) {
+    verdict = 'improved';
+    reasons = [`delta +${fmt(delta)} is at or above ${scoring.minDelta} (minDelta)`];
+  } else {
+    verdict = 'unchanged';
+    reasons = [`|delta| ${fmt(Math.abs(delta))} is below ${scoring.minDelta} (minDelta)`];
+  }
 
   const candidateOutcome =
     verdict === 'error'
       ? null
-      : cases.every((c) => c.candidate.passRate === 1)
+      : cases.every(
+            (c) => c.candidate.passRate !== null && c.candidate.passRate >= 1 - SCORE_EPSILON,
+          )
         ? 'passed'
         : 'failed';
+  const nondeterministic =
+    !options.deterministicAgent || Boolean(options.nondeterministicAssertions);
 
   return {
     baseline,
@@ -210,9 +280,12 @@ export function summarize(runs: readonly RunOutcome[], options: SummarizeOptions
     delta,
     passRateDelta,
     verdict,
+    reasons,
     candidateOutcome,
-    confidence: confidenceFor(options.repetitions, unstable),
+    confidence: confidenceFor(options.repetitions, instability.length > 0),
     deterministicAgent: options.deterministicAgent,
+    nondeterministic,
+    conclusive: !(nondeterministic && options.repetitions < 2),
     cases,
     scoring,
     repetitions: options.repetitions,

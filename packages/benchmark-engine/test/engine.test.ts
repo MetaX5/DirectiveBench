@@ -11,6 +11,8 @@ import {
   buildCommandEnv,
   buildManifest,
   diffManifests,
+  equivalenceIssues,
+  executionBlockers,
   loadDefinitionFile,
   parseDefinitionText,
   prepareSuiteImport,
@@ -188,6 +190,28 @@ describe('runCommand', () => {
     expect(shell.stdout.trim()).toBe('$HOME && whoami');
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'sends SIGTERM first and SIGKILL only after the grace period (FR-110-08)',
+    async () => {
+      const graceful = await runCommand(
+        [
+          process.execPath,
+          '-e',
+          "process.on('SIGTERM', () => process.exit(7)); setInterval(() => {}, 1000)",
+        ],
+        { ...base(), timeoutMs: 300, killGraceMs: 5000 },
+      );
+      expect(graceful).toMatchObject({ timedOut: true, exitCode: 7 });
+
+      const stubborn = await runCommand(
+        [process.execPath, '-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+        { ...base(), timeoutMs: 300, killGraceMs: 300 },
+      );
+      expect(stubborn).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
+      expect(stubborn.durationMs).toBeGreaterThanOrEqual(550);
+    },
+  );
+
   it('times out, truncates and reports spawn errors', async () => {
     const slow = await runCommand([process.execPath, '-e', 'setTimeout(() => {}, 10000)'], {
       ...base(),
@@ -317,5 +341,82 @@ describe('runBenchmark (mock agent, RED/GREEN)', () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow(BenchmarkCancelledError);
+  });
+});
+
+describe('execution guards and equivalence', () => {
+  it('reports execution blockers shared by the web app and the orchestrator', async () => {
+    const definition = await loadDefinitionFile(exampleSuite);
+    expect(executionBlockers(definition, true)).toEqual([]);
+    expect(executionBlockers(definition, false)).toEqual([
+      'This suite version runs commands but has not been approved for execution.',
+    ]);
+    const docker = {
+      ...definition,
+      execution: { ...definition.execution, environment: { kind: 'docker' as const, image: 'x' } },
+    };
+    expect(executionBlockers(docker, true)[0]).toMatch(/not implemented yet/);
+  });
+
+  it('detects fixture and agent-version mismatches (FR-112-08)', () => {
+    const fixtures = { c: { fixture: 'aaa' } };
+    const ok = { caseId: 'c', variant: 'baseline' as const, repetition: 1, fixtureHash: 'aaa' };
+    expect(equivalenceIssues(fixtures, [ok], '1.0', '1.0')).toEqual([]);
+    expect(
+      equivalenceIssues(
+        fixtures,
+        [ok, { ...ok, variant: 'candidate', fixtureHash: 'bbb' }],
+        '1.0',
+        '1.1',
+      ),
+    ).toEqual([
+      'case c: candidate repetition 1 used a different fixture snapshot',
+      'agent version changed during the run (1.0 → 1.1)',
+    ]);
+  });
+
+  it('records an infrastructure error when the fixture store was tampered with (FR-110-02)', async () => {
+    const store = tmp('store');
+    const prepared = await prepareSuiteImport(exampleSuite, store);
+    const fixtureHash = prepared.fixtures['implement-parse-age']?.fixture as string;
+    writeFileSync(join(store, fixtureHash, 'README.md'), 'tampered');
+    const definition = {
+      ...prepared.definition,
+      execution: { ...prepared.definition.execution, repetitions: 1 },
+    };
+    const outcome = await runBenchmark({
+      definition,
+      fixtures: prepared.fixtures,
+      fixtureStore: store,
+      artifact: await exampleArtifact(),
+      adapter: new MockAgentAdapter(),
+      workRoot: join(tmp('work'), 'run'),
+      executionApproved: true,
+      signal: new AbortController().signal,
+    });
+    expect(outcome.agentRuns.every((r) => r.executionStatus === 'infrastructure-error')).toBe(true);
+    expect(outcome.agentRuns[0]?.error).toMatch(/does not match fixture snapshot/);
+    expect(outcome.summary.verdict).toBe('error');
+  });
+
+  it('requires headless execution and artifact installation capabilities', async () => {
+    const store = tmp('store');
+    const prepared = await prepareSuiteImport(exampleSuite, store);
+    const adapter = new MockAgentAdapter();
+    Object.defineProperty(adapter, 'capabilities', {
+      value: { ...adapter.capabilities, artifactInstallation: false },
+    });
+    await expect(
+      runBenchmark({
+        definition: prepared.definition,
+        fixtures: prepared.fixtures,
+        fixtureStore: store,
+        artifact: await exampleArtifact(),
+        adapter,
+        workRoot: join(tmp('work'), 'run'),
+        executionApproved: true,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/headless execution and artifact installation/);
   });
 });

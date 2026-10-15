@@ -2,10 +2,15 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, AgentRunResult, TraceEvent } from '@directivebench/agent-adapters';
-import { canonicalJson, sha256, type ArtifactBundle } from '@directivebench/core';
+import { canonicalJson, hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
-import { definitionRunsCommands, type BenchmarkCase, type BenchmarkDefinition } from './definition';
+import {
+  executionBlockers,
+  isDeterministicAssertion,
+  type BenchmarkCase,
+  type BenchmarkDefinition,
+} from './definition';
 import { buildManifest, copyTree, diffManifests, type FileChange } from './files';
 import type { CaseFixtures } from './import';
 import {
@@ -85,11 +90,8 @@ export function assertRunnable(
   >,
 ): void {
   const { definition, adapter } = input;
-  if (definition.execution.environment.kind !== 'local-process') {
-    throw new BenchmarkConfigurationError(
-      `Execution environment "${definition.execution.environment.kind}" is not implemented yet; only "local-process" is available.`,
-    );
-  }
+  const [blocker] = executionBlockers(definition, input.executionApproved);
+  if (blocker) throw new BenchmarkConfigurationError(blocker);
   if (definition.execution.agent !== adapter.id) {
     throw new BenchmarkConfigurationError(
       `Suite requires agent "${definition.execution.agent}" but adapter "${adapter.id}" was provided.`,
@@ -100,14 +102,14 @@ export function assertRunnable(
       `Agent "${adapter.id}" cannot execute benchmarks in this build.`,
     );
   }
+  if (!adapter.capabilities.headless || !adapter.capabilities.artifactInstallation) {
+    throw new BenchmarkConfigurationError(
+      `Agent "${adapter.id}" must support headless execution and artifact installation for RED/GREEN runs.`,
+    );
+  }
   if (!definition.artifactTypes.includes(input.artifact.type)) {
     throw new BenchmarkConfigurationError(
       `Suite evaluates ${definition.artifactTypes.join(', ')} artifacts, not ${input.artifact.type}.`,
-    );
-  }
-  if (definitionRunsCommands(definition) && !input.executionApproved) {
-    throw new BenchmarkConfigurationError(
-      'This suite version runs commands but has not been approved for execution.',
     );
   }
   for (const benchmarkCase of definition.cases) {
@@ -186,6 +188,14 @@ async function executeAgentRun(
   try {
     await mkdir(homeDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
+    // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
+    const copiedHash = hashManifest(await buildManifest(workspaceDir));
+    if (copiedHash !== caseFixtures.fixture) {
+      return fail(
+        'infrastructure-error',
+        `Workspace does not match fixture snapshot ${caseFixtures.fixture.slice(0, 12)} (got ${copiedHash.slice(0, 12)}); the fixture store may be corrupted.`,
+      );
+    }
 
     for (const command of benchmarkCase.setup) {
       const result = await runCommand(command, {
@@ -286,6 +296,34 @@ async function executeAgentRun(
 }
 
 /**
+ * Post-run equivalence check (FR-112-08): every baseline and candidate run of a case must have
+ * started from the recorded fixture snapshot, and the agent version must not change during the
+ * run. Returns the list of mismatches (empty when comparable).
+ */
+export function equivalenceIssues(
+  fixtures: Record<string, CaseFixtures>,
+  agentRuns: readonly Pick<AgentRunRecord, 'caseId' | 'variant' | 'repetition' | 'fixtureHash'>[],
+  adapterVersionBefore: string | null,
+  adapterVersionAfter: string | null,
+): string[] {
+  const issues: string[] = [];
+  for (const run of agentRuns) {
+    const expected = fixtures[run.caseId]?.fixture;
+    if (run.fixtureHash !== expected) {
+      issues.push(
+        `case ${run.caseId}: ${run.variant} repetition ${run.repetition} used a different fixture snapshot`,
+      );
+    }
+  }
+  if (adapterVersionBefore !== adapterVersionAfter) {
+    issues.push(
+      `agent version changed during the run (${adapterVersionBefore} → ${adapterVersionAfter})`,
+    );
+  }
+  return issues;
+}
+
+/**
  * RED/GREEN evaluation. For each case and repetition the baseline (no artifact) and candidate
  * (exact artifact version installed) run in fresh, independent workspaces from the same fixture
  * snapshot with identical prompt, adapter, model and limits. The order alternates between
@@ -342,23 +380,29 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
     if (!input.keepWorkspaces) await rm(input.workRoot, { recursive: true, force: true });
   }
 
-  // Within one run every agent run shares the suite version, fixture hashes and adapter, so the
-  // comparison is comparable by construction; the check guards against adapter version drift.
   const finalDetection = await adapter.detect();
-  const comparable = finalDetection.version === detection.version;
-  if (!comparable) {
-    warnings.push(
-      `Agent version changed during the run (${detection.version} → ${finalDetection.version}).`,
-    );
-  }
+  const comparabilityIssues = equivalenceIssues(
+    input.fixtures,
+    agentRuns,
+    detection.version,
+    finalDetection.version,
+  );
+  warnings.push(...comparabilityIssues);
 
   const summary = summarize(agentRuns, {
     caseIds: definition.cases.map((c) => c.id),
     scoring: definition.scoring,
     repetitions: definition.execution.repetitions,
-    comparable,
+    comparable: comparabilityIssues.length === 0,
+    comparabilityIssues,
     deterministicAgent: adapter.capabilities.deterministic,
+    nondeterministicAssertions: definition.cases.some((c) =>
+      c.assertions.some((a) => !isDeterministicAssertion(a)),
+    ),
   });
+  if (!summary.conclusive) {
+    warnings.push('Single repetition of a nondeterministic run: the result is not conclusive.');
+  }
   if (adapter.capabilities.deterministic && summary.verdict !== 'error') {
     warnings.push(
       'Deterministic agent: repetitions confirm reproducibility, not statistical confidence.',

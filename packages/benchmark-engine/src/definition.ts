@@ -220,3 +220,42 @@ export function definitionRunsCommands(definition: BenchmarkDefinition): boolean
     (c) => c.setup.length > 0 || c.assertions.some((a) => a.type === 'command'),
   );
 }
+
+/** Environments the runner can execute in this build. */
+export const SUPPORTED_ENVIRONMENTS: readonly BenchmarkDefinition['execution']['environment']['kind'][] =
+  ['local-process'];
+
+/**
+ * Reasons why a suite version cannot run in this build, independent of the agent adapter.
+ * Shared by the web app (checked before enqueueing) and the orchestrator (checked before running).
+ */
+export function executionBlockers(
+  definition: BenchmarkDefinition,
+  executionApproved: boolean,
+): string[] {
+  const blockers: string[] = [];
+  const kind = definition.execution.environment.kind;
+  if (!SUPPORTED_ENVIRONMENTS.includes(kind)) {
+    blockers.push(
+      `Execution environment "${kind}" is not implemented yet; only "local-process" is available.`,
+    );
+  }
+  if (definitionRunsCommands(definition) && !executionApproved) {
+    blockers.push('This suite version runs commands but has not been approved for execution.');
+  }
+  return blockers;
+}
+
+/**
+ * All assertion types of format v1 are deterministic. Nondeterministic types (e.g. a future
+ * `llm-judge`) must be added here so results are flagged (SPEC-111 FR-111-42).
+ */
+export function isDeterministicAssertion(assertion: AssertionDefinition): boolean {
+  switch (assertion.type) {
+    case 'command':
+    case 'file-exists':
+    case 'file-contains':
+    case 'changed-files':
+      return true;
+  }
+}
