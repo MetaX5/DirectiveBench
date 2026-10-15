@@ -86,7 +86,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 ## Index
 
 All specifications are drafts. They were created on 2026-10-14 during the bootstrap, except
-SPEC-014 (2026-10-15).
+SPEC-014 and SPEC-117 (2026-10-15).
 `implemented/` and `archive/` are currently empty.
 
 ### Foundation
@@ -128,6 +128,7 @@ SPEC-014 (2026-10-15).
 | SPEC-114 | [Runner Management](2026-10-14-runner-management.md) | draft |
 | SPEC-115 | [Settings and Configuration](2026-10-14-settings-and-configuration.md) | draft |
 | SPEC-116 | [Dashboard and Navigation](2026-10-14-dashboard-and-navigation.md) | draft |
+| SPEC-117 | [Optional PostgreSQL Backend](2026-10-15-postgresql-backend.md) | draft |
 
 ### Integrations
 
