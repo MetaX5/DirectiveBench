@@ -36,11 +36,20 @@ export class BenchmarkCancelledError extends Error {
 export interface AgentRunRecord extends RunOutcome {
   fixtureHash: string;
   changedFiles: FileChange[];
-  trace: (TraceEvent | { type: 'setup'; command: string[]; exitCode: number | null })[];
+  trace: (TraceEvent | EngineTraceEvent)[];
   usage: Record<string, number> | null;
   error: string | null;
   assertions: AssertionResult[];
 }
+
+/** Engine-level trace events (FR-110-15); adapter events are interleaved in order. */
+export type EngineTraceEvent =
+  | {
+      type: 'stage';
+      stage: 'prepare' | 'setup' | 'install' | 'agent' | 'verification' | 'assertions';
+      at: string;
+    }
+  | { type: 'setup'; command: string[]; exitCode: number | null; durationMs: number };
 
 export interface EnvironmentMetadata {
   kind: 'local-process';
@@ -100,6 +109,11 @@ export function assertRunnable(
   if (!adapter.capabilities.execution) {
     throw new BenchmarkConfigurationError(
       `Agent "${adapter.id}" cannot execute benchmarks in this build.`,
+    );
+  }
+  if (definition.execution.model && !adapter.capabilities.modelSelection) {
+    throw new BenchmarkConfigurationError(
+      `Agent "${adapter.id}" does not support model selection, but the suite sets execution.model.`,
     );
   }
   if (!adapter.capabilities.headless || !adapter.capabilities.artifactInstallation) {
@@ -164,6 +178,8 @@ async function executeAgentRun(
   const workspaceDir = join(runDir, 'workspace');
   const homeDir = join(runDir, 'home');
   const trace: AgentRunRecord['trace'] = [];
+  const stage = (name: Extract<EngineTraceEvent, { type: 'stage' }>['stage']) =>
+    trace.push({ type: 'stage', stage: name, at: new Date().toISOString() });
   const timeoutMs = definition.execution.timeoutSeconds * 1000;
   const commandEnv = buildCommandEnv(homeDir);
   const base = {
@@ -186,6 +202,7 @@ async function executeAgentRun(
   });
 
   try {
+    stage('prepare');
     await mkdir(homeDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
     // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
@@ -197,6 +214,7 @@ async function executeAgentRun(
       );
     }
 
+    if (benchmarkCase.setup.length > 0) stage('setup');
     for (const command of benchmarkCase.setup) {
       const result = await runCommand(command, {
         cwd: workspaceDir,
@@ -205,7 +223,12 @@ async function executeAgentRun(
         maxOutputBytes: definition.execution.maxOutputBytes,
         signal: input.signal,
       });
-      trace.push({ type: 'setup', command, exitCode: result.exitCode });
+      trace.push({
+        type: 'setup',
+        command,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+      });
       if (result.cancelled) return fail('cancelled', 'Cancelled during setup');
       if (result.exitCode !== 0) {
         return fail(
@@ -216,6 +239,7 @@ async function executeAgentRun(
     }
 
     if (variant === 'candidate') {
+      stage('install');
       const installed = await adapter.installArtifact(workspaceDir, input.artifact);
       trace.push({
         type: 'message',
@@ -225,6 +249,7 @@ async function executeAgentRun(
 
     // Snapshot after installation so only the agent's own changes are tracked.
     const before = await buildManifest(workspaceDir);
+    stage('agent');
     const agentSignal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
     const agentResult: AgentRunResult = await withTimeout(
       adapter.run({
@@ -255,6 +280,7 @@ async function executeAgentRun(
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
 
+    stage('verification');
     if (caseFixtures.overlay) {
       await cp(join(input.fixtureStore, caseFixtures.overlay), workspaceDir, {
         recursive: true,
@@ -262,6 +288,7 @@ async function executeAgentRun(
       });
     }
 
+    stage('assertions');
     const assertions: AssertionResult[] = [];
     for (const assertion of benchmarkCase.assertions) {
       if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');

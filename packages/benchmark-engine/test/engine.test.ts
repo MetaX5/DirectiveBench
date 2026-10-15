@@ -223,7 +223,7 @@ describe('runCommand', () => {
       base(),
     );
     expect(loud.truncated).toBe(true);
-    expect(loud.stdout.length).toBe(1024);
+    expect(loud.stdout).toBe(`${'x'.repeat(1024)}\n[truncated ${5000 - 1024} bytes]`);
     const missing = await runCommand(['definitely-not-a-command-xyz'], base());
     expect(missing.error).toBeTruthy();
   });
@@ -289,6 +289,9 @@ describe('runBenchmark (mock agent, RED/GREEN)', () => {
     expect(candidateRun?.assertions.every((a) => a.passed)).toBe(true);
     // The installed skill is not counted as an agent change.
     expect(candidateRun?.changedFiles.map((c) => c.path)).toEqual(['src/parse-age.js']);
+    // Ordered stage events with timestamps (FR-110-15).
+    const stages = candidateRun?.trace.flatMap((e) => (e.type === 'stage' ? [e.stage] : []));
+    expect(stages).toEqual(['prepare', 'install', 'agent', 'verification', 'assertions']);
     expect(outcome.environment).toMatchObject({
       kind: 'local-process',
       sandboxed: false,
@@ -397,6 +400,27 @@ describe('execution guards and equivalence', () => {
     expect(outcome.agentRuns.every((r) => r.executionStatus === 'infrastructure-error')).toBe(true);
     expect(outcome.agentRuns[0]?.error).toMatch(/does not match fixture snapshot/);
     expect(outcome.summary.verdict).toBe('error');
+  });
+
+  it('rejects a model selection the adapter cannot honour (FR-107-07)', async () => {
+    const store = tmp('store');
+    const prepared = await prepareSuiteImport(exampleSuite, store);
+    const definition = {
+      ...prepared.definition,
+      execution: { ...prepared.definition.execution, model: { provider: 'anthropic', model: 'x' } },
+    };
+    await expect(
+      runBenchmark({
+        definition,
+        fixtures: prepared.fixtures,
+        fixtureStore: store,
+        artifact: await exampleArtifact(),
+        adapter: new MockAgentAdapter(),
+        workRoot: join(tmp('work'), 'run'),
+        executionApproved: true,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/does not support model selection/);
   });
 
   it('requires headless execution and artifact installation capabilities', async () => {

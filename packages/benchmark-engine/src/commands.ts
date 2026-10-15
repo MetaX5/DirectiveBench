@@ -56,21 +56,28 @@ export function buildCommandEnv(
 class OutputBuffer {
   private chunks: Buffer[] = [];
   private size = 0;
+  private dropped = 0;
   truncated = false;
   constructor(private readonly limit: number) {}
   push(chunk: Buffer): void {
     const remaining = this.limit - this.size;
     if (remaining <= 0) {
       this.truncated = true;
+      this.dropped += chunk.length;
       return;
     }
     const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
-    if (slice.length < chunk.length) this.truncated = true;
+    if (slice.length < chunk.length) {
+      this.truncated = true;
+      this.dropped += chunk.length - slice.length;
+    }
     this.chunks.push(slice);
     this.size += slice.length;
   }
   toString(): string {
-    return redactSecrets(Buffer.concat(this.chunks).toString('utf8'));
+    const text = redactSecrets(Buffer.concat(this.chunks).toString('utf8'));
+    // FR-110-44: excess output is dropped and marked.
+    return this.dropped > 0 ? `${text}\n[truncated ${this.dropped} bytes]` : text;
   }
 }
 
