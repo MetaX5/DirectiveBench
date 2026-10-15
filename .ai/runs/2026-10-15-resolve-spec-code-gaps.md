@@ -4,7 +4,7 @@ date: 2026-10-15
 agent: Claude Code / claude-opus-5-5
 trigger: Maintainer request — "fix the code or the specs depending on which is right"; also confirmed that the om-* skills are MIT-licensed
 status: completed
-branch: feat/bootstrap-foundation
+branch: fix/resolve-spec-code-gaps
 specs: [SPEC-004, SPEC-005, SPEC-007, SPEC-009, SPEC-107, SPEC-110, SPEC-111, SPEC-112, SPEC-114, SPEC-115]
 ---
 
@@ -69,7 +69,7 @@ Spec changes (code is right):
 
 ## Work performed
 
-Commits on `feat/bootstrap-foundation` (PR #1):
+Commits on `fix/resolve-spec-code-gaps` (new PR; first pushed by mistake to the already merged `feat/bootstrap-foundation`, see Problems):
 
 - `feat(benchmark-engine)`: scoring precision/epsilon, FR-111-27, verdict reasons,
   nondeterministic/conclusive flags, `executionBlockers`, capability checks, workspace hash check,
@@ -111,6 +111,12 @@ level), Windows process-group termination, Node 22.x.
   caught by the Playwright web-server start before `verify:pack`.
 - After `pnpm build`, Vitest in `apps/cli` collected fixture tests from `dist/examples`; fixed
   with an explicit include.
+- **Pushed to a merged PR.** PR #1 had been merged on 2026-10-14 22:08 before this run's
+  commits were pushed to `feat/bootstrap-foundation`, so they were not in `main` and CI did not
+  run; the merged PR's description was also edited to describe them. The maintainer pointed this
+  out. The commits were rebased onto `origin/main` as `fix/resolve-spec-code-gaps` (clean, no
+  content change) and opened as a new PR; PR #1's description was restored. Rule added to
+  AGENTS.md §4 and recorded as a lesson.
 - A first scripted edit of `scoring.ts` aborted on its own over-strict self-check; the file was
   rewritten in full instead (no partial change was written).
 
@@ -118,6 +124,7 @@ level), Windows process-group termination, Node 22.x.
 
 - [Restrict Vitest's include when build output contains test files](../lessons/2026-10-15-vitest-collects-build-output.md)
 - [Bundler defaults break the packed CLI](../lessons/2026-10-14-bundler-strips-node-protocol.md) (updated)
+- [Check the PR is still open before pushing follow-up commits](../lessons/2026-10-15-check-pr-state-before-pushing.md)
 
 ## Follow-ups
 
