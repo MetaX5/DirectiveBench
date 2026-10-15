@@ -58,8 +58,16 @@ These rules are not optional. A task is not done until the applicable steps are 
 6. Follow existing architecture and conventions. Do not contradict an `approved` spec; if it
    must change, change the spec (and, for significant design changes, add an ADR) in the same
    change set.
-7. Add tests for implemented behaviour. Tests must not require paid API calls or credentials;
-   use the deterministic mock agent.
+7. **Every new feature must have 100% unit-test coverage** — lines, branches, functions and
+   statements — and so must every change to existing code. `pnpm test` enforces a 100% threshold
+   for all logic (`packages/*/src`, `apps/cli/src`, `apps/web/lib`, `apps/web/proxy.ts`); a
+   change below 100% fails CI and is not done. React pages and components (`apps/web/app`,
+   `apps/web/components`) are outside the unit-coverage scope; every new page or UI path needs a
+   Playwright test in `apps/web/e2e` instead. Never lower thresholds, widen exclusions or add
+   `/* v8 ignore */` to pass the gate; the only exception is code that cannot run on the CI
+   platform (e.g. a Windows-only branch), marked `/* v8 ignore next -- <reason> */` and named in
+   the PR description. Tests must not require paid API calls or credentials; use the
+   deterministic mock agent.
 8. **Fix bugs from evidence.** Start from the failing CI job, test output or logs, reproduce the
    failure first, fix the root cause rather than the symptom and add a regression test. Do not
    ask how to fix something you can investigate yourself.
@@ -140,7 +148,7 @@ pnpm install          # Node >= 22.16, pnpm via corepack or ~/.local/share/pnpm/
 pnpm dev              # CLI in dev mode: migrations, runner and `next dev`
 pnpm lint             # ESLint
 pnpm typecheck        # tsc / next typegen for every package
-pnpm test             # Vitest unit and integration tests
+pnpm test             # Vitest unit and integration tests, 100% coverage threshold
 pnpm test:e2e         # Playwright smoke test (builds required)
 pnpm build            # build web app and CLI bundle
 pnpm verify:pack      # pack, install and smoke-test the npm tarball

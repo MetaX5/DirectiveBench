@@ -107,8 +107,9 @@ export class LocalRunner {
   }
 
   async start(): Promise<void> {
-    await this.recover();
+    // Reset before awaiting so a stop() that lands during recovery is not undone.
     this.stopping = false;
+    await this.recover();
     const tick = () => {
       if (this.stopping) return;
       void this.poll().finally(() => {

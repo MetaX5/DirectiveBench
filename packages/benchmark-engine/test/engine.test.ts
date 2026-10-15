@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,7 @@ import {
   snapshotDirectory,
   type BenchmarkDefinition,
 } from '../src/index';
+import { useTempDirs } from './helpers';
 
 const examples = fileURLToPath(new URL('../../../examples', import.meta.url));
 const exampleSuite = join(examples, 'benchmarks/mock-input-validation/benchmark.yaml');
@@ -42,7 +43,7 @@ async function exampleArtifact(): Promise<ArtifactBundle> {
   };
 }
 
-const tmp = (prefix: string) => mkdtempSync(join(tmpdir(), `directivebench-${prefix}-`));
+const tmp = useTempDirs();
 
 describe('benchmark definition format', () => {
   it('validates every example definition in the repository', async () => {

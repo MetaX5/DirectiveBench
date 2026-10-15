@@ -1,7 +1,10 @@
-import { displayStatus, type DisplayStatus } from '@directivebench/benchmark-engine/scoring';
+import type { DisplayStatus } from '@directivebench/benchmark-engine/scoring';
 import { Construction, DatabaseZap, FlaskConical } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge, Card, CardContent } from '@/components/ui/primitives';
+
+// Pure logic lives in lib/ so it is unit-tested; re-exported for existing page imports.
+export { runDisplayStatus } from '@/lib/run-status';
 
 export function PageHeader({
   title,
@@ -43,17 +46,6 @@ export function StatusBadge({ status }: { status: DisplayStatus }) {
       {style.label}
     </Badge>
   );
-}
-
-/** Derives the display status from a stored run (verdict + summary.candidateOutcome). */
-export function runDisplayStatus(
-  run: { verdict: string | null; status: string; summary: unknown } | null,
-): DisplayStatus {
-  if (!run) return 'not-tested';
-  if (run.status === 'error') return 'error';
-  if (run.status !== 'completed') return 'not-tested';
-  const outcome = (run.summary as { candidateOutcome?: string } | null)?.candidateOutcome;
-  return displayStatus(run.verdict, outcome);
 }
 
 const jobVariants = {

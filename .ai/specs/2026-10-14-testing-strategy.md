@@ -38,6 +38,14 @@ flowchart TB
 
 ## 3. Per-package coverage
 
+**Coverage requirement:** unit and package tests keep **100% line, branch, function and statement
+coverage** of all logic — `packages/*/src`, `apps/cli/src`, `apps/web/lib` and `apps/web/proxy.ts`.
+Vitest's v8 coverage with `thresholds: { 100: true }` is configured once in `vitest.shared.ts`
+and used by every package's `vitest.config.ts`, so `pnpm test` fails below 100%. React pages and
+components (`apps/web/app`, `apps/web/components`) are covered by Playwright (§4) instead.
+`/* v8 ignore */` is allowed only for code that cannot run on the CI platform and must state a
+reason (`AGENTS.md` §2 rule 7).
+
 | Package | Unit | Integration |
 | --- | --- | --- |
 | `core` | Artifact path classification, frontmatter/format parsers (SKILL.md, `.mdc`, Copilot instructions, generic markdown), config schema and atomic save, data-dir resolution per OS, hashing, secret redaction | — |
@@ -50,11 +58,14 @@ flowchart TB
 
 Scoring and verdict logic additionally get table-driven tests covering every precedence branch (error, not-comparable, unstable, regressed, improved, unchanged).
 
-## 4. End-to-end smoke (Playwright)
+## 4. Browser integration tests (Playwright)
 
-- Setup: create a temp data dir, run `directivebench demo --data-dir <tmp>` to seed it, start `serve --no-open --port <free> --data-dir <tmp>`.
-- Checks: dashboard shows non-zero counts; artifact detail renders content and versions; benchmark detail shows cases; "Run benchmark" enqueues a job that reaches `completed`; run detail shows RED vs GREEN and the "Mock agent — not an AI evaluation" label; planned pages say "Planned — not implemented"; a request with a foreign `Host` header is rejected.
-- One browser (Chromium) in CI; others optional locally.
+- Setup: create a temp data dir, run `directivebench demo --data-dir <tmp>` to seed it, start `serve --no-open --port <free> --data-dir <tmp>` (the built CLI, as an end user would). Tests run in one worker because they share that instance.
+- `apps/web/e2e/home.spec.ts` — the home page: dashboard counts equal database counts, recent runs with the mock label, navigation order and `aria-current`, every nav target and planned page, not-found page, theme toggle.
+- `apps/web/e2e/management.spec.ts` — the management paths: artifacts list/filters → detail; results list → detail (RED vs GREEN, verdict reasons, "Mock agent — not an AI evaluation"); benchmarks → Run → Executions → `completed` → run detail; server-side approval re-check (FR-114-02); cancelling a pending and a running job; categories; agents; settings.
+- Jobs that must stay pending or running for cancellation tests are seeded directly in the temp database (a temporary trigger keeps the runner from claiming the pending one); the runner's own handling of a cancel request is covered by the runner tests.
+- The foreign-`Host` rejection is checked by `verify:pack` (§5).
+- One browser (Chromium) in CI; others optional locally. Agent-driven exploratory checks (e.g. with `agent-browser`) are local QA, not CI gates.
 
 ## 5. Packaging verification
 
@@ -84,22 +95,20 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 ## 8. CI (GitHub Actions)
 
-Workflow `.github/workflows/ci.yml`, triggered on pull requests and pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable).
+Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable). Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
 
-1. Checkout; set up Node; `corepack enable`; `pnpm install --frozen-lockfile`; `pnpm audit --prod`.
-2. `pnpm format:check` and `pnpm lint`.
-3. `pnpm typecheck`.
-4. `pnpm test` (unit + integration via Turborepo).
-5. `pnpm build`.
-6. `pnpm verify:pack`.
-7. Install Playwright Chromium; `pnpm test:e2e`; upload traces on failure.
+| Job | Steps |
+| --- | --- |
+| `lint` | `pnpm audit --prod`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck` |
+| `unit` | `pnpm test` with the 100% coverage threshold (§3); coverage reports uploaded as an artifact |
+| `build` | `pnpm build`, `pnpm verify:pack` (§5) |
+| `e2e` | `pnpm build`, install Playwright Chromium, `pnpm test:e2e` against a temporary instance with a SQLite data dir (§4); traces uploaded on failure |
 
 No secrets are configured for the default workflow.
 
 ## 9. Implementation status
 
-- **Implemented (verified on 2026-10-15, Node 24.21, Linux — 95 tests, all passing):** Vitest suites per package — `core` 36 tests (path classification, parsers, frontmatter, config schema and atomic save, data-dir resolution, hashing, redaction), `database` 7 (migrations idempotent, immutable artifact versions, category seeding, atomic FIFO job acquisition, cancellation, stale recovery), `agent-adapters` 8 (mock playbook baseline/candidate, installation, path escapes, missing-executable detection), `benchmark-engine` 30 (definition schema incl. all repository examples, fixture snapshotting and symlink rejection, `runCommand` incl. `SIGTERM` → `SIGKILL` grace, mock RED/GREEN end-to-end with real `node --test` verification, execution blockers, equivalence mismatches, tampered fixture store, capability checks, scoring with every verdict branch, epsilon thresholds, FR-111-27, verdict reasons and "not conclusive"), `runner` 6 (import → enqueue → run → persist, unapproved suites, cancellation and orphan recovery, shutdown → interrupted, runner id format, capped shutdown), `cli` 7 (option precedence, port/host usage errors, Node version check, asset resolution, `doctor` data-dir hints and writability; `apps/cli/vitest.config.ts` limits collection to `test/**/*.test.ts` because `dist/examples` contains fixture `*.test.js` files); `pnpm build && pnpm verify:pack` (§5, all steps passed).
-- **Implemented (verified by `pnpm test:e2e`, 7/7 passing against the built CLI):** Playwright smoke test `apps/web/e2e/smoke.spec.ts` — dashboard counts and mock label, artifact list/detail, run detail RED vs GREEN (50% → 100%, +50 pts, `improved`, verdict reasons, 6 agent runs), "Run" on the benchmark page enqueues a job that the runner completes, server-side approval re-check before enqueueing (FR-114-02), planned page label, theme toggle; `apps/web/playwright.config.ts` seeds a temp data dir with `demo` and starts the built CLI.
-- **Implemented — CI (§8):** `.github/workflows/ci.yml` (Node 24 on `ubuntu-latest`: install, `pnpm audit --prod`, `format:check`, `lint`, `typecheck`, `test`, `build`, `verify:pack`, Playwright Chromium, `test:e2e`, report upload on failure) ran green on PR #1 on 2026-10-14; the `pnpm audit --prod` step was added on 2026-10-15 (clean locally) and has not run in CI yet.
-- **Partially implemented:** the smoke test does not check the foreign-`Host` rejection (covered by `verify:pack`), job cancellation from the UI, or the Settings page. Unit tests for `proxy.ts`, Server Actions, runner concurrency > 1 and two-runner acquisition are missing; `cli` integration tests of `init`/`demo` are covered only by `verify:pack`.
-- **Not implemented:** adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS / Node 22 CI matrix.
+- **Implemented (verified on 2026-10-15, Node 24.21, Linux — 468 tests, all passing, 100% line/branch/function/statement coverage in every package):** Vitest suites per package with the §3 coverage threshold (`vitest.shared.ts`) — `core` 95, `database` 59 (one test file per repository plus `client.test.ts`; databases from `test/support/test-database.ts`), `agent-adapters` 34 (incl. detection with fake executables on a temp `PATH`), `benchmark-engine` 109 (incl. env allowlist, process-group kill, output truncation, symlink/FIFO/traversal rejection, every assertion type, orchestrator error and cancellation paths), `runner` 31 (incl. concurrency > 1, two runners on one database claiming every job exactly once, heartbeat failure, stop during start), `cli` 74 (incl. `serve` supervision with injected spawn/fetch/process, `init`, `demo`, `doctor`), `web` 66 (server actions against a real temp database, `proxy.ts` Host allowlist, `lib/` helpers); `pnpm build && pnpm verify:pack` (§5, all steps passed).
+- **Implemented (verified by `pnpm test:e2e`, 17/17 passing against the built CLI on 2026-10-15, three consecutive runs):** the browser integration tests of §4.
+- **Implemented — CI (§8):** four parallel jobs (`lint`, `unit`, `build`, `e2e`) with the shared setup action. The previous single-job workflow ran green on PR #1 on 2026-10-14; the four-job workflow is verified locally job by job (commands above) and has not run on GitHub yet. Making the jobs required checks is a repository setting.
+- **Not implemented:** PostgreSQL backend tests with testcontainers (planned with the optional PostgreSQL backend), adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS / Node 22 CI matrix.

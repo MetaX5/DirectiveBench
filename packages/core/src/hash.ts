@@ -32,7 +32,8 @@ function sortKeys(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
         .filter(([, v]) => v !== undefined)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        // Object keys are unique, so two keys never compare equal.
+        .sort(([a], [b]) => (a < b ? -1 : 1))
         .map(([k, v]) => [k, sortKeys(v)]),
     );
   }

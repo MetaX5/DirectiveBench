@@ -3,7 +3,7 @@ id: SPEC-106
 title: Category Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-101, SPEC-105, SPEC-108, SPEC-109, SPEC-113, SPEC-116, SPEC-005, SPEC-006]
 ---
@@ -183,6 +183,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented (verified by `packages/database/test/database.test.ts` "seeds predefined categories once" and `packages/runner/test/runner.test.ts` category assignment):** `PREDEFINED_CATEGORIES` (17 entries) in `packages/core/src/categories.ts`; `categories` and `artifact_categories` tables; `seedPredefinedCategories`, `listCategories`, `assignCategoriesBySlug` (existing non-archived slugs only; unknown slugs returned, not created) in `packages/database/src/repositories/`; seeding on `init`/`serve`/`demo`.
+- **Implemented (verified by `packages/database/test/catalog.test.ts` "seeds predefined categories once and keeps user changes" and `packages/runner/test/runner.test.ts` category assignment):** `PREDEFINED_CATEGORIES` (17 entries) in `packages/core/src/categories.ts`; `categories` and `artifact_categories` tables; `seedPredefinedCategories`, `listCategories`, `assignCategoriesBySlug` (existing non-archived slugs only; unknown slugs returned, not created) in `packages/database/src/repositories/`; seeding on `init`/`serve`/`demo`.
 - **Partially implemented:** read-only Categories page (links to `/artifacts?category=<slug>`), category badges on artifacts and the `category` filter on the artifacts list exist in `apps/web`, without a verified automated UI test.
 - **Not implemented:** create/edit/rename/slug change/archive/merge/bulk assign UI and actions, aliases, `merged_into_id`, suite category resolution warnings, AI-assisted categorisation.

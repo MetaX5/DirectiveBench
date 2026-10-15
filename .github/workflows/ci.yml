@@ -12,31 +12,61 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job is a required check for pull requests (SPEC-012 §8). Jobs run in parallel.
 jobs:
-  checks:
-    name: Lint, typecheck, test, build, package
+  lint:
+    name: Lint, format, typecheck, audit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Audit production dependencies
         run: pnpm audit --prod
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test
+
+  unit:
+    name: Unit tests (100% coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Unit and package tests with the 100% coverage threshold
+        run: pnpm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            apps/*/coverage
+            packages/*/coverage
+          retention-days: 7
+
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
       - run: pnpm build
       - name: Packaging verification (pack, install, help/version, demo, serve)
         run: pnpm verify:pack
+
+  e2e:
+    name: Integration tests (browser, SQLite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm build
       - name: Install Playwright Chromium
         run: pnpm --filter @directivebench/web exec playwright install --with-deps chromium
-      - name: UI smoke tests
+      - name: Browser tests against a temporary instance
         run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -1,13 +1,23 @@
-import { chmodSync, mkdtempSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configSchema } from '@directivebench/core';
 import { doctorCommand } from '../src/commands';
 import { CliError, ExitCode, checkNodeVersion, resolveAssets } from '../src/runtime';
 import { resolveServerOptions } from '../src/setup';
 
 const config = configSchema.parse({});
+const tempDirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('resolveServerOptions', () => {
   it('applies flag > env > config precedence', () => {
@@ -68,9 +78,7 @@ describe('doctor', () => {
   }
 
   it('warns with a hint when the data directory does not exist yet', async () => {
-    const { code, checks } = await runDoctor(
-      join(mkdtempSync(join(tmpdir(), 'db-doctor-')), 'new'),
-    );
+    const { code, checks } = await runDoctor(join(tempDir('db-doctor-'), 'new'));
     expect(code).toBe(ExitCode.Ok);
     expect(checks.find((c) => c.name === 'data-dir')).toMatchObject({
       status: 'warn',
@@ -82,7 +90,7 @@ describe('doctor', () => {
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'fails when the data directory is not writable',
     async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'db-doctor-ro-'));
+      const dir = tempDir('db-doctor-ro-');
       chmodSync(dir, 0o500);
       const { code, checks } = await runDoctor(dir);
       expect(code).toBe(ExitCode.CheckFailed);

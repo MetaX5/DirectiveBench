@@ -1,8 +1,6 @@
 import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import {
   ConfigError,
-  DEFAULT_HOST,
-  DEFAULT_PORT,
   dataDirLayout,
   isLoopbackHost,
   loadConfig,
@@ -80,15 +78,14 @@ export interface ServerOptions {
   port: number;
 }
 
-/** Precedence: flag > environment variable > config.json > default. */
+/** Precedence: flag > environment variable > config.json (whose schema supplies the defaults). */
 export function resolveServerOptions(
   flags: { host?: string; port?: string; allowNetworkAccess?: boolean },
   config: DirectiveBenchConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): ServerOptions {
-  const host = flags.host ?? env.DIRECTIVEBENCH_HOST ?? config.server.host ?? DEFAULT_HOST;
-  const rawPort =
-    flags.port ?? env.DIRECTIVEBENCH_PORT ?? String(config.server.port ?? DEFAULT_PORT);
+  const host = flags.host ?? env.DIRECTIVEBENCH_HOST ?? config.server.host;
+  const rawPort = flags.port ?? env.DIRECTIVEBENCH_PORT ?? String(config.server.port);
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new CliError(`Invalid port "${rawPort}" (expected 1–65535)`, ExitCode.Usage);

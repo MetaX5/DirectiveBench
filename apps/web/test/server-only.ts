@@ -1,0 +1,2 @@
+// Empty stand-in for the `server-only` marker package in unit tests (see vitest.config.ts).
+export {};

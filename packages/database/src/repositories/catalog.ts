@@ -53,10 +53,7 @@ export async function getDashboardStats(db: Database) {
     .select({ type: artifacts.type, count: sql<number>`count(*)` })
     .from(artifacts)
     .groupBy(artifacts.type);
-  const repoCount = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(repositories)
-    .get();
+  const repositoryCount = await db.$count(repositories);
   const lastSync = await db
     .select({ at: repositories.lastSyncAt })
     .from(repositories)
@@ -67,7 +64,7 @@ export async function getDashboardStats(db: Database) {
   const byType = { skill: 0, instruction: 0, rule: 0 };
   for (const row of typeCounts) byType[row.type] = Number(row.count);
   return {
-    repositoryCount: Number(repoCount?.count ?? 0),
+    repositoryCount,
     artifactCount: byType.skill + byType.instruction + byType.rule,
     skillCount: byType.skill,
     instructionCount: byType.instruction,

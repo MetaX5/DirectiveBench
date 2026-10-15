@@ -3,7 +3,7 @@ id: SPEC-101
 title: Artifact Registry
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-005, SPEC-006, SPEC-102, SPEC-103, SPEC-104, SPEC-105, SPEC-106, SPEC-111, SPEC-112, SPEC-113, SPEC-116]
 ---
@@ -268,6 +268,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented (verified by `packages/core/test/artifacts.test.ts`, `packages/database/test/database.test.ts` "creates immutable versions only for new content and preserves user metadata", `packages/runner/test/runner.test.ts` and `pnpm verify:pack`):** artifact type/format enums, path classification and `parseArtifactFile` (`packages/core/src/artifacts.ts`); tables `artifacts`, `artifact_versions`, `artifact_occurrences`, `artifact_categories`, `artifact_benchmark_assignments`; import of the bundled example artifact with categories and benchmark assignment (`importBundledExample`); `listArtifacts` with latest evaluation and categories.
-- **Partially implemented:** identity resolution — bootstrap `importArtifactVersion` (`packages/database/src/repositories/artifacts.ts`) matches an existing artifact **by slug** and upserts the occurrence by `(repository, path)`; the §8.3 rules (occurrence-first, move detection, exact-copy linking, slug suffixing) replace slug matching when sync is implemented. Artifacts list (search `q`, `type` and `category` URL filters) and detail page (original content, metadata, categories, parsed metadata, version history, latest RED/GREEN comparison, evaluation history) exist in `apps/web`; the list row (type, display status) and detail content are verified by `pnpm test:e2e`, the filters are not covered by a test. No sorting controls; compatibility mapping may be partial.
+- **Implemented (verified by `packages/core/test/artifacts.test.ts`, `packages/database/test/artifacts.test.ts` "creates immutable versions only for new content and preserves user metadata", `packages/runner/test/runner.test.ts` and `pnpm verify:pack`):** artifact type/format enums, path classification and `parseArtifactFile` (`packages/core/src/artifacts.ts`); tables `artifacts`, `artifact_versions`, `artifact_occurrences`, `artifact_categories`, `artifact_benchmark_assignments`; import of the bundled example artifact with categories and benchmark assignment (`importBundledExample`); `listArtifacts` with latest evaluation and categories.
+- **Partially implemented:** identity resolution — bootstrap `importArtifactVersion` (`packages/database/src/repositories/artifacts.ts`) matches an existing artifact **by slug** and upserts the occurrence by `(repository, path)`; the §8.3 rules (occurrence-first, move detection, exact-copy linking, slug suffixing) replace slug matching when sync is implemented. Artifacts list (search `q`, `type` and `category` URL filters) and detail page (original content, metadata, categories, parsed metadata, version history, latest RED/GREEN comparison, evaluation history) exist in `apps/web`; the list row (type, display status), the filters ("artifact filters narrow the list by text, type and category") and detail content are verified by `pnpm test:e2e`. No sorting controls; compatibility mapping may be partial.
 - **Not implemented:** occurrences created from repository sync (no sync exists; bootstrap occurrences come only from the `bundled-examples` repository), identity resolution rules 2–3, editing tags/notes, `archived_at`/description override/compatibility override columns, possible-duplicate hints, hard delete, FTS search, link/unlink.
