@@ -5,7 +5,7 @@ status: draft
 created: 2026-10-14
 updated: 2026-10-15
 category: foundation
-related: [SPEC-001, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-008, SPEC-009, SPEC-011, SPEC-107, SPEC-110, SPEC-112, SPEC-114, SPEC-105]
+related: [SPEC-001, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-008, SPEC-009, SPEC-011, SPEC-107, SPEC-110, SPEC-112, SPEC-114, SPEC-105, SPEC-014]
 ---
 
 # System Architecture
@@ -83,7 +83,7 @@ Rules:
 - `benchmark-engine` never imports `database` or `runner`.
 - `web` imports `benchmark-engine` only through its side-effect-free subpath exports `./definition`, `./load` and `./scoring` (definition validation, `displayStatus`, types) — never the orchestrator — and `agent-adapters` for detection only.
 - Future `model-providers` depends on `core` only; future `git-providers` depends on `core` only; the registry sync service (in `runner` or a future `registry` package) composes them with `database`.
-- Internal packages are "just-in-time" TypeScript packages (`exports` → `src`); `web` transpiles them (`transpilePackages`), the CLI bundles them. Enforcement: lint rule or dependency check in CI ([SPEC-012](2026-10-14-testing-strategy.md)).
+- Internal packages are "just-in-time" TypeScript packages (`exports` → `src`); `web` transpiles them (`transpilePackages`), the CLI bundles them. Enforcement: ESLint `no-restricted-imports` in `eslint.config.mjs`, run by `pnpm lint` locally and in CI ([SPEC-014 §9](2026-10-15-engineering-standards.md#9-enforcement)).
 
 ## 3. Process model (local)
 
@@ -232,5 +232,6 @@ Full design: [SPEC-011](2026-10-14-self-hosting-architecture.md), [ADR-0009](../
 ## Implementation status
 
 - **Implemented (verified by the package test suites — core 36, agent-adapters 8, database 7, benchmark-engine 31, runner 6, cli 7 tests — and `pnpm verify:pack` on 2026-10-14 and 2026-10-15):** package layout of §2 (`apps/cli`, `apps/web`, `packages/{core,database,agent-adapters,benchmark-engine,runner}`; `benchmark-engine` subpath exports `./definition`, `./load`, `./scoring`); process model §3 (CLI supervises runner and `next start` child; coordination only through the `jobs` table); job lifecycle §4.1 with polling acquisition (1 s), heartbeat (5 s, also reads the cancel flag), cancellation, stale (30 s) → `interrupted` recovery and shutdown → `interrupted` (capped at 10 s); runner ids `local-<hostname>-<pid>-<random>`; runner lifecycle events in `<dataDir>/logs/runner.log`; Mock Agent and CLI detection (`claude-code`, `codex`, `cursor`); artifact parsers; four assertion types; `local-process` environment; Host allowlist in `proxy.ts` (403 for foreign hosts, `verify:pack`).
-- **Partially:** dependency-direction enforcement (convention only; no automated check); agent adapter capability names differ from earlier drafts (see §6, `contract.ts`).
+- **Implemented (verified by `pnpm lint` and forbidden-import probes on 2026-10-15):** dependency-direction enforcement — ESLint `no-restricted-imports` rules per package and for `apps/web` ([SPEC-014 §9](2026-10-15-engineering-standards.md#9-enforcement)).
+- **Partially:** agent adapter capability names differ from earlier drafts (see §6, `contract.ts`).
 - **Not implemented:** repository sync flow §4.2; model providers; git providers; real agent execution; docker environment; custom coding harness §7; self-hosted mapping §8; SSE/live updates; stage-level engine progress events (planned — the current contract is the `onAgentRun(record)` callback, §5).
