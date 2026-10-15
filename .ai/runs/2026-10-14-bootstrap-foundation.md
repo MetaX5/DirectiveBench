@@ -105,8 +105,8 @@ workflow itself (it has not run yet), `npx directivebench` from the npm registry
 ## Follow-ups
 
 - Maintainer review of all draft specs and the ADRs marked Proposed (0008, 0009).
-- The om-* skills come from `open-mercato/skills`; confirm their license allows redistribution
-  in this MIT repository.
+- The om-* skills come from `open-mercato/skills`. Resolved on 2026-10-15: the maintainer
+  confirmed they are MIT-licensed.
 - Recommended next task: Milestone 1, first slice — register a local directory/Git repository,
   scan it with the existing artifact parsers, create versions and show them in the registry.
 - Real agent adapters (Milestone 4) need answers to the open questions on HOME isolation vs.
