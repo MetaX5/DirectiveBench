@@ -85,7 +85,8 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 
 ## Index
 
-All specifications were created on 2026-10-14 during the bootstrap and are drafts.
+All specifications are drafts. They were created on 2026-10-14 during the bootstrap, except
+SPEC-014 (2026-10-15).
 `implemented/` and `archive/` are currently empty.
 
 ### Foundation
@@ -105,6 +106,7 @@ All specifications were created on 2026-10-14 during the bootstrap and are draft
 | SPEC-011 | [Self-Hosting Architecture](2026-10-14-self-hosting-architecture.md) | draft |
 | SPEC-012 | [Testing Strategy](2026-10-14-testing-strategy.md) | draft |
 | SPEC-013 | [Implementation Roadmap](2026-10-14-implementation-roadmap.md) | draft |
+| SPEC-014 | [Engineering Standards](2026-10-15-engineering-standards.md) | draft |
 
 ### Features
 

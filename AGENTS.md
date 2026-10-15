@@ -131,6 +131,7 @@ These rules are not optional. A task is not done until the applicable steps are 
 
 Dependency direction: `core ← database`, `core ← agent-adapters ← benchmark-engine`,
 `{core, database, agent-adapters, benchmark-engine} ← runner`, `apps/* ← packages/*`. No cycles.
+ESLint (`pnpm lint`) enforces it, including the web app's restrictions (SPEC-003 §2.1).
 
 ## 6. Commands
 
@@ -152,6 +153,18 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   never disable TLS verification, keep commands argv-only with an environment allowlist.
 - The mock agent must always be labelled as a mock; never present mock results as AI results.
 - Incomplete features must be visibly marked as planned or not implemented.
+- Follow the engineering standards in
+  [`.ai/specs/2026-10-15-engineering-standards.md`](.ai/specs/2026-10-15-engineering-standards.md)
+  (SPEC-014): naming, architecture rules, security minimums, code quality and the review
+  checklist. In short:
+  - Persistence only through `@directivebench/database` repositories; the web app never runs
+    processes or benchmarks. Use the Zod-parsed output, never raw `FormData` or request bodies.
+  - Check-then-act on shared state is one conditional statement or a `withTransaction`.
+  - Safety checks fail closed; untrusted input never reaches a query, command or path
+    unparameterised or uncanonicalised; secrets never reach logs, errors or the UI.
+  - No silently swallowed errors, no unnamed timeouts or limits, no literal `true`/`false`
+    arguments in new APIs, console output only in `apps/cli` and scripts.
+  - No speculative packages, abstractions or options; three similar lines beat a premature helper.
 
 ## 8. Other agents
 
