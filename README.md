@@ -84,10 +84,11 @@ pnpm install
 pnpm dev            # runs the CLI from source: migrations, runner and `next dev`
 pnpm lint
 pnpm typecheck
-pnpm test           # Vitest unit and integration tests (no credentials or paid APIs)
+pnpm test           # Vitest unit and integration tests, 100% coverage required (no credentials or paid APIs)
 pnpm build          # web app + CLI bundle
 pnpm verify:pack    # pack, install and smoke-test the npm tarball
-pnpm test:e2e       # Playwright smoke tests (after pnpm build; needs `playwright install chromium`)
+pnpm test:e2e       # Playwright browser tests of the home page and management paths (after pnpm build;
+                    # needs `playwright install chromium`)
 ```
 
 Repository layout:

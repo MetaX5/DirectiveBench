@@ -3,7 +3,7 @@ id: SPEC-105
 title: Repository Synchronization
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-103, SPEC-104, SPEC-106, SPEC-006, SPEC-007, SPEC-114, SPEC-201, SPEC-202, ADR-0007, ADR-0008]
 ---
@@ -239,6 +239,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented (schema only, verified by `packages/database/test/database.test.ts` migrations):** repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`) exist; the job queue supports only the `benchmark-run` job type.
+- **Implemented (schema only, verified by `packages/database/test/client.test.ts` migrations):** repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`) exist; the job queue supports only the `benchmark-run` job type.
 - **Partially implemented:** none.
 - **Not implemented:** `repository-sync` job type, fetching/cloning, cache, `planSync`/`applySyncPlan`, change detection, deletion handling, `sync_runs`/`sync_run_items` tables, sync UI and CLI `sync` command, dry run.

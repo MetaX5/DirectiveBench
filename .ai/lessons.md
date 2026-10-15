@@ -18,6 +18,8 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-15] **Keep 100% branch coverage deterministic** — comparators over `readdir` order and ordering by random IDs make coverage and tests machine-dependent. → [lessons/2026-10-15-deterministic-full-coverage.md](lessons/2026-10-15-deterministic-full-coverage.md)
+- [2026-10-15] **Reset lifecycle flags before the first `await`** — `LocalRunner.start()` undid a concurrent `stop()`. → [lessons/2026-10-15-reset-lifecycle-flags-before-await.md](lessons/2026-10-15-reset-lifecycle-flags-before-await.md)
 - [2026-10-15] **Use `regex`, not `group` negations, to allow subpaths in `no-restricted-imports`** — gitignore semantics cannot re-include a subpath of an excluded package, and later rule entries replace earlier ones. → [lessons/2026-10-15-eslint-restricted-import-negation.md](lessons/2026-10-15-eslint-restricted-import-negation.md)
 - [2026-10-15] **Check the PR is still open before pushing follow-up commits** — commits pushed to an already merged PR's branch never reach `main`. → [lessons/2026-10-15-check-pr-state-before-pushing.md](lessons/2026-10-15-check-pr-state-before-pushing.md)
 - [2026-10-15] **Restrict Vitest's include when build output contains `*.test.*` files** — `apps/cli/dist/examples` fixture tests were collected after `pnpm build`. → [lessons/2026-10-15-vitest-collects-build-output.md](lessons/2026-10-15-vitest-collects-build-output.md)

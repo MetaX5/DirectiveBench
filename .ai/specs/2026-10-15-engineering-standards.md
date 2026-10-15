@@ -181,6 +181,7 @@ When two principles conflict, prefer the one that keeps the change smaller and m
 | --- | --- |
 | Package dependency direction (§3.1); domain packages free of Next.js/React | ESLint `no-restricted-imports` per package in `eslint.config.mjs` |
 | Web app: no runner, no engine orchestrator, agent adapters for detection only, no Drizzle / `node:sqlite` / `child_process` (§3.2–3.3) | ESLint `no-restricted-imports` for `apps/web` (Playwright tests in `apps/web/e2e/` are exempt because they seed the database) |
+| 100% unit-test coverage of logic (`AGENTS.md` §2 rule 7) | Vitest v8 coverage thresholds in `vitest.shared.ts`, enforced by `pnpm test` and the CI `unit` job ([SPEC-012 §3](2026-10-14-testing-strategy.md#3-per-package-coverage)) |
 | No `any` (§6.1) | ESLint `@typescript-eslint/no-explicit-any` |
 | Console only in the CLI and scripts (§6.7) | ESLint `no-console` for `packages/*/src` and `apps/web` |
 | Formatting | Prettier (`pnpm format:check` in CI) |

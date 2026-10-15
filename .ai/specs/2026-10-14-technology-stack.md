@@ -45,7 +45,7 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 | CLI parsing | commander | 15 | Mature, small, typed subcommands. |
 | YAML | yaml | 2.9 | YAML 1.2 parser for benchmark definitions and frontmatter. |
 | Unit / integration tests | Vitest | 5.0 | Fast TS-native runner across packages. |
-| E2E tests | Playwright | 1.64 | Browser smoke test against the real `serve` process ([SPEC-012](2026-10-14-testing-strategy.md)); `apps/web/e2e/smoke.spec.ts`, 7 tests passing. |
+| E2E tests | Playwright | 1.64 | Browser smoke test against the real `serve` process ([SPEC-012](2026-10-14-testing-strategy.md)); `apps/web/e2e/home.spec.ts` and `apps/web/e2e/management.spec.ts`, 17 tests passing on 2026-10-15. |
 | Example fixture tests | `node --test` | Node built-in | Hidden verification tests in examples need no extra dependency in the workspace. |
 
 ## 3. Constraints and rationale details
@@ -81,6 +81,6 @@ The CLI ships the prebuilt Next.js output in `dist/web` and spawns `next start` 
 
 - **Implemented (verified on 2026-10-14 and 2026-10-15 by `pnpm lint && pnpm typecheck && pnpm test`, `pnpm build` and `pnpm verify:pack`, Node 24.21, Linux):** the toolchain and libraries of §1–§2 at the listed versions (pnpm workspace `apps/*`, `packages/*`; Turborepo tasks; strict `tsconfig.base.json`; ESLint 10 flat config without `eslint-plugin-react`); `node:sqlite` + Drizzle `sqlite-proxy` client with WAL, `busy_timeout`, foreign keys and transactional migrations (`packages/database/src/client.ts`); `engines.node: ">=22.16.0"` in the root and CLI `package.json`; tsup bundle with `removeNodeProtocol: false`; `next start` child with `NEXT_TELEMETRY_DISABLED=1`.
 - **Implemented — dependency policy §4.3 (verified on 2026-10-15 in the packed tarball by `pnpm verify:pack`):** `@directivebench/*`, `commander`, `drizzle-orm`, `yaml` and `zod` are bundled into `dist/cli.js` (with the `createRequire` banner); the published package's runtime `dependencies` are only `next`, `react`, `react-dom`.
-- **Implemented (verified by `pnpm test:e2e`, 7/7 passing against the built CLI):** Playwright 1.64 smoke test (`apps/web/e2e/smoke.spec.ts`).
+- **Implemented (verified by `pnpm test:e2e`, 17/17 passing against the built CLI on 2026-10-15):** Playwright 1.64 end-to-end tests (`apps/web/e2e/home.spec.ts`, `apps/web/e2e/management.spec.ts`).
 - **Implemented — CI:** the workflow (`.github/workflows/ci.yml`, Node 24 on `ubuntu-latest`: install, `pnpm audit --prod`, format check, lint, typecheck, test, build, `verify:pack`, Playwright) ran green on PR #1 on 2026-10-14 (before the audit step was added). §4.7 `pnpm audit --prod` is a CI step since 2026-10-15 and was clean when run locally that day; it has not yet run in CI.
 - **Not implemented / unverified:** CI on Node 22, Windows and macOS; dependency-direction checks in CI; suppression of the `node:sqlite` experimental warning; JSON Schema export for the benchmark format.
