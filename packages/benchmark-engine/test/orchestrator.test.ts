@@ -20,7 +20,7 @@ import {
   type AgentRunRecord,
   type RunBenchmarkInput,
 } from '../src/orchestrator';
-import { nodeScript, useTempDirs } from './helpers';
+import { collectGarbage, nodeScript, useTempDirs } from './helpers';
 
 const tmp = useTempDirs();
 
@@ -307,7 +307,9 @@ describe('runBenchmark with a nondeterministic adapter', () => {
       executionStatus: 'timeout',
       error: 'Agent did not stop after timeout',
     });
-    // The agent still received an abort signal that fired at the timeout.
+    // The agent still received an abort signal that fired at the timeout, and it stays aborted
+    // after a collection: an adapter that polls `signal.aborted` must not lose the timeout.
+    await collectGarbage();
     expect(adapter.requests[0]?.signal.aborted).toBe(true);
     expect(outcome.agentRuns[1]?.executionStatus).toBe('completed');
   }, 20_000);
@@ -443,6 +445,37 @@ describe('cancellation after the agent started', () => {
       error: 'Cancelled during assertions',
     });
   }, 20_000);
+});
+
+describe('cancellation before the agent starts', () => {
+  it('does not start the agent when cancelled while the artifact was installed', async () => {
+    const input = await suite();
+    const controller = new AbortController();
+    const adapter = new FakeAdapter();
+    const install = adapter.install;
+    adapter.install = async (workspaceDir) => {
+      controller.abort();
+      return install(workspaceDir);
+    };
+    const records: AgentRunRecord[] = [];
+    await expect(
+      runBenchmark({
+        ...input,
+        adapter,
+        signal: controller.signal,
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }),
+    ).rejects.toThrow(BenchmarkCancelledError);
+    expect(records.map((r) => [r.variant, r.executionStatus, r.error])).toEqual([
+      ['baseline', 'completed', null],
+      ['candidate', 'cancelled', 'Cancelled'],
+    ]);
+    // Only the baseline reached the agent; it finished before the cancellation.
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]?.signal.aborted).toBe(false);
+  });
 });
 
 describe('assertRunnable', () => {
