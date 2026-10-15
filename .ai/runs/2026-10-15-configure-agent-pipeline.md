@@ -60,11 +60,13 @@ All choices were confirmed by the user in the setup interview:
 
 ## Problems and deviations
 
-- Local `gh` is 2.46.0, below the tracker descriptor's minimum of 2.82.1. Label writes use REST
-  and worked; `gh pr view` / `gh issue view` without `--json` may fail until `gh` is upgraded.
-- The untracked `.ai/docs/` directory (holding `2026-09-01-engineering-standards.md`, the
-  external source document of SPEC-014) was found empty at 12:37 during the run. No command in
-  this run touched that path; not investigated further.
+- Local `gh` was 2.46.0, below the tracker descriptor's minimum of 2.82.1. Label writes use REST
+  and worked. At the user's request, `gh` 2.102.0 was then installed to `~/.local/bin`, from the
+  official release tarball with its SHA-256 checked against the release checksums. The distro
+  package needs sudo, so it is still at 2.46.0 in `/usr/bin` but is shadowed on `PATH`.
+  `gh pr view 6` without `--json` works with the new binary.
+- The untracked `.ai/docs/` directory was found empty during the run. The user confirmed they
+  deleted the file themselves.
 
 ## Lessons recorded
 
@@ -72,8 +74,10 @@ None. No non-obvious bug or correction.
 
 ## Follow-ups
 
-- Maintainer: decide the version-bump policy for `directivebench` (TODO in
-  `BACKWARD_COMPATIBILITY.md`), and review the proposed one-release deprecation window for CLI
-  names.
+- At the user's request, `BACKWARD_COMPATIBILITY.md` now carries a proposed versioning policy
+  (semver; breaking changes bump the minor while `0.y`; persisted data is never broken) and a
+  deprecation window for CLI names (one minor while `0.y`, until the next major after `1.0`). It
+  takes effect when this PR is merged. Record it as an ADR if it should carry its reasoning
+  separately.
 - If SPEC-014 moves to `.ai/specs/implemented/`, update `reviewChecklist` in the config.
-- Upgrade `gh` to ≥ 2.82.1.
+- Optionally remove the distro `gh` 2.46.0 (`sudo apt remove gh`) so nothing picks it up by absolute path.

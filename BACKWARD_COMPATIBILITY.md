@@ -8,12 +8,33 @@ path as a blocker; implementation skills warn before making one.
 **Release status:** the only published package is the `directivebench` CLI (`apps/cli`,
 version 0.1.0), and nothing has been published to npm yet (SPEC-009 §12). Users can still have
 data directories created from source checkouts, so the persisted-data rules (§2–§5) apply
-already. TODO(maintainer): decide the version-bump policy (semver for `directivebench` from the
-first npm release?) and record it here.
+already.
+
+## Versioning policy
+
+`directivebench` follows [Semantic Versioning](https://semver.org/). The workspace packages are
+private and unversioned for compatibility purposes.
+
+| Change | While `0.y.z` | From `1.0.0` |
+| --- | --- | --- |
+| Breaking change to a protected surface (§1, §6) | minor (`0.1 → 0.2`) | major |
+| New command, option, field or format feature | patch | minor |
+| Bug fix, internal change | patch | patch |
+| Breaking change to persisted data (§2–§5) | never — migrate forward instead, at any version | never — migrate forward instead |
+
+Persisted data is exempt from the usual pre-1.0 freedom on purpose: a `0.y` bump can rename a
+flag, but it must never strand a user's data directory, config or benchmark suites. `1.0.0` is
+cut deliberately by the maintainer once the CLI surface (§1) and benchmark format v1 (§3) are
+considered stable.
+
+**Deprecation window.** A removed or renamed CLI command, option or env var stays as an alias
+that prints a deprecation warning naming its replacement: for at least one minor release while
+`0.y.z` (deprecated in `0.2`, removable in `0.3`), and until the next major from `1.0.0`. Exit
+code numbers are never reused, and `doctor --json` fields are only removed under the same window.
 
 A breaking change always ships with, in the same PR: the owning spec updated, a migration note in
-the PR body, and a test proving the old input still works or fails with a clear, actionable
-message.
+the PR body (carried into `CHANGELOG.md` at release by `om-auto-update-changelog`), and a test
+proving the old input still works or fails with a clear, actionable message.
 
 ## 1. CLI — `directivebench` (owner: [SPEC-009](.ai/specs/2026-10-14-cli-architecture.md))
 
@@ -30,9 +51,9 @@ flag > env > `config.json` > default; supported Node range (`>=22.16.0`).
   idempotent / read-only.
 - **Not breaking:** new commands, options, env vars, exit codes, or optional `doctor --json`
   fields; human-readable output wording.
-- **Path:** keep the old name as a deprecated alias that prints a warning for at least one
-  release; update SPEC-009 §2/§3/§9 and `runtime.ts` together (SPEC-009 §9 requires the exit-code
-  table and the code to match); cover both names in `apps/cli/test/`.
+- **Path:** keep the old name as a deprecated alias for the deprecation window above; update
+  SPEC-009 §2/§3/§9 and `runtime.ts` together (SPEC-009 §9 requires the exit-code table and the
+  code to match); cover both names in `apps/cli/test/`.
 
 ## 2. `config.json` (owner: [SPEC-115](.ai/specs/2026-10-14-settings-and-configuration.md))
 
