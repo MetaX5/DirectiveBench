@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createExecutableAdapters } from '@directivebench/agent-adapters';
 import { isLoopbackHost } from '@directivebench/core';
 import { LocalRunner } from '@directivebench/runner';
+import { createRunnerLogger } from './logger';
 import { CliError, ExitCode, resolveAssets } from './runtime';
 import { initialize, resolveServerOptions } from './setup';
 
@@ -96,16 +97,13 @@ export async function serve(flags: ServeFlags): Promise<number> {
     );
   }
 
-  const runner = new LocalRunner({
+  const runner: LocalRunner = new LocalRunner({
     handle,
     fixtureStore: layout.fixtures,
     adapters: createExecutableAdapters(),
     concurrency: config.runner.concurrency,
     keepWorkspaces: config.runner.keepWorkspaces,
-    logger: {
-      info: (m) => console.log(`[runner] ${m}`),
-      error: (m) => console.error(`[runner] ${m}`),
-    },
+    logger: createRunnerLogger(join(layout.logs, 'runner.log'), (): string => runner.runnerId),
   });
   await runner.start();
 
@@ -163,7 +161,7 @@ export async function serve(flags: ServeFlags): Promise<number> {
 
   console.log(`\nDirectiveBench is running at ${url}`);
   console.log(`  data directory: ${layout.root}`);
-  console.log(`  web log:        ${join(layout.logs, 'web.log')}`);
+  console.log(`  logs:           ${layout.logs} (web.log, runner.log)`);
   if (!isLoopbackHost(host)) {
     console.warn(
       '  WARNING: listening on a non-loopback address. This instance has no authentication.',

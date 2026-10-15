@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SCORE_EPSILON,
   aggregate,
   confidenceFor,
   displayStatus,
@@ -66,8 +67,10 @@ describe('aggregate', () => {
       meanScore: 0.75,
       stdDev: 0.25,
       passRate: 0.5,
-      errorRate: 0.333333,
     });
+    expect(
+      aggregate([run('baseline', 1), run('baseline', null), run('baseline', null)]).errorRate,
+    ).toBeCloseTo(2 / 3, 12);
   });
 });
 
@@ -133,5 +136,64 @@ describe('confidence and display status', () => {
     expect(displayStatus('improved', 'passed')).toBe('passed');
     expect(displayStatus('unchanged', 'failed')).toBe('failed');
     expect(displayStatus('unstable', 'passed')).toBe('unstable');
+  });
+});
+
+describe('FR-111 refinements', () => {
+  it('compares thresholds with an epsilon and keeps full precision', () => {
+    const third = { passed: true, score: 1, weight: 1, required: false };
+    const miss = { passed: false, score: 0, weight: 2, required: false };
+    const result = scoreRun([third, miss], 1 / 3);
+    expect(result.score).toBe(1 / 3);
+    expect(result.passed).toBe(true);
+    expect(scoreRun([third, miss], 1 / 3 + 10 * SCORE_EPSILON).passed).toBe(false);
+  });
+
+  it('nulls suite means and reports error when a case has no valid runs (FR-111-27)', () => {
+    const s = summarize(
+      [
+        run('baseline', 0.5),
+        run('candidate', 1),
+        run('baseline', 0.5, { caseId: 'd' }),
+        run('candidate', null, { caseId: 'd' }),
+      ],
+      { ...options, caseIds: ['c', 'd'] },
+    );
+    expect(s.candidate.meanScore).toBeNull();
+    expect(s.verdict).toBe('error');
+    expect(s.reasons).toContain('case d: no valid candidate runs');
+  });
+
+  it('explains verdicts with reasons', () => {
+    expect(summarize([run('baseline', 0.5), run('candidate', 1)], options).reasons[0]).toMatch(
+      /delta \+0\.5 is at or above 0\.05/,
+    );
+    const notComparable = summarize([run('baseline', 0.5), run('candidate', 1)], {
+      ...options,
+      comparable: false,
+      comparabilityIssues: ['agent version changed during the run (1 → 2)'],
+    });
+    expect(notComparable.reasons).toEqual(['agent version changed during the run (1 → 2)']);
+  });
+
+  it('flags nondeterministic single repetitions as not conclusive (FR-111-42)', () => {
+    const single = { ...options, repetitions: 1 };
+    expect(summarize([run('baseline', 0.5), run('candidate', 1)], single)).toMatchObject({
+      nondeterministic: true,
+      conclusive: false,
+    });
+    expect(
+      summarize([run('baseline', 0.5), run('candidate', 1)], {
+        ...single,
+        deterministicAgent: true,
+      }),
+    ).toMatchObject({ nondeterministic: false, conclusive: true });
+    expect(
+      summarize([run('baseline', 0.5), run('candidate', 1)], {
+        ...single,
+        deterministicAgent: true,
+        nondeterministicAssertions: true,
+      }).conclusive,
+    ).toBe(false);
   });
 });

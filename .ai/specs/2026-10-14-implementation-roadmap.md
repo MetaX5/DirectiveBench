@@ -3,7 +3,7 @@ id: SPEC-013
 title: Implementation Roadmap
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-001, SPEC-002, SPEC-003, SPEC-009, SPEC-011, SPEC-012, SPEC-101, SPEC-102, SPEC-104, SPEC-105, SPEC-107, SPEC-109, SPEC-111, SPEC-112, SPEC-114, SPEC-201, SPEC-202, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-211, SPEC-212]
 ---
@@ -31,7 +31,7 @@ flowchart LR
 
 | Milestone | Priority | Status |
 | --- | --- | --- |
-| M0 Bootstrap | P0 | In progress — deliverables done; CI workflow added but not yet run (§3 M0) |
+| M0 Bootstrap | P0 | In progress — all deliverables done (CI ran green on PR #1); UI cancellation and crash-restart not yet verified end to end (§3 M0, §5) |
 | M1 Artifact Registry | P0 | Not started (recommended next) |
 | M2 Git Integrations | P1 | Not started |
 | M3 Benchmark Engine | P0 | Not started beyond the bootstrap subset in M0 |
@@ -55,27 +55,27 @@ Applies to every milestone:
 
 ### M0 — Bootstrap
 
-**Status:** in progress (deliverable status below, as of 2026-10-14).
+**Status:** in progress (deliverable status below, as of 2026-10-15).
 **Priority:** P0. **Dependencies:** none.
 **Deliverables:** pnpm + Turborepo monorepo ([ADR-0003](../decisions/0003-monorepo-architecture.md)); packages `core`, `database`, `agent-adapters`, `benchmark-engine`, `runner`; apps `cli`, `web`; SQLite schema + migrations; CLI `serve`/`init`/`doctor`/`demo` ([SPEC-009](2026-10-14-cli-architecture.md)); runner with heartbeat, cancellation and crash recovery; Mock Agent; benchmark format v1 with `command`, `file-exists`, `file-contains`, `changed-files` assertions; RED/GREEN + scoring; web UI sections per [SPEC-116](2026-10-14-dashboard-and-navigation.md); agent CLI detection; examples; specs and ADRs; Playwright smoke test; CI workflow.
 
-| Deliverable | Status (2026-10-14) | Evidence |
+| Deliverable | Status (2026-10-15) | Evidence |
 | --- | --- | --- |
 | pnpm 12 + Turborepo 2.11 monorepo | Done | `pnpm lint && pnpm typecheck && pnpm test`, `pnpm build` |
-| Packages `core`, `database`, `agent-adapters`, `benchmark-engine`, `runner`; apps `cli`, `web` | Done | Package test suites (core 36, database 7, agent-adapters 8, benchmark-engine 21, runner 4, cli 5 — all passing) |
+| Packages `core`, `database`, `agent-adapters`, `benchmark-engine`, `runner`; apps `cli`, `web` | Done | Package test suites (core 36, database 7, agent-adapters 8, benchmark-engine 31, runner 6, cli 7 — 95 tests, all passing on 2026-10-15) |
 | SQLite schema + migrations | Done | `packages/database/test/database.test.ts` |
 | CLI `serve`/`init`/`doctor`/`demo` (+ `--help`, `--version`, exit codes) | Done | `apps/cli/test/cli.test.ts`, `pnpm verify:pack` |
 | Runner with heartbeat, cancellation, crash recovery | Done | `packages/runner/test/runner.test.ts`, `database.test.ts` |
 | Mock Agent | Done | `packages/agent-adapters/test/mock.test.ts` |
 | Benchmark format v1 with four assertion types | Done | `benchmark-engine` definition tests (all repository examples validate) |
 | RED/GREEN + scoring | Done | `engine.test.ts`, `scoring.test.ts`; demo verdict `improved` |
-| Web UI sections per [SPEC-116](2026-10-14-dashboard-and-navigation.md) | Done | `pnpm test:e2e` (dashboard, artifacts, run detail, Run → completed, planned page, theme toggle), `verify:pack` (`/results`) |
+| Web UI sections per [SPEC-116](2026-10-14-dashboard-and-navigation.md) | Done | `pnpm test:e2e` (dashboard, artifacts, run detail with verdict reasons, Run → completed, server-side approval re-check, planned page, theme toggle), `verify:pack` (`/results`) |
 | Agent CLI detection (`claude-code`, `codex`, `cursor`) | Done (detection only) | `mock.test.ts` "detectCliAgent", `doctor` |
 | Examples (`mock-input-validation` executable; `nextjs-component-quality`, `wordpress-ajax-security` specification-only) | Done | `engine.test.ts` "validates every example definition" |
 | Specs and ADRs | Done (all `draft`) | `.ai/specs/`, `.ai/decisions/` |
-| npm packaging + `pnpm verify:pack` | Done | `verify:pack` passed on 2026-10-14; nothing published (name `directivebench` unclaimed) |
-| Playwright smoke test | Done | `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 6/6 passing against the built CLI) |
-| CI workflow | Pending (added, never run) | `.github/workflows/ci.yml` exists (Node 24, `ubuntu-latest`: format, lint, typecheck, test, build, `verify:pack`, `test:e2e`); no CI run recorded |
+| npm packaging + `pnpm verify:pack` | Done | `verify:pack` passed on 2026-10-14 and 2026-10-15 (runtime dependencies only `next`, `react`, `react-dom`); nothing published (name `directivebench` unclaimed) |
+| Playwright smoke test | Done | `pnpm test:e2e` (`apps/web/e2e/smoke.spec.ts`, 7/7 passing against the built CLI) |
+| CI workflow | Done | `.github/workflows/ci.yml` (Node 24, `ubuntu-latest`: install, `pnpm audit --prod`, format, lint, typecheck, test, build, `verify:pack`, `test:e2e`) ran green on PR #1 on 2026-10-14; the audit step was added on 2026-10-15 and has not run in CI yet |
 
 **Acceptance criteria:**
 - `npx <packed tarball> demo` on a clean machine with Node 24 imports the bundled example and prints a RED/GREEN summary with verdict `improved`, labelled as mock, exit code 0.
@@ -182,5 +182,5 @@ This slice is local-only (no network, no secrets), builds directly on M0 code, a
 
 ## 5. Implementation status
 
-- **M0:** in progress. Verified on 2026-10-14 (Node 24.21, Linux): the packed tarball, installed with npm into an empty project, runs `demo` (verdict `improved`, labelled as mock, exit 0) and `serve`; `GET /api/health` returns 200 with `database: ready`; a foreign `Host` header is rejected with 403; `/results` lists the run; `SIGTERM` exits cleanly; `pnpm verify:pack` passes. "Run" from the benchmark page enqueues a job that the runner completes (`pnpm test:e2e`). Runner-level cancellation, shutdown → `interrupted` and stale-job recovery are verified by `runner.test.ts`. Not yet verified end to end: cancelling a running job from the UI, killing the CLI mid-run and restarting, the first CI run. M0 is not marked complete until these are verified.
+- **M0:** in progress. Verified on 2026-10-14 (Node 24.21, Linux): the packed tarball, installed with npm into an empty project, runs `demo` (verdict `improved`, labelled as mock, exit 0) and `serve`; `GET /api/health` returns 200 with `database: ready`; a foreign `Host` header is rejected with 403; `/results` lists the run; `SIGTERM` exits cleanly; `pnpm verify:pack` passes. "Run" from the benchmark page enqueues a job that the runner completes (`pnpm test:e2e`). Runner-level cancellation, shutdown → `interrupted` and stale-job recovery are verified by `runner.test.ts`. The CI workflow ran green on PR #1 on 2026-10-14. Verified on 2026-10-15: 95 unit/integration tests, `pnpm build && pnpm verify:pack`, `pnpm test:e2e` 7/7. Not yet verified end to end: cancelling a running job from the UI, killing the CLI mid-run and restarting. M0 is not marked complete until these are verified.
 - **M1–M8:** not implemented. Bootstrap contains only preparatory pieces (agent CLI detection, format v1, mock-only execution, local-process environment).

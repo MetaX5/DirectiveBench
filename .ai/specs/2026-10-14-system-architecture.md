@@ -3,7 +3,7 @@ id: SPEC-003
 title: System Architecture
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-001, SPEC-004, SPEC-005, SPEC-006, SPEC-007, SPEC-008, SPEC-009, SPEC-011, SPEC-107, SPEC-110, SPEC-112, SPEC-114, SPEC-105]
 ---
@@ -175,7 +175,7 @@ Spec: [SPEC-105](2026-10-14-repository-synchronization.md).
 - **Events:** the engine reports progress through a single `onAgentRun(record)` callback per completed agent run and returns the scored outcome at the end; the runner persists both. A richer typed event set (`runStarted`, `agentRunStarted`, `assertionEvaluated`, `warning`, …) is planned. The UI reads persisted state (Executions and run detail pages refresh every 2 s while jobs run; SSE optional later).
 - **Errors:** engine distinguishes `agent-error`, `timeout`, `cancelled`, `infrastructure-error` per agent run; job `failed` is reserved for failures outside a single agent run.
 - **Configuration:** `config.json` (Zod) with CLI flags and env vars taking precedence ([SPEC-115](2026-10-14-settings-and-configuration.md)).
-- **Logging:** the web child's output is appended to `<dataDir>/logs/web.log`; CLI and runner messages go to the terminal. Captured benchmark command output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)); structured log files are planned.
+- **Logging:** the web child's output is appended to `<dataDir>/logs/web.log`; runner lifecycle events are appended as redacted JSON lines to `<dataDir>/logs/runner.log` and printed to stderr ([SPEC-114](2026-10-14-runner-management.md) FR-114-15); other CLI messages go to the terminal. Captured benchmark command output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)).
 
 ## 6. Extension points
 
@@ -231,6 +231,6 @@ Full design: [SPEC-011](2026-10-14-self-hosting-architecture.md), [ADR-0009](../
 
 ## Implementation status
 
-- **Implemented (verified by the package test suites — core 36, agent-adapters 8, database 7, benchmark-engine 21, runner 4, cli 5 tests — and `pnpm verify:pack` on 2026-10-14):** package layout of §2 (`apps/cli`, `apps/web`, `packages/{core,database,agent-adapters,benchmark-engine,runner}`; `benchmark-engine` subpath exports `./definition`, `./load`, `./scoring`); process model §3 (CLI supervises runner and `next start` child; coordination only through the `jobs` table); job lifecycle §4.1 with polling acquisition (1 s), heartbeat (5 s, also reads the cancel flag), cancellation, stale (30 s) → `interrupted` recovery and shutdown → `interrupted`; Mock Agent and CLI detection (`claude-code`, `codex`, `cursor`); artifact parsers; four assertion types; `local-process` environment; Host allowlist in `proxy.ts` (403 for foreign hosts, `verify:pack`).
-- **Partially:** dependency-direction enforcement (convention only; no automated check); engine events reduced to the `onAgentRun` callback (§5); agent adapter capability names differ from earlier drafts (see §6, `contract.ts`).
-- **Not implemented:** repository sync flow §4.2; model providers; git providers; real agent execution; docker environment; custom coding harness §7; self-hosted mapping §8; SSE/live updates; structured log files.
+- **Implemented (verified by the package test suites — core 36, agent-adapters 8, database 7, benchmark-engine 31, runner 6, cli 7 tests — and `pnpm verify:pack` on 2026-10-14 and 2026-10-15):** package layout of §2 (`apps/cli`, `apps/web`, `packages/{core,database,agent-adapters,benchmark-engine,runner}`; `benchmark-engine` subpath exports `./definition`, `./load`, `./scoring`); process model §3 (CLI supervises runner and `next start` child; coordination only through the `jobs` table); job lifecycle §4.1 with polling acquisition (1 s), heartbeat (5 s, also reads the cancel flag), cancellation, stale (30 s) → `interrupted` recovery and shutdown → `interrupted` (capped at 10 s); runner ids `local-<hostname>-<pid>-<random>`; runner lifecycle events in `<dataDir>/logs/runner.log`; Mock Agent and CLI detection (`claude-code`, `codex`, `cursor`); artifact parsers; four assertion types; `local-process` environment; Host allowlist in `proxy.ts` (403 for foreign hosts, `verify:pack`).
+- **Partially:** dependency-direction enforcement (convention only; no automated check); agent adapter capability names differ from earlier drafts (see §6, `contract.ts`).
+- **Not implemented:** repository sync flow §4.2; model providers; git providers; real agent execution; docker environment; custom coding harness §7; self-hosted mapping §8; SSE/live updates; stage-level engine progress events (planned — the current contract is the `onAgentRun(record)` callback, §5).

@@ -105,6 +105,9 @@ These rules are not optional. A task is not done until the applicable steps are 
 ## 4. Git and GitHub workflow
 
 - Never commit directly to `main`. Create a branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`).
+- Before adding commits to an existing branch, check its PR is still open
+  (`gh pr view --json state,mergedAt`). Work for a merged or closed PR goes on a new branch from
+  the current `main` with a new PR; never rewrite a merged PR's description.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) with a scope where useful,
   e.g. `feat(benchmark-engine): …`, `fix(cli): …`, `docs(specs): …`. Make small, logical commits.
 - Use the GitHub CLI (`gh`) for pull requests and issues: `gh pr create`, `gh pr view`,

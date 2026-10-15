@@ -3,7 +3,7 @@ id: SPEC-005
 title: Domain Model
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-001, SPEC-003, SPEC-006, SPEC-101, SPEC-103, SPEC-104, SPEC-106, SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-114]
 ---
@@ -135,7 +135,7 @@ stateDiagram-v2
 ## 7. Invariants
 
 1. **Immutability.** ArtifactVersion, BenchmarkSuiteVersion and FixtureVersion are never updated (except the explicit approval transition on a suite version) or deleted while referenced. New content ⇒ new version.
-2. **Exact references.** Every BenchmarkRun references exactly one ArtifactVersion, one BenchmarkSuiteVersion, a snapshot AgentConfiguration, and the fixture hashes used; every AgentRun records variant, repetition and environment metadata (adapter version, Node version, platform, environment kind, `sandboxed`).
+2. **Exact references.** Every BenchmarkRun references exactly one ArtifactVersion, one BenchmarkSuiteVersion, a snapshot AgentConfiguration, the fixture hashes used and its environment metadata (adapter version, Node version, platform, environment kind, `sandboxed`). Environment metadata is recorded once per BenchmarkRun because it is identical for all of its AgentRuns by construction (one runner process, one adapter detection, one suite version); every AgentRun records variant, repetition and the fixture hash it started from (`fixtureVersionId`).
 3. **Definition ≠ execution.** Definition entities hold no results; execution entities hold no editable definition data. Deleting or editing a definition never alters past results.
 4. **Comparability.** `comparabilityKey = sha256(canonicalJson({ cases, scoring, execution, fixtures, adapterId, adapterVersion }))` — the definition content that drives execution (prompts, assertions, scoring thresholds, agent, model config, environment, limits, repetitions), fixture and overlay hashes, and adapter id + version ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43). This subsumes the suite version; the artifact version is excluded. Aggregation, ranking and version comparison operate only within one key. No global cross-suite ranking.
 5. **RED/GREEN symmetry.** Baseline and candidate share fixture hash, prompt, adapter + version, model config and limits; only the installed artifact differs. Uncontrolled differences are recorded as warnings ([SPEC-112](2026-10-14-red-green-evaluation.md)).
@@ -149,5 +149,5 @@ stateDiagram-v2
 - **Implemented in bootstrap (verified in code 2026-10-14):** `ArtifactType`, `ArtifactFormat`, artifact path classification/parsing, `ArtifactFile`/`ArtifactBundle`, `ModelSelection`, `PREDEFINED_CATEGORIES`, manifest hashing and canonical JSON (`packages/core/src`).
 - **Implemented in schema (verified `packages/database/src/schema.ts` 2026-10-14):** persistence shapes for Repository, Artifact (incl. JSON tags, notes), ArtifactOccurrence, ArtifactVersion, Category, artifact↔category and artifact↔suite assignments, FixtureVersion, BenchmarkSuite(Version), Job, BenchmarkRun, AgentRun, AssertionResult.
 - **Implemented (verified by `packages/database/test/database.test.ts`, `packages/runner/test/runner.test.ts`, `packages/benchmark-engine/test/*.test.ts`):** job state machine (§6) in `@directivebench/database` and `@directivebench/runner` (atomic acquisition, cancel pending/running, stale-heartbeat and shutdown → `interrupted`); RED/GREEN with the Mock Agent; scoring and comparability key computation.
-- **Deviation:** environment metadata (invariant 2) is recorded once per BenchmarkRun (`benchmark_runs.summary.environment`; the `environment` column holds only `{ kind }`), not per AgentRun.
+- **Implemented (invariant 2):** environment metadata is recorded once per BenchmarkRun (`benchmark_runs.summary.environment`; the `environment` column holds only `{ kind }`) and the fixture hash per AgentRun (`agent_runs.fixture_version_id`); the post-run equivalence check compares each AgentRun's fixture hash with the recorded snapshot ([SPEC-112](2026-10-14-red-green-evaluation.md) FR-112-08).
 - **Not implemented:** Repository sync semantics, normalized Tag entity, ProviderConnection, Model discovery, `authMode` other than `none`, LLM-judge provenance, docker ExecutionEnvironment.

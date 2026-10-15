@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { chmodSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { configSchema } from '@directivebench/core';
+import { doctorCommand } from '../src/commands';
 import { CliError, ExitCode, checkNodeVersion, resolveAssets } from '../src/runtime';
 import { resolveServerOptions } from '../src/setup';
 
@@ -47,4 +51,43 @@ describe('runtime checks', () => {
     expect(assets.migrationsDir).toMatch(/packages\/database\/migrations$/);
     expect(assets.nextBin).toMatch(/next\/dist\/bin\/next$/);
   });
+});
+
+describe('doctor', () => {
+  async function runDoctor(dataDir: string) {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const code = await doctorCommand({ dataDir, json: true });
+      const output = JSON.parse(String(log.mock.calls.at(-1)?.[0])) as {
+        checks: { name: string; status: string; hint?: string }[];
+      };
+      return { code, checks: output.checks };
+    } finally {
+      log.mockRestore();
+    }
+  }
+
+  it('warns with a hint when the data directory does not exist yet', async () => {
+    const { code, checks } = await runDoctor(
+      join(mkdtempSync(join(tmpdir(), 'db-doctor-')), 'new'),
+    );
+    expect(code).toBe(ExitCode.Ok);
+    expect(checks.find((c) => c.name === 'data-dir')).toMatchObject({
+      status: 'warn',
+      hint: expect.stringContaining('directivebench init'),
+    });
+    expect(checks.filter((c) => c.status !== 'ok').every((c) => c.hint)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'fails when the data directory is not writable',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'db-doctor-ro-'));
+      chmodSync(dir, 0o500);
+      const { code, checks } = await runDoctor(dir);
+      expect(code).toBe(ExitCode.CheckFailed);
+      expect(checks.find((c) => c.name === 'data-dir')?.status).toBe('fail');
+      chmodSync(dir, 0o700);
+    },
+  );
 });

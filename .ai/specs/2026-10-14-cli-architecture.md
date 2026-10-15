@@ -3,7 +3,7 @@ id: SPEC-009
 title: CLI Architecture
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-010, SPEC-012, SPEC-114, SPEC-115, ADR-0001, ADR-0004, ADR-0007]
 ---
@@ -14,7 +14,7 @@ related: [SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-010, SPEC-012, SPEC-114, 
 
 The `directivebench` npm package (`apps/cli`): commands, options, environment variables, exit codes, process lifecycle and packaging. Installation and first-run experience from the user's point of view is in [SPEC-010](2026-10-14-local-installation.md); distribution rationale in [ADR-0004](../decisions/0004-native-cli-distribution.md).
 
-`apps/cli` is the **only publishable package**. It is built with tsup, which bundles the internal workspace packages (`@directivebench/*`) into `dist/cli.js`. The prebuilt Next.js app is shipped alongside it.
+`apps/cli` is the **only publishable package**. It is built with tsup, which bundles the internal workspace packages (`@directivebench/*`) and the pure-JS libraries (`commander`, `drizzle-orm`, `yaml`, `zod`) into `dist/cli.js`; only `next`, `react` and `react-dom` remain runtime dependencies ([SPEC-004](2026-10-14-technology-stack.md) dependency policy). The prebuilt Next.js app is shipped alongside it.
 
 ## 2. Commands
 
@@ -45,7 +45,7 @@ Future commands must not be registered as stubs that pretend to work; until impl
 | `--no-open` | — | open | serve | Do not open a browser. |
 | `--allow-network-access` | — | off | serve | Permits non-loopback `--host`; prints an "unauthenticated instance" warning ([SPEC-007](2026-10-14-security-and-privacy.md)). |
 | `--dev` | — | off | `serve` subcommand | Runs `next dev` instead of `next start`; only available from a source checkout (usage error otherwise). Used by `pnpm dev`. |
-| `--json` | — | off | doctor | Machine-readable output (`{ "checks": [{ name, status, detail }] }`). |
+| `--json` | — | off | doctor | Machine-readable output (`{ "checks": [{ name, status, detail, hint? }] }`; `hint` is present for every non-`ok` check). |
 
 Precedence: command-line option > environment variable > `config.json` > built-in default. All values are validated (Zod) before any side effect. `--data-dir` is a global option; serve options may be given with or without the `serve` subcommand.
 
@@ -83,10 +83,10 @@ The CLI process is the supervisor: it owns the runner and the web child. The web
 
 ## 6. Process supervision and shutdown
 
-- The web server runs as a child process (`node <next>/dist/bin/next start <dist/web>`). Its stdout and stderr are appended to `<dataDir>/logs/web.log`; stderr is also echoed to the CLI's stderr (stdout only with `--dev`).
+- The web server runs as a child process (`node <next>/dist/bin/next start <dist/web>`). Its stdout and stderr are appended to `<dataDir>/logs/web.log`; stderr is also echoed to the CLI's stderr (stdout only with `--dev`). Runner lifecycle events are appended as redacted JSON lines to `<dataDir>/logs/runner.log` and printed to stderr as `[runner] <message>` ([SPEC-114](2026-10-14-runner-management.md) FR-114-15). On startup `serve` prints `logs: <dataDir>/logs (web.log, runner.log)`.
 - If the child exits unexpectedly, the CLI stops the runner, marks running jobs `interrupted`, and exits non-zero. No automatic restart in bootstrap.
 - Readiness: poll `GET /api/health` until `200` or 30 s timeout (then exit with an error). The health body is `{"status":"ok","database":"ready"|"not-initialized"}`.
-- **Graceful shutdown** on `SIGINT`/`SIGTERM` (and Windows Ctrl+C): stop acquiring jobs → abort running jobs via `AbortSignal` → mark them `interrupted` → terminate agent subprocesses → send `SIGTERM` to the web child (force kill after 5 s) → close the database → exit. A second signal forces immediate exit.
+- **Graceful shutdown** on `SIGINT`/`SIGTERM` (and Windows Ctrl+C): stop acquiring jobs → abort running jobs via `AbortSignal` → wait at most 10 s, then mark them `interrupted` → terminate agent subprocesses → send `SIGTERM` to the web child (force kill after 5 s) → close the database → exit. A second signal forces immediate exit.
 
 ## 7. Browser opening
 
@@ -114,16 +114,17 @@ The implementation (`ExitCode` in `apps/cli/src/runtime.ts`) matches this table;
 
 ```text
 directivebench/            # published npm package (apps/cli)
-├── package.json           # "bin": {"directivebench": "dist/cli.js"}, engines.node, runtime deps (next, react, react-dom, …)
+├── package.json           # "bin": {"directivebench": "dist/cli.js"}, engines.node, runtime deps: only next, react, react-dom
 ├── LICENSE
 ├── README.md
 └── dist/
-    ├── cli.js             # tsup bundle with shebang; includes @directivebench/* workspace code
+    ├── cli.js             # tsup bundle: shebang + createRequire banner; includes @directivebench/*, commander, drizzle-orm, yaml, zod
     ├── web/               # prebuilt Next.js app: .next/ (without cache, trace, types, diagnostics, *.nft.json, *.map), public/, next.config.mjs
     ├── migrations/        # SQL migrations + drizzle meta journal
     └── examples/          # bundled example artifacts and benchmarks used by `demo`
 ```
 
+- **Bundle banner:** `dist/cli.js` starts with the shebang followed by `const require = createRequire(import.meta.url)`, because bundled CommonJS dependencies (e.g. `yaml`) call `require()` inside the ESM bundle.
 - **File resolution:** all bundled assets are resolved relative to the CLI file (`path.dirname(fileURLToPath(import.meta.url))` → `dist/`), never relative to `process.cwd()`. The `next` binary is resolved with `createRequire(import.meta.url).resolve('next/package.json')`.
 - Development mode (running from source) resolves the same assets from `apps/web`, `packages/database/migrations` and `examples/` through a single resolver function, so both modes share one code path.
 - No native compilation: SQLite uses built-in `node:sqlite` ([ADR-0002](../decisions/0002-sqlite-with-node-sqlite.md)).
@@ -134,6 +135,7 @@ directivebench/            # published npm package (apps/cli)
 
 ## 12. Implementation status
 
-- **Implemented (verified by `apps/cli/test/cli.test.ts` and `pnpm verify:pack` on 2026-10-14, Node 24.21, Linux):** commands `directivebench` (= `serve`), `serve [--host --port --no-open --allow-network-access --dev]`, `init`, `doctor [--json]`, `demo`, `--help`, `--version`, global `--data-dir`; option precedence flag > env > config > default, invalid port and non-loopback host without `--allow-network-access` → exit 2 (`cli.test.ts`); Node version check (exit 3 below 22.16.0); startup sequence of §5 with the runner embedded in the CLI process; web child started with `node <next>/dist/bin/next start dist/web`, readiness poll of `/api/health` (30 s), `SIGTERM` to the child with `SIGKILL` after 5 s, second signal forces exit; port in use → exit 4 without picking another port; data-dir/migration failures → exit 5; `doctor` failures and a `demo` verdict other than `improved` → exit 6; browser opener skipped when `CI` is set or on Linux without `DISPLAY`/`WAYLAND_DISPLAY`; web log appended to `<dataDir>/logs/web.log`; packaging layout of §10 (`LICENSE` copied in, `required-server-files` paths rewritten, `next`/`react`/`react-dom` as runtime dependencies); `verify:pack` steps of §11 all passed. Nothing has been published to npm.
-- **Partially implemented:** `doctor` checks data-dir existence but not writability, and prints remediation hints only for some checks; port-in-use, signal handling and browser-opening behaviour are verified manually / by `verify:pack` (clean `SIGTERM` exit), not by dedicated unit tests. Windows Ctrl+C handling is unverified.
+- **Implemented (verified by `apps/cli/test/cli.test.ts` and `pnpm verify:pack` on 2026-10-14, Node 24.21, Linux):** commands `directivebench` (= `serve`), `serve [--host --port --no-open --allow-network-access --dev]`, `init`, `doctor [--json]`, `demo`, `--help`, `--version`, global `--data-dir`; option precedence flag > env > config > default, invalid port and non-loopback host without `--allow-network-access` → exit 2 (`cli.test.ts`); Node version check (exit 3 below 22.16.0); startup sequence of §5 with the runner embedded in the CLI process; web child started with `node <next>/dist/bin/next start dist/web`, readiness poll of `/api/health` (30 s), `SIGTERM` to the child with `SIGKILL` after 5 s, second signal forces exit; port in use → exit 4 without picking another port; data-dir/migration failures → exit 5; `doctor` failures and a `demo` verdict other than `improved` → exit 6; browser opener skipped when `CI` is set or on Linux without `DISPLAY`/`WAYLAND_DISPLAY`; web log appended to `<dataDir>/logs/web.log`; packaging layout of §10 (`LICENSE` copied in, `required-server-files` paths rewritten). Nothing has been published to npm.
+- **Implemented on 2026-10-15 (verified by `apps/cli/test/cli.test.ts` — 7 tests — `pnpm build && pnpm verify:pack` and the Playwright run):** `doctor` checks data-directory writability (existing directory: not writable → `fail`; missing directory: `warn` when the nearest existing parent is writable, `fail` otherwise) and every non-`ok` check carries a remediation `hint` (printed as `→ hint`, included in `--json`; tests "warns with a hint when the data directory does not exist yet" and "fails when the data directory is not writable"); `serve` writes `<dataDir>/logs/runner.log` and prints the logs location (verified by inspecting `runner.log` after the Playwright run); `dist/cli.js` bundles `@directivebench/*`, `commander`, `drizzle-orm`, `yaml` and `zod` with the `createRequire` banner, and the packed tarball's runtime `dependencies` are only `next`, `react`, `react-dom`; `verify:pack` steps of §11 all passed.
+- **Partially implemented:** port-in-use, signal handling and browser-opening behaviour are verified manually / by `verify:pack` (clean `SIGTERM` exit), not by dedicated unit tests. Windows Ctrl+C handling is unverified.
 - **Not implemented:** `sync`, `benchmark run|list`, `export`, `import`, `backup`, `restore`, `runner`; automatic restart of the web child; detection of an already running instance.

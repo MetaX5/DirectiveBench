@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '@directivebench/agent-adapters';
@@ -20,15 +21,19 @@ import {
   getSuiteVersion,
   heartbeatJob,
   insertAgentRun,
+  interruptJobs,
   isCancellationRequested,
   recoverStaleJobs,
   type DatabaseHandle,
   type JobRecord,
 } from '@directivebench/database';
 
+/** Structured context attached to runner log events (job id, event name, …). */
+export type RunnerLogFields = Record<string, string | number | boolean | null>;
+
 export interface RunnerLogger {
-  info(message: string): void;
-  error(message: string): void;
+  info(message: string, fields?: RunnerLogFields): void;
+  error(message: string, fields?: RunnerLogFields): void;
 }
 
 export interface LocalRunnerOptions {
@@ -44,6 +49,8 @@ export interface LocalRunnerOptions {
   heartbeatIntervalMs?: number;
   /** Running jobs whose heartbeat is older than this are considered orphaned. */
   staleAfterMs?: number;
+  /** Maximum time graceful shutdown waits for running jobs (FR-114-13, default 10 s). */
+  shutdownTimeoutMs?: number;
   logger?: RunnerLogger;
 }
 
@@ -62,7 +69,7 @@ const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefin
  * an authenticated outbound connection (see .ai/specs/2026-10-14-runner-management.md).
  */
 export class LocalRunner {
-  readonly runnerId = `runner_${randomBytes(6).toString('hex')}`;
+  readonly runnerId = `local-${hostname()}-${process.pid}-${randomBytes(4).toString('hex')}`;
   private readonly options: Required<Omit<LocalRunnerOptions, 'logger'>> & { logger: RunnerLogger };
   private readonly active = new Map<
     string,
@@ -80,6 +87,7 @@ export class LocalRunner {
       pollIntervalMs: 1000,
       heartbeatIntervalMs: 5000,
       staleAfterMs: 30_000,
+      shutdownTimeoutMs: 10_000,
       logger: silentLogger,
       ...options,
     };
@@ -90,7 +98,10 @@ export class LocalRunner {
     const staleBefore = new Date(Date.now() - this.options.staleAfterMs).toISOString();
     const recovered = await recoverStaleJobs(this.options.handle.db, staleBefore);
     if (recovered.length > 0) {
-      this.options.logger.info(`Marked ${recovered.length} orphaned job(s) as interrupted`);
+      this.options.logger.info(`Marked ${recovered.length} orphaned job(s) as interrupted`, {
+        event: 'recovered',
+        jobIds: recovered.join(','),
+      });
     }
     return recovered;
   }
@@ -115,12 +126,15 @@ export class LocalRunner {
       while (!this.stopping && this.active.size < this.options.concurrency) {
         const job = await acquireNextJob(this.options.handle.db, this.runnerId);
         if (!job) break;
+        this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
         const controller = new AbortController();
         const done = this.execute(job, controller).finally(() => this.active.delete(job.id));
         this.active.set(job.id, { controller, done });
       }
     } catch (error) {
-      this.options.logger.error(`Runner poll failed: ${(error as Error).message}`);
+      this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
+        event: 'poll-failed',
+      });
     } finally {
       this.polling = false;
     }
@@ -137,14 +151,34 @@ export class LocalRunner {
   }
 
   /**
-   * Graceful shutdown: stops polling, aborts running jobs and waits for them. Aborted jobs are
-   * recorded as `interrupted` (not user-cancelled).
+   * Graceful shutdown: stops polling, aborts running jobs and waits up to `shutdownTimeoutMs`
+   * for them. Aborted jobs are recorded as `interrupted` (not user-cancelled); jobs that did not
+   * stop in time are marked `interrupted` directly.
    */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
-    for (const { controller } of this.active.values()) controller.abort('shutdown');
-    await Promise.allSettled([...this.active.values()].map((a) => a.done));
+    const running = [...this.active.entries()];
+    for (const [, { controller }] of running) controller.abort('shutdown');
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = await Promise.race([
+      Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut) {
+      const ids = await interruptJobs(
+        this.options.handle.db,
+        [...this.active.keys()],
+        'Runner shut down before the job stopped',
+      );
+      this.options.logger.error(`Shutdown timed out; marked ${ids.length} job(s) as interrupted`, {
+        event: 'shutdown-timeout',
+        jobIds: ids.join(','),
+      });
+    }
   }
 
   get activeJobCount(): number {
@@ -159,9 +193,18 @@ export class LocalRunner {
     const heartbeat = setInterval(() => {
       void (async () => {
         await heartbeatJob(db, job.id);
-        if (await isCancellationRequested(db, job.id)) controller.abort('cancelled');
+        if (!controller.signal.aborted && (await isCancellationRequested(db, job.id))) {
+          logger.info(`Job ${job.id} cancellation requested`, {
+            event: 'cancel-observed',
+            jobId: job.id,
+          });
+          controller.abort('cancelled');
+        }
       })().catch((error: unknown) =>
-        logger.error(`Heartbeat failed for ${job.id}: ${(error as Error).message}`),
+        logger.error(`Heartbeat failed for ${job.id}: ${(error as Error).message}`, {
+          event: 'heartbeat-failed',
+          jobId: job.id,
+        }),
       );
     }, this.options.heartbeatIntervalMs);
 
@@ -170,12 +213,16 @@ export class LocalRunner {
       error: string | null,
     ): Promise<JobExecutionResult> => {
       await finishJob(db, job.id, status, error ?? undefined);
-      logger.info(`Job ${job.id} ${status}${error ? `: ${error}` : ''}`);
+      logger.info(`Job ${job.id} ${status}${error ? `: ${error}` : ''}`, {
+        event: 'finished',
+        jobId: job.id,
+        status,
+        benchmarkRunId,
+      });
       return { jobId: job.id, status, benchmarkRunId, error };
     };
 
     try {
-      logger.info(`Job ${job.id} started`);
       const payload = benchmarkJobPayloadSchema.parse(job.payload);
       const suiteVersion = await getSuiteVersion(db, payload.suiteVersionId);
       const artifact = await getArtifactBundle(db, payload.artifactVersionId);

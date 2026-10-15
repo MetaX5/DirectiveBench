@@ -157,6 +157,16 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <dd title={summary.confidence.reason}>{summary.confidence.level}</dd>
               </dl>
               <p className="text-xs text-muted-foreground">{summary.confidence.reason}</p>
+              {summary.reasons?.length ? (
+                <ul className="list-inside list-disc text-xs" data-testid="verdict-reasons">
+                  {summary.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {summary.conclusive === false ? (
+                <Badge variant="warning">Not conclusive — single nondeterministic repetition</Badge>
+              ) : null}
             </CardContent>
           </Card>
         </div>

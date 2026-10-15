@@ -18,7 +18,9 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
-- [2026-10-14] **Run `pnpm verify:pack` after any bundling change** — tsup stripped the `node:` prefix and broke `node:sqlite` only in the packed CLI. → [lessons/2026-10-14-bundler-strips-node-protocol.md](lessons/2026-10-14-bundler-strips-node-protocol.md)
+- [2026-10-15] **Check the PR is still open before pushing follow-up commits** — commits pushed to an already merged PR's branch never reach `main`. → [lessons/2026-10-15-check-pr-state-before-pushing.md](lessons/2026-10-15-check-pr-state-before-pushing.md)
+- [2026-10-15] **Restrict Vitest's include when build output contains `*.test.*` files** — `apps/cli/dist/examples` fixture tests were collected after `pnpm build`. → [lessons/2026-10-15-vitest-collects-build-output.md](lessons/2026-10-15-vitest-collects-build-output.md)
+- [2026-10-14] **Run `pnpm verify:pack` after any bundling change** — tsup stripped the `node:` prefix (broke `node:sqlite`) and bundled CommonJS needs a `createRequire` banner; both failed only in the packed CLI. → [lessons/2026-10-14-bundler-strips-node-protocol.md](lessons/2026-10-14-bundler-strips-node-protocol.md)
 - [2026-10-14] **Validate untrusted paths against the narrowest root** — `path.join()` normalises `..` and can hide escapes. → [lessons/2026-10-14-validate-paths-against-the-real-root.md](lessons/2026-10-14-validate-paths-against-the-real-root.md)
 - [2026-10-14] **Toolchain constraints** — TypeScript 6.0 (typescript-eslint), ESLint 10 without eslint-plugin-react, Drizzle `sqlite-proxy` over `node:sqlite` (Node >= 22.16), pnpm 12 build approvals. → [lessons/2026-10-14-toolchain-version-constraints.md](lessons/2026-10-14-toolchain-version-constraints.md)
 - [2026-10-14] **Process and HTTP testing pitfalls** — `fetch` ignores `Host`, `npx` does not forward SIGINT, `pkill -f` can kill your own shell, quote commas in YAML flow lists. → [lessons/2026-10-14-testing-processes-and-http.md](lessons/2026-10-14-testing-processes-and-http.md)

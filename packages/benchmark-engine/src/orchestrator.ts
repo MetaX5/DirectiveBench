@@ -2,10 +2,15 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, AgentRunResult, TraceEvent } from '@directivebench/agent-adapters';
-import { canonicalJson, sha256, type ArtifactBundle } from '@directivebench/core';
+import { canonicalJson, hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
-import { definitionRunsCommands, type BenchmarkCase, type BenchmarkDefinition } from './definition';
+import {
+  executionBlockers,
+  isDeterministicAssertion,
+  type BenchmarkCase,
+  type BenchmarkDefinition,
+} from './definition';
 import { buildManifest, copyTree, diffManifests, type FileChange } from './files';
 import type { CaseFixtures } from './import';
 import {
@@ -31,11 +36,20 @@ export class BenchmarkCancelledError extends Error {
 export interface AgentRunRecord extends RunOutcome {
   fixtureHash: string;
   changedFiles: FileChange[];
-  trace: (TraceEvent | { type: 'setup'; command: string[]; exitCode: number | null })[];
+  trace: (TraceEvent | EngineTraceEvent)[];
   usage: Record<string, number> | null;
   error: string | null;
   assertions: AssertionResult[];
 }
+
+/** Engine-level trace events (FR-110-15); adapter events are interleaved in order. */
+export type EngineTraceEvent =
+  | {
+      type: 'stage';
+      stage: 'prepare' | 'setup' | 'install' | 'agent' | 'verification' | 'assertions';
+      at: string;
+    }
+  | { type: 'setup'; command: string[]; exitCode: number | null; durationMs: number };
 
 export interface EnvironmentMetadata {
   kind: 'local-process';
@@ -85,11 +99,8 @@ export function assertRunnable(
   >,
 ): void {
   const { definition, adapter } = input;
-  if (definition.execution.environment.kind !== 'local-process') {
-    throw new BenchmarkConfigurationError(
-      `Execution environment "${definition.execution.environment.kind}" is not implemented yet; only "local-process" is available.`,
-    );
-  }
+  const [blocker] = executionBlockers(definition, input.executionApproved);
+  if (blocker) throw new BenchmarkConfigurationError(blocker);
   if (definition.execution.agent !== adapter.id) {
     throw new BenchmarkConfigurationError(
       `Suite requires agent "${definition.execution.agent}" but adapter "${adapter.id}" was provided.`,
@@ -100,14 +111,19 @@ export function assertRunnable(
       `Agent "${adapter.id}" cannot execute benchmarks in this build.`,
     );
   }
+  if (definition.execution.model && !adapter.capabilities.modelSelection) {
+    throw new BenchmarkConfigurationError(
+      `Agent "${adapter.id}" does not support model selection, but the suite sets execution.model.`,
+    );
+  }
+  if (!adapter.capabilities.headless || !adapter.capabilities.artifactInstallation) {
+    throw new BenchmarkConfigurationError(
+      `Agent "${adapter.id}" must support headless execution and artifact installation for RED/GREEN runs.`,
+    );
+  }
   if (!definition.artifactTypes.includes(input.artifact.type)) {
     throw new BenchmarkConfigurationError(
       `Suite evaluates ${definition.artifactTypes.join(', ')} artifacts, not ${input.artifact.type}.`,
-    );
-  }
-  if (definitionRunsCommands(definition) && !input.executionApproved) {
-    throw new BenchmarkConfigurationError(
-      'This suite version runs commands but has not been approved for execution.',
     );
   }
   for (const benchmarkCase of definition.cases) {
@@ -162,6 +178,8 @@ async function executeAgentRun(
   const workspaceDir = join(runDir, 'workspace');
   const homeDir = join(runDir, 'home');
   const trace: AgentRunRecord['trace'] = [];
+  const stage = (name: Extract<EngineTraceEvent, { type: 'stage' }>['stage']) =>
+    trace.push({ type: 'stage', stage: name, at: new Date().toISOString() });
   const timeoutMs = definition.execution.timeoutSeconds * 1000;
   const commandEnv = buildCommandEnv(homeDir);
   const base = {
@@ -184,9 +202,19 @@ async function executeAgentRun(
   });
 
   try {
+    stage('prepare');
     await mkdir(homeDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
+    // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
+    const copiedHash = hashManifest(await buildManifest(workspaceDir));
+    if (copiedHash !== caseFixtures.fixture) {
+      return fail(
+        'infrastructure-error',
+        `Workspace does not match fixture snapshot ${caseFixtures.fixture.slice(0, 12)} (got ${copiedHash.slice(0, 12)}); the fixture store may be corrupted.`,
+      );
+    }
 
+    if (benchmarkCase.setup.length > 0) stage('setup');
     for (const command of benchmarkCase.setup) {
       const result = await runCommand(command, {
         cwd: workspaceDir,
@@ -195,7 +223,12 @@ async function executeAgentRun(
         maxOutputBytes: definition.execution.maxOutputBytes,
         signal: input.signal,
       });
-      trace.push({ type: 'setup', command, exitCode: result.exitCode });
+      trace.push({
+        type: 'setup',
+        command,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+      });
       if (result.cancelled) return fail('cancelled', 'Cancelled during setup');
       if (result.exitCode !== 0) {
         return fail(
@@ -206,6 +239,7 @@ async function executeAgentRun(
     }
 
     if (variant === 'candidate') {
+      stage('install');
       const installed = await adapter.installArtifact(workspaceDir, input.artifact);
       trace.push({
         type: 'message',
@@ -215,6 +249,7 @@ async function executeAgentRun(
 
     // Snapshot after installation so only the agent's own changes are tracked.
     const before = await buildManifest(workspaceDir);
+    stage('agent');
     const agentSignal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
     const agentResult: AgentRunResult = await withTimeout(
       adapter.run({
@@ -245,6 +280,7 @@ async function executeAgentRun(
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
 
+    stage('verification');
     if (caseFixtures.overlay) {
       await cp(join(input.fixtureStore, caseFixtures.overlay), workspaceDir, {
         recursive: true,
@@ -252,6 +288,7 @@ async function executeAgentRun(
       });
     }
 
+    stage('assertions');
     const assertions: AssertionResult[] = [];
     for (const assertion of benchmarkCase.assertions) {
       if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');
@@ -283,6 +320,34 @@ async function executeAgentRun(
   } finally {
     if (!input.keepWorkspaces) await rm(runDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Post-run equivalence check (FR-112-08): every baseline and candidate run of a case must have
+ * started from the recorded fixture snapshot, and the agent version must not change during the
+ * run. Returns the list of mismatches (empty when comparable).
+ */
+export function equivalenceIssues(
+  fixtures: Record<string, CaseFixtures>,
+  agentRuns: readonly Pick<AgentRunRecord, 'caseId' | 'variant' | 'repetition' | 'fixtureHash'>[],
+  adapterVersionBefore: string | null,
+  adapterVersionAfter: string | null,
+): string[] {
+  const issues: string[] = [];
+  for (const run of agentRuns) {
+    const expected = fixtures[run.caseId]?.fixture;
+    if (run.fixtureHash !== expected) {
+      issues.push(
+        `case ${run.caseId}: ${run.variant} repetition ${run.repetition} used a different fixture snapshot`,
+      );
+    }
+  }
+  if (adapterVersionBefore !== adapterVersionAfter) {
+    issues.push(
+      `agent version changed during the run (${adapterVersionBefore} → ${adapterVersionAfter})`,
+    );
+  }
+  return issues;
 }
 
 /**
@@ -342,23 +407,29 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
     if (!input.keepWorkspaces) await rm(input.workRoot, { recursive: true, force: true });
   }
 
-  // Within one run every agent run shares the suite version, fixture hashes and adapter, so the
-  // comparison is comparable by construction; the check guards against adapter version drift.
   const finalDetection = await adapter.detect();
-  const comparable = finalDetection.version === detection.version;
-  if (!comparable) {
-    warnings.push(
-      `Agent version changed during the run (${detection.version} → ${finalDetection.version}).`,
-    );
-  }
+  const comparabilityIssues = equivalenceIssues(
+    input.fixtures,
+    agentRuns,
+    detection.version,
+    finalDetection.version,
+  );
+  warnings.push(...comparabilityIssues);
 
   const summary = summarize(agentRuns, {
     caseIds: definition.cases.map((c) => c.id),
     scoring: definition.scoring,
     repetitions: definition.execution.repetitions,
-    comparable,
+    comparable: comparabilityIssues.length === 0,
+    comparabilityIssues,
     deterministicAgent: adapter.capabilities.deterministic,
+    nondeterministicAssertions: definition.cases.some((c) =>
+      c.assertions.some((a) => !isDeterministicAssertion(a)),
+    ),
   });
+  if (!summary.conclusive) {
+    warnings.push('Single repetition of a nondeterministic run: the result is not conclusive.');
+  }
   if (adapter.capabilities.deterministic && summary.verdict !== 'error') {
     warnings.push(
       'Deterministic agent: repetitions confirm reproducibility, not statistical confidence.',

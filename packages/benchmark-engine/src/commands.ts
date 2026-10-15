@@ -8,7 +8,11 @@ export interface CommandOptions {
   timeoutMs: number;
   maxOutputBytes: number;
   signal: AbortSignal;
+  /** Time between SIGTERM and SIGKILL on timeout or cancellation (default 5 s, FR-110-08). */
+  killGraceMs?: number;
 }
+
+export const DEFAULT_KILL_GRACE_MS = 5000;
 
 export interface CommandResult {
   command: string[];
@@ -52,27 +56,35 @@ export function buildCommandEnv(
 class OutputBuffer {
   private chunks: Buffer[] = [];
   private size = 0;
+  private dropped = 0;
   truncated = false;
   constructor(private readonly limit: number) {}
   push(chunk: Buffer): void {
     const remaining = this.limit - this.size;
     if (remaining <= 0) {
       this.truncated = true;
+      this.dropped += chunk.length;
       return;
     }
     const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
-    if (slice.length < chunk.length) this.truncated = true;
+    if (slice.length < chunk.length) {
+      this.truncated = true;
+      this.dropped += chunk.length - slice.length;
+    }
     this.chunks.push(slice);
     this.size += slice.length;
   }
   toString(): string {
-    return redactSecrets(Buffer.concat(this.chunks).toString('utf8'));
+    const text = redactSecrets(Buffer.concat(this.chunks).toString('utf8'));
+    // FR-110-44: excess output is dropped and marked.
+    return this.dropped > 0 ? `${text}\n[truncated ${this.dropped} bytes]` : text;
   }
 }
 
 /**
- * Runs an argv command without a shell. On timeout or cancellation the whole process group is
- * killed (POSIX). Output is truncated and secret-redacted before it is returned.
+ * Runs an argv command without a shell. On timeout or cancellation the whole process group
+ * (POSIX) receives SIGTERM and, if still alive after the grace period, SIGKILL. Output is
+ * truncated and secret-redacted before it is returned.
  */
 export function runCommand(
   command: readonly string[],
@@ -122,22 +134,32 @@ export function runCommand(
     let cancelled = false;
     let spawnError: string | null = null;
 
-    const kill = () => {
-      if (child.exitCode !== null || child.pid === undefined) return;
+    let closed = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+    const sendSignal = (signal: NodeJS.Signals) => {
+      if (closed || child.pid === undefined) return;
       try {
-        if (detached) process.kill(-child.pid, 'SIGKILL');
-        else child.kill('SIGKILL');
+        if (detached) process.kill(-child.pid, signal);
+        else child.kill(signal);
       } catch {
         // already gone
       }
     };
+    const terminate = () => {
+      if (forceKillTimer) return;
+      sendSignal('SIGTERM');
+      forceKillTimer = setTimeout(
+        () => sendSignal('SIGKILL'),
+        options.killGraceMs ?? DEFAULT_KILL_GRACE_MS,
+      );
+    };
     const timer = setTimeout(() => {
       timedOut = true;
-      kill();
+      terminate();
     }, options.timeoutMs);
     const onAbort = () => {
       cancelled = true;
-      kill();
+      terminate();
     };
     options.signal.addEventListener('abort', onAbort, { once: true });
 
@@ -147,7 +169,9 @@ export function runCommand(
       spawnError = error.message;
     });
     child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+      closed = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
       options.signal.removeEventListener('abort', onAbort);
       resolve({
         command: [...command],

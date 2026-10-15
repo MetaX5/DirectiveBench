@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createExecutableAdapters } from '@directivebench/agent-adapters';
+import { MockAgentAdapter, createExecutableAdapters } from '@directivebench/agent-adapters';
 import {
   enqueueBenchmarkJob,
   getBenchmarkRunDetail,
@@ -126,4 +126,46 @@ describe('vertical slice: import → enqueue → run → persist', () => {
     await runner.stop();
     expect((await getJob(handle.db, job.id))?.status).toBe('interrupted');
   }, 60_000);
+});
+
+describe('runner lifecycle details', () => {
+  it('uses a runner id of the form local-<hostname>-<pid>-<random> (FR-114-17)', () => {
+    expect(createRunner().runnerId).toMatch(new RegExp(`^local-.+-${process.pid}-[0-9a-f]{8}$`));
+  });
+
+  it('caps graceful shutdown and marks jobs that do not stop as interrupted (FR-114-13)', async () => {
+    const example = await importBundledExample(handle, examples, join(dataDir, 'fixtures'));
+    const job = await enqueueBenchmarkJob(handle.db, {
+      suiteVersionId: example.suite.versionId,
+      artifactVersionId: example.artifact.versionId,
+    });
+    // An adapter that ignores cancellation for longer than the shutdown cap.
+    const stubborn = new MockAgentAdapter();
+    stubborn.run = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return {
+        status: 'completed',
+        durationMs: 1500,
+        summary: '',
+        trace: [],
+        usage: null,
+        error: null,
+      };
+    };
+    const runner = new LocalRunner({
+      handle,
+      fixtureStore: join(dataDir, 'fixtures'),
+      adapters: new Map([['mock', stubborn]]),
+      workspaceRoot: join(dataDir, 'workspaces'),
+      shutdownTimeoutMs: 200,
+    });
+    await runner.poll();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const started = Date.now();
+    await runner.stop();
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect((await getJob(handle.db, job.id))?.status).toBe('interrupted');
+    // Let the abandoned execution settle before the database is closed.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }, 30_000);
 });

@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test } from '@playwright/test';
 
 test('dashboard shows registry counts and the persisted demo run', async ({ page }) => {
@@ -26,6 +28,7 @@ test('run detail compares RED and GREEN with recorded assertions', async ({ page
   await expect(page.getByTestId('candidate-score')).toHaveText('100%');
   await expect(page.getByTestId('score-delta')).toHaveText('+50 pts');
   await expect(page.getByTestId('verdict')).toHaveText('improved');
+  await expect(page.getByTestId('verdict-reasons')).toContainText('delta +0.5 is at or above 0.05');
   await expect(page.getByTestId('agent-run')).toHaveCount(6);
 });
 
@@ -48,4 +51,26 @@ test('theme toggle switches between light and dark', async ({ page }) => {
   const before = (await html.getAttribute('class')) ?? '';
   await page.getByRole('button', { name: 'Toggle colour theme' }).first().click();
   await expect(html).not.toHaveAttribute('class', before);
+});
+
+test('enqueueing re-checks execution approval on the server (FR-114-02)', async ({ page }) => {
+  const db = new DatabaseSync(
+    join(process.env.DIRECTIVEBENCH_E2E_DATA_DIR as string, 'directivebench.db'),
+  );
+  try {
+    await page.goto('/benchmarks');
+    await page.getByRole('link', { name: 'Input validation (mock agent demo)' }).click();
+    const run = page.getByRole('button', { name: 'Run' });
+    await expect(run).toBeEnabled();
+    // Approval is revoked after the page was rendered; the server action must refuse the job.
+    db.exec('update benchmark_suite_versions set execution_approved_at = null');
+    await run.click();
+    await expect(page.getByTestId('enqueue-error')).toContainText('not been approved');
+    await expect(page.getByRole('button', { name: 'Run' })).toBeDisabled();
+  } finally {
+    db.exec(
+      "update benchmark_suite_versions set execution_approved_at = '2026-01-01T00:00:00.000Z'",
+    );
+    db.close();
+  }
 });

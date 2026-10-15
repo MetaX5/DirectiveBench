@@ -143,24 +143,42 @@ export async function isCancellationRequested(db: Database, jobId: string): Prom
  */
 export async function recoverStaleJobs(db: Database, staleBefore: string): Promise<string[]> {
   const stale = await db
-    .update(jobs)
-    .set({
-      status: 'interrupted',
-      finishedAt: nowIso(),
-      error: 'Runner stopped unexpectedly while the job was running',
-    })
+    .select({ id: jobs.id })
+    .from(jobs)
     .where(
       and(
         eq(jobs.status, 'running'),
         or(isNull(jobs.heartbeatAt), lt(jobs.heartbeatAt, staleBefore)),
       ),
-    )
+    );
+  return interruptJobs(
+    db,
+    stale.map((j) => j.id),
+    'Runner stopped unexpectedly while the job was running',
+  );
+}
+
+/**
+ * Marks running jobs (and their running benchmark runs) as `interrupted`. Used for crash
+ * recovery and when a graceful shutdown times out. Returns the ids that were changed.
+ */
+export async function interruptJobs(
+  db: Database,
+  jobIds: readonly string[],
+  reason: string,
+): Promise<string[]> {
+  if (jobIds.length === 0) return [];
+  const now = nowIso();
+  const changed = await db
+    .update(jobs)
+    .set({ status: 'interrupted', finishedAt: now, error: reason })
+    .where(and(inArray(jobs.id, [...jobIds]), eq(jobs.status, 'running')))
     .returning({ id: jobs.id });
-  const ids = stale.map((j) => j.id);
+  const ids = changed.map((j) => j.id);
   if (ids.length > 0) {
     await db
       .update(benchmarkRuns)
-      .set({ status: 'interrupted', finishedAt: nowIso(), error: 'Runner interrupted' })
+      .set({ status: 'interrupted', finishedAt: now, error: reason })
       .where(and(inArray(benchmarkRuns.jobId, ids), eq(benchmarkRuns.status, 'running')));
   }
   return ids;

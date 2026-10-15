@@ -3,7 +3,7 @@ id: SPEC-111
 title: Benchmark Scoring
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-107, SPEC-108, SPEC-110, SPEC-112, SPEC-113, SPEC-103, SPEC-005]
 ---
@@ -48,7 +48,7 @@ Comparing "with instructions" and "without instructions" is only useful when the
 |---|---|
 | FR-111-01 | Each assertion result SHALL have score `s ∈ [0, 1]`. Deterministic assertion types (`command`, `file-exists`, `file-contains`, `changed-files`) SHALL produce `s ∈ {0, 1}` (`passed ⇔ s = 1`). |
 | FR-111-02 | Each assertion SHALL have weight `w ≥ 0` (default 1) and `required` (default false). |
-| FR-111-03 | Run score SHALL be `score = Σᵢ wᵢ·sᵢ / Σᵢ wᵢ` over all assertions of the case. If `Σᵢ wᵢ = 0`, score SHALL be 0 and a warning recorded. |
+| FR-111-03 | Run score SHALL be `score = Σᵢ wᵢ·sᵢ / Σᵢ wᵢ` over all assertions of the case. The definition schema SHALL reject a case whose assertions all have weight 0 ([SPEC-108](2026-10-14-benchmark-definition-format.md)), so `Σᵢ wᵢ > 0` always holds for a stored suite version. |
 | FR-111-04 | Run passed SHALL be `(∀ required i: sᵢ = 1) ∧ score ≥ passThreshold` (default `passThreshold = 1`). |
 | FR-111-05 | Score and passed SHALL be computed only for runs with execution status `completed`; for other statuses both are `null`. |
 | FR-111-06 | Comparisons with thresholds SHALL use an epsilon of `1e-9` (e.g. `score ≥ passThreshold − 1e-9`). Values are stored at full precision and displayed rounded to 2–3 decimals. |
@@ -121,40 +121,55 @@ For case `c`, variant `v ∈ {baseline, candidate}`, let `N` be the number of at
 
 ## 8. Domain entities and contracts
 
+The contracts below are the implemented ones in `packages/benchmark-engine/src/scoring.ts`.
+
 ```ts
+type ExecutionStatus = "completed" | "agent-error" | "timeout" | "cancelled" | "infrastructure-error";
 type Verdict = "error" | "not-comparable" | "unstable" | "regressed" | "improved" | "unchanged";
-type CandidateOutcome = "passed" | "failed";
 type DisplayStatus = "error" | "not-comparable" | "unstable" | "regression" | "passed" | "failed" | "not-tested";
-type Confidence = "low" | "medium" | "high";
+type ConfidenceLevel = "low" | "medium" | "high";
 
-interface ScoringConfig { passThreshold: number; minDelta: number; stabilityThreshold: number } // 1, 0.05, 0.1
+const SCORE_EPSILON = 1e-9; // tolerance for every threshold comparison (FR-111-06)
 
-interface AssertionScore { id: string; score: number; weight: number; required: boolean; deterministic: boolean }
+// scoring config comes from the validated definition: { passThreshold: 1, minDelta: 0.05, stabilityThreshold: 0.1 }
+type ScoringConfig = BenchmarkDefinition["scoring"];
 
-interface VariantCaseAggregate {
-  caseId: string;
-  validRuns: number; attemptedRuns: number;
-  meanScore: number | null; stdDev: number | null;
-  min: number | null; max: number | null;
-  passRate: number | null; errorRate: number;
+interface ScoredAssertion { passed: boolean; score: number; weight: number; required: boolean }
+
+interface RunOutcome {
+  caseId: string; variant: "baseline" | "candidate"; repetition: number;
+  executionStatus: ExecutionStatus;
+  score: number | null; passed: boolean | null; durationMs: number;
 }
 
-interface VariantSuiteAggregate { meanScore: number | null; passRate: number | null; errorRate: number; cases: VariantCaseAggregate[] }
+interface Aggregate {                     // per case × variant, and per suite × variant
+  totalRuns: number; validRuns: number;
+  meanScore: number | null; stdDev: number | null;   // population stdDev; null at suite level
+  minScore: number | null; maxScore: number | null;
+  passRate: number | null; errorRate: number;
+  meanDurationMs: number | null;
+}
 
-interface ComparisonResult {
-  baseline: VariantSuiteAggregate;
-  candidate: VariantSuiteAggregate;
+interface CaseSummary { caseId: string; baseline: Aggregate; candidate: Aggregate; delta: number | null }
+
+interface ScoringSummary {
+  baseline: Aggregate; candidate: Aggregate;
   delta: number | null; passRateDelta: number | null;
-  perCaseDelta: Record<string, number | null>;
   verdict: Verdict;
-  candidateOutcome: CandidateOutcome | null;
-  displayStatus: DisplayStatus;
-  confidence: Confidence;
-  nondeterministic: boolean;
-  comparabilityKey: string;
-  reasons: string[];        // e.g. "case c2 candidate stdDev 0.217 > 0.1"
+  reasons: string[];                       // e.g. "case c2: candidate score stdDev 0.217 exceeds 0.1"
+  candidateOutcome: "passed" | "failed" | null;   // null when the verdict is error
+  confidence: { level: ConfidenceLevel; reason: string };
+  deterministicAgent: boolean;
+  nondeterministic: boolean;               // adapter or any assertion nondeterministic (FR-111-42)
+  conclusive: boolean;                     // false for a single repetition of a nondeterministic run
+  cases: CaseSummary[];                    // per-case delta is cases[].delta
+  scoring: ScoringConfig; repetitions: number;
 }
 ```
+
+The display status and the comparability key are not part of `ScoringSummary`: the runner
+stores `displayStatus(verdict, candidateOutcome)` and the orchestrator's `comparabilityKey`
+alongside the summary when it persists a benchmark run.
 
 ## 9. Data flow
 
@@ -174,14 +189,29 @@ flowchart LR
 
 ## 10. API and interface design
 
+Implemented, pure functions exported by `@directivebench/benchmark-engine`:
+
 ```ts
-scoreRun(assertions: AssertionScore[], cfg: ScoringConfig): { score: number; passed: boolean; warnings: string[] };
-aggregateCase(runs: { status: ExecutionStatus; score: number | null; passed: boolean | null }[]): VariantCaseAggregate;
-compare(input: { baseline: VariantCaseAggregate[]; candidate: VariantCaseAggregate[]; cfg: ScoringConfig;
-                 repetitions: number; comparable: boolean; nondeterministic: boolean; comparabilityKey: string }): ComparisonResult;
-comparabilityKey(parts: ComparabilityParts): string;
-versionRegression(prev: ComparisonResult, next: ComparisonResult, cfg: ScoringConfig): "regression" | "ok" | "inconclusive" | "not-comparable";
+scoreRun(assertions: readonly ScoredAssertion[], passThreshold: number): { score: number; passed: boolean };
+aggregate(runs: readonly RunOutcome[]): Aggregate;
+summarize(runs: readonly RunOutcome[], options: {
+  caseIds: readonly string[];
+  scoring: ScoringConfig;
+  repetitions: number;
+  comparable: boolean;                       // result of the equivalence check (SPEC-112)
+  comparabilityIssues?: readonly string[];   // become the reasons of a not-comparable verdict
+  deterministicAgent: boolean;
+  nondeterministicAssertions?: boolean;      // any assertion with isDeterministicAssertion() = false
+}): ScoringSummary;
+confidenceFor(repetitions: number, unstable: boolean): { level: ConfidenceLevel; reason: string };
+displayStatus(verdict: string | null | undefined, candidateOutcome: string | null | undefined): DisplayStatus;
+SCORE_EPSILON: number;                       // 1e-9
+
+// in orchestrator.ts (needs the definition and fixtures):
+comparabilityKey(definition, fixtures, adapterId: string, adapterVersion: string | null): string;
 ```
+
+Planned (not implemented): `versionRegression(prev, next, scoring): "regression" | "ok" | "inconclusive" | "not-comparable"` for FR-111-50…52.
 
 ## 11. UI/UX considerations
 
@@ -202,7 +232,7 @@ Scoring has no I/O. Integrity concern: results must not be manipulable post hoc;
 
 ## 14. Edge cases
 
-- `Σw = 0` → score 0 with warning; `passed` then depends only on required assertions and `passThreshold = 0`.
+- `Σw = 0` cannot occur: the definition schema rejects a case whose assertions all have weight 0 (FR-111-03).
 - All runs cancelled by user → benchmark run `cancelled`, no verdict, display status unchanged (previous result kept).
 - Baseline already passes everything (meanScore 1.0) and candidate also 1.0 → `unchanged`, candidate `passed` → display `passed`.
 - Baseline 1.0, candidate 0.9 with stable runs → `regressed` (display `regression`).
@@ -263,7 +293,7 @@ Artifact v2 candidate meanScore 1.0 (stable, key K); v3 candidate meanScore 0.83
 ## 16. Acceptance criteria
 
 - [ ] `scoreRun` reproduces example A (0.5 / false and 1.0 / true).
-- [ ] `aggregateCase` uses population standard deviation (example B: 0.2165 ± 1e-4).
+- [ ] `aggregate` uses population standard deviation (example B: 0.2165 ± 1e-4).
 - [ ] Non-completed runs never contribute scores; example C yields `error`.
 - [ ] Verdict precedence follows the documented order for crafted inputs hitting each rule (including ties at boundaries).
 - [ ] Display status mapping matches FR-111-34 for all verdict/outcome combinations; `not-tested` when no completed benchmark run exists.
@@ -291,12 +321,12 @@ Artifact v2 candidate meanScore 1.0 (stable, key K); v3 candidate meanScore 0.83
 
 ## 20. Implementation status
 
-- **Implemented (verified by `packages/benchmark-engine/test/scoring.test.ts` and `engine.test.ts`):** `scoreRun` (weighted score, required gate, pass threshold), `aggregate` (valid runs, population stdDev, min/max, pass rate, error rate; non-completed runs excluded from quality), suite aggregates with equal case weighting, delta and `passRateDelta`, verdict precedence (`error > not-comparable > unstable > regressed > improved > unchanged`), candidate outcome, `displayStatus` mapping, `confidenceFor`, and `comparabilityKey` as defined in FR-111-43 (`src/scoring.ts`, `src/orchestrator.ts`).
+- **Implemented (verified by `packages/benchmark-engine/test/scoring.test.ts` and `engine.test.ts`):** the API of §8/§10 in `src/scoring.ts` — `scoreRun` (weighted score, required gate, pass threshold), `aggregate` (valid runs, population stdDev, min/max, pass rate, error rate; non-completed runs excluded from quality), suite aggregates with equal case weighting, delta, per-case `cases[].delta` and `passRateDelta`, verdict precedence (`error > not-comparable > unstable > regressed > improved > unchanged`) with verdict `reasons`, candidate outcome, `displayStatus` mapping, `confidenceFor`, and `comparabilityKey` as defined in FR-111-43 (`src/orchestrator.ts`).
+- **FR-111-03:** a case whose assertions all have weight 0 is rejected by the definition schema (`benchmarkCaseSchema` in `src/definition.ts`), so `Σw > 0` for every stored suite version.
+- **FR-111-06:** scores and aggregates are stored at full precision; every threshold comparison uses `SCORE_EPSILON = 1e-9` (test "compares thresholds with an epsilon and keeps full precision").
+- **FR-111-27:** a case with `validRuns = 0` in either variant nulls the suite `meanScore`/`passRate` and yields verdict `error` with the reason `case <id>: no valid <variant> runs` (test "nulls suite means and reports error when a case has no valid runs").
+- **Verdict reasons (§8, §11):** `ScoringSummary.reasons` explains the matched rule, e.g. "delta +0.5 is at or above 0.05 (minDelta)"; for `not-comparable` the reasons are the equivalence-check mismatches (test "explains verdicts with reasons"). The run detail page lists them (`data-testid="verdict-reasons"`, covered by the Playwright smoke test).
+- **FR-111-41/42:** adapters declare `deterministic`; assertion types are classified by `isDeterministicAssertion` (`src/definition.ts`; all four v1 types are deterministic). `summarize` sets `nondeterministic` when the adapter or any assertion is nondeterministic and `conclusive = false` for a single repetition of a nondeterministic run; the orchestrator adds the warning "Single repetition of a nondeterministic run: the result is not conclusive." and the run detail page shows a "Not conclusive — single nondeterministic repetition" badge (test "flags nondeterministic single repetitions as not conclusive"; the badge itself has no automated UI test because the mock agent is deterministic).
+- **FR-111-44:** the equivalence check (`equivalenceIssues`, [SPEC-112](2026-10-14-red-green-evaluation.md)) compares every agent run's fixture hash with the recorded snapshot and the adapter version detected before and after the run; any mismatch → `not-comparable`. Environment metadata is recorded once per benchmark run and is identical for all of its agent runs by construction ([SPEC-005](2026-10-14-domain-model.md)), so no per-agent-run environment comparison is needed.
 - **Verified worked example A:** the mock RED/GREEN run of `mock-input-validation` produces baseline 0.5 / pass rate 0, candidate 1.0 / pass rate 1, delta +0.5, `passRateDelta` +1, verdict `improved`, confidence `medium`, candidate outcome `passed` (`engine.test.ts`, `packages/runner/test/runner.test.ts`, `directivebench demo`).
-- **Partially implemented:**
-  - The implemented API differs from §8/§10: `scoreRun(assertions, passThreshold)`, `aggregate`, `summarize` (returns `ScoringSummary` with `deterministicAgent`, without `reasons`, `perCaseDelta` or a `nondeterministic` flag; the runner adds `displayStatus` when persisting), `confidenceFor`, `displayStatus`.
-  - Thresholds use values rounded to 6 decimals instead of an explicit `1e-9` epsilon (FR-111-06); `Σw = 0` cannot occur because the schema requires a weight > 0, so no warning is recorded (FR-111-03).
-  - FR-111-27: a case without valid runs is excluded from suite means instead of nulling them; the verdict becomes `error` only via the suite `errorRate > 0.5` rule.
-  - FR-111-42: only the adapter's `deterministic` capability is recorded (`deterministicAgent`); assertion-level determinism is stored per assertion result but not aggregated, and the "not conclusive" label is not implemented.
-  - FR-111-44: the comparability check compares the adapter version detected before and after the run; environment drift is not checked.
-- **Not implemented:** version regression detection across artifact versions (FR-111-50…52), fractional assertion types, llm-judge, configurable outcome policies, Example B–D golden tests.
+- **Not implemented:** version regression detection across artifact versions (FR-111-50…52, `versionRegression`), fractional assertion types, llm-judge, configurable outcome policies, Example B–D golden tests.

@@ -3,7 +3,7 @@ id: SPEC-010
 title: Local Installation
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: foundation
 related: [SPEC-004, SPEC-006, SPEC-007, SPEC-009, SPEC-115, ADR-0001, ADR-0002, ADR-0004, ADR-0008]
 ---
@@ -60,7 +60,7 @@ Override with `--data-dir` or `DIRECTIVEBENCH_DATA_DIR`.
 | `config.json` | User configuration (Zod-validated, atomic writes) |
 | `directivebench.db` (+ `-wal`, `-shm`) | SQLite database |
 | `fixtures/<sha256>/` | Content-addressed, immutable fixture snapshots |
-| `logs/` | `web.log` — output of the Next.js child process (appended; not redacted). CLI and runner messages go to the terminal. |
+| `logs/` | `web.log` — output of the Next.js child process (appended; not redacted); `runner.log` — runner lifecycle events as redacted JSON lines (mode `0600`; also printed to stderr). Other CLI messages go to the terminal. |
 | `cache/` | Future: git clones |
 | `backups/` | Future: database backups |
 
@@ -89,7 +89,7 @@ DirectiveBench writes nothing outside the data directory, the temp workspace dir
 
 ## 9. Troubleshooting
 
-Run `directivebench doctor` first; it checks Node version, `node:sqlite`, data directory existence, config validity, migration state, port availability, the bundled web build and agent CLI detection ([SPEC-009 §4](2026-10-14-cli-architecture.md#4-doctor-checks)).
+Run `directivebench doctor` first; it checks Node version, `node:sqlite`, data directory existence and writability, config validity, migration state, port availability, the bundled web build and agent CLI detection, and prints a remediation hint for every check that is not `ok` ([SPEC-009 §4](2026-10-14-cli-architecture.md#4-doctor-checks)).
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
@@ -112,6 +112,6 @@ After the package is installed (or present in the npm cache), DirectiveBench wor
 
 ## 12. Implementation status
 
-- **Implemented (verified by `pnpm verify:pack` on 2026-10-14 — packed tarball installed with npm into an empty project, Node 24.21, Linux):** running the installed `directivebench` binary (`--help`, `--version`, `demo`, `serve`); `init` and `doctor` commands; Node version check (exit 3); data directory resolution with `--data-dir`/`DIRECTIVEBENCH_DATA_DIR` overrides and OS defaults (`packages/core/test/config.test.ts`); data directory created with mode `0700`; `config.json` strict validation and atomic `0600` writes (`config.test.ts`); migrations and category seeding on `init`/`serve`/`demo`; workspace cleanup after runs unless `runner.keepWorkspaces`.
+- **Implemented (verified by `pnpm verify:pack` on 2026-10-14 — packed tarball installed with npm into an empty project, Node 24.21, Linux):** running the installed `directivebench` binary (`--help`, `--version`, `demo`, `serve`); `init` and `doctor` commands (data-dir writability and remediation hints verified by `apps/cli/test/cli.test.ts` on 2026-10-15); `runner.log` written by `serve`; Node version check (exit 3); data directory resolution with `--data-dir`/`DIRECTIVEBENCH_DATA_DIR` overrides and OS defaults (`packages/core/test/config.test.ts`); data directory created with mode `0700`; `config.json` strict validation and atomic `0600` writes (`config.test.ts`); migrations and category seeding on `init`/`serve`/`demo`; workspace cleanup after runs unless `runner.keepWorkspaces`.
 - **Partially implemented:** the macOS data-dir path is covered by a unit test only and the Windows path by none (neither platform has been run); `npx directivebench` from the npm registry is untested because nothing is published yet.
 - **Not implemented:** pre-migration automatic backup, downgrade refusal, keychain secrets, `backup`/`restore` commands, proxy support for outbound integrations (no outbound integrations exist yet).

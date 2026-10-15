@@ -3,7 +3,7 @@ id: SPEC-107
 title: Benchmark Engine
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-15
 category: feature
 related: [SPEC-108, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-005, SPEC-006, SPEC-007, SPEC-012, ADR-0005, ADR-0006, ADR-0007]
 ---
@@ -105,6 +105,11 @@ function parseDefinitionText(text: string, format: 'yaml' | 'json'): ParseDefini
 function loadDefinitionFile(path: string): Promise<BenchmarkDefinition>; // throws DefinitionValidationError
 function migrateDefinitionDocument(document: unknown): unknown;          // throws UnsupportedSchemaVersionError
 function definitionRunsCommands(definition: BenchmarkDefinition): boolean;
+const SUPPORTED_ENVIRONMENTS: readonly ['local-process'];
+// Adapter-independent blockers (environment, execution approval); used by the web app before
+// enqueueing (SPEC-114 FR-114-02) and by assertRunnable.
+function executionBlockers(definition: BenchmarkDefinition, executionApproved: boolean): string[];
+function isDeterministicAssertion(assertion: AssertionDefinition): boolean; // all v1 types: true
 type ParseDefinitionResult =
   | { success: true; definition: BenchmarkDefinition }
   | { success: false; issues: { path: string; message: string }[] };
@@ -118,11 +123,13 @@ const DEFAULT_FILE_LIMITS = { maxFiles: 5000, maxTotalBytes: 100 * 1024 * 1024 }
 // commands.ts
 function buildCommandEnv(homeDir: string, base?: NodeJS.ProcessEnv): Record<string, string>;
 function runCommand(argv: readonly string[], opts: CommandOptions): Promise<CommandResult>;
+// opts.killGraceMs: SIGTERM → SIGKILL grace on timeout/cancel (default DEFAULT_KILL_GRACE_MS = 5000)
 
 // assertions.ts
 function evaluateAssertion(a: AssertionDefinition, ctx: AssertionContext): Promise<AssertionResult>;
 
-// scoring.ts
+// scoring.ts (contracts: SPEC-111 §8/§10)
+const SCORE_EPSILON = 1e-9;
 function scoreRun(assertions: ScoredAssertion[], passThreshold: number): { score: number; passed: boolean };
 function aggregate(runs: RunOutcome[]): Aggregate;
 function summarize(runs: RunOutcome[], opts: SummarizeOptions): ScoringSummary;
@@ -148,6 +155,10 @@ function assertRunnable(input: Pick<RunBenchmarkInput, 'definition' | 'fixtures'
 function comparabilityKey(definition: BenchmarkDefinition, fixtures: Record<string, CaseFixtures>,
   adapterId: string, adapterVersion: string | null): string;          // sha256(canonicalJson({cases, scoring, execution, fixtures, adapterId, adapterVersion}))
 function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkOutcome>;
+// Post-run equivalence check (SPEC-112 FR-112-08); empty = comparable.
+function equivalenceIssues(fixtures: Record<string, CaseFixtures>,
+  agentRuns: readonly Pick<AgentRunRecord, 'caseId' | 'variant' | 'repetition' | 'fixtureHash'>[],
+  adapterVersionBefore: string | null, adapterVersionAfter: string | null): string[];
 
 interface RunBenchmarkInput {
   definition: BenchmarkDefinition;
@@ -267,7 +278,7 @@ flowchart LR
 ## 10. API and interface design
 
 - Package entry: `@directivebench/benchmark-engine` (`src/index.ts`, just-in-time TS package, bundled by the CLI).
-- Callers: `@directivebench/runner` (job handler), `apps/cli` `demo` (headless), tests. `apps/web` imports only the subpath exports `./definition`, `./load` and `./scoring` (types, `validateDefinition`, `displayStatus`) — never runs benchmarks ([SPEC-008](2026-10-14-api-architecture.md)).
+- Callers: `@directivebench/runner` (job handler), `apps/cli` `demo` (headless), tests. `apps/web` imports only the subpath exports `./definition`, `./load` and `./scoring` (types, `validateDefinition`, `executionBlockers`, `displayStatus`) — never runs benchmarks ([SPEC-008](2026-10-14-api-architecture.md)).
 - Errors exported: `DefinitionValidationError` (with `issues`), `UnsupportedSchemaVersionError`, `UnsafeFileError`, `BenchmarkConfigurationError` (environment, agent mismatch, capability, artifact type, approval, missing fixture), `BenchmarkCancelledError`; `UnsupportedCapabilityError`, `PathEscapeError` from adapters.
 
 ## 11. UI/UX considerations
@@ -340,6 +351,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` and `scoring.test.ts` — 21 tests — and `packages/runner/test/runner.test.ts`):** definition schema v1, YAML/JSON parsing, migration hook (rejects newer versions), `loadDefinitionFile` (all repository examples validate), file manifests/snapshots/diff with symlink rejection, `runCommand`/`buildCommandEnv` (no shell, no leaked environment, timeout, truncation, spawn errors), assertion types `command`, `file-exists`, `file-contains`, `changed-files`, scoring (`scoreRun`, `aggregate`, `summarize`, `confidenceFor`, `displayStatus`), `prepareSuiteImport`/`suiteContentHash`, `assertRunnable` (unapproved commands and `docker` rejected), `comparabilityKey`, `runBenchmark` with `onAgentRun` callback, alternating order and cancellation (`src/import.ts`, `src/orchestrator.ts`); Mock Agent adapter and contract in `@directivebench/agent-adapters` (`mock.test.ts`). Subpath exports `./definition`, `./load`, `./scoring`.
-- **Partially implemented:** progress events (only per-agent-run callback; no stage/command-output events); capability checks (only `execution`, not `headless`/`artifactInstallation`/`modelSelection`); FR-107-14 independence is respected by the package manifest but not enforced by a test or lint rule.
-- **Not implemented:** `onEvent` stage events, exported `runAgentRun`, assertion plugin registry, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.
+- **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` and `scoring.test.ts` — 31 tests — and `packages/runner/test/runner.test.ts`):** definition schema v1, YAML/JSON parsing, migration hook (rejects newer versions), `loadDefinitionFile` (all repository examples validate), file manifests/snapshots/diff with symlink rejection, `runCommand`/`buildCommandEnv` (no shell, no leaked environment, timeout and cancellation with `SIGTERM` then `SIGKILL` after `killGraceMs`, truncation, spawn errors), assertion types `command`, `file-exists`, `file-contains`, `changed-files` (`isDeterministicAssertion`), scoring (`scoreRun`, `aggregate`, `summarize` with verdict reasons and `nondeterministic`/`conclusive` flags, `confidenceFor`, `displayStatus`, `SCORE_EPSILON`), `prepareSuiteImport`/`suiteContentHash`, `executionBlockers` and `assertRunnable` (unapproved commands and `docker` rejected; capabilities `execution`, `headless` and `artifactInstallation` required), fixture copy verified against the snapshot hash, `comparabilityKey`, `equivalenceIssues`, `runBenchmark` with `onAgentRun` callback, alternating order and cancellation (`src/import.ts`, `src/orchestrator.ts`); Mock Agent adapter and contract in `@directivebench/agent-adapters` (`mock.test.ts`). Subpath exports `./definition`, `./load`, `./scoring`.
+- **Implemented (2026-10-15):** FR-107-07 capability checks including `modelSelection` when `execution.model` is set (`engine.test.ts`, "rejects a model selection the adapter cannot honour").
+- **Partially implemented:** FR-107-14 independence is respected by the package manifest but not enforced by a test or lint rule.
+- **Not implemented (planned):** stage-level progress events (`onEvent` with `stage-started`, `stage-finished`, `command-output`, … — FR-107-09; the current contract is the `onAgentRun(record)` callback), exported `runAgentRun`, assertion plugin registry, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.
