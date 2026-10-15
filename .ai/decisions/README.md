@@ -27,9 +27,10 @@ repeating the rationale.
 | [ADR-0008](0008-secret-storage-and-authentication.md) | Secret storage and authentication modes | Proposed | 2026-10-14 |
 | [ADR-0009](0009-self-hosted-readiness.md) | Self-hosted readiness boundaries | Proposed | 2026-10-14 |
 | [ADR-0010](0010-mit-license.md) | MIT license | Accepted | 2026-10-14 |
+| [ADR-0011](0011-optional-postgresql-backend-with-kysely.md) | Optional PostgreSQL backend, one repository layer on Kysely | Proposed | 2026-10-15 |
 
-All ADRs above were written during project bootstrap and are pending maintainer review (see the
-"Deciders" field in each record).
+ADR-0001 to ADR-0010 were written during project bootstrap; all ADRs above are pending maintainer
+review (see the "Deciders" field in each record).
 
 ## Statuses
 
