@@ -119,7 +119,7 @@ function extractReferences(body: string): string[] {
   for (const match of body.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
     const target = match[1];
     if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) continue;
-    refs.add(target.split('#')[0] ?? target);
+    refs.add(target.replace(/#.*/, ''));
   }
   return [...refs].filter(Boolean).sort();
 }

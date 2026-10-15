@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { classifyArtifactPath, parseArtifactFile, slugify } from '../src/artifacts';
-import { parseFrontmatter } from '../src/frontmatter';
 
 describe('classifyArtifactPath', () => {
   it.each([
     ['.claude/skills/pdf/SKILL.md', 'skill-md', 'skill', '.claude/skills/pdf'],
     ['.agents/skills/review/SKILL.md', 'skill-md', 'skill', '.agents/skills/review'],
     ['skills/x/SKILL.md', 'skill-md', 'skill', 'skills/x'],
+    ['SKILL.md', 'skill-md', 'skill', ''],
     ['AGENTS.md', 'agents-md', 'instruction', null],
     ['packages/api/AGENTS.md', 'agents-md', 'instruction', null],
     ['CLAUDE.md', 'claude-md', 'instruction', null],
@@ -91,24 +91,84 @@ describe('parseArtifactFile', () => {
     ).toEqual({ globs: ['src/**'] });
   });
 
+  it('names a root SKILL.md without metadata after the format', () => {
+    const parsed = parseArtifactFile('SKILL.md', 'No heading here.');
+    expect(parsed.name).toBe('skill');
+    expect(parsed.description).toBeNull();
+  });
+
+  it('applies Cursor rules without frontmatter only when requested', () => {
+    const parsed = parseArtifactFile(
+      '.cursor/rules/plain.mdc',
+      '---\nalwaysApply: yes-please\n---\nx',
+    );
+    expect(parsed.activation).toEqual({});
+    expect(parsed.description).toBeNull();
+  });
+
+  it('accepts glob lists and ignores empty or non-string globs', () => {
+    expect(
+      parseArtifactFile('.cursor/rules/a.mdc', '---\nglobs: ["src/**", "", 3]\n---\nx').activation,
+    ).toEqual({ globs: ['src/**'] });
+    expect(
+      parseArtifactFile('.cursor/rules/a.mdc', '---\nglobs: " , "\n---\nx').activation,
+    ).toEqual({});
+    expect(
+      parseArtifactFile('.claude/rules/a.md', '---\npaths: ["", "  "]\n---\nx').activation,
+    ).toEqual({ alwaysApply: true });
+    expect(parseArtifactFile('.claude/rules/a.md', '---\npaths: 42\n---\nx').activation).toEqual({
+      alwaysApply: true,
+    });
+  });
+
+  it.each([
+    ['AGENTS.md', 'agents-md', 'instruction', 'AGENTS.md'],
+    ['packages/api/AGENTS.md', 'agents-md', 'instruction', 'packages/api/AGENTS.md'],
+    ['CLAUDE.md', 'claude-md', 'instruction', 'CLAUDE.md'],
+    [
+      '.github/copilot-instructions.md',
+      'copilot-instructions',
+      'instruction',
+      '.github/copilot-instructions.md',
+    ],
+    ['.gitlab/duo/chat-rules.md', 'gitlab-duo-chat-rules', 'rule', '.gitlab/duo/chat-rules.md'],
+  ])('always applies %s and names it by its path', (path, format, type, name) => {
+    const parsed = parseArtifactFile(path, '# Project rules\nBody');
+    expect(parsed).toMatchObject({
+      format,
+      type,
+      name,
+      description: 'Project rules',
+      activation: { alwaysApply: true },
+      warnings: [],
+    });
+  });
+
+  it('prefers a frontmatter description over the first heading', () => {
+    expect(
+      parseArtifactFile('AGENTS.md', '---\ndescription: "  From metadata  "\n---\n# Heading')
+        .description,
+    ).toBe('From metadata');
+  });
+
+  it('reports invalid frontmatter as a warning', () => {
+    const parsed = parseArtifactFile('CLAUDE.md', '---\nname: [unclosed\n---\nbody');
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0]).toMatch(/^Invalid frontmatter: /);
+    expect(parsed.frontmatter).toEqual({});
+  });
+
+  it('extracts unique, sorted local references without fragments', () => {
+    const body = [
+      '[b](docs/b.md#section) [a](docs/a.md) [again](docs/a.md#top)',
+      '[anchor](#local) [mail](mailto:x@example.com) [web](HTTPS://example.com)',
+      '[empty]() [spaced](has space.md)',
+    ].join('\n');
+    expect(parseArtifactFile('AGENTS.md', body).references).toEqual(['docs/a.md', 'docs/b.md']);
+  });
+
   it('rejects unknown paths', () => {
     expect(() => parseArtifactFile('README.md', 'x')).toThrow(/Not a recognised/);
-  });
-});
-
-describe('parseFrontmatter', () => {
-  it('returns content unchanged without frontmatter', () => {
-    expect(parseFrontmatter('# hi')).toEqual({ frontmatter: {}, body: '# hi' });
-  });
-
-  it('reports invalid YAML without throwing', () => {
-    const result = parseFrontmatter('---\nname: [unclosed\n---\nbody');
-    expect(result.error).toBeDefined();
-    expect(result.body).toBe('body');
-  });
-
-  it('rejects non-mapping frontmatter', () => {
-    expect(parseFrontmatter('---\n- a\n---\n').error).toMatch(/mapping/);
   });
 });
 

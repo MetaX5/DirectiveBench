@@ -72,6 +72,20 @@ describe('aggregate', () => {
       aggregate([run('baseline', 1), run('baseline', null), run('baseline', null)]).errorRate,
     ).toBeCloseTo(2 / 3, 12);
   });
+
+  it('returns empty statistics without runs', () => {
+    expect(aggregate([])).toEqual({
+      totalRuns: 0,
+      validRuns: 0,
+      meanScore: null,
+      stdDev: null,
+      minScore: null,
+      maxScore: null,
+      passRate: null,
+      errorRate: 0,
+      meanDurationMs: null,
+    });
+  });
 });
 
 describe('summarize verdicts', () => {
@@ -120,6 +134,15 @@ describe('summarize verdicts', () => {
         .verdict,
     ).toBe('not-comparable');
   });
+
+  it('error when there are no cases to compare', () => {
+    expect(summarize([], { ...options, caseIds: [] })).toMatchObject({
+      verdict: 'error',
+      reasons: ['no comparable scores were produced'],
+      delta: null,
+      candidateOutcome: null,
+    });
+  });
 });
 
 describe('confidence and display status', () => {
@@ -132,6 +155,9 @@ describe('confidence and display status', () => {
 
   it('maps verdicts to display statuses', () => {
     expect(displayStatus(null, null)).toBe('not-tested');
+    expect(displayStatus(undefined, undefined)).toBe('not-tested');
+    expect(displayStatus('error', null)).toBe('error');
+    expect(displayStatus('not-comparable', 'passed')).toBe('not-comparable');
     expect(displayStatus('regressed', 'passed')).toBe('regression');
     expect(displayStatus('improved', 'passed')).toBe('passed');
     expect(displayStatus('unchanged', 'failed')).toBe('failed');
@@ -174,6 +200,12 @@ describe('FR-111 refinements', () => {
       comparabilityIssues: ['agent version changed during the run (1 → 2)'],
     });
     expect(notComparable.reasons).toEqual(['agent version changed during the run (1 → 2)']);
+    const withoutDetails = summarize([run('baseline', 0.5), run('candidate', 1)], {
+      ...options,
+      comparable: false,
+      comparabilityIssues: [],
+    });
+    expect(withoutDetails.reasons).toEqual(['equivalence check failed']);
   });
 
   it('flags nondeterministic single repetitions as not conclusive (FR-111-42)', () => {

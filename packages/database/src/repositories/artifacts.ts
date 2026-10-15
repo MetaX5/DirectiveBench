@@ -266,13 +266,15 @@ function toLatestEvaluation(run: typeof benchmarkRuns.$inferSelect): LatestEvalu
   };
 }
 
-/** Latest benchmark run per artifact (any version), keyed by artifact id. */
+/**
+ * Latest benchmark run per artifact (any version), keyed by artifact id. Callers pass a non-empty
+ * `artifactIds` list.
+ */
 async function latestRunsByArtifact(
   db: Database,
   artifactIds: string[],
 ): Promise<Map<string, LatestEvaluation>> {
   const result = new Map<string, LatestEvaluation>();
-  if (artifactIds.length === 0) return result;
   const rows = await db
     .select({ run: benchmarkRuns, artifactId: artifactVersions.artifactId })
     .from(benchmarkRuns)

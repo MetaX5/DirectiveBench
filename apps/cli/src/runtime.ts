@@ -73,9 +73,9 @@ export interface Assets {
  * Locates bundled files relative to this file, never relative to the working directory.
  * Packaged: `dist/cli.js` next to `dist/{web,migrations,examples}`.
  * Source (development): `apps/cli/src/*.ts` inside the monorepo.
+ * `here` defaults to this module's directory and is only overridden by tests.
  */
-export function resolveAssets(): Assets {
-  const here = dirname(fileURLToPath(import.meta.url));
+export function resolveAssets(here = dirname(fileURLToPath(import.meta.url))): Assets {
   if (existsSync(join(here, 'web', '.next', 'BUILD_ID'))) {
     const require = createRequire(import.meta.url);
     return {

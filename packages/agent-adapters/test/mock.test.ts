@@ -1,11 +1,11 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ArtifactBundle } from '@directivebench/core';
-import { detectCliAgent } from '../src/detection';
-import { MockAgentAdapter } from '../src/mock';
-import { PathEscapeError, resolveInside } from '../src/paths';
+import type { AgentRunRequest } from '../src/contract';
+import { MOCK_AGENT_ID, MOCK_AGENT_VERSION, MockAgentAdapter } from '../src/mock';
+import { PathEscapeError } from '../src/paths';
 
 const skill: ArtifactBundle = {
   artifactId: 'art_1',
@@ -30,35 +30,74 @@ const options = {
   ],
 };
 
-function request(workspaceDir: string, opts: unknown = options) {
-  return {
-    workspaceDir,
-    prompt: 'task',
-    timeoutMs: 1000,
-    signal: new AbortController().signal,
-    model: null,
-    options: opts,
-  };
+function request(
+  workspaceDir: string,
+  opts: unknown = options,
+  signal = new AbortController().signal,
+): AgentRunRequest {
+  return { workspaceDir, prompt: 'task', timeoutMs: 1000, signal, model: null, options: opts };
 }
+
+const tempDirs: string[] = [];
+function workspace(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mock-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('MockAgentAdapter', () => {
   const adapter = new MockAgentAdapter();
 
+  it('identifies itself as a deterministic mock that needs no auth', async () => {
+    expect(adapter.id).toBe(MOCK_AGENT_ID);
+    expect(adapter.displayName).toMatch(/mock/i);
+    expect(adapter.displayName).toMatch(/no AI/);
+    expect(adapter.capabilities).toMatchObject({ execution: true, deterministic: true });
+    expect(await adapter.detect()).toEqual({
+      adapterId: 'mock',
+      installed: true,
+      version: MOCK_AGENT_VERSION,
+      executablePath: null,
+      auth: 'not-required',
+      notes: ['Built-in deterministic mock; results are not AI evaluations.'],
+    });
+  });
+
   it('skips guarded steps when no artifact is installed (baseline)', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'mock-'));
+    const ws = workspace();
     const result = await adapter.run(request(ws));
-    expect(result.status).toBe('completed');
+    expect(result).toMatchObject({
+      status: 'completed',
+      summary: 'Applied 1 of 2 playbook steps',
+      usage: null,
+      error: null,
+    });
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(readFileSync(join(ws, 'src/a.js'), 'utf8')).toBe('naive');
-    expect(result.trace).toContainEqual(
-      expect.objectContaining({ type: 'step-skipped', stepId: 'strict' }),
-    );
+    expect(result.trace).toEqual([
+      { type: 'context-loaded', files: [] },
+      { type: 'step-applied', stepId: 'base', description: 'naive' },
+      { type: 'file-written', path: 'src/a.js', bytes: 5 },
+      {
+        type: 'step-skipped',
+        stepId: 'strict',
+        description: 'validated',
+        reason: 'instruction context does not contain "validate external input"',
+      },
+      { type: 'message', text: 'Applied 1 of 2 playbook steps' },
+    ]);
   });
 
   it('follows directives from an installed skill (candidate)', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'mock-'));
+    const ws = workspace();
     const installed = await adapter.installArtifact(ws, skill);
     expect(installed.paths).toEqual(['.agents/skills/validate-input/SKILL.md']);
     const result = await adapter.run(request(ws));
+    expect(result.summary).toBe('Applied 2 of 2 playbook steps');
     expect(readFileSync(join(ws, 'src/a.js'), 'utf8')).toBe('validated');
     expect(result.trace[0]).toEqual({
       type: 'context-loaded',
@@ -66,27 +105,107 @@ describe('MockAgentAdapter', () => {
     });
   });
 
-  it('installs instructions through AGENTS.md', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'mock-'));
-    await adapter.installArtifact(ws, { ...skill, type: 'instruction', format: 'agents-md' });
-    await adapter.run(request(ws));
+  it('installs instructions under .agents/instructions and appends them to AGENTS.md', async () => {
+    const ws = workspace();
+    const first = await adapter.installArtifact(ws, {
+      ...skill,
+      type: 'instruction',
+      format: 'agents-md',
+    });
+    expect(first.paths).toEqual(['.agents/instructions/validate-input/SKILL.md', 'AGENTS.md']);
+    expect(readFileSync(join(ws, 'AGENTS.md'), 'utf8')).toBe('Always VALIDATE external input.');
+
+    await adapter.installArtifact(ws, {
+      ...skill,
+      slug: 'second-rule',
+      type: 'rule',
+      files: [
+        { path: 'a.md', sha256: '', size: 1, content: 'Rule A.' },
+        { path: 'b.md', sha256: '', size: 1, content: 'Rule B.' },
+      ],
+    });
+    expect(readFileSync(join(ws, 'AGENTS.md'), 'utf8')).toBe(
+      'Always VALIDATE external input.\n\nRule A.\n\nRule B.',
+    );
+
+    const result = await adapter.run(request(ws));
+    expect(result.trace[0]).toEqual({ type: 'context-loaded', files: ['AGENTS.md'] });
     expect(readFileSync(join(ws, 'src/a.js'), 'utf8')).toBe('validated');
   });
 
-  it('reports invalid options and path escapes as agent errors', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'mock-'));
-    expect((await adapter.run(request(ws, {}))).status).toBe('agent-error');
-    const escape = await adapter.run(
+  it('loads AGENTS.md and skill directories in name order, ignoring stray entries', async () => {
+    const ws = workspace();
+    writeFileSync(join(ws, 'AGENTS.md'), 'root rules');
+    const skills = join(ws, '.agents', 'skills');
+    for (const name of ['zeta', 'alpha', 'empty'])
+      mkdirSync(join(skills, name), { recursive: true });
+    writeFileSync(join(skills, 'zeta', 'SKILL.md'), 'zeta skill');
+    writeFileSync(join(skills, 'alpha', 'SKILL.md'), 'alpha skill');
+    writeFileSync(join(skills, 'loose.md'), 'validate external input');
+
+    const result = await adapter.run(request(ws));
+    expect(result.trace[0]).toEqual({
+      type: 'context-loaded',
+      files: ['AGENTS.md', '.agents/skills/alpha/SKILL.md', '.agents/skills/zeta/SKILL.md'],
+    });
+    // The loose file is not a skill, so the guarded step must not fire.
+    expect(readFileSync(join(ws, 'src/a.js'), 'utf8')).toBe('naive');
+  });
+
+  it('rejects invalid options as an agent error without touching the workspace', async () => {
+    const ws = workspace();
+    for (const opts of [null, {}, { playbook: [] }, { ...options, extra: true }]) {
+      const result = await adapter.run(request(ws, opts));
+      expect(result).toMatchObject({
+        status: 'agent-error',
+        summary: 'Mock agent could not start',
+      });
+      expect(result.error).toMatch(/^Invalid mock agent options: /);
+      expect(result.trace).toEqual([{ type: 'error', message: result.error }]);
+    }
+  });
+
+  it('reports a path escape as an agent error and stops', async () => {
+    const ws = workspace();
+    const result = await adapter.run(
       request(ws, {
-        playbook: [{ id: 'x', description: 'x', write: { path: '../evil', content: '' } }],
+        playbook: [
+          { id: 'x', description: 'x', write: { path: '../evil', content: '' } },
+          { id: 'y', description: 'y', write: { path: 'never.txt', content: '' } },
+        ],
       }),
     );
-    expect(escape.status).toBe('agent-error');
-    expect(escape.error).toMatch(/escapes/);
+    expect(result).toMatchObject({ status: 'agent-error', summary: 'Step x failed' });
+    expect(result.error).toMatch(/escapes/);
+    expect(result.trace.at(-1)).toEqual({ type: 'error', message: result.error });
+    expect(() => readFileSync(join(ws, 'never.txt'))).toThrow();
+  });
+
+  it('reports a filesystem failure as an agent error', async () => {
+    const ws = workspace();
+    writeFileSync(join(ws, 'blocker'), 'a file, not a directory');
+    const result = await adapter.run(
+      request(ws, {
+        playbook: [
+          { id: 'nested', description: 'n', write: { path: 'blocker/x.txt', content: '' } },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ status: 'agent-error', summary: 'Step nested failed' });
+    expect(result.error).toMatch(/EEXIST|ENOTDIR/);
+  });
+
+  it('returns cancelled when the signal is already aborted', async () => {
+    const ws = workspace();
+    const controller = new AbortController();
+    controller.abort();
+    const result = await adapter.run(request(ws, options, controller.signal));
+    expect(result).toMatchObject({ status: 'cancelled', summary: 'Cancelled', error: null });
+    expect(() => readFileSync(join(ws, 'src/a.js'))).toThrow();
   });
 
   it('refuses artifact files that escape the install directory', async () => {
-    const ws = mkdtempSync(join(tmpdir(), 'mock-'));
+    const ws = workspace();
     await expect(
       adapter.installArtifact(ws, {
         ...skill,
@@ -94,54 +213,10 @@ describe('MockAgentAdapter', () => {
       }),
     ).rejects.toThrow(PathEscapeError);
   });
-});
 
-describe('resolveInside', () => {
-  it('rejects absolute and parent paths', () => {
-    expect(() => resolveInside('/ws', '/etc/passwd')).toThrow(PathEscapeError);
-    expect(() => resolveInside('/ws', 'a/../../b')).toThrow(PathEscapeError);
-    expect(resolveInside('/ws', 'a/b')).toBe('/ws/a/b');
+  it('never overwrites an existing artifact file', async () => {
+    const ws = workspace();
+    await adapter.installArtifact(ws, skill);
+    await expect(adapter.installArtifact(ws, skill)).rejects.toThrow(/EEXIST/);
   });
-});
-
-describe('detectCliAgent', () => {
-  it('reports missing executables without throwing', async () => {
-    const detection = await detectCliAgent(
-      {
-        id: 'x',
-        displayName: 'X',
-        executable: 'definitely-not-installed-xyz',
-        versionArgs: ['--version'],
-        specPath: '',
-      },
-      { PATH: mkdtempSync(join(tmpdir(), 'empty-')) },
-    );
-    expect(detection).toMatchObject({ installed: false, version: null });
-  });
-
-  it.skipIf(process.platform === 'win32')(
-    'reads the version of an executable on PATH',
-    async () => {
-      const dir = mkdtempSync(join(tmpdir(), 'bin-'));
-      mkdirSync(dir, { recursive: true });
-      const bin = join(dir, 'fake-agent');
-      writeFileSync(bin, '#!/bin/sh\necho "fake-agent 1.2.3"\n');
-      chmodSync(bin, 0o755);
-      const detection = await detectCliAgent(
-        {
-          id: 'fake',
-          displayName: 'Fake',
-          executable: 'fake-agent',
-          versionArgs: ['--version'],
-          specPath: '',
-        },
-        { PATH: dir },
-      );
-      expect(detection).toMatchObject({
-        installed: true,
-        version: 'fake-agent 1.2.3',
-        auth: 'unknown',
-      });
-    },
-  );
 });

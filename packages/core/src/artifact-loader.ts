@@ -23,7 +23,8 @@ async function collectFiles(root: string, warnings: string[]): Promise<ArtifactF
   let total = 0;
   async function walk(dir: string, prefix: string): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
-    entries.sort((a, b) => (a.name < b.name ? -1 : 1));
+    // UTF-16 code-unit order, independent of the order the file system returns entries in.
+    entries.sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name));
     for (const entry of entries) {
       const rel = prefix ? posix.join(prefix, entry.name) : entry.name;
       const abs = join(dir, entry.name);

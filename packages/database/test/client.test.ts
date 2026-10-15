@@ -1,0 +1,288 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { eq, getTableName, is, sql } from 'drizzle-orm';
+import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  ensureDatabaseDir,
+  migrateDatabase,
+  openDatabase,
+  schema,
+  withTransaction,
+  type DatabaseHandle,
+} from '../src/index';
+import { makeTempDir, migrationsFolder, useTestDatabase } from './support/test-database';
+
+const { categories } = schema;
+
+function categoryRow(slug: string) {
+  return {
+    id: `cat_${slug}`,
+    slug,
+    name: slug,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function tableNames(handle: DatabaseHandle): string[] {
+  return handle.sqlite
+    .prepare("select name from sqlite_master where type = 'table' order by name")
+    .all()
+    .map((r) => String(r.name));
+}
+
+describe('openDatabase', () => {
+  let temp: ReturnType<typeof makeTempDir>;
+  beforeEach(() => {
+    temp = makeTempDir();
+  });
+  afterEach(() => temp.dispose());
+
+  it('creates missing parent directories and enables WAL and foreign keys', () => {
+    const path = join(temp.dir, 'nested', 'deeper', 'data.db');
+    const handle = openDatabase(path);
+    try {
+      expect(existsSync(path)).toBe(true);
+      expect(handle.path).toBe(path);
+      expect(handle.sqlite.prepare('pragma journal_mode').get()).toEqual({ journal_mode: 'wal' });
+      expect(handle.sqlite.prepare('pragma foreign_keys').get()).toEqual({ foreign_keys: 1 });
+      expect(handle.sqlite.prepare('pragma busy_timeout').get()).toEqual({ timeout: 5000 });
+    } finally {
+      handle.close();
+    }
+  });
+
+  it('opens an in-memory database without touching the file system or enabling WAL', async () => {
+    const handle = openDatabase(':memory:');
+    try {
+      expect(handle.sqlite.prepare('pragma journal_mode').get()).toEqual({
+        journal_mode: 'memory',
+      });
+      expect(existsSync(':memory:')).toBe(false);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(tableNames(handle)).toContain('jobs');
+    } finally {
+      handle.close();
+    }
+  });
+
+  it('opens read-only without creating directories and rejects writes', async () => {
+    const missing = join(temp.dir, 'missing', 'data.db');
+    expect(() => openDatabase(missing, { readOnly: true })).toThrow();
+    expect(existsSync(join(temp.dir, 'missing'))).toBe(false);
+
+    const path = join(temp.dir, 'data.db');
+    const writer = openDatabase(path);
+    await migrateDatabase(writer, migrationsFolder);
+    await writer.db.insert(categories).values(categoryRow('security'));
+    writer.close();
+
+    const reader = openDatabase(path, { readOnly: true });
+    try {
+      const rows = await reader.db.select({ slug: categories.slug }).from(categories);
+      expect(rows).toEqual([{ slug: 'security' }]);
+      await expect(
+        reader.db.insert(categories).values(categoryRow('other')),
+      ).rejects.toHaveProperty('cause.message', expect.stringMatching(/readonly/i));
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('can be closed more than once', () => {
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    handle.close();
+    expect(handle.sqlite.isOpen).toBe(false);
+    expect(() => handle.close()).not.toThrow();
+  });
+});
+
+describe('ensureDatabaseDir', () => {
+  it('creates the parent directory of a database path', () => {
+    const temp = makeTempDir();
+    try {
+      const path = join(temp.dir, 'a', 'b', 'data.db');
+      ensureDatabaseDir(path);
+      expect(existsSync(join(temp.dir, 'a', 'b'))).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(() => ensureDatabaseDir(path)).not.toThrow();
+    } finally {
+      temp.dispose();
+    }
+  });
+});
+
+describe('migrateDatabase', () => {
+  const getHandle = useTestDatabase();
+
+  it('creates the schema and is idempotent', async () => {
+    const handle = getHandle();
+    expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(0);
+    expect(tableNames(handle)).toEqual(
+      expect.arrayContaining([
+        'artifacts',
+        'artifact_versions',
+        'jobs',
+        'benchmark_runs',
+        'assertion_results',
+      ]),
+    );
+  });
+
+  it('rolls back every statement of a failing migration', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      const folder = join(temp.dir, 'migrations');
+      mkdirSync(join(folder, 'meta'), { recursive: true });
+      writeFileSync(
+        join(folder, 'meta', '_journal.json'),
+        JSON.stringify({
+          version: '7',
+          dialect: 'sqlite',
+          entries: [{ idx: 0, version: '6', when: 1, tag: '0000_broken', breakpoints: true }],
+        }),
+      );
+      writeFileSync(
+        join(folder, '0000_broken.sql'),
+        'CREATE TABLE `ok` (`id` text);\n--> statement-breakpoint\nCREATE TABLE broken (;',
+      );
+
+      await expect(migrateDatabase(handle, folder)).rejects.toThrow(/syntax error/);
+      expect(tableNames(handle)).not.toContain('ok');
+      expect(handle.sqlite.isTransaction).toBe(false);
+      const recorded = handle.sqlite
+        .prepare('select count(*) as n from __drizzle_migrations')
+        .get();
+      expect(recorded).toEqual({ n: 0 });
+    } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+});
+
+describe('withTransaction', () => {
+  const getHandle = useTestDatabase();
+
+  async function slugs(handle: DatabaseHandle): Promise<string[]> {
+    const rows = await handle.db
+      .select({ slug: categories.slug })
+      .from(categories)
+      .orderBy(categories.slug);
+    return rows.map((r) => r.slug);
+  }
+
+  it('commits the callback result', async () => {
+    const handle = getHandle();
+    const result = await withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow('a'));
+      return 'done';
+    });
+    expect(result).toBe('done');
+    expect(handle.sqlite.isTransaction).toBe(false);
+    expect(await slugs(handle)).toEqual(['a']);
+  });
+
+  it('rolls back and rethrows when the callback fails', async () => {
+    const handle = getHandle();
+    const failure = new Error('boom');
+    await expect(
+      withTransaction(handle, async (db) => {
+        await db.insert(categories).values(categoryRow('a'));
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(handle.sqlite.isTransaction).toBe(false);
+    expect(await slugs(handle)).toEqual([]);
+  });
+
+  it('rethrows the original error when SQLite already rolled the transaction back', async () => {
+    const handle = getHandle();
+    await handle.db.insert(categories).values(categoryRow('a'));
+    await expect(
+      withTransaction(handle, async (db) => {
+        await db.insert(categories).values(categoryRow('b'));
+        // OR ROLLBACK makes SQLite end the transaction itself on the constraint violation.
+        await db.run(
+          sql`insert or rollback into ${categories} (id, slug, name, created_at, updated_at)
+              values ('cat_dup', 'a', 'a', 'now', 'now')`,
+        );
+      }),
+    ).rejects.toHaveProperty('cause.message', expect.stringMatching(/UNIQUE constraint failed/));
+    expect(handle.sqlite.isTransaction).toBe(false);
+    expect(await slugs(handle)).toEqual(['a']);
+  });
+
+  it('serialises concurrent transactions and keeps going after a failed one', async () => {
+    const handle = getHandle();
+    const order: string[] = [];
+    const first = withTransaction(handle, async (db) => {
+      order.push('first:start');
+      await db.insert(categories).values(categoryRow('first'));
+      await new Promise((resolve) => setImmediate(resolve));
+      order.push('first:end');
+      throw new Error('first failed');
+    });
+    const second = withTransaction(handle, async (db) => {
+      order.push('second:start');
+      await db.insert(categories).values(categoryRow('second'));
+      order.push('second:end');
+      return db.select().from(categories).where(eq(categories.slug, 'first'));
+    });
+
+    await expect(first).rejects.toThrow('first failed');
+    expect(await second).toEqual([]);
+    expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
+    expect(await slugs(handle)).toEqual(['second']);
+  });
+});
+
+describe('schema', () => {
+  const getHandle = useTestDatabase();
+
+  const exports: unknown[] = Object.values(schema);
+  const tables = exports.filter((value): value is SQLiteTable => is(value, SQLiteTable));
+
+  it('declares the same foreign keys and indexes as the migrated database', () => {
+    const handle = getHandle();
+    expect(tables.map((t) => getTableName(t)).sort()).toEqual(
+      tableNames(handle).filter((name) => !name.startsWith('__')),
+    );
+    for (const table of tables) {
+      const config = getTableConfig(table);
+      const declaredKeys = config.foreignKeys
+        .map((fk) => {
+          const ref = fk.reference();
+          return {
+            from: ref.columns.map((c) => c.name).join(','),
+            table: getTableName(ref.foreignTable),
+            to: ref.foreignColumns.map((c) => c.name).join(','),
+            onDelete: (fk.onDelete ?? 'no action').toUpperCase(),
+          };
+        })
+        .sort((a, b) => a.from.localeCompare(b.from));
+      const actualKeys = handle.sqlite
+        .prepare(`pragma foreign_key_list(${config.name})`)
+        .all()
+        .map((row) => ({
+          from: String(row.from),
+          table: String(row.table),
+          to: String(row.to),
+          onDelete: String(row.on_delete),
+        }))
+        .sort((a, b) => a.from.localeCompare(b.from));
+      expect(declaredKeys, config.name).toEqual(actualKeys);
+
+      const declaredIndexes = config.indexes.map((i) => i.config.name).sort();
+      const actualIndexes = handle.sqlite
+        .prepare(`pragma index_list(${config.name})`)
+        .all()
+        .filter((row) => row.origin === 'c')
+        .map((row) => String(row.name))
+        .sort();
+      expect(declaredIndexes, config.name).toEqual(actualIndexes);
+    }
+  });
+});

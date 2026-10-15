@@ -9,7 +9,7 @@
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "outputs": []
+      "outputs": ["coverage/**"]
     },
     "dev": {
       "cache": false,

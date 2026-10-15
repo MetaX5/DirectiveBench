@@ -16,7 +16,8 @@ export function parseFrontmatter(content: string): FrontmatterResult {
   if (!match) return { frontmatter: {}, body: text };
   const body = text.slice(match[0].length);
   try {
-    const value: unknown = parse(match[1] ?? '');
+    // Capture group 1 is not optional, so it is always defined when the expression matches.
+    const value: unknown = parse(match[1] as string);
     if (value === null || value === undefined) return { frontmatter: {}, body };
     if (typeof value !== 'object' || Array.isArray(value)) {
       return { frontmatter: {}, body, error: 'frontmatter is not a mapping' };

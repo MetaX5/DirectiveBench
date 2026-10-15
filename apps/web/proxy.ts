@@ -21,7 +21,8 @@ function hostname(hostHeader: string | null): string | null {
   if (!hostHeader) return null;
   const host = hostHeader.toLowerCase();
   if (host.startsWith('[')) return host.slice(0, host.indexOf(']') + 1);
-  return host.split(':')[0] ?? null;
+  const colon = host.indexOf(':');
+  return colon === -1 ? host : host.slice(0, colon);
 }
 
 export function proxy(request: NextRequest) {
