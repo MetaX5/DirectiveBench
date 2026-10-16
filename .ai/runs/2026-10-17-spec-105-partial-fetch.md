@@ -62,6 +62,10 @@ Docs only, no code; spec status stays `draft`.
 ## Problems and deviations
 
 - The first explicit blob fetch failed with "bad revision"; fixed by noop negotiation (lesson).
+- Review follow-up (`om-auto-review-pr`, 2026-10-17): §9.1 now records the commit fetched in step 1
+  rather than the one `ls-remote` resolved in step 0, which a push between the two would make
+  differ (FR-105-06). It also places `GIT_NO_LAZY_FETCH` on the step 4 pre-check instead of step 3,
+  and names how the clone size limit is enforced during a fetch (§12, with tests in §15).
 
 ## Lessons recorded
 

@@ -26,7 +26,8 @@ directory belongs to the skill (SPEC-102 FR-102-12).
 Use git with a two-phase partial fetch into a bare cache, never a working tree:
 
 1. `git clone --bare --filter=blob:none --depth 1 --single-branch --no-tags` fetches the commit and
-   its trees only.
+   its trees only. The commit read from the cache afterwards is the snapshot that is recorded, not
+   the one `ls-remote` resolved earlier, because the branch can move in between.
 2. `git ls-tree -r -z` lists the tree; a pure function selects candidate paths with the SPEC-102
    rules (formats, skill directories, excludes, include roots, count limits).
 3. One `git fetch --filter=blob:none --stdin` with `fetch.negotiationAlgorithm=noop` downloads
