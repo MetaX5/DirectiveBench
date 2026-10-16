@@ -113,6 +113,16 @@ A red signal does not short-circuit the review either. A failing required check 
 
 None of this touches the merge gates. Reporting early is safe; merging early is not — required checks still gate every merge, and the merge tooling refuses until they are genuinely green.
 
+## Working in parallel
+
+Several people, each with their own agents, can work on the backlog at the same time. These rules keep them from colliding:
+
+- **Claim before you start, human or agent.** Use the same three signals as the claim protocol: assign yourself, add `in-progress`, and comment what you are doing. One issue has one author at a time.
+- **One worktree or branch per issue.** Never share a working copy between two people or two agents (`AGENTS.md` §3).
+- **Respect `Depends on:`.** Start an issue only once the issues it depends on are merged, or branch from the open PR it depends on and say so in your PR description.
+- **One schema migration in flight.** Drizzle numbers migrations in sequence (`packages/database/migrations`, `meta/_journal.json`), so two open PRs that both add a migration will conflict. Before adding one, check the open PRs. If another one already has a migration, wait for it to merge, then rebase and regenerate yours.
+- **Optional second-model review.** Before `om-auto-review-pr` runs, the author may check out the PR branch (`gh pr checkout <n>`) and run `/codex:adversarial-review --base main --wait` (or `/codex:review`) from the Codex plugin, then post the output as a PR comment. The command is review-only and edits nothing. `om-auto-review-pr` collects existing PR comments as findings, so Codex's points count in the verdict. The formal reviewer is still `om-auto-review-pr` or a human.
+
 ## The automation contract
 
 The `om-auto-*` skills run this process unattended and are chainable: each accepts the artifact the previous one produced (an issue id, a spec path, or a PR number from the `PR: #<number> (link: <url>)` reference line every PR-producing skill emits), and each detects work already started — an open PR referencing the issue or plan — and continues on it rather than opening a duplicate. A completed autonomous run leaves a **ready** (non-draft), fully labeled PR — one pipeline label, category, QA meta, one priority, one risk — with a run-summary comment and, for user-facing changes, screenshots from the working app attached as PR evidence. Draft PRs are reserved for explicitly incomplete states: spec-only design PRs, interrupted hand-offs, or autonomous defaults flagged for human confirmation. Automation applies `qa-approved` only through the self-QA exception (`om-auto-qa-pr --self-qa-signoff`, always paired with `qa-self-verified`, never on a `risk-high` PR); no authoring, review, or merge skill ever applies it.
