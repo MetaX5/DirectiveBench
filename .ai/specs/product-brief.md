@@ -2,8 +2,8 @@
 
 - Date: 2026-10-16
 - Mode: own; Owner: Mateusz Minkiewicz (maintainer); Pass: full
-- Evidence basis: one first-hand account from the maintainer, who is also the builder; six decisions the maintainer confirmed on 2026-10-15 and 2026-10-16; specs that describe what is planned, not what users need; two reference products checked on 2026-10-15. No colleague, outside-user, usage or support material yet. Most consequential untested belief: DirectiveBench's verdicts will predict real-project outcomes (A03).
-- Coverage: 26 claims — 22 sourced (interview 6, data 1, document 7, product 6, benchmark 2), 0 synthetic, 4 assumed; 2 entries on the collection plan
+- Evidence basis: one first-hand account from the maintainer, who is also the builder; seven decisions the maintainer confirmed on 2026-10-15 and 2026-10-16; specs that describe what is planned, not what users need; two reference products checked on 2026-10-15. No colleague, outside-user, usage or support material yet. Most consequential untested belief: DirectiveBench's verdicts will predict real-project outcomes (A03).
+- Coverage: 27 claims — 23 sourced (interview 6, data 1, document 8, product 6, benchmark 2), 0 synthetic, 4 assumed; 2 entries on the collection plan
 - Synthetic hypotheses outside Coverage: 0
 - Definition of Ready signed by: not yet signed; `SDLC.md` has no Definition of Ready section. Ready for: implementation planning of Now (the repository-based Registry); research before the comparison work and any team-facing scope.
 - Sources: `research/interviews/2026-10-15-skill-author-maintainer.md`, `research/decisions/`, [SPEC-001](2026-10-14-project-overview.md), [SPEC-013](2026-10-14-implementation-roadmap.md), [SPEC-101](2026-10-14-artifact-registry.md), [SPEC-102](2026-10-14-artifact-discovery.md), [SPEC-104](2026-10-14-repository-management.md), [SPEC-112](2026-10-14-red-green-evaluation.md), [SPEC-113](2026-10-14-results-and-reporting.md)
@@ -18,7 +18,7 @@ The skills the maintainer updates live in the client projects' repositories, and
 
 Later uncertainty: whether verdicts match real projects (D03, A03) and whether Promptfoo already covers the comparison need (A04).
 
-Next: plan the Registry backlog. In parallel the maintainer tries Promptfoo on one own skill and interviews colleagues (Collection plan).
+Next: build the first Registry slice (register, scan, browse, preview), then a one-to-two-week value checkpoint before categories (D07). In parallel the maintainer tries Promptfoo on one own skill and interviews colleagues (Collection plan).
 
 ## Vision
 
@@ -59,7 +59,7 @@ Skill authors see all their skills, instructions and rules in one place and know
 
 ## Scope
 
-- **Now:** the Artifact Registry as roadmap M1 defines it — register local repositories and directories, discover, browse, filter, preview content, version on change, categories (D01); plus adding a public GitHub repository by URL, fetched without credentials and limited to candidate paths (D06; SPEC-105 FR-105-05 and OQ-105-04 change first). User-level folders stay out of Now, as SPEC-102 §3 already says (D04, D05). `[PRODUCT]` [SPEC-013 M1](2026-10-14-implementation-roadmap.md), [SPEC-102 §3](2026-10-14-artifact-discovery.md)
+- **Now:** the Artifact Registry as roadmap M1 defines it — register local repositories and directories, discover, browse, filter, preview content, version on change, categories after a value checkpoint (D01, D07); plus adding a public GitHub repository by URL, fetched without credentials and limited to candidate paths (D06; SPEC-105 FR-105-05 and OQ-105-04 change first). User-level folders stay out of Now, as SPEC-102 §3 already says (D04, D05). `[PRODUCT]` [SPEC-013 M1](2026-10-14-implementation-roadmap.md), [SPEC-102 §3](2026-10-14-artifact-discovery.md)
 - **Later:** real-agent RED/GREEN runs per skill version with regression highlighting in history (M3, M4); a hand-written suite per skill until the builder (M5); direct version-against-version comparison is a future "A/B mode". Whether this solves the observed problem is A03. `[PRODUCT]` [SPEC-112 §4, §19](2026-10-14-red-green-evaluation.md), [SPEC-113](2026-10-14-results-and-reporting.md). Also chains of skills (D02, needs its own spec); opt-in scanning of user-level skill folders, off by default, to see how global skills interact with a project (D05); private repositories with credentials and GitLab (rest of M2, D06), M6–M8.
 - **Not doing:** see Non-goals.
 
@@ -98,13 +98,14 @@ Changing any row needs a superseding row approved by the maintainer.
 | D04 | 2026-10-16 | Skills are read from project repositories; that is the product's premise | The skills the maintainer updates live in client project repositories | Mateusz Minkiewicz | active | unknown | maintainer | `[DOCUMENT]` [D04](research/decisions/D04-repositories-are-the-source.md) | none |
 | D05 | 2026-10-16 | User-level skill folders are an opt-in option, off by default, to check how global skills interact with a project | The maintainer's answer; matches SPEC-102 §3. Placement with the comparison work (Later) is the agent's reading and remains a proposal | Mateusz Minkiewicz | active | when the comparison work is specified | maintainer | `[DOCUMENT]` [D05](research/decisions/D05-user-level-skills-opt-in.md) | none |
 | D06 | 2026-10-16 | Now includes registering a public GitHub repository by URL, without credentials; private repositories come later | The maintainer wants to add repositories by URL; private ones are not needed yet. Fetching only candidate paths was the agent's proposal, accepted with the story | Mateusz Minkiewicz | active | when private repositories are needed | maintainer | `[DOCUMENT]` [D06](research/decisions/D06-public-github-by-url-in-now.md) | none |
+| D07 | 2026-10-16 | A value checkpoint after the first Registry slice gates the categories work | A Codex review found the full Registry outran the evidence (A02); the agent proposed the checkpoint and its one-to-two-week window; the maintainer accepted | Mateusz Minkiewicz | active | at the checkpoint | maintainer | `[DOCUMENT]` [D07](research/decisions/D07-value-checkpoint-before-categories.md) | none |
 
 ## Riskiest assumptions
 
 | Id | Assumption | Importance | Evidence today | If false | Smallest test | Owner | By when | Result |
 |---|---|---|---|---|---|---|---|---|
 | A01 | PMs, developers and testers at the maintainer's company have the same problem and would use the tool `[ASSUMPTION]` maintainer's belief | medium | Only the maintainer's statement | Team-facing scope loses its basis | Interviews (Collection plan) | Mateusz Minkiewicz | unknown | untested |
-| A02 | One place to see and preview skills is worth building before the comparison `[ASSUMPTION]` maintainer's stated want | medium | Stated want; no incident | The observed problem stays unaddressed longer | After the Registry ships, note whether the maintainer uses it when working on skills | Mateusz Minkiewicz | unknown | accepted untested (D01) |
+| A02 | One place to see and preview skills is worth building before the comparison `[ASSUMPTION]` maintainer's stated want | medium | Stated want; no incident | The observed problem stays unaddressed longer | After the first slice (register, scan, browse, preview) ships, the maintainer uses it on their own repositories for one to two weeks and notes whether they open it when working on skills (D07) | Mateusz Minkiewicz | before categories (E03) start | accepted untested (D01); checkpoint set (D07) |
 | A03 | Verdicts on a skill change will match what later happens in real projects `[ASSUMPTION]` no material | high | None; SkillsBench shows effects vary and can be negative | Confident verdicts that do not help decide | Once runs exist, record each skill update's verdict and the next real-project outcome | Mateusz Minkiewicz | unknown | untested |
 | A04 | DirectiveBench gives value Promptfoo does not `[ASSUMPTION]` maintainer's belief | high | Promptfoo row above | The comparison work duplicates a free tool | Promptfoo trial (Collection plan) | Mateusz Minkiewicz | before planning comparison work | untested |
 
@@ -124,6 +125,7 @@ None; no simulated walkthroughs were run.
 | Q04 | Where do the skills the maintainer updates for client projects live? | no | maintainer | closed 2026-10-16: in those projects' repositories (D04) |
 | Q02 | How often are skills updated, and how long does judging one update take? | no — informs D03's threshold | maintainer | open |
 | Q03 | Which agent was used in the client project, and what did the failure look like? | no — informs the first agent adapter | maintainer | open |
+| Q05 | How is D03 measured: which outcome counts as "confirmed in a real project", how many skill updates, over what period, and what agreement makes us continue or stop? | yes — the comparison work (Later) only | maintainer | open |
 
 ## Definition of Ready addendum (own)
 
