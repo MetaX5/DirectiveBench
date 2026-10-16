@@ -3,7 +3,7 @@ id: SPEC-102
 title: Artifact Discovery
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-17
 category: feature
 related: [SPEC-101, SPEC-103, SPEC-104, SPEC-105, SPEC-005, SPEC-007, SPEC-012, SPEC-203, SPEC-204, SPEC-205]
 ---
@@ -185,7 +185,7 @@ flowchart TD
 
 ## 10. API and interface design
 
-- Package: `@directivebench/core` — pure functions listed in §8.1 (implemented) and `discoverArtifacts` (planned).
+- Package: `@directivebench/core` — pure functions listed in §8.1 (implemented) and `discoverArtifacts` (implemented for local roots; see §20).
 - Consumers: repository sync ([SPEC-105](2026-10-14-repository-synchronization.md)), example/demo import (CLI `demo`), Mock Agent context loading (uses the same conventions to read `.agents/skills/*/SKILL.md` and `AGENTS.md` in a workspace — [SPEC-107](2026-10-14-benchmark-engine.md)).
 - No HTTP endpoint of its own. A future "Preview discovery" UI action on a repository calls sync in dry-run mode.
 
@@ -265,5 +265,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/core/test/artifacts.test.ts` and the `core` hashing tests):** `ARTIFACT_TYPES`, `ARTIFACT_FORMATS`, `classifyArtifactPath` (incl. Windows separators and `./`), `parseArtifactFile` (SKILL.md frontmatter/activation/references and missing-metadata fallback, Cursor rule globs/`alwaysApply`, Copilot `applyTo`, Claude rules; unknown paths rejected), `parseFrontmatter`, `hashManifest`, `slugify` in `packages/core/src`. Not every one of the eight formats has a dedicated test.
+- **Implemented (verified by `packages/core/test/discovery.test.ts` and `discovery-simulated-fs.test.ts`, issue #24):** `discoverArtifacts(root, { limits })` in `packages/core/src/discovery.ts` walks a local root without following symlinks, skips `.git/` and `node_modules/` at any depth (FR-102-15, first sentence), collects every regular file of a directory-based skill except nested skills (FR-102-12, incl. the root-`SKILL.md` warning of §14), returns a manifest and `hashManifest` content hash per artifact (FR-102-14), enforces the FR-102-16 defaults as the named `DISCOVERY_LIMITS` (per-artifact errors; the per-scan cap aborts the scan), detects binary files (NUL in the first 8 KiB or invalid UTF-8: supporting file skipped, primary file a `binary-primary` error — FR-102-17), reports a symlink at a candidate path as a `symlink` error and lists symlinks inside a skill in `skipped` (FR-102-18), reads files as bytes only (FR-102-19, security fixture), and returns the same artifacts, order, hashes and warnings for any directory listing order (FR-102-20). It is a library function only: no scan job, database import or UI uses it yet (story #16).
+- **Deviations from §8.3:** `discoverArtifacts` takes a local root path, not a `FileTree` (the abstraction waits for a second tree source, SPEC-105); it has no `exclude` option; `DiscoveredArtifact` adds `primaryFile` and `warnings` (parser plus discovery warnings, as in `LoadedArtifact`); `skipped` reasons are `symlink` and `binary` only, because an oversized file is an error (FR-102-16) and walked paths cannot leave the root.
 - **Partially implemented:** file collection for a single local artifact (`loadLocalArtifact` in `packages/core/src/artifact-loader.ts`: sorted walk, symlinks skipped with a warning, limits of 200 files / 1 MiB) used to import bundled examples.
-- **Not implemented:** binary file storage, `discoverArtifacts` tree walker, handler registry, exclude globs, binary detection, symlink policy for repository trees, `scopeDir`, `@path` import resolution, compatibility mapping per format, sync integration.
+- **Not implemented:** binary file storage, handler registry, `FileTree` abstraction, exclude globs, restricting git repositories to files tracked at the scanned commit (FR-102-15, second sentence), `scopeDir`, `@path` import resolution, compatibility mapping per format, scan jobs and sync integration (story #16).
