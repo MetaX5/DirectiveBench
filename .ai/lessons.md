@@ -18,6 +18,7 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-17] **Fetch blobs by ID into a shallow partial clone with `fetch.negotiationAlgorithm=noop`, and disable lazy fetch for reads** — otherwise the fetch fails with "bad revision", and a read of a missing blob silently fetches and spawns `git maintenance`. → [lessons/2026-10-17-git-partial-clone-blob-fetch.md](lessons/2026-10-17-git-partial-clone-blob-fetch.md)
 - [2026-10-15] **Don't hand out `AbortSignal.any()` built from `AbortSignal.timeout()`**: once the fired timeout signal is garbage-collected, `.aborted` reads `false` forever if nobody listens for `abort`. Use a controller, and use `collectGarbage()` in tests. → [lessons/2026-10-15-abortsignal-any-loses-gc-collected-timeout.md](lessons/2026-10-15-abortsignal-any-loses-gc-collected-timeout.md)
 - [2026-10-15] **Keep 100% branch coverage deterministic** — comparators over `readdir` order and ordering by random IDs make coverage and tests machine-dependent. → [lessons/2026-10-15-deterministic-full-coverage.md](lessons/2026-10-15-deterministic-full-coverage.md)
 - [2026-10-15] **Reset lifecycle flags before the first `await`** — `LocalRunner.start()` undid a concurrent `stop()`. → [lessons/2026-10-15-reset-lifecycle-flags-before-await.md](lessons/2026-10-15-reset-lifecycle-flags-before-await.md)
