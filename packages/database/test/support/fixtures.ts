@@ -22,7 +22,6 @@ export function artifactInput(
     format: 'skill-md',
     primaryFile: 'SKILL.md',
     files: [{ path: 'SKILL.md', sha256: content, size: content.length, content }],
-    contentHash: `hash-${content}`,
     parsedMetadata: {},
     ...overrides,
   };
