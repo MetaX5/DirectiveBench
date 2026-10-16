@@ -123,6 +123,21 @@ Several people, each with their own agents, can work on the backlog at the same 
 - **One schema migration in flight.** Drizzle numbers migrations in sequence (`packages/database/migrations`, `meta/_journal.json`), so two open PRs that both add a migration will conflict. Before adding one, check the open PRs. If another one already has a migration, wait for it to merge, then rebase and regenerate yours.
 - **Optional second-model review.** Before `om-auto-review-pr` runs, the author may check out the PR branch (`gh pr checkout <n>`) and run `/codex:adversarial-review --base main --wait` (or `/codex:review`) from the Codex plugin, then post the output as a PR comment. The command is review-only and edits nothing. `om-auto-review-pr` collects existing PR comments as findings, so Codex's points count in the verdict. The formal reviewer is still `om-auto-review-pr` or a human.
 
+## Definition of Done
+
+An issue (story or task) is done when all of the following hold. Most items point to rules that already exist elsewhere; this list gathers them in one place.
+
+1. **Acceptance criteria met.** Every acceptance criterion in the issue is met, and the PR names its evidence: a test name, or a screenshot for UI behaviour.
+2. **Validation gate green.** See *Validation gate* below; the unit tests run at the 100% coverage threshold (`AGENTS.md` §2). A UI change also passes `pnpm test:e2e`, and every new page or UI path has a Playwright test in `apps/web/e2e`.
+3. **Exercised for real.** The change was run for real (the CLI command, the page in a browser, or `directivebench demo`), and the PR says how (`AGENTS.md` §2).
+4. **Reviewed and QA'd.** An approving review was submitted in the review loop (`om-auto-review-pr` or a human). A `risk-high` change carries the evidence its gate requires, and a `needs-qa` PR passed the QA gate.
+5. **Product decisions respected.** The change does not contradict an active decision, rule or non-goal in `.ai/specs/product-brief.md`. Changing one needs a superseding row approved by its owner.
+6. **Specs current.** A spec's *Implementation status* is updated only for behaviour that was verified. A spec moves to `implemented/` only when all of its acceptance criteria are verified (`AGENTS.md` §2).
+7. **Lessons and run log.** A lesson is recorded for a non-obvious fix, a misleading error, or any correction from a human. An autonomous run's log is finalised with its real verification results.
+8. **Closed and ticked.** The PR is squash-merged with a closing keyword (`Fixes #n`), so GitHub closes the issue on merge (`om-close-fixed-issues` catches any that were missed), and the issue is ticked in its epic's checklist.
+
+An epic is done when every child in its checklist is done.
+
 ## The automation contract
 
 The `om-auto-*` skills run this process unattended and are chainable: each accepts the artifact the previous one produced (an issue id, a spec path, or a PR number from the `PR: #<number> (link: <url>)` reference line every PR-producing skill emits), and each detects work already started — an open PR referencing the issue or plan — and continues on it rather than opening a duplicate. A completed autonomous run leaves a **ready** (non-draft), fully labeled PR — one pipeline label, category, QA meta, one priority, one risk — with a run-summary comment and, for user-facing changes, screenshots from the working app attached as PR evidence. Draft PRs are reserved for explicitly incomplete states: spec-only design PRs, interrupted hand-offs, or autonomous defaults flagged for human confirmation. Automation applies `qa-approved` only through the self-QA exception (`om-auto-qa-pr --self-qa-signoff`, always paired with `qa-self-verified`, never on a `risk-high` PR); no authoring, review, or merge skill ever applies it.
