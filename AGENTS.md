@@ -16,6 +16,9 @@ benchmarking AI agent skills, instructions and rules. Start with
 ├── specs/                    # specifications for spec-driven development (SDD)
 │   ├── README.md             # index, naming rules, lifecycle
 │   ├── YYYY-MM-DD-slug.md    # active specs (draft / approved)
+│   ├── product-brief.md      # product brief written by om-discover (fixed name)
+│   ├── backlog.md            # backlog record written by om-backlog (fixed name)
+│   ├── research/             # discovery material: interviews, decisions, templates
 │   ├── implemented/          # specs whose acceptance criteria are verified
 │   └── archive/              # deprecated or superseded specs
 ├── runs/                     # logs of autonomous AI runs: YYYY-MM-DD-slug.md
@@ -28,8 +31,11 @@ benchmarking AI agent skills, instructions and rules. Start with
 - **Specs** say *what* the system must do. **ADRs** say *why* a decision was made.
   **Run logs** say *what an AI run did*. **Lessons** keep *what we learned*. Code is *how*.
 - File names in `specs/`, `runs/` and `lessons/` **must** use `YYYY-MM-DD-slug.md`
-  (date = creation date, `slug` = lowercase kebab-case). Index files (`README.md`) are the only
-  exception. Do not create other specification directories (no `docs/specs/`, `ai/specs/`, …).
+  (date = creation date, `slug` = lowercase kebab-case). The exceptions are index files
+  (`README.md`) and the fixed paths the `om-*` skills read and write in `specs/`:
+  `product-brief.md`, `backlog.md` and the `research/` directory (its own naming is set by
+  `om-discover`). Do not create other specification directories (no `docs/specs/`, `ai/specs/`,
+  …).
 
 ## 2. Required workflow
 

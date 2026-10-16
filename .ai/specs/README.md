@@ -16,8 +16,11 @@ The mandatory workflow for AI agents is defined in [`AGENTS.md`](../../AGENTS.md
 
 ```text
 .ai/specs/
-├── README.md                 # this index (the only file here not named by date)
+├── README.md                 # this index
 ├── YYYY-MM-DD-slug.md        # active specs: status draft or approved
+├── product-brief.md          # product brief (om-discover; fixed name, see AGENTS.md §1)
+├── backlog.md                # backlog record (om-backlog; fixed name)
+├── research/                 # discovery interviews, decisions and capture templates
 ├── implemented/              # specs whose acceptance criteria are verified in code and tests
 └── archive/                  # deprecated or superseded specs (kept for history)
 ```
