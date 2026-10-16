@@ -23,8 +23,10 @@ Last filed: 2026-10-16
 | E02-S02 | [#20](https://github.com/MetaX5/DirectiveBench/issues/20) | The same skill in two repositories shows as one artifact with two occurrences | #11 | E02-S01 (#19) | no |
 | E02-S03 | [#21](https://github.com/MetaX5/DirectiveBench/issues/21) | Removed files are marked missing and their history is kept | #11 | E02-S01 (#19) | no |
 | E03 | [#12](https://github.com/MetaX5/DirectiveBench/issues/12) | Organise the catalogue with categories | — | — | no |
-| E03-S01 | [#22](https://github.com/MetaX5/DirectiveBench/issues/22) | A skill author creates, renames and archives categories and assigns them to artifacts | #12 | E01-S03 (#17) | no |
+| E03-S01 | [#22](https://github.com/MetaX5/DirectiveBench/issues/22) | A skill author creates, renames and archives categories and assigns them to artifacts | #12 | E01-S03 (#17), E04-T03 (#30) | no |
 | E04 | [#13](https://github.com/MetaX5/DirectiveBench/issues/13) | Discovery: check the riskiest assumptions before the comparison work | — | — | no |
 | E04-T01 | [#26](https://github.com/MetaX5/DirectiveBench/issues/26) | Find out what Promptfoo already answers for the maintainer's skills (A04) | #13 | — | no |
 | E04-T02 | [#27](https://github.com/MetaX5/DirectiveBench/issues/27) | Find out whether PMs, developers and testers at the company have this problem (A01) | #13 | — | no |
+| E04-T03 | [#30](https://github.com/MetaX5/DirectiveBench/issues/30) | Value checkpoint: does the maintainer use the Registry when working on skills? (A02, D07) | #13 | — | no |
+| E04-T04 | [#31](https://github.com/MetaX5/DirectiveBench/issues/31) | Decide how D03 is measured before the comparison work (Q05) | #13 | — | no |
 | E05 | [#14](https://github.com/MetaX5/DirectiveBench/issues/14) | Later | — | — | no |

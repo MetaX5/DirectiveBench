@@ -3,7 +3,7 @@ id: SPEC-002
 title: Product Requirements
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-16
 category: foundation
 related: [SPEC-001, SPEC-003, SPEC-007, SPEC-009, SPEC-010, SPEC-013, SPEC-101, SPEC-104, SPEC-105, SPEC-107, SPEC-108, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-115, SPEC-116]
 ---
@@ -29,7 +29,7 @@ Priority keys: **MVP** = required for the first public release; **Later** = plan
 | ID | Use case | Personas | Priority |
 |---|---|---|---|
 | UC-1 | Start the tool with `npx directivebench`, see the dashboard in the browser, run the bundled demo. | P1–P4 | MVP |
-| UC-2 | Register local/remote repositories and discover artifacts in them. | P1–P3 | MVP (local git) / Later (GitHub, GitLab) |
+| UC-2 | Register local/remote repositories and discover artifacts in them. | P1–P3 | MVP (local git, public GitHub by URL) / Later (private GitHub, GitLab) |
 | UC-3 | Browse artifacts, their occurrences, versions and diffs; categorize them. | P1–P3 | MVP |
 | UC-4 | Import a benchmark suite (YAML/JSON) and assign it to an artifact. | P1, P3, P4 | MVP |
 | UC-5 | Run RED/GREEN evaluation of an artifact version with a chosen agent and model; inspect per-assertion results and traces. | P1, P3 | MVP (mock + one real agent) |
@@ -44,7 +44,7 @@ Priority keys: **MVP** = required for the first public release; **Later** = plan
 
 | ID | Requirement | Priority | Spec |
 |---|---|---|---|
-| PR-REG-01 | Register repositories of kinds: local git, GitHub, GitLab.com, self-managed GitLab. | MVP (local), Later (remote) | [SPEC-104](2026-10-14-repository-management.md) |
+| PR-REG-01 | Register repositories of kinds: local git, GitHub, GitLab.com, self-managed GitLab. | MVP (local, public GitHub), Later (private GitHub, GitLab) | [SPEC-104](2026-10-14-repository-management.md) |
 | PR-REG-02 | Discover skills, instructions and rules by path conventions and parse their metadata (SKILL.md frontmatter, Cursor `.mdc`, Copilot instructions, generic markdown). | MVP | [SPEC-102](2026-10-14-artifact-discovery.md) |
 | PR-REG-03 | Maintain a logical artifact identity separate from occurrences (repository + path). | MVP | [SPEC-101](2026-10-14-artifact-registry.md) |
 | PR-REG-04 | Create an immutable version for every distinct content hash; never mutate versions; show diffs between versions. | MVP | [SPEC-103](2026-10-14-artifact-versioning.md) |
@@ -139,14 +139,14 @@ flowchart LR
     B7[Agent CLI detection]
   end
   subgraph MVP["MVP (first release)"]
-    M1[Local git repositories + discovery + sync]
+    M1[Local git + public GitHub repositories + discovery + sync]
     M2[Category CRUD]
     M3[One real agent adapter]
     M4[Execution approval UX]
     M5[Version diff + drift]
   end
   subgraph Later
-    L1[GitHub / GitLab]
+    L1[Private GitHub / GitLab]
     L2[Model providers + keychain]
     L3[Docker sandbox]
     L4[Benchmark Builder, LLM judge]

@@ -3,7 +3,7 @@ id: SPEC-013
 title: Implementation Roadmap
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-16
 category: foundation
 related: [SPEC-001, SPEC-002, SPEC-003, SPEC-009, SPEC-011, SPEC-012, SPEC-101, SPEC-102, SPEC-104, SPEC-105, SPEC-107, SPEC-109, SPEC-111, SPEC-112, SPEC-114, SPEC-201, SPEC-202, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-211, SPEC-212]
 ---
@@ -87,21 +87,23 @@ Applies to every milestone:
 ### M1 — Artifact Registry
 
 **Priority:** P0. **Dependencies:** M0.
-**Deliverables:** local repository registration ([SPEC-104](2026-10-14-repository-management.md)); artifact discovery scan of registered local directories ([SPEC-102](2026-10-14-artifact-discovery.md)); artifact registry browsing and filtering ([SPEC-101](2026-10-14-artifact-registry.md)); versioning on content change ([SPEC-103](2026-10-14-artifact-versioning.md)); category CRUD and assignment ([SPEC-106](2026-10-14-category-management.md)).
+**Deliverables:** local repository registration ([SPEC-104](2026-10-14-repository-management.md)); artifact discovery scan of registered local directories ([SPEC-102](2026-10-14-artifact-discovery.md)); artifact registry browsing and filtering ([SPEC-101](2026-10-14-artifact-registry.md)); versioning on content change ([SPEC-103](2026-10-14-artifact-versioning.md)); category CRUD and assignment ([SPEC-106](2026-10-14-category-management.md)); registering a **public GitHub repository by URL** without credentials, fetching only candidate artifact paths ([SPEC-201](2026-10-14-integration-github.md), [SPEC-105](2026-10-14-repository-synchronization.md) FR-105-05; moved from M2 by product-brief decision D06).
+**Value checkpoint:** after registration, scan, browsing and preview ship, the maintainer uses the Registry on their own repositories for one to two weeks and records whether they open it when working on skills; category CRUD starts after that record exists (product-brief decision D07).
 **Acceptance criteria:**
 - Registering a local directory containing `.agents/skills/*/SKILL.md`, `AGENTS.md`, `.cursor/rules/*.mdc` and `.github/copilot-instructions.md` discovers each as an artifact with the correct type/format and an occurrence path.
 - Re-scanning an unchanged repository creates 0 new versions; editing one file creates exactly 1 new version of that artifact.
 - Identical content in two repositories is one artifact version with two occurrences.
 - Removed files mark the occurrence as missing; history is retained.
+- A public GitHub repository can be added by URL and scanned without credentials; occurrences record the commit SHA (moved from M2, D06).
+- An end-to-end test registers a fixture repository, scans it, finds the expected artifacts in the list and opens a raw preview matching the source file.
 - Scanning a repository with 1,000 files completes in < 5 s on a typical laptop (target).
 **Risks:** ambiguous artifact classification; symlinks and very large repos; Windows path normalization.
 
 ### M2 — Git Integrations
 
 **Priority:** P1. **Dependencies:** M1.
-**Deliverables:** local git awareness (commit SHA, branch, dirty state); read-only sync from GitHub ([SPEC-201](2026-10-14-integration-github.md)), GitLab.com and self-managed GitLab ([SPEC-202](2026-10-14-integration-gitlab.md)) into `<dataDir>/cache/`; `directivebench sync` ([SPEC-105](2026-10-14-repository-synchronization.md)); OS-keychain secret storage ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)).
+**Deliverables:** local git awareness (commit SHA, branch, dirty state); read-only sync from private GitHub repositories (public ones are registered in M1, D06) ([SPEC-201](2026-10-14-integration-github.md)), GitLab.com and self-managed GitLab ([SPEC-202](2026-10-14-integration-gitlab.md)) into `<dataDir>/cache/`; `directivebench sync` ([SPEC-105](2026-10-14-repository-synchronization.md)); OS-keychain secret storage ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)).
 **Acceptance criteria:**
-- A public GitHub repository can be added by URL and synced without credentials; occurrences record the commit SHA.
 - A private repository syncs with a token stored in the OS keychain; the token never appears in the database, config, logs or error messages (verified by test).
 - Sync is incremental: an unchanged remote performs no rescan.
 - Contract tests with recorded fixtures cover auth failure, rate limiting and not-found.
