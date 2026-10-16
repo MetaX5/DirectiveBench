@@ -34,5 +34,9 @@
     "qa": ".ai/qa"
   },
   "reviewChecklist": ".ai/specs/2026-10-15-engineering-standards.md",
-  "closeKeywords": []
+  "closeKeywords": [],
+  "discovery": {
+    "enabled": true,
+    "roles": { "domainExpert": false, "designer": false }
+  }
 }
