@@ -1,3 +1,4 @@
+import { hashManifest } from '@directivebench/core';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -69,6 +70,36 @@ describe('importArtifactVersion', () => {
     expect(detail?.occurrences).toHaveLength(1);
     expect(detail?.occurrences[0]?.occurrence.latestVersionId).toBe(second.versionId);
     expect(detail?.evaluations).toEqual([]);
+  });
+
+  it('recomputes the content hash from the files and ignores a caller-supplied one', async () => {
+    const handle = getHandle();
+    const files = [
+      { path: 'scripts/check.sh', sha256: 'b'.repeat(64), size: 1, content: 'b' },
+      { path: 'SKILL.md', sha256: 'a'.repeat(64), size: 1, content: 'a' },
+    ];
+    const expected = hashManifest([
+      { path: 'SKILL.md', sha256: 'a'.repeat(64) },
+      { path: 'scripts/check.sh', sha256: 'b'.repeat(64) },
+    ]);
+    // An untyped caller (or a future untrusted source) smuggling in a forged hash.
+    const forged = { ...artifactInput('v1', { files }), contentHash: 'forged' };
+    const first = await importArtifactVersion(handle, forged);
+
+    const stored = await handle.db
+      .select({ contentHash: schema.artifactVersions.contentHash })
+      .from(schema.artifactVersions)
+      .where(eq(schema.artifactVersions.id, first.versionId))
+      .get();
+    expect(stored?.contentHash).toBe(expected);
+
+    // Deduplication uses the recomputed hash: same files, different forged hash, same version.
+    const reordered = {
+      ...artifactInput('v1', { files: [...files].reverse() }),
+      contentHash: 'another-forgery',
+    };
+    const again = await importArtifactVersion(handle, reordered);
+    expect(again).toEqual({ ...first, createdVersion: false });
   });
 
   it('records the commit on the version and the occurrence', async () => {
@@ -301,7 +332,7 @@ describe('getArtifactBundle', () => {
       name: 'validate',
       type: 'skill',
       format: 'skill-md',
-      contentHash: 'hash-v1',
+      contentHash: hashManifest([{ path: 'SKILL.md', sha256: 'v1' }]),
       files: [{ path: 'SKILL.md', sha256: 'v1', size: 2, content: 'v1' }],
     });
     expect(await getArtifactBundle(handle.db, 'artv_missing')).toBeNull();

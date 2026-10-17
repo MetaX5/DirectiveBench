@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
-import { createId, nowIso } from '@directivebench/core';
+import { createId, hashManifest, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import {
   artifactBenchmarkAssignments,
@@ -34,7 +34,6 @@ export interface ImportArtifactInput {
   format: ArtifactFormat;
   primaryFile: string;
   files: StoredArtifactFile[];
-  contentHash: string;
   parsedMetadata: Record<string, unknown>;
   commitSha?: string | null;
 }
@@ -69,12 +68,15 @@ export async function upsertRepository(db: Database, ref: RepositoryRef): Promis
 /**
  * Records an artifact found in a source. Creates the logical artifact on first sight, adds an
  * immutable version only when the content hash is new, and points the occurrence at it.
- * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
+ * The content hash is always computed here from `files` (SPEC-103 FR-103-04, §12); callers cannot
+ * supply one. User-managed metadata (notes, tags, categories, benchmark assignments) is never
+ * touched.
  */
 export async function importArtifactVersion(
   handle: DatabaseHandle,
   input: ImportArtifactInput,
 ): Promise<ImportArtifactResult> {
+  const contentHash = hashManifest(input.files.map(({ path, sha256 }) => ({ path, sha256 })));
   return withTransaction(handle, async (db) => {
     const now = nowIso();
     const repositoryId = await upsertRepository(db, input.repository);
@@ -109,7 +111,7 @@ export async function importArtifactVersion(
       .where(
         and(
           eq(artifactVersions.artifactId, artifact.id),
-          eq(artifactVersions.contentHash, input.contentHash),
+          eq(artifactVersions.contentHash, contentHash),
         ),
       )
       .get();
@@ -125,7 +127,7 @@ export async function importArtifactVersion(
         id: version.id,
         artifactId: artifact.id,
         version: version.version,
-        contentHash: input.contentHash,
+        contentHash,
         format: input.format,
         primaryFile: input.primaryFile,
         files: input.files,

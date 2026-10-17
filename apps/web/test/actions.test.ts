@@ -79,7 +79,6 @@ async function importArtifact(): Promise<{ artifactId: string; versionId: string
     format: 'skill-md',
     primaryFile: 'SKILL.md',
     files: [{ path: 'SKILL.md', sha256: 'abc', size: 5, content: 'hello' }],
-    contentHash: 'artifact-hash',
     parsedMetadata: {},
   });
 }

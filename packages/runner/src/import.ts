@@ -38,7 +38,6 @@ export async function importLocalArtifact(
     format: loaded.parsed.format,
     primaryFile: loaded.primaryFile,
     files: loaded.files,
-    contentHash: loaded.contentHash,
     parsedMetadata: {
       frontmatter: loaded.parsed.frontmatter,
       activation: loaded.parsed.activation,
