@@ -3,16 +3,16 @@ id: SPEC-105
 title: Repository Synchronization
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-17
 category: feature
-related: [SPEC-101, SPEC-102, SPEC-103, SPEC-104, SPEC-106, SPEC-006, SPEC-007, SPEC-114, SPEC-201, SPEC-202, ADR-0007, ADR-0008]
+related: [SPEC-101, SPEC-102, SPEC-103, SPEC-104, SPEC-106, SPEC-006, SPEC-007, SPEC-114, SPEC-201, SPEC-202, ADR-0007, ADR-0008, ADR-0012]
 ---
 
 # SPEC-105 — Repository Synchronization
 
 ## 1. Summary
 
-Synchronisation brings the artifact registry up to date with a registered repository ([SPEC-104](2026-10-14-repository-management.md)). A sync fetches the selected branch (hosted: shallow bare clone into the data-dir cache; local git: read from the object store; local directory: read from disk), discovers artifacts ([SPEC-102](2026-10-14-artifact-discovery.md)), hashes them, detects changes against the previous state, creates immutable versions ([SPEC-103](2026-10-14-artifact-versioning.md)), updates occurrences, marks deletions and records a **sync run** with statistics, warnings and errors. User-owned metadata (categories, tags, notes, benchmark assignments) is never touched. Repository content is never executed. In the MVP sync is manual.
+Synchronisation brings the artifact registry up to date with a registered repository ([SPEC-104](2026-10-14-repository-management.md)). A sync fetches the selected branch (hosted: a shallow, bare, blob-less partial clone in the data-dir cache into which only the files at candidate artifact paths are downloaded; local git: read from the object store; local directory: read from disk), discovers artifacts ([SPEC-102](2026-10-14-artifact-discovery.md)), hashes them, detects changes against the previous state, creates immutable versions ([SPEC-103](2026-10-14-artifact-versioning.md)), updates occurrences, marks deletions and records a **sync run** with statistics, warnings and errors. User-owned metadata (categories, tags, notes, benchmark assignments) is never touched. Repository content is never executed. In the MVP sync is manual.
 
 ## 2. Motivation and problem statement
 
@@ -50,7 +50,7 @@ Artifacts change in their source repositories. Without a reliable, auditable syn
 | FR-105-02 | A sync SHALL execute as a job in the runner (new job type `repository-sync`, payload `{ repositoryId, ref? }`), not in the web process ([SPEC-008](2026-10-14-api-architecture.md) principle 1, [SPEC-114](2026-10-14-runner-management.md)). Job lifecycle, cancellation and crash recovery follow the job model (pending → running → completed/failed/cancelled/interrupted). |
 | FR-105-03 | At most one sync per repository SHALL be pending or running; a second request returns the existing job. |
 | FR-105-04 | The repository SHALL be validated first ([SPEC-104](2026-10-14-repository-management.md) FR-104-10); validation failure fails the sync with the validation error code, no registry changes. |
-| FR-105-05 | **Fetch** — `github`/`gitlab`: maintain a bare, shallow, single-branch clone at `<dataDir>/cache/repos/<repositoryId>.git` (`git clone --bare --depth 1 --single-branch --branch <ref> --no-tags`, later `git fetch --depth 1 origin <ref>`), with the hardened git options of FR-104-12. `local-git`: no clone; read objects of the user's repository read-only (`git -C <path> rev-parse <ref>^{commit}`, `ls-tree -r -z --long`, `cat-file --batch`). `local-directory`: walk the filesystem. No working tree is ever checked out. |
+| FR-105-05 | **Fetch** — `github`/`gitlab`: download only the content of **candidate paths** of one commit. Candidate paths are the files that [SPEC-102](2026-10-14-artifact-discovery.md) would read: paths matching a registered format pattern (FR-102-01, §8.2) and, for each `SKILL.md`, the regular files of its skill directory (FR-102-12), after exclude globs and include roots (FR-102-15, [SPEC-104](2026-10-14-repository-management.md) FR-104-13). The cache is a bare, shallow, single-branch, blob-less partial clone at `<dataDir>/cache/repos/<repositoryId>.git`, filled in the five steps of §9.1: (1) fetch the commit and its trees only (`git clone --bare --filter=blob:none --depth 1 --single-branch --branch <ref> --no-tags`, later `git fetch --depth 1 --filter=blob:none`); (2) list the tree without reading blobs; (3) select candidate blobs; (4) fetch exactly those blobs by object ID in one batched request; (5) read them from the object store with lazy fetching disabled. Blobs of non-candidate paths are never downloaded and no working tree or sparse checkout is ever created. Public GitHub repositories are fetched over HTTPS **without credentials** ([D06](research/decisions/D06-public-github-by-url-in-now.md), [ADR-0012](../decisions/0012-partial-fetch-of-candidate-paths.md)); every git call uses the hardened invocation of §9.1, which extends FR-104-12. `local-git`: no clone; read objects of the user's repository read-only (`git -C <path> rev-parse <ref>^{commit}`, `ls-tree -r -z --long`, `cat-file --batch`). `local-directory`: walk the filesystem. No working tree is ever checked out. |
 | FR-105-06 | **Snapshot**: for git sources, the sync reads exactly one commit (resolved SHA recorded); file bytes come from git blobs (bytes as committed; symlinks identified by mode `120000`, submodules by mode `160000` and skipped). For local directories the snapshot is the on-disk state during the walk (not atomic; see §14). |
 | FR-105-07 | **Discovery & hashing** via [SPEC-102](2026-10-14-artifact-discovery.md) with the repository's discovery settings; limits and safety rules apply. |
 | FR-105-08 | **Plan**: the sync SHALL compute a `SyncPlan` (pure, no DB writes) by comparing discovered artifacts with the repository's current occurrences, applying identity resolution ([SPEC-101](2026-10-14-artifact-registry.md) §8.3) and move detection ([SPEC-103](2026-10-14-artifact-versioning.md) FR-103-09). Each item gets a change kind: `added`, `modified`, `unchanged`, `moved`, `removed`, `reappeared`, `error`. |
@@ -70,7 +70,7 @@ Artifacts change in their source repositories. Without a reliable, auditable syn
 ## 7. Non-functional requirements
 
 - NFR-105-01: Sync of an already-cached repository with 200 artifacts completes in < 10 s excluding network transfer.
-- NFR-105-02: Disk use per hosted repository ≈ size of one shallow commit (bare, no working tree).
+- NFR-105-02: Disk use per hosted repository ≈ the commit and tree objects of one commit plus the blobs at candidate paths (bare, no working tree, no blobs of non-candidate paths) — for a typical repository well under the size of one shallow commit. Network transfer per first sync is of the same size; a later sync downloads the new commit's trees and only the candidate blobs not already in the cache (blobs are content-addressed and reused). Unreachable objects of earlier commits are not pruned in place; the cache is re-created when it exceeds the clone size limit (§12).
 - NFR-105-03: Apply transaction bounded (batched inserts) so the web process is not blocked for > 1 s (SQLite WAL, `busy_timeout`, [ADR-0002](../decisions/0002-sqlite-with-node-sqlite.md)).
 - NFR-105-04: Idempotent: running sync twice on the same commit produces no new versions and an `unchanged` second run.
 - NFR-105-05: Deterministic plans for identical inputs (sorted processing).
@@ -138,7 +138,7 @@ flowchart TD
   J --> R[Runner acquires job]
   R --> V{validate repository}
   V -- fail --> F[sync_run failed<br/>repositories.sync_status=error]
-  V -- ok --> FE[fetch: bare shallow clone /<br/>local object store / dir walk]
+  V -- ok --> FE[resolve commit + fetch: partial clone,<br/>candidate blobs only §9.1 /<br/>local object store / dir walk]
   FE --> C{commit == last_commit_sha<br/>and settings unchanged?}
   C -- yes --> U[sync_run unchanged]
   C -- no --> D[discover + hash<br/>SPEC-102]
@@ -146,6 +146,32 @@ flowchart TD
   P --> A[applySyncPlan<br/>single transaction]
   A --> OK[sync_run completed<br/>repositories.sync_status=ok]
 ```
+
+### 9.1 Hosted fetch: candidate paths only
+
+Applies to `github` and `gitlab` repositories. In the current scope only public repositories are fetched, without credentials ([D06](research/decisions/D06-public-github-by-url-in-now.md)); a later credentialed fetch ([SPEC-104](2026-10-14-repository-management.md) FR-104-08/09) uses the same steps. Rationale and rejected alternatives (sparse checkout, GitHub REST API, full shallow clone): [ADR-0012](../decisions/0012-partial-fetch-of-candidate-paths.md).
+
+| Step | Command (argv; hardened prefix below omitted) | Result |
+|------|-----------------------------------------------|--------|
+| 0. Resolve | `git ls-remote <url> refs/heads/<ref>` | Commit SHA. If it equals `last_commit_sha` and the other FR-105-10 conditions hold, the sync ends `unchanged` with no fetch. |
+| 1. Commit and trees | First sync: `git clone --bare --filter=blob:none --depth 1 --single-branch --branch <ref> --no-tags -- <url> <cacheDir>`. Later: `git -C <cacheDir> fetch --depth 1 --filter=blob:none --no-tags origin +refs/heads/<ref>:refs/heads/<ref>`. | Commit and tree objects only; no blobs. The **snapshot commit** is then read from the cache (`git -C <cacheDir> rev-parse --verify refs/heads/<ref>^{commit}`): steps 2–5 read it and the sync records it (FR-105-06). Step 0's SHA is used only for the fast path, because the branch can move between step 0 and step 1. |
+| 2. List | `git -C <cacheDir> ls-tree -r -z --full-tree <snapshot>` (no `--long`: sizes of absent blobs are unknown and reading them would fetch them). | `{ mode, type, oid, path }[]` of the whole commit. |
+| 3. Select | Pure function over the listing (no git call): normalise paths (FR-102-02); drop `.git/`, `node_modules/`, exclude globs, paths outside include roots (FR-102-15, FR-104-13); keep paths that classify as a format (FR-102-01); for each `SKILL.md` add the regular files under its directory except nested skill subtrees (FR-102-12). Mode `120000` (symlink) and `160000` (submodule) entries are never fetched — discovery handles them from the mode (FR-102-18, FR-105-06). Count limits are enforced here, before any download: more than 10 000 candidate artifacts aborts the sync; a skill with more than 500 files becomes an item error and its files are not fetched (FR-102-16). | Sorted, de-duplicated blob object IDs. |
+| 4. Fetch blobs | `git -C <cacheDir> fetch --no-tags --no-write-fetch-head --recurse-submodules=no --filter=blob:none --stdin origin`, object IDs on stdin, with `-c fetch.negotiationAlgorithm=noop`. IDs already in the cache (`cat-file --batch-check` with lazy fetching disabled) are not requested. | Exactly the candidate blobs, in one request. |
+| 5. Read | `git -C <cacheDir> cat-file --batch` with lazy fetching disabled; never `--filters` or `--textconv`. A missing object is a sync error, never a trigger for an implicit fetch. | Bytes as committed, for discovery and hashing (FR-105-06, FR-105-07). |
+
+Byte limits (FR-102-16) are checked after step 5, because git does not expose blob sizes before download; the transfer itself is bounded by the clone size limit and the network timeout (§12). If a server ignores `--filter` (git warns and clones in full), the sync stays correct but transfers the whole commit: it records a warning and the clone size limit still applies. `github.com` and `gitlab.com` support partial clone; self-managed GitLab support is an Assumption — requires validation.
+
+**Hardened invocation** — every git call of this section:
+
+- Is spawned with an argv array and no shell; the URL is the normalised, credential-free `https://` location ([SPEC-104](2026-10-14-repository-management.md) FR-104-04/05) passed after `--` where git accepts it; the user's input never becomes an option.
+- Carries `-c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never -c protocol.https.allow=always -c credential.helper= -c submodule.recurse=false -c maintenance.auto=false -c gc.auto=0` (FR-104-12 plus: only HTTPS, no credential helper, no background maintenance process). `/dev/null` has its platform equivalent on Windows. Integration tests allow the `file` protocol instead of `https` through the same mechanism; production code never does.
+- Runs with an environment built from an allowlist, not inherited: `PATH`, `LANG`/`LC_ALL=C`, `TZ`, `HOME` set to an empty DirectiveBench-owned directory, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` (the user's `url.*.insteadOf`, credential helpers, `http.sslVerify` and `core.sshCommand` never apply), `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GIT_ASKPASS`/`SSH_ASKPASS` unset, `GIT_LFS_SKIP_SMUDGE=1`, and `GIT_NO_LAZY_FETCH=1` for steps 2 and 5 and the step 4 pre-check (step 3 runs no git command). Proxy variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, lower-case variants) are forwarded when set and registered for redaction, since they may embed credentials. This follows the env-allowlist rule of [SPEC-007](2026-10-14-security-and-privacy.md) §3–§4; on Windows its variables `SystemRoot`, `PATHEXT` and `COMSPEC` are added.
+- Keeps TLS verification on: `http.sslVerify=false` and `GIT_SSL_NO_VERIFY` are never set or forwarded ([SPEC-007](2026-10-14-security-and-privacy.md) §7).
+- Has a named timeout per step and is killed with its process tree on timeout or cancellation (FR-105-17).
+- Never executes, checks out or filters repository content: no working tree, no `.gitattributes` filters, no LFS smudge, no hooks, no submodules (FR-105-18).
+
+Without credentials a private or non-existent GitHub repository fails at step 0 with no prompt; the error maps to `auth-required` ([SPEC-104](2026-10-14-repository-management.md) §13), worded as "not found or not public" for the no-credential case, and nothing is stored.
 
 ## 10. API and interface design
 
@@ -169,10 +195,11 @@ flowchart TD
 ## 12. Security considerations
 
 Repository content is untrusted ([SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../decisions/0007-local-runner-execution-and-isolation.md)).
-- No execution (FR-105-18); bare clones avoid checkout filters and working-tree attacks; hardened git config.
+- No execution (FR-105-18); bare clones avoid checkout filters and working-tree attacks; hardened git invocation with an environment allowlist and TLS verification on (§9.1).
+- Only candidate blobs are downloaded (FR-105-05), so untrusted non-artifact content (binaries, build output, large assets) never reaches the disk.
 - Symlinks, submodules and path escapes are never followed.
-- Resource limits from [SPEC-102](2026-10-14-artifact-discovery.md); clone size limit (planned config, default 500 MiB — Assumption — requires validation) aborts with a clear error.
-- Credentials resolved per [SPEC-104](2026-10-14-repository-management.md) FR-104-08/09, redacted from all git output.
+- Resource limits from [SPEC-102](2026-10-14-artifact-discovery.md); clone size limit (planned config, default 500 MiB — Assumption — requires validation) applies to the cache directory during and after each fetch step and aborts with a clear error. While a fetch runs, the runner polls the cache directory size at a named interval (`CACHE_SIZE_POLL_INTERVAL_MS`, default 1 s — Assumption) and kills the git process tree as soon as the size exceeds the limit, because blob sizes are unknown before download (§9.1) and one huge candidate blob would otherwise be transferred in full.
+- Public repositories are fetched without credentials: no credential helper, prompt or askpass runs, and a repository that needs authentication fails instead of prompting (§9.1, [D06](research/decisions/D06-public-github-by-url-in-now.md)). Credentialed fetch (later) resolves credentials per [SPEC-104](2026-10-14-repository-management.md) FR-104-08/09, redacted from all git output.
 - Cache directory created with user-only permissions (0700 on POSIX).
 
 ## 13. Error handling
@@ -180,7 +207,8 @@ Repository content is untrusted ([SPEC-007](2026-10-14-security-and-privacy.md),
 | Failure | Result |
 |---------|--------|
 | Validation / auth / network / timeout | Sync run `failed`, repository `sync_status=error`, registry unchanged. |
-| Clone corrupted | Delete cache directory, retry clone once, else fail. |
+| Clone corrupted, or a candidate blob still missing after step 4 (§9.1) | Delete cache directory, retry clone once, else fail. |
+| Cache exceeds the clone size limit | Abort the fetch, delete the cache directory, fail with a clear error naming the limit. |
 | Per-artifact discovery error | Item `error`; sync `completed` with errors (FR-105-11). |
 | Apply transaction error (e.g. constraint) | Rollback; sync run `failed`; error logged locally with details. |
 | Runner crash mid-sync | Job `interrupted` via stale heartbeat; sync run `interrupted`; partial cache is discarded on next run; registry unchanged (apply is transactional). |
@@ -202,7 +230,11 @@ Repository content is untrusted ([SPEC-007](2026-10-14-security-and-privacy.md),
 Per [SPEC-012](2026-10-14-testing-strategy.md):
 - Unit: `planSync` table-driven — added/modified/unchanged/moved (dir and single file)/ambiguous move/removed/reappeared/excluded/error.
 - Integration: local git fixture repositories created in tmp with scripted commits (add, edit, move, delete, revert) → run sync handler end-to-end against a temp SQLite; assert versions, occurrences, sync runs; idempotency (second run unchanged).
-- "Hosted" path tested with a local bare repository via `file://` path (no network).
+- "Hosted" path tested with a local bare repository via `file://` path (no network); the fixture repository sets `uploadpack.allowFilter=true` so partial clone works. Assert that after a sync the cache holds the blobs of candidate paths and none of a large non-candidate file (`cat-file --batch-check --batch-all-objects`), and that a second sync after an edit fetches only the changed candidate blob.
+- Unit: candidate selection (§9.1 step 3) table-driven over tree listings — formats, skill directories with nested skills, excludes and include roots, symlink and submodule modes, count limits.
+- Unit: the hardened argv and environment of each step are exact (no inherited variables, no credential helper, TLS options untouched).
+- Integration: the remote branch moves between step 0 and step 1 → the sync reads and records the fetched commit, not the one resolved in step 0.
+- Integration: a candidate blob larger than a test-sized clone size limit → the fetch is killed, the cache directory deleted and the sync fails with the limit error.
 - Metadata preservation test: assign categories/tags/notes, then move + modify + remove + reappear → metadata intact.
 - Security: fixture repository containing hooks, fsmonitor config, LFS pointers, submodules, symlinks pointing outside → no execution, no escapes.
 - Crash test: kill the runner between plan and apply → registry unchanged, job `interrupted`.
@@ -216,18 +248,19 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - [ ] A broken `SKILL.md` produces an item error while all other artifacts sync.
 - [ ] An auth failure leaves the registry unchanged and shows a redacted error.
 - [ ] No file of the repository is executed (security fixture).
-- [ ] Hosted repositories are stored only as bare shallow clones under `<dataDir>/cache/`.
+- [ ] Hosted repositories are stored only as bare, shallow, blob-less partial clones under `<dataDir>/cache/` that contain no blobs of non-candidate paths.
+- [ ] A public GitHub repository syncs with no credential, prompt or credential helper involved; a private or non-existent one fails with a "not found or not public" error and nothing is stored.
 
 ## 17. Dependencies
 
-[SPEC-104](2026-10-14-repository-management.md), [SPEC-102](2026-10-14-artifact-discovery.md), [SPEC-103](2026-10-14-artifact-versioning.md), [SPEC-101](2026-10-14-artifact-registry.md), [SPEC-114](2026-10-14-runner-management.md) (job processing), [SPEC-201](2026-10-14-integration-github.md)/[SPEC-202](2026-10-14-integration-gitlab.md), [ADR-0007](../decisions/0007-local-runner-execution-and-isolation.md), [ADR-0008](../decisions/0008-secret-storage-and-authentication.md), `git` CLI.
+[SPEC-104](2026-10-14-repository-management.md), [SPEC-102](2026-10-14-artifact-discovery.md), [SPEC-103](2026-10-14-artifact-versioning.md), [SPEC-101](2026-10-14-artifact-registry.md), [SPEC-114](2026-10-14-runner-management.md) (job processing), [SPEC-201](2026-10-14-integration-github.md)/[SPEC-202](2026-10-14-integration-gitlab.md), [ADR-0007](../decisions/0007-local-runner-execution-and-isolation.md), [ADR-0008](../decisions/0008-secret-storage-and-authentication.md), [ADR-0012](../decisions/0012-partial-fetch-of-candidate-paths.md), `git` CLI ≥ 2.44 for hosted repositories (`GIT_NO_LAZY_FETCH`; Assumption — requires validation of the minimum version, [SPEC-104](2026-10-14-repository-management.md) NFR-104-03).
 
 ## 18. Open questions
 
 - OQ-105-01: Should sync of `local-git` read the selected branch's commit (proposed) or HEAD of the current checkout?
 - OQ-105-02: Safety threshold for mass removals — confirm or auto-apply?
 - OQ-105-03: Should per-item results be stored in a table (`sync_run_items`) or as JSON on `sync_runs` (simpler, fine for MVP sizes)?
-- OQ-105-04: Partial clone (`--filter=blob:none` + sparse fetch of only candidate paths) to reduce transfer for huge monorepos — worth the complexity?
+- ~~OQ-105-04: Partial clone (`--filter=blob:none` + sparse fetch of only candidate paths) to reduce transfer for huge monorepos — worth the complexity?~~ **Closed 2026-10-17:** yes. The maintainer accepted fetching only candidate paths together with registering public GitHub repositories by URL ([D06](research/decisions/D06-public-github-by-url-in-now.md)); FR-105-05 and §9.1 specify a blob-less partial clone plus an explicit fetch of candidate blobs, without sparse checkout ([ADR-0012](../decisions/0012-partial-fetch-of-candidate-paths.md)).
 
 ## 19. Future extensions
 

@@ -3,7 +3,7 @@ id: SPEC-104
 title: Repository Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-17
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-105, SPEC-006, SPEC-007, SPEC-008, SPEC-115, SPEC-201, SPEC-202, ADR-0008, ADR-0009]
 ---
@@ -57,7 +57,7 @@ Artifacts live in many repositories, some private, some on self-managed GitLab, 
 | FR-104-09 | Secrets resolved from `keychain`/`env` SHALL be passed to `git` only through the child process environment (e.g. `GIT_CONFIG_*` http extra header or a one-shot `GIT_ASKPASS` helper reading from env), never via argv or URL, and SHALL be registered for redaction ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). Exact mechanism — Assumption — requires validation per provider ([SPEC-201](2026-10-14-integration-github.md), [SPEC-202](2026-10-14-integration-gitlab.md)). |
 | FR-104-10 | **Connection validation** SHALL run on create, on credential/branch change and on demand ("Test connection"). Checks: hosted — `git ls-remote` succeeds within 30 s and the selected branch exists; `local-git` — path exists, is a git work tree, selected branch exists, `git` binary available; `local-directory` — path exists, is a directory, is readable. Result: `ok` or a typed error (§13). |
 | FR-104-11 | Validation and all other repository operations SHALL be read-only: no `git push`, `commit`, `checkout`, `reset`, `stash`, `config` writes, no index/worktree modification of local repositories, no file writes inside local directories. Hosted repositories are cloned only into the DirectiveBench cache ([SPEC-105](2026-10-14-repository-synchronization.md)). |
-| FR-104-12 | Git invocations SHALL disable features that execute repository-controlled code or prompt interactively: `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` (or platform equivalent), `-c protocol.ext.allow=never`, no LFS smudge (`GIT_LFS_SKIP_SMUDGE=1`), no submodule recursion. Only read-only plumbing commands (`ls-remote`, `rev-parse`, `ls-tree`, `cat-file`, `clone --depth`/`fetch --depth` into cache) are used. |
+| FR-104-12 | Git invocations SHALL disable features that execute repository-controlled code or prompt interactively: `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` (or platform equivalent), `-c protocol.ext.allow=never`, no LFS smudge (`GIT_LFS_SKIP_SMUDGE=1`), no submodule recursion. Only read-only plumbing commands (`ls-remote`, `rev-parse`, `ls-tree`, `cat-file`, `clone --depth --filter=blob:none`/`fetch` into cache) are used. Hosted fetches additionally use the hardened invocation of [SPEC-105](2026-10-14-repository-synchronization.md) §9.1 (HTTPS only, no credential helper, environment allowlist, no lazy fetch). |
 | FR-104-13 | **Discovery settings** per repository (planned column `discovery`, JSON): `exclude` globs (added to defaults `.git/**`, `node_modules/**`), optional `include` roots (limit scanning to sub-paths, e.g. `skills/`). Used by [SPEC-102](2026-10-14-artifact-discovery.md). |
 | FR-104-14 | **Edit**: name, selected branch, credential reference, discovery settings, instance URL. Changing provider or location is not allowed (create a new repository instead). |
 | FR-104-15 | **Disable** (planned column `disabled_at`): excluded from "sync all", data kept. **Remove**: deletes the repository row; its occurrences are deleted by cascade but artifacts, versions (provenance `source_repository_id` set to null), categories, notes and evaluation results remain. Removal requires confirmation showing the number of affected artifacts; artifacts left without any occurrence are shown as "orphaned" (lifecycle `removed`). Cached clones are deleted. |
@@ -68,7 +68,7 @@ Artifacts live in many repositories, some private, some on self-managed GitLab, 
 
 - NFR-104-01: Validation completes or times out within 30 s (hosted) / 2 s (local).
 - NFR-104-02: Works offline for `local-git` and `local-directory`.
-- NFR-104-03: Requires the `git` CLI (≥ 2.30 — Assumption — requires validation of the minimum version for `ls-remote --symref` and partial clone flags) for git providers; `directivebench doctor` reports its presence ([SPEC-009](2026-10-14-cli-architecture.md)).
+- NFR-104-03: Requires the `git` CLI (≥ 2.30 for `local-git`, ≥ 2.44 for hosted providers because the partial fetch of [SPEC-105](2026-10-14-repository-synchronization.md) §9.1 needs `GIT_NO_LAZY_FETCH` — Assumption — requires validation of both minimum versions) for git providers; `directivebench doctor` reports its presence ([SPEC-009](2026-10-14-cli-architecture.md)).
 - NFR-104-04: Repository persistence goes through `@directivebench/database` repository functions ([ADR-0009](../decisions/0009-self-hosted-readiness.md)).
 
 ## 8. Domain entities and contracts
