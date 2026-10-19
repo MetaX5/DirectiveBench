@@ -68,17 +68,20 @@ type ConfirmationRequest = Extract<RepositoryRegistrationResult, { code: 'confir
 
 /**
  * The FR-104-18 explanation: why this location needs a confirmation — the size of a scan and the
- * same files counted as occurrences of two repositories.
+ * same files counted as occurrences of two repositories. User-level agent folders are never part
+ * of it: a scan always skips them (product decision D05).
  */
 export function confirmationReasons(request: ConfirmationRequest): string[] {
   const reasons: string[] = [];
+  const userLevel =
+    'User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.';
   if (request.home === 'home') {
     reasons.push(
-      'This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes user-level folders such as ~/.claude/skills and the skills of every project in it.',
+      `This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. ${userLevel}`,
     );
   } else if (request.home === 'contains-home') {
     reasons.push(
-      'This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long, and includes user-level folders such as ~/.claude/skills.',
+      `This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. ${userLevel}`,
     );
   }
   for (const overlap of request.overlaps) {
@@ -167,6 +170,8 @@ export interface ScanNotice {
   errors: { path: string; code: string; message: string }[];
   /** How many errors the scan found in total (the list is capped). */
   errorCount: number;
+  /** One informational line, e.g. the user-level folders the scan skipped; not an error. */
+  info: string | null;
 }
 
 function plural(count: number, noun: string): string {
@@ -180,6 +185,7 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
     message,
     errors: [],
     errorCount: 0,
+    info: null,
   });
   switch (scan.status) {
     case 'pending':
@@ -187,11 +193,19 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
     case 'running':
       return notice('active', `Scanning ${name} (read-only, working tree)…`);
     case 'failed':
+      // A scan that could not run keeps its typed outcome, whose message explains it.
+      if (scan.result && !scan.result.ok) return notice('error', scan.result.message);
       return notice('error', `The scan failed: ${scan.error ?? 'unknown error'}`);
     case 'cancelled':
+      // Cancellation is honoured only before the apply transaction commits (FR-105-17).
       return notice('error', 'The scan was cancelled. Nothing was changed.');
     case 'interrupted':
-      return notice('error', 'The runner stopped before the scan finished. Nothing was changed.');
+      // A shutdown timeout or a crash can land after the apply committed, so this cannot promise
+      // that nothing changed — only that the apply is all or nothing.
+      return notice(
+        'error',
+        "The runner stopped before it recorded the scan's outcome. A scan stores its changes completely or not at all; scan again to make sure the registry is up to date.",
+      );
     case 'completed':
       break;
   }
@@ -206,5 +220,27 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
       `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.`,
     errors: result.errors,
     errorCount: result.errorCount,
+    info: skippedFoldersInfo(result.skippedUserLevelFolders),
   };
+}
+
+/** The line about user-level agent folders a scan skipped (D05), or null when it skipped none. */
+function skippedFoldersInfo(folders: readonly string[]): string | null {
+  if (folders.length === 0) return null;
+  if (folders.includes('.')) {
+    return 'This location is a user-level agent folder; those are never scanned, so nothing was read.';
+  }
+  return `Skipped user-level agent folders, which are never scanned: ${folders.join(', ')}.`;
+}
+
+/** Why the Scan button could not enqueue a scan (`?scanError=` from the action). */
+const SCAN_REQUEST_ERRORS = new Map<string, string>([
+  ['invalid', 'The scan request was invalid. Reload the page and click Scan again.'],
+  ['not-found', 'That repository no longer exists. It may have been removed; reload the list.'],
+  ['unsupported', 'That repository cannot be scanned yet: only local repositories can be scanned.'],
+]);
+
+/** The page-level error for `?scanError=`, or null for no or an unknown value. */
+export function scanRequestError(code: string | undefined): string | null {
+  return code === undefined ? null : (SCAN_REQUEST_ERRORS.get(code) ?? null);
 }

@@ -11,6 +11,8 @@ import {
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
+  NotFoundError,
+  UnsupportedRepositoryError,
   getLatestArtifactVersionId,
   getSuiteVersion,
   requestJobCancellation,
@@ -93,14 +95,30 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
 
 const scanRepositorySchema = z.object({ repositoryId: z.string().min(1) });
 
+/** Enqueues the scan, or names why it cannot be scanned (the page shows a fixed message). */
+async function enqueueScan(
+  repositoryId: string,
+): Promise<{ jobId: string } | { error: 'not-found' | 'unsupported' }> {
+  try {
+    const { job } = await enqueueRepositoryScanJob(requireDatabase(), { repositoryId });
+    return { jobId: job.id };
+  } catch (error) {
+    if (error instanceof NotFoundError) return { error: 'not-found' };
+    if (error instanceof UnsupportedRepositoryError) return { error: 'unsupported' };
+    throw error;
+  }
+}
+
 /**
  * Scans a registered local repository (SPEC-105 FR-105-01/02). The web process only enqueues a
  * `repository-scan` job — or finds the one already pending or running — and the runner in the CLI
- * process reads the files. Unknown or non-local repositories are rejected by the enqueue.
+ * process reads the files. A missing, unknown or non-local repository returns to the page with a
+ * page-level error instead of an error page.
  */
 export async function scanRepositoryAction(formData: FormData): Promise<void> {
-  const input = scanRepositorySchema.parse({ repositoryId: formData.get('repositoryId') });
-  const { job } = await enqueueRepositoryScanJob(requireDatabase(), input);
+  const input = scanRepositorySchema.safeParse({ repositoryId: formData.get('repositoryId') });
+  const outcome = input.success ? await enqueueScan(input.data.repositoryId) : { error: 'invalid' };
+  if ('error' in outcome) redirect(`/repositories?scanError=${outcome.error}`);
   revalidatePath('/repositories');
-  redirect(`/repositories?scan=${encodeURIComponent(job.id)}`);
+  redirect(`/repositories?scan=${encodeURIComponent(outcome.jobId)}`);
 }

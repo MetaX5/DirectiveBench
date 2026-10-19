@@ -14,6 +14,7 @@ const repo = join(sources, 'team-skills');
 const plain = join(sources, 'plain-rules');
 const project = join(sources, 'scan-me');
 const outside = join(sources, 'outside');
+const removed = join(sources, 'removed-meanwhile');
 
 function write(root: string, files: Record<string, string>): void {
   for (const [relPath, content] of Object.entries(files)) {
@@ -26,6 +27,7 @@ test.beforeAll(() => {
   mkdirSync(join(repo, 'skills', 'review'), { recursive: true });
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   mkdirSync(plain);
+  mkdirSync(removed);
   writeFileSync(join(sources, 'notes.txt'), 'not a directory\n');
   // A repository with every format of SPEC-013 M1 AC1 and a symlink at a candidate path.
   write(project, {
@@ -211,6 +213,25 @@ test.describe('repositories', () => {
     await expect(page.getByRole('link', { name: 'e2e-review' })).toBeVisible();
   });
 
+  test('scanning a repository removed meanwhile returns to the page with an error', async ({
+    page,
+  }) => {
+    await register(page, removed);
+    await expect(page.getByTestId('registration-status')).toContainText('Registered ', {
+      timeout: REGISTRATION_TIMEOUT,
+    });
+    // Removed after the page rendered its Scan button (no removal UI exists yet).
+    await withDatabase((db) =>
+      db.prepare('delete from repositories where location = ?').run(removed),
+    );
+    await page.getByRole('button', { name: 'Scan removed-meanwhile' }).click();
+    await expect(page.getByTestId('scan-request-error')).toHaveText(
+      'That repository no longer exists. It may have been removed; reload the list.',
+    );
+    await expect(page).toHaveURL(/\/repositories\?scanError=not-found$/);
+    await expect(repositoryRow(page, removed)).toHaveCount(0);
+  });
+
   test('the filesystem root is rejected (FR-104-18)', async ({ page }) => {
     await register(page, '/');
     await expect(page.getByTestId('path-error')).toHaveText(
@@ -248,7 +269,7 @@ test.describe('repositories', () => {
     expect(await rowsAt(sources)).toBe(1);
   });
 
-  test('the home directory needs a confirmation that mentions user-level folders', async ({
+  test('the home directory needs a confirmation that says user-level folders are skipped (D05)', async ({
     page,
   }) => {
     const before = await withDatabase((db) => count(db, 'select count(*) as n from repositories'));
@@ -257,7 +278,10 @@ test.describe('repositories', () => {
     await expect(confirmation).toContainText('This is your home directory.', {
       timeout: REGISTRATION_TIMEOUT,
     });
-    await expect(confirmation).toContainText('~/.claude/skills');
+    await expect(confirmation).toContainText(
+      'User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
+    );
+    await expect(confirmation).not.toContainText('~/.claude/skills');
     await confirmation.getByRole('link', { name: 'Cancel' }).click();
     expect(await withDatabase((db) => count(db, 'select count(*) as n from repositories'))).toBe(
       before,

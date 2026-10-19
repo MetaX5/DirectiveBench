@@ -32,6 +32,7 @@ import {
   lastScanLabel,
   pathFieldError,
   providerLabel,
+  scanRequestError,
   type RegistrationNotice,
 } from '@/lib/repositories';
 
@@ -42,7 +43,12 @@ const PLANNED = 'Planned — not implemented: hosted URLs, marking deleted artif
 export default async function RepositoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ registration?: string; path?: string; scan?: string }>;
+  searchParams: Promise<{
+    registration?: string;
+    path?: string;
+    scan?: string;
+    scanError?: string;
+  }>;
 }) {
   const handle = getDatabase();
   if (!handle)
@@ -63,6 +69,7 @@ export default async function RepositoriesPage({
   }
   const scan = params.scan ? await getRepositoryScan(handle.db, params.scan) : null;
   const scanNotice = scan ? describeScan(scan) : null;
+  const scanError = scanRequestError(params.scanError);
   const repositories = await listRepositories(handle.db);
   const checking = notice?.kind === 'active';
   const fieldError = notice?.kind === 'fieldError' ? notice : null;
@@ -155,6 +162,12 @@ export default async function RepositoriesPage({
           </CardContent>
         </Card>
 
+        {scanError ? (
+          <p role="alert" data-testid="scan-request-error" className="text-xs text-destructive">
+            {scanError}
+          </p>
+        ) : null}
+
         {scanNotice ? (
           <Card>
             <CardContent className="space-y-2 pt-4">
@@ -182,6 +195,11 @@ export default async function RepositoriesPage({
                   </form>
                 ) : null}
               </div>
+              {scanNotice.info ? (
+                <p data-testid="scan-info" className="text-xs text-muted-foreground">
+                  {scanNotice.info}
+                </p>
+              ) : null}
               {scanNotice.errors.length > 0 ? (
                 <div data-testid="scan-errors" className="space-y-1">
                   <p className="text-xs font-medium">
@@ -215,9 +233,10 @@ export default async function RepositoriesPage({
               <CardDescription data-testid="scan-explanation">
                 Scan finds the skills, instructions and rules in a local repository. It reads the
                 files on disk — the working tree, including uncommitted and untracked files, also
-                for Git repositories — skips .git and node_modules, never follows symbolic links and
-                never runs anything from the repository. Rescanning keeps one artifact per path and
-                adds a version only when its content changed.
+                for Git repositories — skips .git, node_modules and user-level agent folders such as
+                ~/.claude, never follows symbolic links and never runs anything from the repository.
+                Rescanning keeps one artifact per path and adds a version only when its content
+                changed.
               </CardDescription>
             </CardHeader>
             <CardContent>

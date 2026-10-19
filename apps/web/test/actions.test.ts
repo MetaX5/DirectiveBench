@@ -11,6 +11,7 @@ import {
   registerLocalRepository,
   importSuiteVersion,
   listJobs,
+  upsertRepository,
   type DatabaseHandle,
 } from '@directivebench/database';
 import {
@@ -387,14 +388,36 @@ describe('scanRepositoryAction', () => {
     expect(await redirectOf(scanRepositoryAction(form({ repositoryId })))).toBe(url);
   });
 
-  it('rejects a missing or unknown repository without enqueueing', async () => {
-    await expect(scanRepositoryAction(form({}))).rejects.toThrow();
-    await expect(scanRepositoryAction(form({ repositoryId: 'repo_missing' }))).rejects.toThrow(
-      'Repository repo_missing not found',
+  it('returns to the page with an error for a missing, unknown or non-local repository', async () => {
+    expect(await redirectOf(scanRepositoryAction(form({})))).toBe(
+      '/repositories?scanError=invalid',
+    );
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId: 'repo_missing' })))).toBe(
+      '/repositories?scanError=not-found',
+    );
+    await upsertRepository(handle.db, {
+      provider: 'bundled-examples',
+      name: 'Bundled',
+      location: '/opt/examples',
+    });
+    const bundled = handle.sqlite
+      .prepare("select id from repositories where provider = 'bundled-examples'")
+      .get() as { id: string };
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId: bundled.id })))).toBe(
+      '/repositories?scanError=unsupported',
     );
     expect(
       Number((handle.sqlite.prepare('select count(*) as n from jobs').get() as { n: number }).n),
     ).toBe(0);
     expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('still fails loudly on an unexpected database error', async () => {
+    const repositoryId = await localRepository();
+    handle.sqlite.exec(
+      "CREATE TRIGGER fail_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    await expect(scanRepositoryAction(form({ repositoryId }))).rejects.toThrow();
+    expect(next.redirect).not.toHaveBeenCalled();
   });
 });

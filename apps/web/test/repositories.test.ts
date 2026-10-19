@@ -12,6 +12,7 @@ import {
   lastScanLabel,
   pathFieldError,
   providerLabel,
+  scanRequestError,
 } from '../lib/repositories';
 
 const repository: RepositoryRecord = {
@@ -167,13 +168,14 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
       location: '/home/me',
       message: 'Register /home/me anyway?',
       reasons: [
-        'This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes user-level folders such as ~/.claude/skills and the skills of every project in it.',
+        'This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
       ],
     });
+    // D05: user-level folders are never included, so the confirmation never promises them.
     const above = confirm('contains-home', []);
-    expect(above.kind === 'confirm' && above.reasons[0]).toMatch(
-      /^This directory contains your home directory\./,
-    );
+    expect(above.kind === 'confirm' && above.reasons).toEqual([
+      'This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
+    ]);
   });
 
   it('explains double counting for each overlapping repository', () => {
@@ -217,7 +219,7 @@ describe('describeScan', () => {
       ...overrides,
     };
   }
-  const empty = { errors: [], errorCount: 0 };
+  const empty = { errors: [], errorCount: 0, info: null };
 
   it('keeps refreshing while the scan waits or runs', () => {
     expect(describeScan(scan({ status: 'pending' }))).toEqual({
@@ -246,6 +248,7 @@ describe('describeScan', () => {
             warningCount: 0,
             errorCount: 101,
             errors,
+            skippedUserLevelFolders: [],
             durationMs: 1234,
           },
         }),
@@ -256,7 +259,36 @@ describe('describeScan', () => {
         'Scanned skills: 1 file in 1.2 s, 4 artifacts found (4 new, 1 new version), 101 errors.',
       errors,
       errorCount: 101,
+      info: null,
     });
+  });
+
+  it('mentions the user-level agent folders a scan skipped, as information (D05)', () => {
+    const done = (skippedUserLevelFolders: string[]) =>
+      describeScan(
+        scan({
+          result: {
+            ok: true,
+            scannedFiles: 0,
+            discovered: 0,
+            createdArtifacts: 0,
+            createdVersions: 0,
+            warningCount: 0,
+            errorCount: 0,
+            errors: [],
+            skippedUserLevelFolders,
+            durationMs: 1,
+          },
+        }),
+      );
+    expect(done(['.claude', '.codex'])).toMatchObject({
+      kind: 'done',
+      info: 'Skipped user-level agent folders, which are never scanned: .claude, .codex.',
+      errorCount: 0,
+    });
+    expect(done(['.']).info).toBe(
+      'This location is a user-level agent folder; those are never scanned, so nothing was read.',
+    );
   });
 
   it('reports failures, cancellation and missing results', () => {
@@ -266,10 +298,23 @@ describe('describeScan', () => {
         'The scan failed: database is locked',
       ],
       [scan({ status: 'failed' }), 'The scan failed: unknown error'],
+      [
+        scan({
+          status: 'failed',
+          error: 'The registered directory no longer exists.',
+          result: {
+            ok: false,
+            code: 'path-not-found',
+            message: 'The registered directory no longer exists.',
+          },
+        }),
+        'The registered directory no longer exists.',
+      ],
       [scan({ status: 'cancelled' }), 'The scan was cancelled. Nothing was changed.'],
+      // A shutdown timeout can land after the apply committed: no "nothing was changed" here.
       [
         scan({ status: 'interrupted' }),
-        'The runner stopped before the scan finished. Nothing was changed.',
+        "The runner stopped before it recorded the scan's outcome. A scan stores its changes completely or not at all; scan again to make sure the registry is up to date.",
       ],
       [scan({}), 'The runner finished without a result.'],
       [
@@ -286,5 +331,22 @@ describe('describeScan', () => {
     for (const [input, message] of cases) {
       expect(describeScan(input)).toEqual({ kind: 'error', message, ...empty });
     }
+  });
+});
+
+describe('scanRequestError', () => {
+  it('names why the Scan button could not enqueue a scan, and ignores other values', () => {
+    expect(scanRequestError('invalid')).toBe(
+      'The scan request was invalid. Reload the page and click Scan again.',
+    );
+    expect(scanRequestError('not-found')).toBe(
+      'That repository no longer exists. It may have been removed; reload the list.',
+    );
+    expect(scanRequestError('unsupported')).toBe(
+      'That repository cannot be scanned yet: only local repositories can be scanned.',
+    );
+    expect(scanRequestError(undefined)).toBeNull();
+    expect(scanRequestError('toString')).toBeNull();
+    expect(scanRequestError('<script>')).toBeNull();
   });
 });
