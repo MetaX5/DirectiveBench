@@ -221,11 +221,11 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 - [ ] Adding a GitHub HTTPS URL stores provider `github`, normalised location, detected default branch.
 - [ ] Adding a self-managed GitLab URL stores provider `gitlab` and `instance_url`.
-- [ ] Adding a local git path stores `local-git` with the top-level directory; a plain folder stores `local-directory`.
+- [x] Adding a local git path stores `local-git` with the top-level directory; a plain folder stores `local-directory`.
 - [ ] A URL with embedded credentials is rejected and does not appear in any log.
 - [ ] No API accepts a secret value; only `CredentialRef` objects.
 - [ ] Validation errors are returned with the codes in §8 and human hints.
-- [ ] The malicious-hook fixture never executes during validation.
+- [x] The malicious-hook fixture never executes during validation (local path registration; hosted validation does not exist yet).
 - [ ] Removing a repository keeps artifacts, versions and evaluation results.
 
 ## 17. Dependencies
@@ -267,5 +267,12 @@ URL registration for public GitHub (E01-S04, #18) and the remaining FRs follow t
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/runner/test/runner.test.ts` and `pnpm verify:pack`):** `repositories` table (provider enum incl. internal `bundled-examples`, location, instance URL, default/selected branch, sync status columns); `upsertRepository` creates the internal `bundled-examples` repository used by example import (`importBundledExample`).
-- **Partially implemented:** none.
-- **Not implemented:** user registration of any provider, URL/path parsing, credential references (`credential_ref` column, `CredentialRef`/`SecretRef` shape), discovery settings, disable/remove, connection validation, branch listing, hardened git execution, Repositories UI (page shows "Planned — not implemented"), `packages/git-providers`.
+- **Implemented — Phase 1, local path registration (issue #15; verified on 2026-10-19 by `packages/core/test/repository-path.test.ts`, `packages/database/test/{jobs,catalog,client}.test.ts`, `packages/runner/test/{repository-registration,repository-registration-fs-errors,runner-registration}.test.ts`, `apps/web/test/{actions,repositories}.test.ts`, the Playwright tests in `apps/web/e2e/repositories.spec.ts`, and a manual run of the built CLI against a temporary data directory):**
+  - Registration flows web → `repository-registration` job → runner (§9): `registerRepositoryAction` validates the path with the shared `repositoryPathInputSchema` (non-empty, ≤ 4096 characters, no NUL, absolute or `~`/`~/…`) and only enqueues; the runner records `{ ok, repositoryId, created }` or `{ ok: false, code, message }` in `jobs.result` (migration `0001_add_job_result`).
+  - FR-104-01/FR-104-03: `~` expansion, `realpath` canonicalisation (trailing slashes, `//`, `..`, symlinks), existing readable directory check; work tree → `local-git` at the top level (from `--show-cdup`), "not a git repository" → `local-directory`; a path inside `.git` → `git-directory`; other git failures → `git-failed`; missing git → `git-not-installed`; 2 s timeout per git call → `timeout` (NFR-104-01).
+  - FR-104-04 for local paths: `registerLocalRepository` is a single `INSERT … ON CONFLICT DO NOTHING RETURNING` plus a read of the existing row, so `~`, trailing-slash and symlink variants and concurrent registrations return the existing repository (unchanged) without a duplicate row.
+  - FR-104-06 (local basename, `/` for the root), FR-104-07 for `local-git` (current branch from `symbolic-ref`; detached HEAD → null, shown as "not detected").
+  - FR-104-11/FR-104-12 for local registration: only `rev-parse --is-inside-work-tree --show-cdup` and `symbolic-ref --quiet --short HEAD` run, with the path as working directory (never in argv), `-c core.fsmonitor=false -c core.hooksPath=/dev/null -c protocol.ext.allow=never`, `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `GIT_LFS_SKIP_SMUDGE=1`, `GIT_NO_LAZY_FETCH=1`, `LC_ALL=C` and an allowlisted environment (`PATH`, `HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, `SystemRoot`). A fixture repository whose fsmonitor and hooks write a marker (armed: plain `git status` runs them) produces no marker and no file change (type, mode, size, mtime, content of every entry including `.git`) during registration; the same flags also stop `status`, `commit` and `checkout` from running them.
+  - UI: `/repositories` replaces the placeholder with the path field, the registration status (auto-refresh every 2 s while pending/running), a field-level error (input pre-filled, `aria-invalid`) and the list; scanning and hosted URLs are labelled "Planned — not implemented".
+- **Partially implemented:** FR-104-16 — the list shows name, provider, location, branch and artifact count (active occurrences); last sync time, sync status and credential source are not shown yet. FR-104-10 — local checks run at registration only; no on-demand "Test connection" or re-validation, and an existing repository's branch is not refreshed on re-registration. §8 error codes — the local-path subset above.
+- **Not implemented:** URL registration (github/gitlab, FR-104-02, FR-104-05), explicit `local-directory` registration of a work tree, credential references (`credential_ref` column, `CredentialRef`/`SecretRef` shape), discovery settings, edit/disable/remove, branch listing and picker, case-insensitive duplicate detection and Windows path normalisation (§14), `/repositories/[id]`, `packages/git-providers`.

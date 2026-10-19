@@ -63,15 +63,76 @@ relative, missing, file, unreadable paths).
 
 ## Decisions
 
-Recorded as the run progresses.
+- **Registration is a runner job, not a web-side git call.** SPEC-104 §9 had git running in the
+  Server Action (OQ-104-01 proposal); that contradicts SPEC-003 §2.1 / SPEC-014 §3.3 and the
+  issue's implementation notes. The action validates and enqueues `repository-registration`; the
+  runner resolves the path and runs git. SPEC-104 §9/§18 updated (OQ-104-01 resolved for local
+  paths only; hosted validation stays open for #18).
+- **Nullable `jobs.result` column (migration `0001`).** The page must name the new or existing
+  repository and show a typed rejection; `jobs` had no output column and overloading `payload` or
+  `error` would mix input and output. Additive and nullable, so older code ignores it; rollback is
+  `ALTER TABLE jobs DROP COLUMN result` (rehearsed in `client.test.ts`). No other open PR has a
+  migration (checked with `gh pr list`).
+- **A rejected path is a `completed` job with `result.ok = false`**, not `failed` — FR-114-10 says
+  outcomes never make a job fail; `failed` stays for unexpected errors (e.g. invalid payload).
+- **Git is asked questions whose answers carry no user data.** The path is the working directory
+  (never an argument, so no option injection), the top level comes from `--show-cdup`, because
+  `runCommand` redacts stdout and a token-like directory name would otherwise be stored as
+  `[REDACTED]` (lesson recorded).
+- **Fail closed:** git missing → `git-not-installed` (a plain directory is not registered either,
+  since we cannot tell whether it is a work tree); a path inside `.git` or a bare repository →
+  `git-directory` instead of registering git internals as a folder; any git error other than "not a
+  git repository" → `git-failed`; unclassified `realpath` errors fail the job.
+- **`HOME`/`XDG_CONFIG_HOME` are forwarded to git** so the user's global config (`safe.directory`)
+  applies; command-line `-c` values override any `core.fsmonitor`/`core.hooksPath` from it or from
+  the repository.
+- **Re-registering returns the existing row unchanged** (FR-104-04); the stored branch is not
+  refreshed — re-validation is FR-104-10's on-demand check, out of scope.
+- **The Executions list shows benchmark jobs only** (`listJobs` filters `benchmark-run`), because
+  its columns are benchmark-specific; registration jobs are visible on the Repositories page.
+- **UX while the job runs:** the action redirects to `/repositories?registration=<jobId>`; the page
+  says "Waiting for the runner…" (pending) or "Checking … (read-only)…" (running), disables the
+  field and refreshes every 2 s (`AutoRefresh`); on completion it confirms "Registered …" or
+  "… is already registered", or shows the rejection under the field with the path pre-filled.
+  Syntax errors (empty, relative, `~user`) are caught by the action before any job exists.
+- **Scope:** the nav "planned" marker is removed from Repositories; the page carries a
+  "Planned — not implemented: scanning, hosted URLs" badge (AGENTS.md §7).
 
 ## Work performed
 
-Recorded as the run progresses.
+1. Specs: SPEC-104 Phasing section, §9 data flow, error codes, OQ-104-01; SPEC-006 and SPEC-114
+   job type and column — `fde712c`.
+2. `core`: `repositoryPathInputSchema`, `expandHomePath` — `4bde9d0`.
+3. `database`: job type, payload/result schemas, `enqueueRepositoryRegistrationJob`,
+   `getRepositoryRegistration`, `finishJob(…, result)`, migration `0001_add_job_result`,
+   `registerLocalRepository`, `listRepositories` artifact count, `listJobs` filter — `65f47ba`.
+4. `runner`: `inspectLocalPath`/`registerLocalPath` with hardened git — `0399f13`; `LocalRunner`
+   dispatch, cancellation and shutdown — `d011219`.
+5. `web`: `registerRepositoryAction`, `describeRegistration`/`branchLabel`/`providerLabel` —
+   `dac91e6`; Repositories page and nav — `8af4224`; Playwright tests — `54b99bb`; status copy
+   polish after the manual run — `26ad21d`.
+6. Spec implementation status, lesson and this log — see the final commits of the PR.
 
 ## Verification
 
-Recorded at the end of the run.
+- `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm verify:pack`: all exit 0
+  ("Packaging verification passed").
+- `pnpm test`: exit 0, 100% statements/branches/functions/lines in every package — cli 75,
+  agent-adapters 34, benchmark-engine 110, core 124, database 76, web 76, runner 57 tests.
+  The new runner test files were run 5 times in a row without a failure.
+- `pnpm test:e2e` (port 4417): 22 passed, including the 5 new tests in `e2e/repositories.spec.ts`.
+- Real app: built CLI, `init` + `serve --port 4431` on a temporary data directory, driven with
+  headless Chromium. Registered a nested path with trailing slash inside a new git repo on branch
+  `develop` → `my-skills`, Local Git, top level, `develop`; a plain folder → Local directory, `—`;
+  `~/projekty/DirectiveBench` → Local Git at `/home/mateusz/projekty/DirectiveBench`, `main`; the
+  repo again via `my-skills/` → "already registered" (same repository id in `jobs.result`); a
+  missing path → field error, nothing stored; `relative/path` → field error, no job. The top-level
+  files of the registered primary repository's `.git` (including `index`) had identical mtimes and
+  sizes before and after.
+- Not verified: macOS/Windows (CI is Linux only; `/dev/null` for `core.hooksPath` on Git for
+  Windows and case-insensitive duplicates are untested); git older than 2.53 locally (CI uses the
+  runner image's git); registration while the runner is not running (the page keeps saying
+  "Waiting for the runner" — by design, not exercised).
 
 ## Problems and deviations
 
@@ -82,11 +143,19 @@ Recorded at the end of the run.
 
 ## Lessons recorded
 
-Recorded at the end of the run.
+- [Never store a value parsed from redacted command output; inspect git with the path as cwd and
+  `--show-cdup`](../lessons/2026-10-19-derive-git-paths-from-cwd-not-redacted-output.md).
+- Repeated an existing lesson: `pkill -f "port 4431"` killed the agent's own shell while stopping
+  the manual-test server (lesson 2026-10-14 "testing processes": kill by PID). No new lesson.
 
 ## Follow-ups
 
-Recorded at the end of the run.
+- #16 (scan) consumes `repositories.location`/`default_branch` written here.
+- FR-104-16 columns still missing: last sync time, sync status, credential source.
+- On-demand re-validation (FR-104-10) and refreshing a stale branch on re-registration.
+- A branch name that looks like a token is stored redacted (it comes from redacted git output);
+  harmless for display, but sync (#16) should read the branch again rather than trust it blindly.
+- Explicit "register this work tree as a local directory" option (FR-104-03).
 
 ## Progress
 
