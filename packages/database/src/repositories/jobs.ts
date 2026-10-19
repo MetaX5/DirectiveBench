@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { createId, nowIso } from '@directivebench/core';
+import { createId, nowIso, repositoryPathInputSchema } from '@directivebench/core';
 import type { Database } from '../client';
 import {
   artifacts,
@@ -9,6 +9,7 @@ import {
   benchmarkSuites,
   benchmarkSuiteVersions,
   jobs,
+  repositories,
   type JobStatus,
 } from '../schema';
 
@@ -19,6 +20,37 @@ export const benchmarkJobPayloadSchema = z
   })
   .strict();
 export type BenchmarkJobPayload = z.infer<typeof benchmarkJobPayloadSchema>;
+
+/** Input of a `repository-registration` job: the path exactly as the user entered it (trimmed). */
+export const repositoryRegistrationPayloadSchema = z
+  .object({ path: repositoryPathInputSchema })
+  .strict();
+export type RepositoryRegistrationPayload = z.infer<typeof repositoryRegistrationPayloadSchema>;
+
+/** Why the runner rejected a path (SPEC-104 §8 `RepositoryErrorCode`, local-path subset). */
+export const REPOSITORY_REGISTRATION_ERROR_CODES = [
+  'path-not-found',
+  'not-a-directory',
+  'permission-denied',
+  'git-directory',
+  'git-failed',
+  'git-not-installed',
+  'timeout',
+] as const;
+export type RepositoryRegistrationErrorCode = (typeof REPOSITORY_REGISTRATION_ERROR_CODES)[number];
+
+/** Outcome of a `repository-registration` job, stored in `jobs.result` by the runner. */
+export const repositoryRegistrationResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), repositoryId: z.string().min(1), created: z.boolean() }).strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      code: z.enum(REPOSITORY_REGISTRATION_ERROR_CODES),
+      message: z.string().min(1),
+    })
+    .strict(),
+]);
+export type RepositoryRegistrationResult = z.infer<typeof repositoryRegistrationResultSchema>;
 
 export type JobRecord = typeof jobs.$inferSelect;
 
@@ -51,6 +83,29 @@ export async function enqueueBenchmarkJob(
     .values({
       id: createId('job'),
       type: 'benchmark-run',
+      status: 'pending',
+      payload: parsed,
+      createdAt: nowIso(),
+    })
+    .returning();
+  if (!job) throw new Error('Failed to enqueue job');
+  return job;
+}
+
+/**
+ * Enqueues the registration of a local path. The web process only enqueues: the runner resolves
+ * the path, inspects it read-only and records the outcome in `jobs.result` (SPEC-104 §9).
+ */
+export async function enqueueRepositoryRegistrationJob(
+  db: Database,
+  payload: RepositoryRegistrationPayload,
+): Promise<JobRecord> {
+  const parsed = repositoryRegistrationPayloadSchema.parse(payload);
+  const [job] = await db
+    .insert(jobs)
+    .values({
+      id: createId('job'),
+      type: 'repository-registration',
       status: 'pending',
       payload: parsed,
       createdAt: nowIso(),
@@ -100,10 +155,11 @@ export async function finishJob(
   jobId: string,
   status: Extract<JobStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>,
   error?: string,
+  result?: Record<string, unknown>,
 ): Promise<void> {
   await db
     .update(jobs)
-    .set({ status, error: error ?? null, finishedAt: nowIso() })
+    .set({ status, error: error ?? null, result: result ?? null, finishedAt: nowIso() })
     .where(eq(jobs.id, jobId));
 }
 
@@ -195,8 +251,17 @@ export interface JobListItem {
   benchmarkRunId: string | null;
 }
 
+/**
+ * Benchmark jobs, newest first (the Executions page). Registration jobs are short-lived and shown
+ * on the Repositories page instead (`getRepositoryRegistration`).
+ */
 export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]> {
-  const rows = await db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit);
+  const rows = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.type, 'benchmark-run'))
+    .orderBy(desc(jobs.createdAt))
+    .limit(limit);
   const result: JobListItem[] = [];
   for (const job of rows) {
     const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
@@ -243,4 +308,52 @@ export async function countJobsByStatus(db: Database): Promise<Record<JobStatus,
   };
   for (const row of rows) counts[row.status] = Number(row.count);
   return counts;
+}
+
+export interface RepositoryRegistration {
+  jobId: string;
+  status: JobStatus;
+  /** The path as entered. */
+  path: string;
+  /** Set when the job failed outside path validation (redacted by the runner). */
+  error: string | null;
+  /** The runner's outcome; null until the job completes. */
+  result: RepositoryRegistrationResult | null;
+  /** The registered (or already registered) repository when `result.ok`. */
+  repository: typeof repositories.$inferSelect | null;
+}
+
+/**
+ * Reads a registration job for display. Returns null for an unknown id, another job type or a row
+ * whose payload or result does not match its schema, so a page never renders unvalidated data.
+ */
+export async function getRepositoryRegistration(
+  db: Database,
+  jobId: string,
+): Promise<RepositoryRegistration | null> {
+  const job = await getJob(db, jobId);
+  if (job?.type !== 'repository-registration') return null;
+  const payload = repositoryRegistrationPayloadSchema.safeParse(job.payload);
+  if (!payload.success) return null;
+  let result: RepositoryRegistrationResult | null = null;
+  if (job.result !== null) {
+    const parsed = repositoryRegistrationResultSchema.safeParse(job.result);
+    if (!parsed.success) return null;
+    result = parsed.data;
+  }
+  const repository = result?.ok
+    ? ((await db
+        .select()
+        .from(repositories)
+        .where(eq(repositories.id, result.repositoryId))
+        .get()) ?? null)
+    : null;
+  return {
+    jobId: job.id,
+    status: job.status,
+    path: payload.data.path,
+    error: job.error,
+    result,
+    repository,
+  };
 }

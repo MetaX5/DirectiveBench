@@ -8,6 +8,7 @@ import {
   importArtifactVersion,
   listCategories,
   listRepositories,
+  registerLocalRepository,
   schema,
   seedPredefinedCategories,
 } from '../src/index';
@@ -70,6 +71,109 @@ describe('listRepositories', () => {
       ['alpha', 'gitlab', 'never'],
       ['zeta', 'github', 'never'],
     ]);
+  });
+
+  it('counts only active artifact occurrences per repository', async () => {
+    const handle = getHandle();
+    const repository = { provider: 'local-git' as const, name: 'skills', location: '/srv/skills' };
+    await importArtifactVersion(handle, artifactInput('a', { repository, path: 'one' }));
+    await importArtifactVersion(
+      handle,
+      artifactInput('b', { repository, path: 'two', slug: 'two', name: 'two' }),
+    );
+    await importArtifactVersion(
+      handle,
+      artifactInput('c', { repository, path: 'three', slug: 'three', name: 'three' }),
+    );
+    handle.sqlite.exec("update artifact_occurrences set status = 'removed' where path = 'three'");
+    const { repository: empty } = await registerLocalRepository(handle.db, {
+      provider: 'local-directory',
+      name: 'empty',
+      location: '/srv/empty',
+      defaultBranch: null,
+    });
+
+    const repos = await listRepositories(handle.db);
+    expect(repos.map((r) => [r.name, r.location, Number(r.artifactCount)])).toEqual([
+      ['empty', '/srv/empty', 0],
+      ['skills', '/srv/skills', 2],
+    ]);
+    expect(repos[0]).toMatchObject({ ...empty, artifactCount: 0 });
+  });
+
+  it('orders repositories with the same name by location', async () => {
+    const handle = getHandle();
+    for (const location of ['/b/skills', '/a/skills']) {
+      await registerLocalRepository(handle.db, {
+        provider: 'local-directory',
+        name: 'skills',
+        location,
+        defaultBranch: null,
+      });
+    }
+    expect((await listRepositories(handle.db)).map((r) => r.location)).toEqual([
+      '/a/skills',
+      '/b/skills',
+    ]);
+  });
+});
+
+describe('registerLocalRepository', () => {
+  const input = {
+    provider: 'local-git' as const,
+    name: 'skills',
+    location: '/srv/skills',
+    defaultBranch: 'main',
+  };
+
+  it('creates a repository that has never been synchronised', async () => {
+    const handle = getHandle();
+    const { repository, created } = await registerLocalRepository(handle.db, input);
+    expect(created).toBe(true);
+    expect(repository).toMatchObject({
+      ...input,
+      selectedBranch: null,
+      syncStatus: 'never',
+      lastSyncAt: null,
+    });
+    expect(repository.id).toMatch(/^repo_/);
+  });
+
+  it('returns the existing repository unchanged for the same provider and location', async () => {
+    const handle = getHandle();
+    const first = await registerLocalRepository(handle.db, input);
+    const again = await Promise.all([
+      registerLocalRepository(handle.db, { ...input, name: 'renamed', defaultBranch: 'dev' }),
+      registerLocalRepository(handle.db, input),
+    ]);
+    expect(again).toEqual([
+      { repository: first.repository, created: false },
+      { repository: first.repository, created: false },
+    ]);
+    expect(await handle.db.$count(schema.repositories)).toBe(1);
+  });
+
+  it('keeps one row per provider: the same path may exist as local-git and local-directory', async () => {
+    const handle = getHandle();
+    await registerLocalRepository(handle.db, input);
+    const plain = await registerLocalRepository(handle.db, {
+      ...input,
+      provider: 'local-directory',
+      defaultBranch: null,
+    });
+    expect(plain.created).toBe(true);
+    expect(await handle.db.$count(schema.repositories)).toBe(2);
+  });
+
+  it('fails loudly when the insert is dropped without a conflicting row', async () => {
+    const handle = getHandle();
+    // SQLite-specific: a trigger that ignores the insert makes RETURNING yield no row.
+    handle.sqlite.exec(
+      'CREATE TRIGGER drop_repositories BEFORE INSERT ON repositories BEGIN SELECT RAISE(IGNORE); END',
+    );
+    await expect(registerLocalRepository(handle.db, input)).rejects.toThrow(
+      'Repository /srv/skills was neither inserted nor found',
+    );
   });
 });
 

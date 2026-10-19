@@ -234,14 +234,19 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+const JOB_TYPES = ['benchmark-run', 'repository-registration'] as const;
+
 /** Persistent local job queue (no Redis). */
 export const jobs = sqliteTable(
   'jobs',
   {
     id: text('id').primaryKey(),
-    type: text('type', { enum: ['benchmark-run'] }).notNull(),
+    type: text('type', { enum: JOB_TYPES }).notNull(),
     status: text('status', { enum: JOB_STATUSES }).notNull(),
+    /** Input of the job, validated per type at enqueue and again by the runner. */
     payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    /** Outcome recorded by the runner for job types that have one; validated per type on read. */
+    result: text('result', { mode: 'json' }).$type<Record<string, unknown>>(),
     runnerId: text('runner_id'),
     attempts: integer('attempts').notNull().default(0),
     error: text('error'),

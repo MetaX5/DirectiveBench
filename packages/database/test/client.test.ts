@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { eq, getTableName, is, sql } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
@@ -60,7 +60,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(2);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -236,6 +236,62 @@ describe('withTransaction', () => {
     expect(await second).toEqual([]);
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
     expect(await slugs(handle)).toEqual(['second']);
+  });
+});
+
+describe('migration 0001_add_job_result', () => {
+  /** A migrations folder holding only the first `count` entries of the real journal. */
+  function partialMigrations(dir: string, count: number): string {
+    const journal = JSON.parse(
+      readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8'),
+    ) as { entries: { tag: string }[] };
+    const entries = journal.entries.slice(0, count);
+    const folder = join(dir, `migrations-${count}`);
+    mkdirSync(join(folder, 'meta'), { recursive: true });
+    writeFileSync(join(folder, 'meta', '_journal.json'), JSON.stringify({ ...journal, entries }));
+    for (const { tag } of entries) {
+      copyFileSync(join(migrationsFolder, `${tag}.sql`), join(folder, `${tag}.sql`));
+    }
+    return folder;
+  }
+
+  function jobColumns(handle: DatabaseHandle): string[] {
+    return handle.sqlite
+      .prepare('pragma table_info(jobs)')
+      .all()
+      .map((row) => String(row.name));
+  }
+
+  it('adds a nullable jobs.result to an existing database and can be rolled back', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 1));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 1));
+      handle.sqlite.exec(
+        `insert into jobs (id, type, status, payload, created_at)
+         values ('job_old', 'benchmark-run', 'completed', '{"a":1}', '2026-01-01T00:00:00.000Z')`,
+      );
+
+      // Up: the existing row survives with a null result.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(jobColumns(handle)).toEqual([...jobColumns(before), 'result']);
+      expect(
+        handle.sqlite.prepare("select payload, result from jobs where id = 'job_old'").get(),
+      ).toEqual({ payload: '{"a":1}', result: null });
+
+      // Down (the rollback plan): dropping the column restores the 0000 table shape and data.
+      handle.sqlite.exec('alter table jobs drop column result');
+      expect(jobColumns(handle)).toEqual(jobColumns(before));
+      expect(handle.sqlite.prepare("select payload from jobs where id = 'job_old'").get()).toEqual({
+        payload: '{"a":1}',
+      });
+    } finally {
+      before.close();
+      handle.close();
+      temp.dispose();
+    }
   });
 });
 

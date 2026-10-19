@@ -4,15 +4,18 @@ import {
   acquireNextJob,
   countJobsByStatus,
   enqueueBenchmarkJob,
+  enqueueRepositoryRegistrationJob,
   finishJob,
   getBenchmarkRunDetail,
   getJob,
+  getRepositoryRegistration,
   heartbeatJob,
   interruptJobs,
   isCancellationRequested,
   listJobs,
   NotFoundError,
   recoverStaleJobs,
+  registerLocalRepository,
   requestJobCancellation,
   schema,
 } from '../src/index';
@@ -82,6 +85,124 @@ describe('enqueueBenchmarkJob', () => {
       'CREATE TRIGGER drop_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(IGNORE); END',
     );
     await expect(enqueueBenchmarkJob(handle.db, payload)).rejects.toThrow('Failed to enqueue job');
+  });
+});
+
+describe('enqueueRepositoryRegistrationJob', () => {
+  it('stores a pending registration job with the trimmed path', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const job = await enqueueRepositoryRegistrationJob(handle.db, { path: '  ~/code/skills/ ' });
+    expect(job).toMatchObject({
+      type: 'repository-registration',
+      status: 'pending',
+      payload: { path: '~/code/skills/' },
+      result: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    });
+    expect(job.id).toMatch(/^job_/);
+  });
+
+  it('rejects relative paths and unknown fields without storing anything', async () => {
+    const handle = getHandle();
+    await expect(enqueueRepositoryRegistrationJob(handle.db, { path: 'code' })).rejects.toThrow(
+      /absolute path/,
+    );
+    await expect(
+      enqueueRepositoryRegistrationJob(handle.db, { path: '/srv', provider: 'github' } as {
+        path: string;
+      }),
+    ).rejects.toThrow(/Unrecognized key/);
+    expect(await handle.db.$count(schema.jobs)).toBe(0);
+  });
+
+  it('fails loudly when the database silently drops the insert', async () => {
+    const handle = getHandle();
+    handle.sqlite.exec(
+      'CREATE TRIGGER drop_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(IGNORE); END',
+    );
+    await expect(enqueueRepositoryRegistrationJob(handle.db, { path: '/srv' })).rejects.toThrow(
+      'Failed to enqueue job',
+    );
+  });
+});
+
+describe('getRepositoryRegistration', () => {
+  it('returns null for unknown ids, other job types and rows that fail validation', async () => {
+    const handle = getHandle();
+    const benchmark = await enqueueBenchmarkJob(handle.db, payloadOf(await seedTargets(handle)));
+    const base = {
+      type: 'repository-registration' as const,
+      status: 'completed' as const,
+      createdAt: '2026-04-01T00:00:00Z',
+    };
+    await handle.db.insert(schema.jobs).values([
+      { ...base, id: 'job_bad_payload', payload: { path: 'relative' } },
+      { ...base, id: 'job_bad_result', payload: { path: '/srv' }, result: { ok: 'yes' } },
+    ]);
+    expect(await getRepositoryRegistration(handle.db, 'job_missing')).toBeNull();
+    expect(await getRepositoryRegistration(handle.db, benchmark.id)).toBeNull();
+    expect(await getRepositoryRegistration(handle.db, 'job_bad_payload')).toBeNull();
+    expect(await getRepositoryRegistration(handle.db, 'job_bad_result')).toBeNull();
+  });
+
+  it('describes a pending job, a rejection and a registered repository', async () => {
+    const handle = getHandle();
+    const pending = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/pending' });
+    expect(await getRepositoryRegistration(handle.db, pending.id)).toEqual({
+      jobId: pending.id,
+      status: 'pending',
+      path: '/srv/pending',
+      error: null,
+      result: null,
+      repository: null,
+    });
+
+    const rejected = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/missing' });
+    const rejection = { ok: false, code: 'path-not-found', message: 'No directory exists.' };
+    await finishJob(handle.db, rejected.id, 'completed', undefined, rejection);
+    expect(await getRepositoryRegistration(handle.db, rejected.id)).toMatchObject({
+      status: 'completed',
+      result: rejection,
+      repository: null,
+    });
+
+    const { repository } = await registerLocalRepository(handle.db, {
+      provider: 'local-git',
+      name: 'skills',
+      location: '/srv/skills',
+      defaultBranch: 'main',
+    });
+    const done = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/skills/' });
+    const success = { ok: true, repositoryId: repository.id, created: true };
+    await finishJob(handle.db, done.id, 'completed', undefined, success);
+    expect(await getRepositoryRegistration(handle.db, done.id)).toMatchObject({
+      path: '/srv/skills/',
+      result: success,
+      repository,
+    });
+
+    const gone = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/gone' });
+    await finishJob(handle.db, gone.id, 'completed', undefined, {
+      ok: true,
+      repositoryId: 'repo_gone',
+      created: false,
+    });
+    expect(await getRepositoryRegistration(handle.db, gone.id)).toMatchObject({
+      repository: null,
+    });
+  });
+
+  it('passes the runner error of a failed job through', async () => {
+    const handle = getHandle();
+    const job = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv' });
+    await finishJob(handle.db, job.id, 'failed', 'database is locked');
+    expect(await getRepositoryRegistration(handle.db, job.id)).toMatchObject({
+      status: 'failed',
+      error: 'database is locked',
+      result: null,
+    });
   });
 });
 
@@ -275,6 +396,13 @@ describe('listJobs', () => {
     });
     expect(jobs[1]?.benchmarkRunId).toBe(runId);
     expect((await listJobs(handle.db, 1)).map((j) => j.job.id)).toEqual([newer.id]);
+  });
+
+  it('lists benchmark jobs only; registration jobs belong to the Repositories page', async () => {
+    const handle = getHandle();
+    const benchmark = await enqueueBenchmarkJob(handle.db, payloadOf(await seedTargets(handle)));
+    await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/skills' });
+    expect((await listJobs(handle.db)).map((j) => j.job.id)).toEqual([benchmark.id]);
   });
 
   it('leaves labels empty when the payload or its targets cannot be resolved', async () => {
