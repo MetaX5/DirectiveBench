@@ -281,12 +281,18 @@ describe('migration 0001_add_job_result', () => {
         handle.sqlite.prepare("select payload, result from jobs where id = 'job_old'").get(),
       ).toEqual({ payload: '{"a":1}', result: null });
 
-      // Down (the rollback plan): dropping the column restores the 0000 table shape and data.
+      // Down (the rollback plan in the PR): drop the column and forget the migration. The
+      // table returns to the 0000 shape with its data, and the migration can be applied again.
       handle.sqlite.exec('alter table jobs drop column result');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
       expect(jobColumns(handle)).toEqual(jobColumns(before));
       expect(handle.sqlite.prepare("select payload from jobs where id = 'job_old'").get()).toEqual({
         payload: '{"a":1}',
       });
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(jobColumns(handle)).toContain('result');
     } finally {
       before.close();
       handle.close();

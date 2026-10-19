@@ -315,7 +315,7 @@ export interface RepositoryRegistration {
   status: JobStatus;
   /** The path as entered. */
   path: string;
-  /** Set when the job failed outside path validation (redacted by the runner). */
+  /** The runner's message when the job failed outside path validation (e.g. invalid payload). */
   error: string | null;
   /** The runner's outcome; null until the job completes. */
   result: RepositoryRegistrationResult | null;
