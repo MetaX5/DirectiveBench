@@ -14,7 +14,7 @@ test.use({ colorScheme: 'light' });
 /** Sidebar entries in the order required by SPEC-116 FR-116-01, with their page headings. */
 const NAV = [
   { label: 'Dashboard', path: '/', heading: 'Dashboard' },
-  { label: 'Repositories', path: '/repositories', heading: 'Repositories', planned: true },
+  { label: 'Repositories', path: '/repositories', heading: 'Repositories' },
   { label: 'Artifacts', path: '/artifacts', heading: 'Artifacts' },
   { label: 'Categories', path: '/categories', heading: 'Categories' },
   { label: 'Benchmarks', path: '/benchmarks', heading: 'Benchmarks' },
@@ -115,9 +115,9 @@ test('navigation reaches every section and marks the active item', async ({ page
 });
 
 test('planned sections are labelled as not implemented', async ({ page }) => {
-  await page.goto('/repositories');
+  await page.goto('/builder');
   await expect(page.getByText('Planned — not implemented')).toBeVisible();
-  await expect(page.getByText('.ai/specs/2026-10-14-repository-management.md')).toBeVisible();
+  await expect(page.getByText('.ai/specs/2026-10-14-benchmark-builder.md')).toBeVisible();
 });
 
 test('unknown routes show the not-found page with a way back', async ({ page }) => {

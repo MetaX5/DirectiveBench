@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-19
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -160,9 +160,10 @@ PK (artifact_id, suite_id); both FK cascade; `created_at`. User metadata — pre
 | Column | Type | Notes |
 |---|---|---|
 | id | text PK | |
-| type | text NOT NULL | `benchmark-run` (future: `repository-sync`) |
+| type | text NOT NULL | `benchmark-run` \| `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) (future: `repository-sync`) |
 | status | text NOT NULL | `pending` \| `running` \| `completed` \| `failed` \| `cancelled` \| `interrupted`; **I** (status, created_at) |
-| payload | json NOT NULL | e.g. `{suiteVersionId, artifactVersionId, agent, repetitions}` |
+| payload | json NOT NULL | input, validated per type: `{suiteVersionId, artifactVersionId}` (`benchmark-run`), `{path}` (`repository-registration`) |
+| result | json | outcome written by the runner when the job type has one; `repository-registration`: `{ok: true, repositoryId, created}` \| `{ok: false, code, message}`; null otherwise (migration `0001`) |
 | runner_id | text | acquiring runner instance |
 | attempts | int NOT NULL default 0 | incremented on acquire; no automatic retry |
 | error | text | redacted |
@@ -273,5 +274,6 @@ Each lands with its feature spec ([SPEC-105](2026-10-14-repository-synchronizati
 ## Implementation status
 
 - **Implemented (verified by `packages/database/test/{client,artifacts,benchmarks,jobs,runs,catalog}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-14 and 2026-10-15):** all 14 tables of §3 with listed keys and indexes (`schema.ts`, `migrations/0000_init.sql`; migrations idempotent); `node:sqlite` client with WAL, `busy_timeout = 5000`, `foreign_keys = ON`; forward-only `migrateDatabase()` applying all pending migrations in one `BEGIN IMMEDIATE` transaction; `withTransaction()` (IMMEDIATE, serialised per connection); repository functions for artifacts, catalog (categories seeding, repositories, dashboard stats), benchmarks, jobs (atomic `UPDATE … RETURNING` acquisition in FIFO order, cancellation, stale recovery, and `interruptJobs` — shared by stale recovery and the capped graceful shutdown, it marks jobs and their running benchmark runs `interrupted`, verified by `runner.test.ts` on 2026-10-15) and runs; `drizzle-kit generate` script; ID prefixes above.
+- **Implemented (verified by `packages/database/test/{client,jobs,catalog}.test.ts` on 2026-10-19):** `jobs.result` (migration `0001_add_job_result`; a test applies it to a database migrated to `0000` with an existing job, checks the row survives with `result = null`, and rehearses the rollback `ALTER TABLE jobs DROP COLUMN result` back to the `0000` table shape); job type `repository-registration` with `enqueueRepositoryRegistrationJob` and `getRepositoryRegistration` (payload and result validated on read); `registerLocalRepository` (single conditional insert, returns the existing row); `listRepositories` with an active-occurrence artifact count; `listJobs` returns `benchmark-run` jobs only.
 - **Partially:** deletion guards in §4 rely on FK constraints only (no explicit repository checks or domain errors; no delete operations are exposed yet).
 - **Not implemented:** pre-migration backups, downgrade detection, `(comparability_key, started_at)` index, orphan fixture cleanup, all planned tables in §7, PostgreSQL backend.

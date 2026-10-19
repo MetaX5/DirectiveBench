@@ -3,9 +3,9 @@ id: SPEC-114
 title: Runner Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-19
 category: feature
-related: [SPEC-110, SPEC-112, SPEC-113, SPEC-115, SPEC-003, SPEC-006, SPEC-009, SPEC-011]
+related: [SPEC-104, SPEC-110, SPEC-112, SPEC-113, SPEC-115, SPEC-003, SPEC-006, SPEC-009, SPEC-011]
 ---
 
 # SPEC-114 — Runner Management
@@ -31,7 +31,7 @@ Benchmarks run for minutes, spawn processes, and must survive browser reloads. R
 
 - Distributed scheduling, priorities, or automatic retries in the MVP.
 - A standalone `directivebench runner` command or remote runners in the bootstrap.
-- Job types other than `benchmark-run` in the bootstrap (sync jobs are future, [SPEC-105](2026-10-14-repository-synchronization.md)).
+- Job types other than `benchmark-run` and `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) in the bootstrap (sync jobs are future, [SPEC-105](2026-10-14-repository-synchronization.md)).
 
 ## 5. User stories
 
@@ -93,9 +93,10 @@ stateDiagram-v2
 | Column | Type | Notes |
 |---|---|---|
 | `id` | text PK | prefixed random id |
-| `type` | text | `benchmark-run` |
+| `type` | text | `benchmark-run` \| `repository-registration` |
 | `status` | text | see FR-114-01 |
-| `payload` | JSON text | `{ suiteVersionId, artifactVersionId }` |
+| `payload` | JSON text | `{ suiteVersionId, artifactVersionId }` (`benchmark-run`), `{ path }` (`repository-registration`) |
+| `result` | JSON text | outcome recorded by the runner (`repository-registration` only); null otherwise |
 | `runner_id` | text | set at acquisition |
 | `attempts` | integer | incremented at acquisition (diagnostics; no auto retry) |
 | `error` | text | redacted |
@@ -228,4 +229,5 @@ sequenceDiagram
 - **FR-114-15:** `RunnerLogger` takes `(message, fields)`; the runner emits the events `acquired`, `cancel-observed`, `heartbeat-failed`, `finished`, `recovered`, `poll-failed` and `shutdown-timeout`. `serve` appends them as redacted JSON lines `{ ts, level, runnerId, msg, event, jobId, … }` to `<dataDir>/logs/runner.log` (mode 0600, `apps/cli/src/logger.ts`) and prints `[runner] <msg>` to stderr; verified by inspecting `runner.log` after the Playwright run. There is no verbosity setting yet: every event is printed. `demo` runs without the logger.
 - **FR-114-17:** runner ids are `local-<hostname>-<pid>-<8 hex>` (test "uses a runner id of the form local-<hostname>-<pid>-<random>").
 - **Implemented without an automated test:** concurrency > 1; the forced exit on a second signal (FR-114-13, `apps/cli/src/serve.ts`).
-- **Not implemented:** standalone `directivebench runner` command, remote runners and lease protocol, non-benchmark job types, data-dir lock, "Run again" for interrupted jobs.
+- **`repository-registration` jobs (verified by `packages/runner/test/runner-registration.test.ts` on 2026-10-19):** the runner dispatches on `jobs.type`; a registration job completes with its outcome in `jobs.result` (a rejected path is a `completed` job with `{ ok: false }`, per FR-114-10), a payload that no longer validates fails the job, a cancellation request observed by the heartbeat aborts git and records `cancelled`, and shutdown records `interrupted`.
+- **Not implemented:** standalone `directivebench runner` command, remote runners and lease protocol, job types other than `benchmark-run` and `repository-registration`, data-dir lock, "Run again" for interrupted jobs.
