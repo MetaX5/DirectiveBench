@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 
 /** Longest path accepted for registration (PATH_MAX on Linux). */
@@ -11,10 +11,11 @@ function isHomeRelative(path: string): boolean {
 
 /**
  * Expands `~` and `~/…` to `homeDir`. Every other input is returned unchanged; `~user` is not
- * expanded, so the path schema rejects it as relative.
+ * expanded, so the path schema rejects it as relative. The rest of the path is appended as is
+ * (no textual `..` normalisation), so `realpath` can resolve `..` after following symlinks.
  */
 export function expandHomePath(path: string, homeDir: string): string {
-  return isHomeRelative(path) ? join(homeDir, path.slice(1)) : path;
+  return isHomeRelative(path) ? `${homeDir}${path.slice(1)}` : path;
 }
 
 /**

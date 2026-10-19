@@ -229,8 +229,12 @@ export class LocalRunner {
 
     try {
       if (job.type === 'repository-registration') {
-        const { path } = repositoryRegistrationPayloadSchema.parse(job.payload);
-        const result = await registerLocalPath(db, path, {
+        const payload = repositoryRegistrationPayloadSchema.safeParse(job.payload);
+        if (!payload.success) {
+          const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
+          return await finishAs('failed', `The stored registration request is invalid: ${reasons}`);
+        }
+        const result = await registerLocalPath(db, payload.data.path, {
           homeDir: homedir(),
           env: process.env,
           signal: controller.signal,

@@ -10,6 +10,8 @@ describe('expandHomePath', () => {
     expect(expandHomePath('~', '/home/me')).toBe('/home/me');
     expect(expandHomePath('~/', '/home/me')).toBe('/home/me/');
     expect(expandHomePath('~/code/skills', '/home/me')).toBe('/home/me/code/skills');
+    // No textual normalisation: realpath resolves `..` after following symlinks.
+    expect(expandHomePath('~/link/../b', '/home/me')).toBe('/home/me/link/../b');
   });
 
   it('leaves absolute paths, ~user and a ~ inside a name unchanged', () => {

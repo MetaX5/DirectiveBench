@@ -1,4 +1,5 @@
-const REDACTED = '[REDACTED]';
+/** What `redactSecrets` puts in place of a secret. */
+export const REDACTION_MARKER = '[REDACTED]';
 
 /** Token shapes of common providers. Patterns are intentionally conservative. */
 const SECRET_PATTERNS: readonly RegExp[] = [
@@ -20,7 +21,7 @@ const SECRET_PATTERNS: readonly RegExp[] = [
 export function redactSecrets(text: string, knownSecrets: readonly string[] = []): string {
   let result = text;
   for (const secret of knownSecrets) {
-    if (secret.length >= 8) result = result.split(secret).join(REDACTED);
+    if (secret.length >= 8) result = result.split(secret).join(REDACTION_MARKER);
   }
   for (const pattern of SECRET_PATTERNS) {
     result = result.replace(pattern, (match, ...groups: unknown[]) => {
@@ -28,10 +29,10 @@ export function redactSecrets(text: string, knownSecrets: readonly string[] = []
       if (typeof prefix === 'string' && match.startsWith(prefix) && prefix !== match) {
         const suffix = groups[1];
         return typeof suffix === 'string' && match.endsWith(suffix) && suffix !== match
-          ? `${prefix}${REDACTED}${suffix}`
-          : `${prefix}${REDACTED}`;
+          ? `${prefix}${REDACTION_MARKER}${suffix}`
+          : `${prefix}${REDACTION_MARKER}`;
       }
-      return REDACTED;
+      return REDACTION_MARKER;
     });
   }
   return result;

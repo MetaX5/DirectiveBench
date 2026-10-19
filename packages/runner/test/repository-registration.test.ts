@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { delimiter, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -27,7 +27,9 @@ import {
 import {
   LOCAL_GIT_TIMEOUT_MS,
   RegistrationCancelledError,
+  absolutePathEntries,
   buildGitEnv,
+  findGitExecutable,
   hardenedGitArgs,
   inspectLocalPath,
   registerLocalPath,
@@ -43,8 +45,11 @@ const GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'test@example.com',
 };
 
+/** Fixture git commands ignore the developer's system and global config (e.g. commit signing). */
+const NO_USER_CONFIG = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+
 /** Environment of the git commands the tests themselves run to build fixtures. */
-const FIXTURE_GIT_ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', ...GIT_IDENTITY };
+const FIXTURE_GIT_ENV = { ...process.env, ...NO_USER_CONFIG, ...GIT_IDENTITY };
 
 let root: string;
 
@@ -113,7 +118,13 @@ describe('inspectLocalPath', () => {
     const repo = makeRepo('skills');
     symlinkSync(repo, join(root, 'link'));
 
-    for (const path of ['~/skills/', `${repo}/`, `${repo}//a/..`, join(root, 'link'), '~/link/']) {
+    for (const path of [
+      '~/skills/',
+      `${repo}/`,
+      `${repo}//.git/..`,
+      join(root, 'link'),
+      '~/link/',
+    ]) {
       expect(await inspectLocalPath(path, options()), path).toMatchObject({ location: repo });
     }
   });
@@ -200,7 +211,85 @@ describe('inspectLocalPath', () => {
     expect(await inspectLocalPath(dir, options({ env: { PATH: makeDir('empty-bin') } }))).toEqual({
       ok: false,
       code: 'git-not-installed',
-      message: 'git was not found on PATH or could not be started.',
+      message: 'git was not found on PATH.',
+    });
+  });
+
+  it('never runs a git executable shipped inside the repository (relative PATH entries)', async () => {
+    const repo = makeRepo('trojan');
+    const marker = join(root, 'trojan-ran');
+    for (const name of ['git', 'git.exe']) {
+      writeFileSync(join(repo, name), `#!/bin/sh\necho ran >> "${marker}"\nexit 1\n`, {
+        mode: 0o755,
+      });
+    }
+    const realGitDir = dirname((await findGitExecutable(process.env)) as string);
+    // Empty and `.` entries make a bare `git` resolve against the working directory.
+    const env = { PATH: ['', '.', realGitDir].join(delimiter), PATHEXT: '.EXE' };
+
+    expect(await inspectLocalPath(repo, options({ env }))).toMatchObject({
+      provider: 'local-git',
+      location: repo,
+    });
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('reports a git that cannot be started', async () => {
+    const dir = makeDir('rules');
+    const env = fakeGit('');
+    // A shebang pointing at a missing interpreter makes the spawn itself fail.
+    writeFileSync(join(root, 'fake-bin', 'git'), '#!/nonexistent/sh\n', { mode: 0o755 });
+
+    expect(await inspectLocalPath(dir, options({ env }))).toMatchObject({
+      ok: false,
+      code: 'git-failed',
+      message: expect.stringMatching(/^git could not be started: /),
+    });
+  });
+
+  it('rejects a work tree that core.worktree moves to an ancestor', async () => {
+    const repo = makeRepo('nested/proj');
+    git(repo, 'config', 'core.worktree', root);
+
+    expect(await inspectLocalPath(repo, options())).toEqual({
+      ok: false,
+      code: 'git-failed',
+      message:
+        "git reports a work tree that does not hold this repository's .git (core.worktree points elsewhere).",
+    });
+  });
+
+  it('fails closed on a broken .git file instead of registering a plain directory', async () => {
+    const dir = makeDir('broken');
+    writeFileSync(join(dir, '.git'), 'gitdir: /nonexistent/directivebench\n');
+
+    expect(await inspectLocalPath(dir, options())).toMatchObject({
+      ok: false,
+      code: 'git-failed',
+      message: expect.stringMatching(/^git could not inspect this path: not a git repository: /),
+    });
+  });
+
+  it('resolves .. after following symlinks', async () => {
+    const repo = makeRepo('skills');
+    makeDir('skills', 'sub');
+    symlinkSync(join(repo, 'sub'), join(root, 'link'));
+
+    // Textually `${root}/link/..` is the (non-git) temp root; physically it is the repository.
+    expect(await inspectLocalPath(join(root, 'link') + '/..', options())).toMatchObject({
+      provider: 'local-git',
+      location: repo,
+    });
+    expect(await inspectLocalPath('~/link/..', options())).toMatchObject({ location: repo });
+  });
+
+  it('does not store a branch name that output redaction rewrote', async () => {
+    const repo = makeRepo('skills');
+    git(repo, 'checkout', '-q', '-b', `feat/ghp_${'a'.repeat(24)}`);
+
+    expect(await inspectLocalPath(repo, options())).toMatchObject({
+      provider: 'local-git',
+      defaultBranch: null,
     });
   });
 
@@ -237,8 +326,19 @@ describe('inspectLocalPath', () => {
     }
   });
 
+  it('rejects a work-tree answer when no .git entry exists at or above the path', async () => {
+    const dir = makeDir('rules');
+    const env = fakeGit('case "$*" in *rev-parse*) printf "true\\n\\n" ;; esac');
+
+    expect(await inspectLocalPath(dir, options({ env }))).toMatchObject({
+      ok: false,
+      code: 'git-failed',
+    });
+  });
+
   it('accepts a work-tree answer without cdup and an empty branch as unknown', async () => {
     const dir = makeDir('rules');
+    makeDir('rules', '.git');
     const env = fakeGit('case "$*" in *rev-parse*) printf true ;; esac');
 
     expect(await inspectLocalPath(dir, options({ env }))).toEqual({
@@ -258,6 +358,7 @@ describe('inspectLocalPath', () => {
       inspectLocalPath(dir, options({ signal: cancelled.signal })),
     ).rejects.toBeInstanceOf(RegistrationCancelledError);
 
+    makeDir('rules', '.git');
     const env = fakeGit('case "$*" in *rev-parse*) printf "true\\n\\n" ;; *) exec sleep 5 ;; esac');
     const controller = new AbortController();
     const pending = inspectLocalPath(dir, options({ env, signal: controller.signal }));
@@ -318,7 +419,9 @@ describe('read-only guarantee (FR-104-11, FR-104-12)', () => {
   it('the malicious fixture is armed: plain git status runs its fsmonitor and hooks', () => {
     const { repo, marker } = maliciousRepo();
     git(repo, 'status', '--short');
-    expect(readFileSync(marker, 'utf8')).toMatch(/fsmonitor/);
+    const ran = readFileSync(marker, 'utf8');
+    expect(ran).toMatch(/fsmonitor/);
+    expect(ran).toMatch(/post-index-change/);
   });
 
   it('registration executes nothing from the repository and modifies no file in it', async () => {
@@ -343,7 +446,7 @@ describe('read-only guarantee (FR-104-11, FR-104-12)', () => {
     const run = (...args: string[]) =>
       execFileSync('git', hardenedGitArgs(args), {
         cwd: repo,
-        env: { ...buildGitEnv(process.env), ...GIT_IDENTITY },
+        env: { ...buildGitEnv(process.env), ...NO_USER_CONFIG, ...GIT_IDENTITY },
         encoding: 'utf8',
       });
 
@@ -369,9 +472,30 @@ describe('git invocation', () => {
     ]);
   });
 
+  it('keeps only absolute PATH entries', () => {
+    expect(absolutePathEntries(['/usr/bin', '', '.', 'bin', '/bin'].join(delimiter))).toEqual([
+      '/usr/bin',
+      '/bin',
+    ]);
+    expect(absolutePathEntries(undefined)).toEqual([]);
+    expect(buildGitEnv({}).PATH).toBe('');
+  });
+
+  it('finds git only as an executable file on an absolute PATH entry', async () => {
+    const dirOnly = makeDir('dir-bin', 'git'); // a directory named git is skipped
+    const plain = makeDir('plain-bin');
+    writeFileSync(join(plain, 'git'), 'not executable', { mode: 0o644 });
+    const real = (await findGitExecutable(process.env)) as string;
+
+    expect(
+      await findGitExecutable({ PATH: [dirname(dirOnly), plain, dirname(real)].join(delimiter) }),
+    ).toBe(real);
+    expect(await findGitExecutable({ PATH: [dirname(dirOnly), plain].join(delimiter) })).toBeNull();
+  });
+
   it('builds the environment from an allowlist plus fixed safety settings', () => {
     const env = buildGitEnv({
-      PATH: '/usr/bin',
+      PATH: `/usr/bin${delimiter}${delimiter}.`,
       HOME: '/home/me',
       XDG_CONFIG_HOME: '/home/me/.config',
       GIT_DIR: '/elsewhere/.git',
