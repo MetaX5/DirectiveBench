@@ -129,26 +129,99 @@ identity (rule 1/4 only, tests for cross-repository and bundled-example collisio
 
 ### Phase 4: Web
 
-- [ ] 4.1 Server actions for scan and confirmed registration
-- [ ] 4.2 Repositories page: confirmation panel, scan button, scan status and errors
-- [ ] 4.3 Playwright tests for scan and FR-104-18
+- [x] 4.1 Server actions for scan and confirmed registration — 18692a1
+- [x] 4.2 Repositories page: confirmation panel, scan button, scan status and errors — 18692a1
+- [x] 4.3 Playwright tests for scan and FR-104-18 — 18692a1
 
 ### Phase 5: Specs, verification and wrap-up
 
-- [ ] 5.1 Spec updates (SPEC-102 phasing, SPEC-104, SPEC-105, SPEC-114, SPEC-101, SPEC-103, SPEC-006)
-- [ ] 5.2 Full gate, performance measurement and real-app verification
+- [x] 5.1 Spec updates (SPEC-102 phasing, SPEC-104, SPEC-105, SPEC-114, SPEC-101, SPEC-103, SPEC-006) — 8067aa6
+- [x] 5.2 Full gate, performance measurement and real-app verification — f6f3fa0
 - [ ] 5.3 Run log, lessons and PR finalisation
 
 ## Decisions
 
-(filled in as the run proceeds)
+- **Plan review before code.** A sceptical plan reviewer (subagent) returned 2 blockers and
+  7 majors on the plan above; all were addressed or recorded before implementation went further:
+  - *Interleaved writes on the shared connection* (blocker): fixed generically in
+    `withTransaction` (statements from outside the open transaction wait, `AsyncLocalStorage`);
+    `finishJob` guarded against overwriting terminal states; the apply transaction re-checks that
+    the job is still running and not cancelled.
+  - *One unbounded transaction* (blocker): kept one transaction for FR-105-09 atomicity and
+    measured the worst case instead (10,000 changed artifacts hold the write lock ≈ 2.4 s, under
+    the 5 s `busy_timeout`); NFR-105-03 recorded as not met in that case, batching is a follow-up.
+  - Root rows from #15 are refused at scan time; bundled-example identity can no longer attach to
+    a scanned artifact (and vice versa); unreadable subdirectories become `read-failed` errors;
+    skill files are grouped in one pass; `expectedRoot` pins the scan root in discovery's own
+    `realpath`; the residual intermediate-directory swap risk is documented (SPEC-102 §14).
+- **Working tree for `local-git` (interim, needs maintainer confirmation).** SPEC-013 places local
+  git awareness (commit SHA, branch, dirty state) in M2; the M1 scan reads files on disk for both
+  local providers, runs no git and records no commit. Recorded in SPEC-102 Phasing/§20, SPEC-104
+  OQ-104-02, SPEC-105 §20. Known noise: git-ignored folders (`dist`, `.venv`, nested worktrees)
+  are scanned too.
+- **Identity: rule 1 + rule 4, no slug merging for repository content.** Slug matching would merge
+  every repository's `AGENTS.md` into one artifact and could attach repository skills to the
+  bundled demo skill. Rules 2–3 stay with #20.
+- **FR-104-18 round trip bound to the canonical location**, decided atomically with the insert in
+  the database layer; same location under the other provider is not an overlap (OQ-104-05
+  unchanged); an ancestor of the home directory is treated like the home directory.
+- **OQ-104-06 (needs maintainer confirmation):** one extra runner slot for registrations; scans are
+  long jobs. SPEC-114 FR-114-11 amended.
+- **No migration**: `jobs.type` has no CHECK constraint, `repository-scan` needs no DDL.
+- **Scan result in `jobs.result`**, not `sync_runs` (not needed for this story).
 
 ## Work performed
 
+1. Core: path helpers, location schema, walker signal, unreadable directories, `expectedRoot`
+   (f9f09be, 8876f60, d6da2f0).
+2. Database: shared-connection isolation (17c7e78); scan jobs, scan apply, FR-104-18 checks,
+   typed acquisition, guarded finish (7c1f888).
+3. Runner: scan handler, registration checks, short-job lane, `runUntilIdle` fix (ff65d91).
+4. Web: scan action, confirmation panel, scan status, Playwright tests (18692a1).
+5. Specs and README (8067aa6), lessons (f6f3fa0).
+
 ## Verification
+
+- `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:pack`
+  — all exit 0 on 2026-10-19; 633 unit/integration tests (core 137, database 100, runner 88,
+  web 89, cli 75, benchmark-engine 110, agent-adapters 34), 100% coverage in every package.
+- `pnpm test:e2e` — 26 passed (4 new: scan + rescan, `/` rejected, overlap confirmation with
+  Cancel and Register anyway, home confirmation).
+- risk-high evidence: `packages/runner/test/repository-scan.test.ts` — a git repository with
+  hooks, fsmonitor, filter driver, package script and executable skill script leaves no marker
+  and no `child_process` function is called during the scan; symlinks out of the repository are
+  not followed; a sibling directory and a `HOME` with `~/.claude/skills` are not read; a location
+  replaced by a symlink is refused; the same tree scanned twice gives identical discovery output
+  and creates nothing new; FR-104-18 rejected and confirm-required paths in
+  `packages/runner/test/repository-registration.test.ts` and `packages/database/test/catalog.test.ts`.
+- Real app (built CLI, temporary data directory, browser): a local clone of this repository plus
+  a Cursor rule → 673 files, 47 artifacts in 129 ms; a 1,000-file directory → 50 artifacts in
+  56 ms, rescan 0 new; a 50,000-file directory → 200 artifacts in 207 ms; `/` rejected; a
+  directory inside a registered one → confirmation naming it, then registered after "Register
+  anyway"; `~` → home-directory confirmation, cancelled. Worst case 10,000 changed artifacts:
+  3.3 s scan, write lock held ≈ 2.4 s (probe from a second connection).
+- Not verified: macOS and Windows (drive-root and case-insensitive paths), a confirmed scan of a
+  real home directory, cancellation of a real long scan from the UI (runner-level cancellation is
+  tested), the page while no runner is running.
 
 ## Problems and deviations
 
+- The plan's single-lane assumptions broke `runUntilIdle` (a fast job finished while `poll` filled
+  the second lane and was lost); fixed by collecting results as jobs finish.
+- Same-millisecond `created_at` makes FIFO order fall back to random ids; the lane test uses
+  distinct times.
+- Suffixed slugs broke bundled-example re-identification across installs; fixed with a name/type
+  match within the provider (lesson).
+- Deviations recorded in specs: FR-102-15 second sentence and FR-105-05/06 for `local-git`
+  (working tree); NFR-105-03 in the worst case; job type named `repository-scan`.
+
 ## Lessons recorded
 
+- [Shared-connection transactions](../lessons/2026-10-19-shared-connection-transactions.md)
+- [Suffixed slugs break slug lookups](../lessons/2026-10-19-suffixed-slugs-break-slug-lookups.md)
+
 ## Follow-ups
+
+- Batch very large scan applies (NFR-105-03), or confirm the single transaction.
+- Exclude globs / tracked-files filter for noisy working trees (FR-104-13, M2 local git awareness).
+- Rescan rules (#19), cross-repository identity (#20), removed files (#21), hosted repositories (#18).
