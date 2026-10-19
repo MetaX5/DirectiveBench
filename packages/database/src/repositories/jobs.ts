@@ -114,6 +114,9 @@ export type RepositoryScanErrorCode = (typeof REPOSITORY_SCAN_ERROR_CODES)[numbe
 /** Most discovery errors one scan result lists; the count is always complete. */
 export const MAX_REPORTED_SCAN_ERRORS = 100;
 
+/** Most skipped user-level folders one scan result lists (a handful exist per home directory). */
+export const MAX_SKIPPED_USER_LEVEL_FOLDERS = 50;
+
 /** A per-artifact discovery error (SPEC-102 `DiscoveryError`). */
 export const scanDiscoveryErrorSchema = z
   .object({
@@ -137,6 +140,12 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
       warningCount: count,
       errorCount: count,
       errors: z.array(scanDiscoveryErrorSchema).max(MAX_REPORTED_SCAN_ERRORS),
+      /**
+       * User-level agent folders the scan met and did not enter (D05), relative to the location;
+       * `.` when the location itself is one. Informational, not errors. Absent in results stored
+       * before it existed.
+       */
+      skippedUserLevelFolders: z.array(z.string()).max(MAX_SKIPPED_USER_LEVEL_FOLDERS).default([]),
       durationMs: count,
     })
     .strict(),

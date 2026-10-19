@@ -99,7 +99,8 @@ export class LocalRunner {
   private readonly finished = new Set<JobExecutionResult[]>();
   private pollTimer: NodeJS.Timeout | null = null;
   private stopping = false;
-  private polling = false;
+  /** The poll in progress, so `stop()` can wait for a job it is acquiring right now. */
+  private polling: Promise<void> | null = null;
 
   constructor(options: LocalRunnerOptions) {
     this.options = {
@@ -147,17 +148,19 @@ export class LocalRunner {
    */
   async poll(): Promise<void> {
     if (this.polling) return;
-    this.polling = true;
-    try {
-      await this.fill('long', this.options.concurrency);
-      await this.fill('short', SHORT_JOB_SLOTS);
-    } catch (error) {
-      this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
-        event: 'poll-failed',
-      });
-    } finally {
-      this.polling = false;
-    }
+    this.polling = (async () => {
+      try {
+        await this.fill('long', this.options.concurrency);
+        await this.fill('short', SHORT_JOB_SLOTS);
+      } catch (error) {
+        this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
+          event: 'poll-failed',
+        });
+      } finally {
+        this.polling = null;
+      }
+    })();
+    await this.polling;
   }
 
   private laneSize(lane: Lane): number {
@@ -200,13 +203,16 @@ export class LocalRunner {
   }
 
   /**
-   * Graceful shutdown: stops polling, aborts running jobs and waits up to `shutdownTimeoutMs`
-   * for them. Aborted jobs are recorded as `interrupted` (not user-cancelled); jobs that did not
+   * Graceful shutdown: stops polling, waits for a poll in flight to finish claiming, aborts
+   * running jobs and waits up to `shutdownTimeoutMs` for them. Aborted jobs are recorded as `interrupted` (not user-cancelled); jobs that did not
    * stop in time are marked `interrupted` directly.
    */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    // A job claimed by a poll that is still in flight would otherwise start after the abort below
+    // and run unsupervised. `fill` checks `stopping` before each claim, so this ends promptly.
+    await this.polling;
     const running = [...this.active.entries()];
     for (const [, { controller }] of running) controller.abort('shutdown');
     let timer: NodeJS.Timeout | undefined;
@@ -295,9 +301,12 @@ export class LocalRunner {
         const result = await scanLocalRepository(
           handle,
           { jobId: job.id, repositoryId: payload.data.repositoryId },
-          { signal: controller.signal },
+          { signal: controller.signal, homeDir: homedir(), env: process.env },
         );
-        return await finishAs('completed', null, result);
+        // A scan that could not run is a failed job; its typed outcome stays in `jobs.result`.
+        return result.ok
+          ? await finishAs('completed', null, result)
+          : await finishAs('failed', result.message, result);
       }
       const payload = benchmarkJobPayloadSchema.parse(job.payload);
       const suiteVersion = await getSuiteVersion(db, payload.suiteVersionId);

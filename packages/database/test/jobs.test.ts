@@ -432,9 +432,17 @@ describe('getRepositoryScan', () => {
       repository,
     });
     await finishJob(handle.db, job.id, 'completed', undefined, success);
+    // A result stored before skipped user-level folders were reported reads as "none skipped".
     expect(await getRepositoryScan(handle.db, job.id)).toMatchObject({
       status: 'completed',
-      result: success,
+      result: { ...success, skippedUserLevelFolders: [] },
+    });
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify({ ...success, skippedUserLevelFolders: ['.claude'] }), job.id);
+    expect((await getRepositoryScan(handle.db, job.id))?.result).toEqual({
+      ...success,
+      skippedUserLevelFolders: ['.claude'],
     });
     handle.sqlite.exec('delete from repositories');
     expect(await getRepositoryScan(handle.db, job.id)).toMatchObject({ repository: null });

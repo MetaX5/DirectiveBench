@@ -6,6 +6,7 @@ import { ScanCancelledError, scanLocalRepository } from '../src/repository-scan'
 
 const mocks = vi.hoisted(() => ({
   realpath: vi.fn(),
+  stat: vi.fn(),
   discoverArtifacts: vi.fn(),
   applyRepositoryScan: vi.fn(),
   getRepository: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('node:fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof fsPromises>()),
   realpath: mocks.realpath,
+  stat: mocks.stat,
 }));
 vi.mock('@directivebench/core', async (importOriginal) => ({
   ...(await importOriginal<typeof core>()),
@@ -32,15 +34,15 @@ const { JobNoLongerRunningError, NotFoundError } = await vi.importActual<typeof 
   '@directivebench/database',
 );
 
-// The tmp directory exists, so the stat/access checks after `realpath` pass for real.
-const location = (await vi.importActual<typeof fsPromises>('node:fs/promises')).realpath(
-  process.cwd(),
-);
+// The working directory exists, so the stat/access checks after `realpath` pass for real.
+const actualFs = await vi.importActual<typeof fsPromises>('node:fs/promises');
+const location = actualFs.realpath(process.cwd());
 const handle = { db: {} } as unknown as database.DatabaseHandle;
 const job = { jobId: 'job_1', repositoryId: 'repo_1' };
+const missing = () => Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
 
 function run(signal = new AbortController().signal) {
-  return scanLocalRepository(handle, job, { signal });
+  return scanLocalRepository(handle, job, { signal, homeDir: '/nonexistent-home', env: {} });
 }
 
 beforeEach(async () => {
@@ -51,20 +53,48 @@ beforeEach(async () => {
     provider: 'local-directory',
     location: canonical,
   });
-  mocks.realpath.mockResolvedValue(canonical);
-  mocks.discoverArtifacts.mockResolvedValue({ artifacts: [], errors: [], scannedFiles: 0 });
+  // Only the location resolves; the user-level folders below the fake home do not exist.
+  mocks.realpath.mockImplementation((path: string) =>
+    path === canonical ? Promise.resolve(canonical) : Promise.reject(missing()),
+  );
+  mocks.stat.mockImplementation(actualFs.stat);
+  mocks.discoverArtifacts.mockResolvedValue({
+    artifacts: [],
+    errors: [],
+    scannedFiles: 0,
+    skippedDirectories: [],
+  });
   mocks.applyRepositoryScan.mockResolvedValue({ createdArtifacts: 0, createdVersions: 0 });
 });
 
 describe('scanLocalRepository with unexpected errors', () => {
-  it('rethrows file-system errors it cannot classify instead of scanning an unchecked path', async () => {
-    const io = Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+  it('fails the scan and marks the repository for file-system errors it cannot classify', async () => {
+    const canonical = await location;
+    const io = Object.assign(new Error(`EIO: i/o error, realpath '${canonical}'`), { code: 'EIO' });
     mocks.realpath.mockRejectedValueOnce(io);
-    await expect(run()).rejects.toBe(io);
-    const bare = new Error('no code');
-    mocks.realpath.mockRejectedValueOnce(bare);
-    await expect(run()).rejects.toBe(bare);
+    const checkFailed = {
+      ok: false,
+      code: 'scan-failed',
+      message: 'The scan failed: the registered directory could not be checked (EIO).',
+    };
+    expect(await run()).toEqual(checkFailed);
+    expect(mocks.markRepositoryScanFailed).toHaveBeenLastCalledWith(
+      handle.db,
+      'repo_1',
+      checkFailed.message,
+    );
+    mocks.realpath.mockRejectedValueOnce(new Error(`no code ${canonical}`));
+    expect(await run()).toMatchObject({
+      code: 'scan-failed',
+      message: 'The scan failed: the registered directory could not be checked (unknown error).',
+    });
+    // `stat` failing after `realpath` (removed in between, or an I/O error) is classified too.
+    mocks.stat.mockRejectedValueOnce(missing());
+    expect(await run()).toMatchObject({ ok: false, code: 'path-not-found' });
+    mocks.stat.mockRejectedValueOnce(io);
+    expect(await run()).toEqual(checkFailed);
     expect(mocks.discoverArtifacts).not.toHaveBeenCalled();
+    expect(mocks.markRepositoryScanFailed).toHaveBeenCalledTimes(4);
   });
 
   it('maps a root that changed between the check and the walk to location-changed', async () => {
@@ -92,6 +122,25 @@ describe('scanLocalRepository with unexpected errors', () => {
       code: 'scan-failed',
       message: 'The scan failed: [REDACTED]',
     });
+    // Neither the error code's message nor any other message names the absolute location.
+    const canonical = await location;
+    mocks.discoverArtifacts.mockRejectedValueOnce(
+      Object.assign(new Error(`EACCES: permission denied, scandir '${canonical}'`), {
+        code: 'EACCES',
+      }),
+    );
+    expect(await run()).toEqual({
+      ok: false,
+      code: 'scan-failed',
+      message: 'The scan failed: the directory could not be read (EACCES).',
+    });
+    mocks.discoverArtifacts.mockRejectedValueOnce(
+      new Error(`Discovery root is not a directory: ${canonical}`),
+    );
+    expect(await run()).toMatchObject({
+      message: 'The scan failed: Discovery root is not a directory: <repository>',
+    });
+    expect(mocks.markRepositoryScanFailed).toHaveBeenCalledTimes(4);
   });
 
   it('turns an abort during the walk or before the apply into a cancellation that writes nothing', async () => {
@@ -105,7 +154,12 @@ describe('scanLocalRepository with unexpected errors', () => {
     const late = new AbortController();
     mocks.discoverArtifacts.mockImplementationOnce(() => {
       late.abort('shutdown');
-      return Promise.resolve({ artifacts: [], errors: [], scannedFiles: 0 });
+      return Promise.resolve({
+        artifacts: [],
+        errors: [],
+        scannedFiles: 0,
+        skippedDirectories: [],
+      });
     });
     await expect(run(late.signal)).rejects.toThrow('Scan was cancelled');
     expect(mocks.applyRepositoryScan).not.toHaveBeenCalled();
@@ -116,16 +170,40 @@ describe('scanLocalRepository with unexpected errors', () => {
     await expect(run()).rejects.toThrow(ScanCancelledError);
   });
 
-  it('reports a repository removed during the scan and rethrows other apply errors', async () => {
+  it('reports a repository removed during the scan and fails on other apply errors', async () => {
     mocks.applyRepositoryScan.mockRejectedValueOnce(new NotFoundError('gone'));
     expect(await run()).toEqual({
       ok: false,
       code: 'repository-not-found',
       message: 'The repository was removed during the scan.',
     });
-    const locked = new Error('database is locked');
-    mocks.applyRepositoryScan.mockRejectedValueOnce(locked);
-    await expect(run()).rejects.toBe(locked);
+    expect(mocks.markRepositoryScanFailed).not.toHaveBeenCalled();
+    // Drizzle wraps the SQLite error; its message would carry the query parameters (contents).
+    const sqlite = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
+    mocks.applyRepositoryScan.mockRejectedValueOnce(
+      new Error('Failed query: insert … params: secret file content', { cause: sqlite }),
+    );
+    const stored = {
+      ok: false,
+      code: 'scan-failed',
+      message: 'The scan failed: the results could not be stored (ERR_SQLITE_ERROR).',
+    };
+    expect(await run()).toEqual(stored);
+    expect(mocks.markRepositoryScanFailed).toHaveBeenLastCalledWith(
+      handle.db,
+      'repo_1',
+      stored.message,
+    );
+    mocks.applyRepositoryScan.mockRejectedValueOnce(
+      Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }),
+    );
+    expect(await run()).toMatchObject({
+      message: 'The scan failed: the results could not be stored (SQLITE_IOERR).',
+    });
+    mocks.applyRepositoryScan.mockRejectedValueOnce(null);
+    expect(await run()).toMatchObject({
+      message: 'The scan failed: the results could not be stored (unknown error).',
+    });
   });
 
   it('lists at most MAX_REPORTED_SCAN_ERRORS errors but counts them all', async () => {
@@ -134,7 +212,12 @@ describe('scanLocalRepository with unexpected errors', () => {
       code: 'binary-primary',
       message: 'not text',
     }));
-    mocks.discoverArtifacts.mockResolvedValueOnce({ artifacts: [], errors, scannedFiles: 150 });
+    mocks.discoverArtifacts.mockResolvedValueOnce({
+      artifacts: [],
+      errors,
+      scannedFiles: 150,
+      skippedDirectories: [],
+    });
     const result = await run();
     expect(result).toMatchObject({ ok: true, errorCount: 150 });
     expect(result.ok && result.errors).toEqual(errors.slice(0, 100));

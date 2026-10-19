@@ -11,6 +11,7 @@ import {
   openDatabase,
   registerLocalRepository,
   requestJobCancellation,
+  withTransaction,
   type DatabaseHandle,
 } from '@directivebench/database';
 import { LocalRunner, SHORT_JOB_SLOTS } from '../src/index';
@@ -173,5 +174,30 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     expect(await requestJobCancellation(handle.db, cancelled)).toBe('running');
     const [result] = await second.runUntilIdle();
     expect(result).toMatchObject({ jobId: cancelled, status: 'cancelled', error: null });
+  });
+
+  // Regression (review of PR #44): stop() only aborted the jobs already active, so a job a poll
+  // was claiming at that moment started afterwards and ran unsupervised.
+  it('stop() waits for a job that a poll is claiming and interrupts it too', async () => {
+    const scan = await scanJob('/srv/a');
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // An open transaction makes the claim statement wait, so the poll is in flight.
+    const holding = withTransaction(handle, async () => gate);
+    await new Promise((resolve) => setImmediate(resolve));
+    const runner = createRunner({ shutdownTimeoutMs: 1000 });
+    const polling = runner.poll();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(runner.activeJobCount).toBe(0);
+    const stopped = runner.stop();
+    release();
+    await holding;
+    await stopped;
+    await polling;
+    expect(held.scans[0]?.signal.aborted).toBe(true);
+    expect(await status(scan)).toBe('interrupted');
+    expect(runner.activeJobCount).toBe(0);
   });
 });

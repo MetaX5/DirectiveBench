@@ -29,6 +29,7 @@ import {
   type DatabaseHandle,
 } from '@directivebench/database';
 import { LocalRunner } from '../src/index';
+import { userLevelAgentFolders } from '../src/repository-scan';
 
 // Every process-spawning function stays real but observable: a scan must call none of them.
 vi.mock('node:child_process', async (importOriginal) => {
@@ -163,9 +164,14 @@ function createRunner(overrides: Partial<ConstructorParameters<typeof LocalRunne
 async function scan(repositoryId: string) {
   const { job } = await enqueueRepositoryScanJob(handle, { repositoryId });
   const [execution] = await createRunner().runUntilIdle();
-  expect(execution).toMatchObject({ jobId: job.id, status: 'completed', error: null });
   const result = await getRepositoryScan(handle.db, job.id);
   if (!result?.result) throw new Error('scan has no result');
+  // A scan that could not run is a failed job; its typed outcome stays in `jobs.result`.
+  expect(execution).toMatchObject(
+    result.result.ok
+      ? { jobId: job.id, status: 'completed', error: null }
+      : { jobId: job.id, status: 'failed', error: result.result.message },
+  );
   return result.result;
 }
 
@@ -303,6 +309,96 @@ describe('repository-scan jobs', () => {
     expect(storedOccurrences().map((o) => o.path)).toEqual(['AGENTS.md']);
   });
 
+  it('always skips user-level agent folders, even in a confirmed home directory scan (D05)', async () => {
+    const home = join(sources, 'home');
+    write(home, {
+      'AGENTS.md': '# Home rules\n',
+      '.claude/skills/global/SKILL.md': '---\nname: global\n---\n',
+      '.claude/CLAUDE.md': '# User-level Claude\n',
+      '.codex/AGENTS.md': '# User-level Codex\n',
+      '.agents/skills/user/SKILL.md': '---\nname: user\n---\n',
+      '.cursor/rules/user.mdc': '---\nalwaysApply: true\n---\n',
+      '.config/cursor/rules/x.mdc': '---\nalwaysApply: true\n---\n',
+      // A project's own `.claude/skills` is not user-level and is scanned.
+      'project/.claude/skills/local/SKILL.md': '---\nname: local\n---\n',
+    });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_CONFIG_HOME', '');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    vi.stubEnv('CODEX_HOME', '');
+    const repository = await register(home, 'local-directory');
+
+    const result = await scan(repository.id);
+    expect(result).toMatchObject({
+      ok: true,
+      discovered: 2,
+      errorCount: 0,
+      skippedUserLevelFolders: ['.agents', '.claude', '.codex', '.config/cursor', '.cursor'],
+    });
+    expect(storedOccurrences().map((o) => o.path)).toEqual([
+      'AGENTS.md',
+      'project/.claude/skills/local',
+    ]);
+  });
+
+  it('skips the user-level folders below an ancestor, behind symlinks and from the environment', async () => {
+    const home = join(sources, 'home');
+    write(home, { '.claude/skills/global/SKILL.md': '---\nname: global\n---\n' });
+    // `~/.codex` is a symlink into a dotfiles folder that the scanned ancestor also contains.
+    write(sources, {
+      'dotfiles/codex/AGENTS.md': '# User-level Codex\n',
+      'claude-config/CLAUDE.md': '# CLAUDE_CONFIG_DIR\n',
+      'codex-home/AGENTS.md': '# CODEX_HOME\n',
+      'xdg/cursor/rules/x.mdc': '---\nalwaysApply: true\n---\n',
+      'projects/app/AGENTS.md': '# App\n',
+    });
+    symlinkSync(join(sources, 'dotfiles/codex'), join(home, '.codex'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_CONFIG_HOME', join(sources, 'xdg'));
+    vi.stubEnv('CLAUDE_CONFIG_DIR', join(sources, 'claude-config'));
+    vi.stubEnv('CODEX_HOME', join(sources, 'codex-home'));
+    const repository = await register(sources, 'local-directory');
+
+    const result = await scan(repository.id);
+    expect(result).toMatchObject({
+      ok: true,
+      skippedUserLevelFolders: [
+        'claude-config',
+        'codex-home',
+        'dotfiles/codex',
+        'home/.claude',
+        'xdg/cursor',
+      ],
+    });
+    expect(storedOccurrences().map((o) => o.path)).toEqual(['projects/app/AGENTS.md']);
+  });
+
+  it('reads nothing from a registered location that is itself a user-level folder', async () => {
+    const home = join(sources, 'home');
+    write(home, { '.claude/skills/global/SKILL.md': '---\nname: global\n---\n' });
+    vi.stubEnv('HOME', home);
+    const repository = await register(join(home, '.claude', 'skills'), 'local-directory');
+
+    expect(await scan(repository.id)).toMatchObject({
+      ok: true,
+      scannedFiles: 0,
+      discovered: 0,
+      skippedUserLevelFolders: ['.'],
+    });
+    expect(storedOccurrences()).toEqual([]);
+  });
+
+  it('lists the user-level folders of a home directory that cannot be resolved', async () => {
+    const env = { XDG_CONFIG_HOME: 'relative/xdg', CLAUDE_CONFIG_DIR: 'relative', CODEX_HOME: '' };
+    expect(await userLevelAgentFolders('/nonexistent-home', env)).toEqual([
+      '/nonexistent-home/.agents',
+      '/nonexistent-home/.claude',
+      '/nonexistent-home/.codex',
+      '/nonexistent-home/.config/cursor',
+      '/nonexistent-home/.cursor',
+    ]);
+  });
+
   it('refuses a registered location that was replaced by a symlink, and records the error', async () => {
     const project = join(sources, 'project');
     write(project, { 'AGENTS.md': '# Project\n' });
@@ -404,14 +500,18 @@ describe('repository-scan jobs', () => {
       createdAt: '2026-01-01T00:00:01Z',
     });
     await createRunner().runUntilIdle();
-    expect((await getJob(handle.db, 'job_bundled'))?.result).toMatchObject({
-      ok: false,
-      code: 'unsupported-provider',
+    expect(await getJob(handle.db, 'job_bundled')).toMatchObject({
+      status: 'failed',
+      result: { ok: false, code: 'unsupported-provider' },
     });
-    expect((await getJob(handle.db, 'job_missing'))?.result).toEqual({
-      ok: false,
-      code: 'repository-not-found',
-      message: 'The repository no longer exists.',
+    expect(await getJob(handle.db, 'job_missing')).toMatchObject({
+      status: 'failed',
+      error: 'The repository no longer exists.',
+      result: {
+        ok: false,
+        code: 'repository-not-found',
+        message: 'The repository no longer exists.',
+      },
     });
   });
 
