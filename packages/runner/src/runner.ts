@@ -46,6 +46,14 @@ const LANE_JOB_TYPES: Record<Lane, readonly JobType[]> = {
 /** Slots of the short lane, in addition to `concurrency`. */
 export const SHORT_JOB_SLOTS = 1;
 
+/**
+ * How long `stop()` waits, once its deadline has passed, to mark the jobs that did not stop as
+ * `interrupted`. The write can wait behind a transaction a job still holds on the shared
+ * connection; past this grace `stop()` returns without it, and the first runner start after
+ * their heartbeat went stale recovers the jobs left `running` (`recoverStaleJobs`, SPEC-114).
+ */
+export const SHUTDOWN_INTERRUPT_GRACE_MS = 1000;
+
 /** Structured context attached to runner log events (job id, event name, …). */
 export type RunnerLogFields = Record<string, string | number | boolean | null>;
 
@@ -208,7 +216,8 @@ export class LocalRunner {
    * Graceful shutdown: stops polling, waits for a poll in flight to finish claiming, aborts
    * running jobs and waits for them — all within `shutdownTimeoutMs`. Aborted jobs are recorded
    * as `interrupted` (not user-cancelled); jobs that did not stop in time are marked
-   * `interrupted` directly, and a job claimed after the deadline is aborted as soon as it is.
+   * `interrupted` directly, waiting at most {@link SHUTDOWN_INTERRUPT_GRACE_MS} more for that
+   * write, and a job claimed after the deadline is aborted as soon as it is.
    */
   async stop(): Promise<void> {
     this.stopping = true;
@@ -233,13 +242,40 @@ export class LocalRunner {
         deadline,
       ]));
     clearTimeout(timer);
-    if (timedOut) {
-      const ids = await interruptJobs(
-        this.options.handle.db,
-        [...this.active.keys()],
-        'Runner shut down before the job stopped',
+    if (timedOut) await this.interruptRemaining();
+  }
+
+  /**
+   * Marks the jobs still active after the shutdown deadline as `interrupted`, waiting at most
+   * {@link SHUTDOWN_INTERRUPT_GRACE_MS}: the write can wait behind a transaction one of those
+   * jobs holds. A write that misses the grace still runs if that transaction ends while the
+   * process lives; otherwise the jobs stay `running` until a runner start recovers them.
+   */
+  private async interruptRemaining(): Promise<void> {
+    const { handle, logger } = this.options;
+    const jobIds = [...this.active.keys()];
+    const marking = interruptJobs(handle.db, jobIds, 'Runner shut down before the job stopped')
+      // Handled here, not left to reject unobserved after `stop()` has returned.
+      .catch((error: unknown) => {
+        logger.error(`Shutdown could not mark jobs as interrupted: ${(error as Error).message}`, {
+          event: 'shutdown-interrupt-failed',
+          jobIds: jobIds.join(','),
+        });
+        return null;
+      });
+    let timer: NodeJS.Timeout | undefined;
+    const grace = new Promise<'grace-expired'>((resolve) => {
+      timer = setTimeout(() => resolve('grace-expired'), SHUTDOWN_INTERRUPT_GRACE_MS);
+    });
+    const ids = await Promise.race([marking, grace]);
+    clearTimeout(timer);
+    if (ids === 'grace-expired') {
+      logger.error(
+        `Shutdown timed out; ${jobIds.length} job(s) stay running until a later runner start recovers them as interrupted`,
+        { event: 'shutdown-interrupt-skipped', jobIds: jobIds.join(',') },
       );
-      this.options.logger.error(`Shutdown timed out; marked ${ids.length} job(s) as interrupted`, {
+    } else if (ids !== null) {
+      logger.error(`Shutdown timed out; marked ${ids.length} job(s) as interrupted`, {
         event: 'shutdown-timeout',
         jobIds: ids.join(','),
       });

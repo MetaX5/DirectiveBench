@@ -14,7 +14,7 @@ import {
   withTransaction,
   type DatabaseHandle,
 } from '@directivebench/database';
-import { LocalRunner, SHORT_JOB_SLOTS } from '../src/index';
+import { LocalRunner, SHORT_JOB_SLOTS, SHUTDOWN_INTERRUPT_GRACE_MS } from '../src/index';
 import type * as registrationModule from '../src/repository-registration';
 import type * as scanModule from '../src/repository-scan';
 import { ScanCancelledError } from '../src/repository-scan';
@@ -226,5 +226,66 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     const [late] = await runner.runUntilIdle();
     expect(late).toMatchObject({ jobId: scan, status: 'interrupted' });
     expect(await status(scan)).toBe('interrupted');
+  });
+
+  // Regression (third Codex review of PR #44): past the deadline, stop() awaited the interrupt
+  // write without a budget; behind a transaction a job still held it never returned, and the CLI
+  // waits for stop() before it terminates the web server.
+  it('returns within its deadline plus the grace when the interrupt write waits behind a transaction', async () => {
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/a' });
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const runner = createRunner({ shutdownTimeoutMs: 20, logger });
+    await runner.poll();
+    expect(runner.activeJobCount).toBe(1);
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The held registration ignores the abort; the open transaction stands for one it holds.
+    const holding = withTransaction(handle, async () => gate);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const started = performance.now();
+    const budget = 20 + SHUTDOWN_INTERRUPT_GRACE_MS;
+    let hang: NodeJS.Timeout | undefined;
+    const outcome = await Promise.race([
+      runner.stop().then(() => 'stopped'),
+      new Promise((resolve) => {
+        hang = setTimeout(() => resolve('still waiting'), budget + 1000);
+      }),
+    ]);
+    clearTimeout(hang);
+    const elapsed = performance.now() - started;
+    release();
+    await holding;
+    expect(outcome).toBe('stopped');
+    expect(elapsed).toBeGreaterThanOrEqual(budget - 50);
+    expect(logger.error).toHaveBeenCalledWith(
+      'Shutdown timed out; 1 job(s) stay running until a later runner start recovers them as interrupted',
+      { event: 'shutdown-interrupt-skipped', jobIds: registration.id },
+    );
+    // The skipped write was not dropped: it runs once the transaction ends.
+    await vi.waitFor(async () => expect(await status(registration.id)).toBe('interrupted'));
+    held.registrations[0]?.release();
+  });
+
+  it('logs an interrupt write that fails at shutdown instead of rejecting', async () => {
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/a' });
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const runner = createRunner({ shutdownTimeoutMs: 20, logger });
+    await runner.poll();
+    // The write fails at once: its table is gone (restored below so the job can finish).
+    handle.sqlite.exec('alter table jobs rename to jobs_hidden');
+    await runner.stop();
+    handle.sqlite.exec('alter table jobs_hidden rename to jobs');
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringMatching(/^Shutdown could not mark jobs as interrupted: /),
+      { event: 'shutdown-interrupt-failed', jobIds: registration.id },
+    );
+    const events = logger.error.mock.calls.map(([, fields]) => (fields as { event: string }).event);
+    expect(events).not.toContain('shutdown-interrupt-skipped');
+    expect(events).not.toContain('shutdown-timeout');
+    held.registrations[0]?.release();
+    await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
   });
 });
