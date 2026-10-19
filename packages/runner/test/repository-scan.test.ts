@@ -27,6 +27,7 @@ import {
   openDatabase,
   registerLocalRepository,
   schema,
+  withTransaction,
   type DatabaseHandle,
 } from '@directivebench/database';
 import { LocalRunner } from '../src/index';
@@ -48,15 +49,23 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 // The scan's discovery stays real; a test can lower its limits (FR-102-16).
+// `afterDiscovery` runs when discovery has finished, before the scan stores its results.
 const discoveryHooks = vi.hoisted(() => ({
   limits: undefined as Partial<core.DiscoveryLimits> | undefined,
+  afterDiscovery: null as ((signal: AbortSignal | undefined) => void) | null,
 }));
 vi.mock('@directivebench/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>();
   return {
     ...actual,
-    discoverArtifacts: (root: string, options?: core.DiscoveryOptions) =>
-      actual.discoverArtifacts(root, { ...options, limits: discoveryHooks.limits }),
+    discoverArtifacts: async (root: string, options?: core.DiscoveryOptions) => {
+      const result = await actual.discoverArtifacts(root, {
+        ...options,
+        limits: discoveryHooks.limits,
+      });
+      discoveryHooks.afterDiscovery?.(options?.signal);
+      return result;
+    },
   };
 });
 
@@ -85,6 +94,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   discoveryHooks.limits = undefined;
+  discoveryHooks.afterDiscovery = null;
   vi.unstubAllEnvs();
   handle.close();
   rmSync(dataDir, { recursive: true, force: true });
@@ -398,6 +408,31 @@ describe('repository-scan jobs', () => {
     ]);
   });
 
+  it("skips a sibling home's agent folder under its symlink target inside an ancestor scan", async () => {
+    const home = join(sources, 'home');
+    write(home, { 'AGENTS.md': '# Home rules\n' });
+    // `/home/bob/.claude` → `/home/dotfiles/bob-claude`: both spellings lie in the scanned tree.
+    write(sources, {
+      'dotfiles/bob-claude/CLAUDE.md': '# Bob user-level\n',
+      'dotfiles/bob-claude/skills/theirs/SKILL.md': '---\nname: theirs\n---\n',
+      'dotfiles/AGENTS.md': '# Dotfiles project rules\n',
+    });
+    mkdirSync(join(sources, 'bob'));
+    symlinkSync(join(sources, 'dotfiles/bob-claude'), join(sources, 'bob/.claude'));
+    vi.stubEnv('HOME', home);
+    const repository = await register(sources, 'local-directory');
+
+    const result = await scan(repository.id);
+    expect(result).toMatchObject({ ok: true, skippedUserLevelFolders: ['dotfiles/bob-claude'] });
+    expect(storedOccurrences().map((o) => o.path)).toEqual([
+      'dotfiles/AGENTS.md',
+      'home/AGENTS.md',
+    ]);
+    expect(await userLevelAgentFolders(home, {}, sources)).toEqual(
+      expect.arrayContaining([join(sources, 'bob/.claude'), join(sources, 'dotfiles/bob-claude')]),
+    );
+  });
+
   it('keeps the project folders of a repository that sits next to the home directory', async () => {
     const home = join(sources, 'home');
     write(home, { '.claude/skills/global/SKILL.md': '---\nname: global\n---\n' });
@@ -578,6 +613,39 @@ describe('repository-scan jobs', () => {
       syncError: result.ok ? null : result.message,
       lastSyncAt: null,
     });
+  });
+
+  it('stores nothing when the runner shuts down while the results wait behind another transaction', async () => {
+    const project = join(sources, 'project');
+    write(project, { 'AGENTS.md': '# Project rules\n' });
+    const repository = await register(project, 'local-directory');
+    const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+    const runner = createRunner();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding: Promise<void> | undefined;
+    let stopped: Promise<void> | undefined;
+    // Another job's transaction holds the connection when discovery ends, so the scan's apply
+    // transaction queues behind it (the scan's own abort check has passed by then). Once it is
+    // queued, the runner shuts down; the other transaction ends only after the abort.
+    discoveryHooks.afterDiscovery = (signal) => {
+      holding = withTransaction(handle, () => gate);
+      signal?.addEventListener('abort', () => release());
+      setImmediate(() => {
+        stopped = runner.stop();
+      });
+    };
+
+    const [execution] = await runner.runUntilIdle();
+    await holding;
+    await stopped;
+    expect(execution).toMatchObject({ jobId: job.id, status: 'interrupted', error: null });
+    expect((await getJob(handle.db, job.id))?.status).toBe('interrupted');
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+    expect(await handle.db.$count(schema.artifactOccurrences)).toBe(0);
+    expect((await getRepository(handle.db, repository.id))?.lastSyncAt).toBeNull();
   });
 
   it('refuses the filesystem root, unknown repositories and non-local providers', async () => {

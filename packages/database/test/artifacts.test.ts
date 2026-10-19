@@ -22,11 +22,14 @@ import {
   schema,
   seedPredefinedCategories,
   upsertRepository,
+  withTransaction,
 } from '../src/index';
 import { artifactInput, registerLocal, seedRun, seedTargets } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
+/** A scan's abort signal that is never aborted. */
+const signal = new AbortController().signal;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -496,6 +499,7 @@ describe('applyRepositoryScan', () => {
     const summary = await applyRepositoryScan(handle, {
       repositoryId: repository.id,
       jobId,
+      signal,
       artifacts: [input, scanned('packages/api/AGENTS.md', '# API\n', 'packages/api/AGENTS.md')],
     });
     expect(summary).toEqual({ createdArtifacts: 2, createdVersions: 2 });
@@ -537,6 +541,7 @@ describe('applyRepositoryScan', () => {
       applyRepositoryScan(handle, {
         repositoryId: first.repository.id,
         jobId,
+        signal,
         artifacts: [scanned('AGENTS.md', content)],
       });
     expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 1, createdVersions: 1 });
@@ -557,7 +562,7 @@ describe('applyRepositoryScan', () => {
     const handle = getHandle();
     const { repository, jobId } = await runningScan(handle, '/srv/skills');
     const apply = (artifacts: ScannedArtifactInput[]) =>
-      applyRepositoryScan(handle, { repositoryId: repository.id, jobId, artifacts });
+      applyRepositoryScan(handle, { repositoryId: repository.id, jobId, artifacts, signal });
     await apply([scanned('AGENTS.md', 'v1'), scanned('packages/api/AGENTS.md', 'v1', 'api')]);
     const before = await handle.db.select().from(schema.artifactOccurrences);
     const versionsBefore = await handle.db.select().from(schema.artifactVersions);
@@ -598,12 +603,14 @@ describe('applyRepositoryScan', () => {
     await applyRepositoryScan(handle, {
       repositoryId: a.repository.id,
       jobId: a.jobId,
+      signal,
       artifacts: [scanned('AGENTS.md', 'same'), scanned('docs/x/AGENTS.md', 'same')],
     });
     const b = await runningScan(handle, '/srv/b');
     await applyRepositoryScan(handle, {
       repositoryId: b.repository.id,
       jobId: b.jobId,
+      signal,
       artifacts: [scanned('AGENTS.md', 'same')],
     });
     // A later bundled import (moved install) still finds its own artifact, not a scanned one.
@@ -633,6 +640,7 @@ describe('applyRepositoryScan', () => {
     await applyRepositoryScan(handle, {
       repositoryId: scan.repository.id,
       jobId: scan.jobId,
+      signal,
       artifacts: [{ ...scanned('skills/validate', 'mine', 'validate'), type: 'skill' }],
     });
     // Scan first, bundled example second: the bundled import must not attach to the scanned skill.
@@ -656,6 +664,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: repository.id,
       jobId,
       artifacts: [scanned('AGENTS.md', 'x')],
+      signal,
     };
     await requestJobCancellation(handle.db, jobId);
     await expect(applyRepositoryScan(handle, application)).rejects.toThrow(JobNoLongerRunningError);
@@ -669,10 +678,43 @@ describe('applyRepositoryScan', () => {
       applyRepositoryScan(handle, {
         repositoryId: other.repository.id,
         jobId: other.jobId,
+        signal,
         artifacts: [scanned('AGENTS.md', 'x')],
       }),
     ).rejects.toThrow(NotFoundError);
     expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('writes nothing when its signal is aborted while it waits behind another transaction', async () => {
+    // Runner shutdown aborts the signal but records nothing in the job row, so the transaction
+    // must check the signal itself: the scan checked it before queueing, the abort came after.
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = withTransaction(handle, () => gate);
+    const controller = new AbortController();
+    const applied = applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      artifacts: [scanned('AGENTS.md', 'x')],
+      signal: controller.signal,
+    });
+    controller.abort('shutdown');
+    release();
+    await holding;
+    await expect(applied).rejects.toThrow(
+      new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`),
+    );
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+    const stored = await handle.db
+      .select({ syncStatus: schema.repositories.syncStatus })
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored?.syncStatus).not.toBe('ok');
   });
 
   it('rejects content that is not well-formed Unicode before writing anything', async () => {
@@ -682,6 +724,7 @@ describe('applyRepositoryScan', () => {
       applyRepositoryScan(handle, {
         repositoryId: repository.id,
         jobId,
+        signal,
         artifacts: [scanned('AGENTS.md', 'bad \ud800')],
       }),
     ).rejects.toThrow(/not well-formed Unicode/);

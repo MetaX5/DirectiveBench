@@ -334,6 +334,12 @@ export interface RepositoryScanApplication {
   /** The `repository-scan` job doing the work; nothing is written unless it is still running. */
   jobId: string;
   artifacts: readonly ScannedArtifactInput[];
+  /**
+   * The job's abort signal (user cancellation or runner shutdown). It is checked inside the
+   * transaction, before anything is written: the transaction may have waited behind another one
+   * on the shared connection, and a shutdown records nothing in the `jobs` row to re-check.
+   */
+  signal: AbortSignal;
 }
 
 /**
@@ -343,8 +349,9 @@ export interface RepositoryScanApplication {
  * identity, and the repository records a successful scan (`last_sync_at`, `sync_status = 'ok'`,
  * `sync_error = null`). A scan reads the working tree, so no commit is recorded. Occurrences that
  * were not found again are left as they are (removed files are issue #21). The job is re-checked
- * inside the transaction: a scan that was cancelled or interrupted meanwhile writes nothing
- * (FR-105-17), and a repository removed meanwhile is a `NotFoundError`.
+ * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
+ * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
+ * meanwhile is a `NotFoundError`.
  */
 export async function applyRepositoryScan(
   handle: DatabaseHandle,
@@ -356,6 +363,9 @@ export async function applyRepositoryScan(
     recomputed: recomputeFiles(input),
   }));
   return withTransaction(handle, async (db) => {
+    if (application.signal.aborted) {
+      throw new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`);
+    }
     const job = await db
       .select({ status: jobs.status, cancelRequestedAt: jobs.cancelRequestedAt })
       .from(jobs)

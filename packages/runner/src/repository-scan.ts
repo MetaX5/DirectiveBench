@@ -73,11 +73,12 @@ async function siblingHomes(home: string): Promise<string[]> {
 }
 
 /**
- * The canonical paths a scan of `location` never enters (D05): each user-level folder as it is
- * spelled below the canonical home directory and, when it is a symlink (dotfiles), where it
- * resolves to; when `location` contains the home directory, also the same folders in the sibling
- * directories of the home directory. Relative environment values are ignored, as the agents
- * ignore them. Other users' homes elsewhere (e.g. `/root`) are not known.
+ * The canonical paths a scan of `location` never enters (D05): the user-level folders below the
+ * canonical home directory and, when `location` contains the home directory, the same folders in
+ * the sibling directories of the home directory — each as it is spelled there and, when it is a
+ * symlink (dotfiles), where it resolves to, so a target inside the scanned tree is skipped under
+ * either spelling. Relative environment values are ignored, as the agents ignore them. Other
+ * users' homes elsewhere (e.g. `/root`) are not known.
  */
 export async function userLevelAgentFolders(
   homeDir: string,
@@ -88,20 +89,16 @@ export async function userLevelAgentFolders(
   const absolute = (value: string | undefined) =>
     value !== undefined && isAbsolute(value) ? [resolve(value)] : [];
   const configHome = absolute(env.XDG_CONFIG_HOME)[0] ?? join(home, '.config');
+  const containsHome = pathRelation(location, home) === 'contains';
   const folders = [
     ...USER_LEVEL_FOLDER_NAMES.map((name) => join(home, name)),
     join(configHome, 'cursor'),
     ...absolute(env.CLAUDE_CONFIG_DIR),
     ...absolute(env.CODEX_HOME),
+    ...(containsHome ? (await siblingHomes(home)).flatMap(foldersOf) : []),
   ];
   const resolved = await Promise.all(folders.map((folder) => realpath(folder).catch(() => null)));
-  const containsHome = pathRelation(location, home) === 'contains';
-  const others = containsHome ? (await siblingHomes(home)).flatMap(foldersOf) : [];
-  const all = [
-    ...folders,
-    ...resolved.filter((folder): folder is string => folder !== null),
-    ...others,
-  ];
+  const all = [...folders, ...resolved.filter((folder): folder is string => folder !== null)];
   return [...new Set(all)].sort();
 }
 
@@ -257,7 +254,9 @@ export async function scanLocalRepository(
     if (error instanceof DiscoveryRootChangedError) return fail(locationChanged());
     return fail(discoveryFailure(error, repository.location));
   }
-  // Cancellation is honoured until the apply transaction starts (FR-105-17).
+  // Cancellation is honoured until the apply transaction starts (FR-105-17). The transaction
+  // checks the signal again: it may wait behind another one, and an abort meanwhile (shutdown)
+  // leaves no trace in the job row that it could re-check otherwise.
   if (options.signal.aborted) throw new ScanCancelledError('Scan was cancelled');
 
   let summary;
@@ -266,8 +265,11 @@ export async function scanLocalRepository(
       repositoryId: repository.id,
       jobId: job.jobId,
       artifacts: discovery.artifacts.map(toScannedArtifact),
+      signal: options.signal,
     });
   } catch (error) {
+    // An aborted signal, a cancellation request or a job that is no longer running: nothing was
+    // written; the runner records `cancelled` or `interrupted` by the abort reason.
     if (error instanceof JobNoLongerRunningError) {
       throw new ScanCancelledError('Scan was cancelled');
     }
