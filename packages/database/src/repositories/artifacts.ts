@@ -91,10 +91,10 @@ export async function importArtifactVersion(
   input: ImportArtifactInput,
 ): Promise<ImportArtifactResult> {
   const files: StoredArtifactFile[] = input.files.map(({ path, content }) => {
-    // Encoding replaces a lone surrogate with U+FFFD, so two different strings would share one
-    // hash (and one version). Fail closed instead.
-    if (LONE_SURROGATE.test(content)) {
-      throw new Error(`File content is not well-formed Unicode: ${path}`);
+    // Encoding replaces a lone surrogate with U+FFFD, so two different paths or contents would
+    // share one hash (and one version). Fail closed instead.
+    if (LONE_SURROGATE.test(path) || LONE_SURROGATE.test(content)) {
+      throw new Error(`File path or content is not well-formed Unicode: ${JSON.stringify(path)}`);
     }
     const bytes = Buffer.from(content, 'utf8');
     return { path, sha256: sha256(bytes), size: bytes.length, content };

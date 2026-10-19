@@ -46,7 +46,8 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
   manifest and therefore a new version. Bundled examples are unaffected: none of their files is
   invalid UTF-8 or contains a NUL.
 - After review: `sha256`/`size` are now optional on `ImportArtifactFile` (still ignored), and
-  content containing an unpaired UTF-16 surrogate is rejected. `'\uD800'` and `'\uFFFD'`
+  a file path or content containing an unpaired UTF-16 surrogate is rejected (the path check
+  came from the re-review). `'\uD800'` and `'\uFFFD'`
   encode to the same UTF-8 bytes, so they would otherwise share one identity. The check is a
   `/\p{Surrogate}/u` regex, because `String.prototype.isWellFormed` is not in the repository's
   `ES2023` TypeScript lib.
@@ -66,7 +67,8 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
    minor and nit findings only. Fixed in a follow-up commit: the lone-surrogate guard and test,
    optional ignored fields, the SPEC-103 §12 invariant sentence and this run log. Declined: adding
    the `.ai/lessons.md` entry (this run may not edit that file). Follow-up: the existing
-   double read of a skill's primary file.
+   double read of a skill's primary file. The re-review approved, with one nit: also reject a path
+   that contains a lone surrogate, which was then fixed.
 
 ## Verification
 

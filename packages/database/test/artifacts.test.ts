@@ -145,14 +145,21 @@ describe('importArtifactVersion', () => {
     expect(honest).toEqual({ ...first, createdVersion: false });
   });
 
-  it('rejects content that is not well-formed Unicode and writes nothing', async () => {
+  it('rejects a path or content that is not well-formed Unicode and writes nothing', async () => {
     const handle = getHandle();
     // '\uD800' and '\uFFFD' encode to the same UTF-8 bytes, so they would share one identity.
     const loneSurrogate = artifactInput('unused', {
       files: [{ path: 'SKILL.md', content: 'a\uD800b' }],
     });
     await expect(importArtifactVersion(handle, loneSurrogate)).rejects.toThrow(
-      'File content is not well-formed Unicode: SKILL.md',
+      'File path or content is not well-formed Unicode: "SKILL.md"',
+    );
+    // The manifest hash encodes paths the same way, so a lone surrogate in a path is rejected too.
+    const loneSurrogatePath = artifactInput('unused', {
+      files: [{ path: 'ref\uD800.md', content: 'fine' }],
+    });
+    await expect(importArtifactVersion(handle, loneSurrogatePath)).rejects.toThrow(
+      'File path or content is not well-formed Unicode: "ref\\ud800.md"',
     );
     expect(await handle.db.select().from(schema.artifacts).all()).toEqual([]);
 
