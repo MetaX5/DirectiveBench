@@ -225,7 +225,7 @@ describe('inspectLocalPath', () => {
     }
     const realGitDir = dirname((await findGitExecutable(process.env)) as string);
     // Empty and `.` entries make a bare `git` resolve against the working directory.
-    const env = { PATH: ['', '.', realGitDir].join(delimiter), PATHEXT: '.EXE' };
+    const env = { PATH: ['', '.', realGitDir].join(delimiter) };
 
     expect(await inspectLocalPath(repo, options({ env }))).toMatchObject({
       provider: 'local-git',
@@ -255,7 +255,7 @@ describe('inspectLocalPath', () => {
       ok: false,
       code: 'git-failed',
       message:
-        "git reports a work tree that does not hold this repository's .git (core.worktree points elsewhere).",
+        "git's top level does not match the nearest .git entry (for example, core.worktree points elsewhere).",
     });
   });
 
@@ -491,6 +491,23 @@ describe('git invocation', () => {
       await findGitExecutable({ PATH: [dirname(dirOnly), plain, dirname(real)].join(delimiter) }),
     ).toBe(real);
     expect(await findGitExecutable({ PATH: [dirname(dirOnly), plain].join(delimiter) })).toBeNull();
+  });
+
+  it('on Windows (PATHEXT set) considers only git.exe and git.com, never a bare git or a .cmd shim', async () => {
+    const shims = makeDir('shim-bin');
+    for (const name of ['git', 'git.cmd', 'git.bat']) {
+      writeFileSync(join(shims, name), '', { mode: 0o755 });
+    }
+    const exe = makeDir('exe-bin');
+    writeFileSync(join(exe, 'git.exe'), '', { mode: 0o755 });
+
+    expect(
+      await findGitExecutable({
+        PATH: [shims, exe].join(delimiter),
+        PATHEXT: '.COM;.EXE;.BAT;.CMD',
+      }),
+    ).toBe(join(exe, 'git.exe'));
+    expect(await findGitExecutable({ PATH: shims, PATHEXT: '.CMD;.BAT' })).toBeNull();
   });
 
   it('builds the environment from an allowlist plus fixed safety settings', () => {

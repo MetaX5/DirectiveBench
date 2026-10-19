@@ -68,17 +68,26 @@ async function isExecutableFile(path: string): Promise<boolean> {
   }
 }
 
+/** Extensions Windows can start without a shell (Node refuses `.bat`/`.cmd`, CVE-2024-27980). */
+const SPAWNABLE_EXTENSIONS = new Set(['.exe', '.com']);
+
+/** Candidate file names: `git` on POSIX; on Windows (`PATHEXT` set) `git.exe`/`git.com` only. */
+function gitFileNames(pathExt: string | undefined): string[] {
+  if (pathExt === undefined) return ['git'];
+  return pathExt
+    .split(';')
+    .map((extension) => extension.toLowerCase())
+    .filter((extension) => SPAWNABLE_EXTENSIONS.has(extension))
+    .map((extension) => `git${extension}`);
+}
+
 /**
  * Locates git on the absolute `PATH` entries, in the runner's own context, so the program that
  * runs can never be a `git` (or, on Windows, `git.exe` found in the working directory first)
  * shipped inside the repository being registered. Returns an absolute path or null.
  */
 export async function findGitExecutable(env: NodeJS.ProcessEnv): Promise<string | null> {
-  const extensions = (env.PATHEXT ?? '')
-    .split(';')
-    .filter(Boolean)
-    .map((extension) => extension.toLowerCase());
-  const names = ['git', ...extensions.map((extension) => `git${extension}`)];
+  const names = gitFileNames(env.PATHEXT);
   for (const directory of absolutePathEntries(env.PATH)) {
     for (const name of names) {
       const candidate = join(directory, name);
@@ -296,7 +305,7 @@ export async function inspectLocalPath(
   if ((await nearestGitEntry(directory)) !== topLevel) {
     return reject(
       'git-failed',
-      "git reports a work tree that does not hold this repository's .git (core.worktree points elsewhere).",
+      "git's top level does not match the nearest .git entry (for example, core.worktree points elsewhere).",
     );
   }
 
