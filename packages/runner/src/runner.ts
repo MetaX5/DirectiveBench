@@ -175,6 +175,8 @@ export class LocalRunner {
       if (!job) return;
       this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
       const controller = new AbortController();
+      // Claimed after `stop()` gave up waiting for this poll: interrupt it instead of running it.
+      if (this.stopping) controller.abort('shutdown');
       const done = this.execute(job, controller)
         .then((result) => {
           for (const results of this.finished) results.push(result);
@@ -204,24 +206,32 @@ export class LocalRunner {
 
   /**
    * Graceful shutdown: stops polling, waits for a poll in flight to finish claiming, aborts
-   * running jobs and waits up to `shutdownTimeoutMs` for them. Aborted jobs are recorded as `interrupted` (not user-cancelled); jobs that did not
-   * stop in time are marked `interrupted` directly.
+   * running jobs and waits for them — all within `shutdownTimeoutMs`. Aborted jobs are recorded
+   * as `interrupted` (not user-cancelled); jobs that did not stop in time are marked
+   * `interrupted` directly, and a job claimed after the deadline is aborted as soon as it is.
    */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
+    });
     // A job claimed by a poll that is still in flight would otherwise start after the abort below
-    // and run unsupervised. `fill` checks `stopping` before each claim, so this ends promptly.
-    await this.polling;
+    // and run unsupervised. `fill` checks `stopping` before each claim, so this ends promptly
+    // unless the claim waits behind a transaction.
+    const claimTimedOut = await Promise.race([
+      Promise.resolve(this.polling).then(() => false),
+      deadline,
+    ]);
     const running = [...this.active.entries()];
     for (const [, { controller }] of running) controller.abort('shutdown');
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = await Promise.race([
-      Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
-      }),
-    ]);
+    const timedOut =
+      claimTimedOut ||
+      (await Promise.race([
+        Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
+        deadline,
+      ]));
     clearTimeout(timer);
     if (timedOut) {
       const ids = await interruptJobs(

@@ -1,11 +1,12 @@
 import { constants } from 'node:fs';
-import { access, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { access, readdir, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   DiscoveryRootChangedError,
   discoverArtifacts,
   isFilesystemRoot,
+  pathRelation,
   redactSecrets,
   type DiscoveredArtifact,
 } from '@directivebench/core';
@@ -46,14 +47,42 @@ export interface RepositoryScanOptions {
  */
 const USER_LEVEL_FOLDER_NAMES = ['.agents', '.claude', '.codex', '.cursor'];
 
+/** The same folders in another user's home directory (no environment overrides apply there). */
+function foldersOf(home: string): string[] {
+  return [
+    ...USER_LEVEL_FOLDER_NAMES.map((name) => join(home, name)),
+    join(home, '.config', 'cursor'),
+  ];
+}
+
 /**
- * The canonical paths a scan never enters (D05): each user-level folder as it is spelled below the
- * canonical home directory and, when it is a symlink (dotfiles), where it resolves to. Relative
- * environment values are ignored, as the agents ignore them.
+ * The directories next to the home directory — other users' homes when homes share a parent such
+ * as `/home` — so a scan of that parent skips their user-level folders too. None when the home
+ * directory sits directly below the filesystem root, or its parent cannot be listed. Only used
+ * when the scanned location contains the home directory, so a repository that merely sits next
+ * to it (`/home/projects`) keeps its own `.claude/skills`.
+ */
+async function siblingHomes(home: string): Promise<string[]> {
+  const parent = dirname(home);
+  if (isFilesystemRoot(parent)) return [];
+  const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(parent, entry.name))
+    .filter((dir) => dir !== home);
+}
+
+/**
+ * The canonical paths a scan of `location` never enters (D05): each user-level folder as it is
+ * spelled below the canonical home directory and, when it is a symlink (dotfiles), where it
+ * resolves to; when `location` contains the home directory, also the same folders in the sibling
+ * directories of the home directory. Relative environment values are ignored, as the agents
+ * ignore them. Other users' homes elsewhere (e.g. `/root`) are not known.
  */
 export async function userLevelAgentFolders(
   homeDir: string,
   env: NodeJS.ProcessEnv,
+  location: string,
 ): Promise<string[]> {
   const home = await realpath(homeDir).catch(() => resolve(homeDir));
   const absolute = (value: string | undefined) =>
@@ -66,7 +95,13 @@ export async function userLevelAgentFolders(
     ...absolute(env.CODEX_HOME),
   ];
   const resolved = await Promise.all(folders.map((folder) => realpath(folder).catch(() => null)));
-  const all = [...folders, ...resolved.filter((folder): folder is string => folder !== null)];
+  const containsHome = pathRelation(location, home) === 'contains';
+  const others = containsHome ? (await siblingHomes(home)).flatMap(foldersOf) : [];
+  const all = [
+    ...folders,
+    ...resolved.filter((folder): folder is string => folder !== null),
+    ...others,
+  ];
   return [...new Set(all)].sort();
 }
 
@@ -211,7 +246,11 @@ export async function scanLocalRepository(
     discovery = await discoverArtifacts(repository.location, {
       signal: options.signal,
       expectedRoot: repository.location,
-      skipDirectories: await userLevelAgentFolders(options.homeDir, options.env),
+      skipDirectories: await userLevelAgentFolders(
+        options.homeDir,
+        options.env,
+        repository.location,
+      ),
     });
   } catch (error) {
     if (options.signal.aborted) throw new ScanCancelledError('Scan was cancelled');

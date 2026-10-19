@@ -351,6 +351,11 @@ describe('repository-scan jobs', () => {
       'codex-home/AGENTS.md': '# CODEX_HOME\n',
       'xdg/cursor/rules/x.mdc': '---\nalwaysApply: true\n---\n',
       'projects/app/AGENTS.md': '# App\n',
+      // Another user's home next to this one (as in /home/<user>), and a plain file.
+      'other-user/.claude/skills/theirs/SKILL.md': '---\nname: theirs\n---\n',
+      'other-user/.config/cursor/rules/y.mdc': '---\nalwaysApply: true\n---\n',
+      'other-user/AGENTS.md': '# Their project rules\n',
+      'notes.txt': 'not a directory\n',
     });
     symlinkSync(join(sources, 'dotfiles/codex'), join(home, '.codex'));
     vi.stubEnv('HOME', home);
@@ -367,10 +372,27 @@ describe('repository-scan jobs', () => {
         'codex-home',
         'dotfiles/codex',
         'home/.claude',
+        'other-user/.claude',
+        'other-user/.config/cursor',
         'xdg/cursor',
       ],
     });
-    expect(storedOccurrences().map((o) => o.path)).toEqual(['projects/app/AGENTS.md']);
+    expect(storedOccurrences().map((o) => o.path)).toEqual([
+      'other-user/AGENTS.md',
+      'projects/app/AGENTS.md',
+    ]);
+  });
+
+  it('keeps the project folders of a repository that sits next to the home directory', async () => {
+    const home = join(sources, 'home');
+    write(home, { '.claude/skills/global/SKILL.md': '---\nname: global\n---\n' });
+    const neighbour = join(sources, 'team-repo');
+    write(neighbour, { '.claude/skills/team/SKILL.md': '---\nname: team\n---\n' });
+    vi.stubEnv('HOME', home);
+    const repository = await register(neighbour, 'local-directory');
+
+    expect(await scan(repository.id)).toMatchObject({ ok: true, skippedUserLevelFolders: [] });
+    expect(storedOccurrences().map((o) => o.path)).toEqual(['.claude/skills/team']);
   });
 
   it('reads nothing from a registered location that is itself a user-level folder', async () => {
@@ -390,13 +412,17 @@ describe('repository-scan jobs', () => {
 
   it('lists the user-level folders of a home directory that cannot be resolved', async () => {
     const env = { XDG_CONFIG_HOME: 'relative/xdg', CLAUDE_CONFIG_DIR: 'relative', CODEX_HOME: '' };
-    expect(await userLevelAgentFolders('/nonexistent-home', env)).toEqual([
+    expect(await userLevelAgentFolders('/nonexistent-home', env, '/')).toEqual([
       '/nonexistent-home/.agents',
       '/nonexistent-home/.claude',
       '/nonexistent-home/.codex',
       '/nonexistent-home/.config/cursor',
       '/nonexistent-home/.cursor',
     ]);
+    // A parent that cannot be listed contributes no sibling homes.
+    expect(
+      await userLevelAgentFolders('/nonexistent-parent/home', {}, '/nonexistent-parent'),
+    ).toHaveLength(5);
   });
 
   it('refuses a registered location that was replaced by a symlink, and records the error', async () => {

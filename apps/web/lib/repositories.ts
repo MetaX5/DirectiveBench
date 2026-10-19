@@ -74,7 +74,7 @@ type ConfirmationRequest = Extract<RepositoryRegistrationResult, { code: 'confir
 export function confirmationReasons(request: ConfirmationRequest): string[] {
   const reasons: string[] = [];
   const userLevel =
-    'User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.';
+    'User-level agent folders such as ~/.claude, ~/.codex, ~/.cursor and ~/.agents are always skipped.';
   if (request.home === 'home') {
     reasons.push(
       `This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. ${userLevel}`,

@@ -279,7 +279,7 @@ test.describe('repositories', () => {
       timeout: REGISTRATION_TIMEOUT,
     });
     await expect(confirmation).toContainText(
-      'User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
+      'User-level agent folders such as ~/.claude, ~/.codex, ~/.cursor and ~/.agents are always skipped.',
     );
     await expect(confirmation).not.toContainText('~/.claude/skills');
     await confirmation.getByRole('link', { name: 'Cancel' }).click();

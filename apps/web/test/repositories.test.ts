@@ -168,13 +168,13 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
       location: '/home/me',
       message: 'Register /home/me anyway?',
       reasons: [
-        'This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
+        'This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. User-level agent folders such as ~/.claude, ~/.codex, ~/.cursor and ~/.agents are always skipped.',
       ],
     });
     // D05: user-level folders are never included, so the confirmation never promises them.
     const above = confirm('contains-home', []);
     expect(above.kind === 'confirm' && above.reasons).toEqual([
-      'This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. User-level agent folders (~/.claude, ~/.codex, ~/.cursor, ~/.agents) are always skipped.',
+      'This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. User-level agent folders such as ~/.claude, ~/.codex, ~/.cursor and ~/.agents are always skipped.',
     ]);
   });
 

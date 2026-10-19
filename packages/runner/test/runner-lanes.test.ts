@@ -30,9 +30,9 @@ vi.mock('../src/repository-scan', async (importOriginal) => ({
   scanLocalRepository: vi.fn(
     (_handle: unknown, _job: unknown, options: { signal: AbortSignal }) =>
       new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () =>
-          reject(new ScanCancelledError('Scan was cancelled')),
-        );
+        const cancel = () => reject(new ScanCancelledError('Scan was cancelled'));
+        if (options.signal.aborted) cancel();
+        options.signal.addEventListener('abort', cancel);
         held.scans.push({
           signal: options.signal,
           release: () =>
@@ -199,5 +199,32 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     expect(held.scans[0]?.signal.aborted).toBe(true);
     expect(await status(scan)).toBe('interrupted');
     expect(runner.activeJobCount).toBe(0);
+  });
+
+  it('keeps stop() within its timeout when the claim waits, and interrupts the late job', async () => {
+    const scan = await scanJob('/srv/a');
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = withTransaction(handle, async () => gate);
+    await new Promise((resolve) => setImmediate(resolve));
+    const runner = createRunner({ shutdownTimeoutMs: 20 });
+    const polling = runner.poll();
+    await new Promise((resolve) => setImmediate(resolve));
+    // The claim is still waiting for the transaction when the deadline passes.
+    await runner.stop();
+    // Read on the raw connection: a Drizzle read would wait for the open transaction.
+    expect(handle.sqlite.prepare('select status from jobs where id = ?').get(scan)).toEqual({
+      status: 'pending',
+    });
+    release();
+    await holding;
+    await polling;
+    // Claimed after the deadline: aborted at once, so it never runs unsupervised.
+    expect(held.scans[0]?.signal.aborted).toBe(true);
+    const [late] = await runner.runUntilIdle();
+    expect(late).toMatchObject({ jobId: scan, status: 'interrupted' });
+    expect(await status(scan)).toBe('interrupted');
   });
 });
