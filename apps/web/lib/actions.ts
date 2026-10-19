@@ -2,8 +2,10 @@
 
 import { executionBlockers } from '@directivebench/benchmark-engine/definition';
 import { validateDefinition } from '@directivebench/benchmark-engine/load';
+import { repositoryPathInputSchema } from '@directivebench/core';
 import {
   enqueueBenchmarkJob,
+  enqueueRepositoryRegistrationJob,
   getLatestArtifactVersionId,
   getSuiteVersion,
   requestJobCancellation,
@@ -52,4 +54,28 @@ export async function cancelJobAction(formData: FormData): Promise<void> {
   const jobId = z.string().min(1).parse(formData.get('jobId'));
   await requestJobCancellation(requireDatabase().db, jobId);
   revalidatePath('/executions');
+}
+
+const registerRepositorySchema = z.object({ path: repositoryPathInputSchema });
+
+/**
+ * Registers a local repository by path (SPEC-104 §9). The web process only validates the field
+ * and enqueues a `repository-registration` job; the runner in the CLI process resolves the path
+ * and runs git read-only. Invalid input returns to the form with a field-level error.
+ */
+export async function registerRepositoryAction(formData: FormData): Promise<void> {
+  const raw = formData.get('path');
+  const input = registerRepositorySchema.safeParse({ path: raw });
+  if (!input.success) {
+    const params = new URLSearchParams({
+      path: typeof raw === 'string' ? raw : '',
+      error: input.error.issues.map((issue) => issue.message).join(' '),
+    });
+    redirect(`/repositories?${params.toString()}`);
+  }
+  const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {
+    path: input.data.path,
+  });
+  revalidatePath('/repositories');
+  redirect(`/repositories?registration=${encodeURIComponent(job.id)}`);
 }

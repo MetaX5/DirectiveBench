@@ -4,12 +4,17 @@ import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
   acquireNextJob,
   getJob,
+  getRepositoryRegistration,
   importArtifactVersion,
   importSuiteVersion,
   listJobs,
   type DatabaseHandle,
 } from '@directivebench/database';
-import { cancelJobAction, enqueueBenchmarkRunAction } from '../lib/actions';
+import {
+  cancelJobAction,
+  enqueueBenchmarkRunAction,
+  registerRepositoryAction,
+} from '../lib/actions';
 import { DatabaseNotInitializedError, requireDatabase } from '../lib/db';
 import { createTempDataDir, initialiseDatabase, resetCachedDatabase } from './support/data-dir';
 
@@ -265,5 +270,64 @@ describe('cancelJobAction', () => {
     await expect(cancelJobAction(form({}))).rejects.toThrow();
     await expect(cancelJobAction(form({ jobId: '' }))).rejects.toThrow();
     expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe('registerRepositoryAction', () => {
+  function jobCount(): number {
+    return Number(
+      (handle.sqlite.prepare('select count(*) as n from jobs').get() as { n: number }).n,
+    );
+  }
+
+  it('enqueues a registration job and shows its status on the Repositories page', async () => {
+    const url = await redirectOf(registerRepositoryAction(form({ path: ' ~/code/skills/ ' })));
+
+    const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+    expect(url).toBe(`/repositories?registration=${jobId}`);
+    expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
+    expect(await getRepositoryRegistration(handle.db, jobId)).toMatchObject({
+      status: 'pending',
+      path: '~/code/skills/',
+      result: null,
+    });
+  });
+
+  it('returns to the form with the entered path and a field error for invalid input', async () => {
+    const url = await redirectOf(registerRepositoryAction(form({ path: 'code/skills' })));
+
+    const params = new URL(url, 'http://localhost').searchParams;
+    expect(url.startsWith('/repositories?')).toBe(true);
+    expect(params.get('path')).toBe('code/skills');
+    expect(params.get('error')).toBe(
+      'Enter an absolute path, for example /home/you/project or ~/project.',
+    );
+    expect(jobCount()).toBe(0);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing field or a file upload without echoing it', async () => {
+    for (const data of [
+      form({}),
+      (() => {
+        const upload = new FormData();
+        upload.set('path', new File(['x'], 'path.txt'));
+        return upload;
+      })(),
+    ]) {
+      const params = new URL(await redirectOf(registerRepositoryAction(data)), 'http://localhost')
+        .searchParams;
+      expect(params.get('path')).toBe('');
+      expect(params.get('error')).toBeTruthy();
+    }
+    expect(jobCount()).toBe(0);
+  });
+
+  it('fails clearly when the database is not initialised', async () => {
+    resetCachedDatabase();
+    dataDir.remove();
+    await expect(registerRepositoryAction(form({ path: '/srv/skills' }))).rejects.toBeInstanceOf(
+      DatabaseNotInitializedError,
+    );
   });
 });
