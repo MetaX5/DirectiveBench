@@ -251,6 +251,38 @@ describe('discoverArtifacts edge cases', () => {
   });
 });
 
+describe('discoverArtifacts cancellation', () => {
+  it('throws the abort reason before walking when the signal is already aborted', async () => {
+    await write('AGENTS.md', '# Rules\n');
+    const controller = new AbortController();
+    controller.abort(new Error('shutdown'));
+    await expect(discoverArtifacts(root, { signal: controller.signal })).rejects.toThrow(
+      'shutdown',
+    );
+  });
+
+  it('checks the signal before each directory and each candidate', async () => {
+    await write('AGENTS.md', '# Rules\n');
+    await write('sub/CLAUDE.md', '# Rules\n');
+    let checks = 0;
+    // Two directories are listed (root, sub); the third check is the first candidate.
+    const signal = {
+      throwIfAborted: () => {
+        checks += 1;
+        if (checks === 3) throw new Error('cancelled');
+      },
+    } as AbortSignal;
+    await expect(discoverArtifacts(root, { signal })).rejects.toThrow('cancelled');
+    expect(checks).toBe(3);
+  });
+
+  it('completes normally with a signal that is never aborted', async () => {
+    await write('AGENTS.md', '# Rules\n');
+    const result = await discoverArtifacts(root, { signal: new AbortController().signal });
+    expect(result.artifacts).toHaveLength(1);
+  });
+});
+
 describe('discoverArtifacts limits', () => {
   it('uses the SPEC-102 FR-102-16 defaults', () => {
     expect(DISCOVERY_LIMITS).toEqual({

@@ -74,6 +74,11 @@ export interface DiscoveryResult {
 export interface DiscoveryOptions {
   /** Overrides of {@link DISCOVERY_LIMITS}. */
   limits?: Partial<DiscoveryLimits>;
+  /**
+   * Aborts the scan: checked before each directory is listed and each candidate is read, so a
+   * cancelled or shut-down job stops walking a large tree. The abort reason is thrown.
+   */
+  signal?: AbortSignal;
 }
 
 interface TreeEntry {
@@ -98,9 +103,10 @@ function byCodeUnit(a: string, b: string): number {
 }
 
 /** Lists regular files and symlinks below `root` without following symlinks. */
-async function walk(root: string): Promise<TreeEntry[]> {
+async function walk(root: string, signal: AbortSignal | undefined): Promise<TreeEntry[]> {
   const entries: TreeEntry[] = [];
   async function visit(dir: string, prefix: string): Promise<void> {
+    signal?.throwIfAborted();
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) {
@@ -285,7 +291,7 @@ export async function discoverArtifacts(
     throw new Error(`Discovery root is not a directory: ${root}`);
   }
 
-  const entries = await walk(realRoot);
+  const entries = await walk(realRoot, options.signal);
   const candidates: { entry: TreeEntry; classification: ArtifactClassification }[] = [];
   for (const entry of entries) {
     const classification = classifyArtifactPath(entry.path);
@@ -306,6 +312,7 @@ export async function discoverArtifacts(
   const artifacts: DiscoveredArtifact[] = [];
   const errors: DiscoveryError[] = [];
   for (const { entry, classification } of candidates) {
+    options.signal?.throwIfAborted();
     try {
       if (entry.kind === 'symlink') {
         throw new ArtifactError('symlink', `${entry.path} is a symbolic link and is not followed`);
