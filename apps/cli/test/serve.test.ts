@@ -47,6 +47,19 @@ class FakeProcess extends EventEmitter implements ServeProcess {
   readonly stdout = { write: vi.fn() };
   readonly stderr = { write: vi.fn() };
   readonly exit = vi.fn();
+  /**
+   * Resolves once `serve()` registers its SIGINT handler, i.e. it is up and waiting for a signal.
+   * `newListener` fires just before the listener is added; the listener is in place by the time
+   * an awaiting test resumes.
+   */
+  readonly running = new Promise<void>((resolve) => {
+    const onListener = (event: string | symbol) => {
+      if (event !== 'SIGINT') return;
+      this.off('newListener', onListener);
+      resolve();
+    };
+    this.on('newListener', onListener);
+  });
   constructor(
     readonly env: NodeJS.ProcessEnv,
     platform: NodeJS.Platform = 'linux',
@@ -124,8 +137,10 @@ function startServe(
   return harness;
 }
 
+/** Waits for the readiness signal instead of polling, so a slow startup cannot time out early. */
 async function whenRunning(harness: Harness): Promise<void> {
-  await vi.waitFor(() => expect(harness.proc.listenerCount('SIGINT')).toBe(1));
+  await harness.proc.running;
+  expect(harness.proc.listenerCount('SIGINT')).toBe(1);
 }
 
 async function rejection(promise: Promise<unknown>): Promise<CliError> {
@@ -384,6 +399,25 @@ describe('serve', () => {
     );
     await whenRunning(harness);
     expect(harness.spawn).toHaveBeenCalledTimes(1);
+    harness.proc.emit('SIGINT');
+    expect(await harness.promise).toBe(ExitCode.Ok);
+  });
+
+  it('waits for a startup slower than the default vi.waitFor timeout (#38)', async () => {
+    // Longer than vi.waitFor's 1000 ms default, which the old polling helper relied on.
+    const SLOW_STARTUP_MS = 1_200;
+    const harness = startServe(
+      { port: String(await freePort()), open: false },
+      {
+        deps: {
+          checkPortFree: (host, port) =>
+            new Promise((resolve) => setTimeout(resolve, SLOW_STARTUP_MS)).then(() =>
+              checkPortFree(host, port),
+            ),
+        },
+      },
+    );
+    await whenRunning(harness);
     harness.proc.emit('SIGINT');
     expect(await harness.promise).toBe(ExitCode.Ok);
   });

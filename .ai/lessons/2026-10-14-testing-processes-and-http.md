@@ -25,6 +25,10 @@ Several false failures happened while verifying the server and CLI during the bo
   `__CF_USER_TEXT_ENCODING` to every process. And a developer's `PATH` can be close to 1 KB, so
   a test that prints the whole environment can exceed a small `maxOutputBytes` and be truncated.
   Both made the `runCommand` environment test fail on macOS while CI (Linux) stayed green.
+- (2026-10-19) `vi.waitFor` gives up after 1000 ms by default. Polling for "the process is
+  running" with it is a hidden timeout: `serve()` does real I/O (migrations, port check, runner
+  start) before it registers SIGINT, and the first, cold test in a file sometimes took longer on a
+  loaded CI runner while all packages ran in parallel (#38). Locally the same step took ~60 ms.
 
 ## How to apply
 
@@ -33,3 +37,7 @@ When a test inspects a child's environment, print variable names rather than val
 the OS-injected names explicitly with a comment (see `OS_INJECTED_ENV` in
 `packages/benchmark-engine/test/commands.test.ts`). Do not loosen the check to "contains": an
 unexpected inherited variable must still fail the test.
+To wait until a long-running command is ready, await a real signal (an event, a promise or a
+listener registration via `newListener`, as `FakeProcess.running` in
+`apps/cli/test/serve.test.ts` does) instead of polling `vi.waitFor` with its default timeout.
+If polling is unavoidable, pass a named, generous `timeout`.
