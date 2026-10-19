@@ -48,7 +48,7 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
       return {
         kind: 'active',
         path,
-        message: `Waiting for the runner to check ${path}. The runner is part of \`directivebench serve\`.`,
+        message: `Waiting for the runner to check ${path}. It runs inside directivebench serve.`,
       };
     case 'running':
       return { kind: 'active', path, message: `Checking ${path} (read-only)…` };

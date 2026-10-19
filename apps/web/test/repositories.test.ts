@@ -58,8 +58,7 @@ describe('describeRegistration', () => {
     expect(describeRegistration(registration({ status: 'pending' }))).toEqual({
       kind: 'active',
       path: '~/skills',
-      message:
-        'Waiting for the runner to check ~/skills. The runner is part of `directivebench serve`.',
+      message: 'Waiting for the runner to check ~/skills. It runs inside directivebench serve.',
     });
     expect(describeRegistration(registration({ status: 'running' }))).toEqual({
       kind: 'active',
