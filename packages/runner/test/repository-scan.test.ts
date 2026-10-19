@@ -615,6 +615,34 @@ describe('repository-scan jobs', () => {
     });
   });
 
+  it('stores an artifact whose frontmatter JSON cannot represent, with a warning, next to the others', async () => {
+    // YAML is not JSON: a self-referring alias parses to a circular object. Stored as is, it
+    // threw inside the one scan transaction and failed every scan of the repository.
+    const project = join(sources, 'project');
+    write(project, {
+      '.agents/skills/loop/SKILL.md':
+        '---\nname: loop\ndescription: Loops.\nmetadata: &a {self: *a}\n---\n# Loop\n',
+      'AGENTS.md': '# Project rules\n',
+    });
+    const repository = await register(project, 'local-directory');
+
+    const result = await scan(repository.id);
+    expect(result).toMatchObject({ ok: true, discovered: 2, createdArtifacts: 2, errorCount: 0 });
+    const occurrences = storedOccurrences();
+    expect(occurrences.map((o) => o.path)).toEqual(['.agents/skills/loop', 'AGENTS.md']);
+    expect(occurrences[0]?.parsedMetadata).toMatchObject({
+      frontmatter: {},
+      warnings: expect.arrayContaining([
+        'Invalid frontmatter: frontmatter cannot be stored as JSON: it contains an alias that refers to itself',
+      ]) as unknown,
+    });
+    expect(occurrences[1]?.parsedMetadata).toMatchObject({ warnings: [] });
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({
+      syncStatus: 'ok',
+      syncError: null,
+    });
+  });
+
   it('stores nothing when the runner shuts down while the results wait behind another transaction', async () => {
     const project = join(sources, 'project');
     write(project, { 'AGENTS.md': '# Project rules\n' });
