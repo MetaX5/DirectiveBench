@@ -35,7 +35,11 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): D
 
   const db = drizzle(
     async (query, params, method) => {
-      await waitForForeignTransaction(sqlite);
+      // The check and the statement run in the same synchronous step: an `await` between them
+      // would let a queued `withTransaction` begin first, and the statement would join it.
+      for (let open = foreignTransaction(sqlite); open; open = foreignTransaction(sqlite)) {
+        await open;
+      }
       const statement = sqlite.prepare(query);
       const values = params as SQLInputValue[];
       if (method === 'run') {
@@ -97,44 +101,64 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-/** Resolves when the transaction currently open on a connection ends (commit or rollback). */
-const activeTransactions = new WeakMap<DatabaseSync, Promise<void>>();
+/** The transaction a `withTransaction` call has open on a connection, and when it ends. */
+interface OpenTransaction {
+  /** Resolves when the transaction ends (commit or rollback). */
+  ended: Promise<void>;
+}
 
-/** The connection whose `withTransaction` callback the current async context belongs to. */
-const transactionScope = new AsyncLocalStorage<DatabaseSync>();
+const openTransactions = new WeakMap<DatabaseSync, OpenTransaction>();
+
+/**
+ * The `withTransaction` call the current async context belongs to. Identifying the call rather
+ * than the connection means a continuation that outlives its transaction (a callback that was not
+ * awaited) is treated as outside code, not as part of the next transaction on the connection.
+ */
+const transactionScope = new AsyncLocalStorage<OpenTransaction>();
 
 /**
  * The connection is shared by concurrent jobs (SPEC-114 runner lanes) and the Drizzle proxy is
  * asynchronous, so a statement from outside a running `withTransaction` could otherwise execute
- * inside it and be committed or rolled back with someone else's work. Such a statement waits until
- * the transaction ends. Statements of the transaction's own callback run immediately; a
- * transaction opened outside `withTransaction` (raw `BEGIN`) is not waited for.
+ * inside it and be committed or rolled back with someone else's work. Returns the end of such a
+ * foreign transaction to wait for, or `undefined` when the statement may run now: no transaction
+ * is open, the statement belongs to the open transaction's callback, or the transaction was opened
+ * outside `withTransaction` (raw `BEGIN`, not waited for).
+ *
+ * Synchronous on purpose: the caller must run its statement in the same step as a check that
+ * returned `undefined`, with no `await` in between.
  */
-async function waitForForeignTransaction(sqlite: DatabaseSync): Promise<void> {
-  while (sqlite.isTransaction && transactionScope.getStore() !== sqlite) {
-    const active = activeTransactions.get(sqlite);
-    if (!active) return;
-    await active;
-  }
+function foreignTransaction(sqlite: DatabaseSync): Promise<void> | undefined {
+  if (!sqlite.isTransaction) return undefined;
+  const open = openTransactions.get(sqlite);
+  if (!open || transactionScope.getStore() === open) return undefined;
+  return open.ended;
 }
 
 /**
  * Runs `fn` inside an IMMEDIATE transaction. Transactions on the same connection are serialised
  * because the Drizzle proxy API is asynchronous while the connection is shared, and statements
  * issued outside `fn` meanwhile wait for the transaction to end. Callers must not await unrelated
- * I/O inside the callback.
+ * I/O inside the callback. Calls cannot be nested: `withTransaction` on the same connection from
+ * inside `fn` would wait for the transaction it runs in, so it is rejected instead of deadlocking.
  */
 export async function withTransaction<T>(
   handle: DatabaseHandle,
   fn: (db: Database) => Promise<T>,
 ): Promise<T> {
+  const current = openTransactions.get(handle.sqlite);
+  if (current && transactionScope.getStore() === current) {
+    throw new Error(
+      "withTransaction cannot be nested: run the inner statements on the callback's db instead",
+    );
+  }
   const previous = transactionQueues.get(handle.sqlite) ?? Promise.resolve();
   const run = previous
     .catch(() => undefined)
-    .then(() =>
-      transactionScope.run(handle.sqlite, async () => {
-        const ended = deferred();
-        activeTransactions.set(handle.sqlite, ended.promise);
+    .then(() => {
+      const ended = deferred();
+      const open: OpenTransaction = { ended: ended.promise };
+      return transactionScope.run(open, async () => {
+        openTransactions.set(handle.sqlite, open);
         try {
           handle.sqlite.exec('BEGIN IMMEDIATE');
           const result = await fn(handle.db);
@@ -144,11 +168,11 @@ export async function withTransaction<T>(
           if (handle.sqlite.isTransaction) handle.sqlite.exec('ROLLBACK');
           throw error;
         } finally {
-          activeTransactions.delete(handle.sqlite);
+          openTransactions.delete(handle.sqlite);
           ended.resolve();
         }
-      }),
-    );
+      });
+    });
   transactionQueues.set(handle.sqlite, run);
   return run;
 }
