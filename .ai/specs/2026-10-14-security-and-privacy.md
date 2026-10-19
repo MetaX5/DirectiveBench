@@ -3,7 +3,7 @@ id: SPEC-007
 title: Security and Privacy
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-19
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-008, SPEC-009, SPEC-011, SPEC-104, SPEC-105, SPEC-107, SPEC-110, SPEC-112, SPEC-115, SPEC-203, SPEC-204, SPEC-205]
 ---
@@ -67,6 +67,7 @@ flowchart LR
 | Server action origin checks | Next.js server actions compare `Origin` with `Host` (framework default; `serverActions.allowedOrigins` is not configured). There are no mutating route handlers yet. |
 | argv-only commands | `spawn(argv[0], argv.slice(1), { shell: false })`; no string commands. |
 | Env allowlist | Commands receive only `PATH`, `LANG`, `LC_ALL`, `TZ` (plus `SystemRoot`, `PATHEXT`, `COMSPEC` on Windows), `HOME`/`USERPROFILE`/`TMPDIR`/`TEMP`/`TMP` set to a per-run temp dir, `CI=true` and `NO_COLOR=1` (`buildCommandEnv`). No other variable — in particular no secret — is forwarded. |
+| Git environment for repository inspection | Repository registration ([SPEC-104](2026-10-14-repository-management.md) FR-104-12) runs git with its own allowlist: absolute `PATH` entries only (git itself is located on them and spawned by absolute path, never resolved against the repository), `HOME`/`USERPROFILE`/`XDG_CONFIG_HOME` (the user's global git config, e.g. `safe.directory`), `SystemRoot`, plus `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_LFS_SKIP_SMUDGE=1`, `GIT_NO_LAZY_FETCH=1`, `LC_ALL=C`; hooks and fsmonitor are disabled with `-c`. Unlike benchmark commands, `HOME` is the real one, because git never runs repository code under these settings. |
 | Timeouts & output limits | Per-command timeout; on timeout/cancel the process group receives `SIGTERM`, then `SIGKILL` after a 5 s grace period; output truncated to `maxOutputBytes`, then redacted. |
 | Execution approval | Commands run only if `benchmark_suite_versions.execution_approved_at` is set; checked by the web app before enqueueing and again by the engine before running. Bundled examples are approved at import with `execution_approval_source = 'bundled-example'`. User approval UX is planned. |
 | Symlink & traversal rejection | Fixture and overlay snapshotting rejects symlinks and escaping paths. |
