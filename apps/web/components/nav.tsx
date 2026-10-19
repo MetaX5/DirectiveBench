@@ -30,7 +30,7 @@ const sections: { title: string; items: NavItem[] }[] = [
     title: 'Registry',
     items: [
       { href: '/', label: 'Dashboard', icon: Gauge },
-      { href: '/repositories', label: 'Repositories', icon: FolderGit2, planned: true },
+      { href: '/repositories', label: 'Repositories', icon: FolderGit2 },
       { href: '/artifacts', label: 'Artifacts', icon: Boxes },
       { href: '/categories', label: 'Categories', icon: Tags },
     ],
