@@ -117,10 +117,11 @@ relative, missing, file, unreadable paths).
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm verify:pack`: all exit 0
   ("Packaging verification passed").
-- `pnpm test`: exit 0, 100% statements/branches/functions/lines in every package — cli 75,
-  agent-adapters 34, benchmark-engine 110, core 124, database 76, web 76, runner 57 tests.
-  The new runner test files were run 5 times in a row without a failure.
-- `pnpm test:e2e` (port 4417): 22 passed, including the 5 new tests in `e2e/repositories.spec.ts`.
+- `pnpm test`: exit 0, 100% statements/branches/functions/lines in every package — after the
+  review fixes: cli 75, agent-adapters 34, benchmark-engine 110, core 125, database 76, web 78,
+  runner 66 tests. The runner test files were run 3–5 times in a row without a failure.
+- `pnpm test:e2e`: 22 passed (port 4417 before the review, port 4418 after the review fixes),
+  including the 5 new tests in `e2e/repositories.spec.ts`.
 - Real app: built CLI, `init` + `serve --port 4431` on a temporary data directory, driven with
   headless Chromium. Registered a nested path with trailing slash inside a new git repo on branch
   `develop` → `my-skills`, Local Git, top level, `develop`; a plain folder → Local directory, `—`;
@@ -135,6 +136,20 @@ relative, missing, file, unreadable paths).
   "Waiting for the runner" — by design, not exercised).
 
 ## Problems and deviations
+
+- Review (own `om-code-review` pass and an independent reviewer subagent) found, all fixed in this
+  PR with regression tests:
+  - BLOCKER: a bare `git` spawned with the repository as `cwd` could run a `git` committed in the
+    repository (empty/`.` `PATH` entries; Windows looks in the cwd first). Git is now located on
+    absolute `PATH` entries and spawned by absolute path; relative entries are removed — `10fcc70`.
+  - MAJOR: `core.worktree` could make `--show-cdup` point at `/`; the top level must now be the
+    nearest directory holding a `.git` entry — `10fcc70`.
+  - MINOR: broken `.git` file treated as a plain directory; redacted branch stored; raw `ZodError`
+    shown; spawn errors reported as "git not installed"; 5 s kill grace on a timed-out git — `10fcc70`.
+    The field error was reflected from the URL — `701249c`; the echoed path was uncapped —
+    `fcf1de0`; the rollback rehearsal did not remove the migration row — `feb6f22`; NFR-104-01 was
+    over-claimed (now partial, incl. queueing behind benchmarks) and the "hooks armed" claim was not
+    asserted (now asserted) — `9428d9d`.
 
 - SPEC-104 had no `## Implementation Plan`/`## Phasing` section, which `om-auto-implement-spec`
   requires, and its §9 data flow ran git in the web process (OQ-104-01 proposal), contradicting
@@ -159,6 +174,8 @@ relative, missing, file, unreadable paths).
 
 ## Progress
 
+PR: #42
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Specs
@@ -178,12 +195,12 @@ relative, missing, file, unreadable paths).
 
 ### Phase 4: Web
 
-- [ ] 4.1 registerRepositoryAction and registration status logic
-- [ ] 4.2 Repositories page with add form, status and list
-- [ ] 4.3 Playwright tests for the Repositories page
+- [x] 4.1 registerRepositoryAction and registration status logic — dac91e6
+- [x] 4.2 Repositories page with add form, status and list — 8af4224
+- [x] 4.3 Playwright tests for the Repositories page — 54b99bb
 
 ### Phase 5: Verification and wrap-up
 
-- [ ] 5.1 Full validation gate and e2e
-- [ ] 5.2 Real-app verification with a temporary data directory
-- [ ] 5.3 Implementation status, lessons and run log
+- [x] 5.1 Full validation gate and e2e — 9428d9d
+- [x] 5.2 Real-app verification with a temporary data directory — 26ad21d
+- [x] 5.3 Implementation status, lessons and run log — 9fa0934
