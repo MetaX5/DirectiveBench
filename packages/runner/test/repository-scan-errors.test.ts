@@ -30,9 +30,9 @@ vi.mock('@directivebench/database', async (importOriginal) => ({
 }));
 
 const { DiscoveryRootChangedError } = await vi.importActual<typeof core>('@directivebench/core');
-const { JobNoLongerRunningError, NotFoundError } = await vi.importActual<typeof database>(
-  '@directivebench/database',
-);
+const { ArtifactStoreError, JobNoLongerRunningError, NotFoundError } = await vi.importActual<
+  typeof database
+>('@directivebench/database');
 
 // The working directory exists, so the stat/access checks after `realpath` pass for real.
 const actualFs = await vi.importActual<typeof fsPromises>('node:fs/promises');
@@ -203,6 +203,37 @@ describe('scanLocalRepository with unexpected errors', () => {
     mocks.applyRepositoryScan.mockRejectedValueOnce(null);
     expect(await run()).toMatchObject({
       message: 'The scan failed: the results could not be stored (unknown error).',
+    });
+  });
+
+  it('names the artifact whose results could not be stored, without its contents', async () => {
+    const sqlite = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
+    mocks.applyRepositoryScan.mockRejectedValueOnce(
+      new ArtifactStoreError('.agents/skills/review', {
+        cause: new Error('Failed query: insert … params: secret file content', { cause: sqlite }),
+      }),
+    );
+    const stored = {
+      ok: false,
+      code: 'scan-failed',
+      message:
+        'The scan failed: the results for .agents/skills/review could not be stored (ERR_SQLITE_ERROR).',
+    };
+    expect(await run()).toEqual(stored);
+    expect(mocks.markRepositoryScanFailed).toHaveBeenLastCalledWith(
+      handle.db,
+      'repo_1',
+      stored.message,
+    );
+    // A serialisation error has no code; the path still says where it happened (redacted).
+    mocks.applyRepositoryScan.mockRejectedValueOnce(
+      new ArtifactStoreError('skills/ghp_abcdefghijklmnopqrstuvwxyz0123456789', {
+        cause: new TypeError('Converting circular structure to JSON'),
+      }),
+    );
+    expect(await run()).toMatchObject({
+      message:
+        'The scan failed: the results for skills/[REDACTED] could not be stored (unknown error).',
     });
   });
 

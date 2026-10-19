@@ -11,6 +11,7 @@ import {
   type DiscoveredArtifact,
 } from '@directivebench/core';
 import {
+  ArtifactStoreError,
   JobNoLongerRunningError,
   MAX_REPORTED_SCAN_ERRORS,
   MAX_SKIPPED_USER_LEVEL_FOLDERS,
@@ -276,11 +277,18 @@ export async function scanLocalRepository(
     if (error instanceof NotFoundError) {
       return failure('repository-not-found', 'The repository was removed during the scan.');
     }
-    // Not the message: a failed query's message carries its parameters, i.e. file contents.
-    const cause = (error as { cause?: unknown } | null)?.cause;
-    const code = errorCode(error) ?? errorCode(cause) ?? 'unknown error';
+    // Not the message: a failed query's message carries its parameters, i.e. file contents. The
+    // artifact's path is repository-relative, so it names no absolute location (redacted anyway).
+    const stored = error instanceof ArtifactStoreError ? error.cause : error;
+    const cause = (stored as { cause?: unknown } | null)?.cause;
+    const code = errorCode(stored) ?? errorCode(cause) ?? 'unknown error';
+    const what =
+      error instanceof ArtifactStoreError ? `the results for ${error.path}` : 'the results';
     return fail(
-      failure('scan-failed', `The scan failed: the results could not be stored (${code}).`),
+      failure(
+        'scan-failed',
+        redactSecrets(`The scan failed: ${what} could not be stored (${code}).`),
+      ),
     );
   }
   return {

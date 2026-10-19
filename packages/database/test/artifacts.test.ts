@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireNextJob,
   applyRepositoryScan,
+  ArtifactStoreError,
   assignBenchmarkSuite,
   enqueueRepositoryScanJob,
   JobNoLongerRunningError,
@@ -682,6 +683,29 @@ describe('applyRepositoryScan', () => {
         artifacts: [scanned('AGENTS.md', 'x')],
       }),
     ).rejects.toThrow(NotFoundError);
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('rolls back and names the artifact whose metadata cannot be stored', async () => {
+    // Core never hands over such metadata any more (parseFrontmatter rejects it); this guards
+    // whatever else could fail while one artifact is written.
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const broken = { ...scanned('docs/AGENTS.md', 'x'), parsedMetadata: { frontmatter: circular } };
+    const failure = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'ok'), broken],
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ArtifactStoreError);
+    expect(failure).toMatchObject({
+      path: 'docs/AGENTS.md',
+      message: 'A scanned artifact could not be stored',
+      cause: expect.any(TypeError),
+    });
     expect(await handle.db.$count(schema.artifacts)).toBe(0);
   });
 

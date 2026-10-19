@@ -324,6 +324,21 @@ export async function importArtifactVersion(
 /** One artifact a repository scan discovered (SPEC-102 `DiscoveredArtifact`, as stored). */
 export type ScannedArtifactInput = VersionContent;
 
+/**
+ * Storing one scanned artifact failed (the whole scan transaction is rolled back). `path` is the
+ * artifact's repository-relative occurrence path; the original error is the `cause`. The message
+ * never carries the cause's text, which can hold query parameters, i.e. file contents.
+ */
+export class ArtifactStoreError extends Error {
+  override name = 'ArtifactStoreError';
+  constructor(
+    readonly path: string,
+    options: { cause: unknown },
+  ) {
+    super('A scanned artifact could not be stored', options);
+  }
+}
+
 export interface RepositoryScanSummary {
   createdArtifacts: number;
   createdVersions: number;
@@ -351,7 +366,8 @@ export interface RepositoryScanApplication {
  * were not found again are left as they are (removed files are issue #21). The job is re-checked
  * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
  * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
- * meanwhile is a `NotFoundError`.
+ * meanwhile is a `NotFoundError`. A failure to store one artifact rolls everything back and is
+ * an `ArtifactStoreError` naming that artifact's path.
  */
 export async function applyRepositoryScan(
   handle: DatabaseHandle,
@@ -393,7 +409,9 @@ export async function applyRepositoryScan(
         },
         input,
         recomputed,
-      );
+      ).catch((error: unknown) => {
+        throw new ArtifactStoreError(input.path, { cause: error });
+      });
       summary.createdArtifacts += Number(result.createdArtifact);
       summary.createdVersions += Number(result.createdVersion);
     }
