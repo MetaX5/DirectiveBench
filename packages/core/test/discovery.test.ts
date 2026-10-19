@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DISCOVERY_LIMITS,
   discoverArtifacts,
+  DiscoveryLimitError,
   DiscoveryRootChangedError,
   SKIPPED_DIRECTORY_NAMES,
 } from '../src/discovery';
@@ -313,6 +314,78 @@ describe('discoverArtifacts robustness', () => {
     }
   });
 
+  it('reports a skill with an unreadable directory inside it as an error, not a partial artifact', async () => {
+    await write('skills/x/SKILL.md', SKILL);
+    await write('skills/x/notes.md', '# Notes\n');
+    await write('skills/x/references/a/api.md', '# API\n');
+    await write('skills/x/references/b/cli.md', '# CLI\n');
+    await write('skills/y/SKILL.md', SKILL);
+    await chmod(join(root, 'skills/x/references/b'), 0o000);
+    await chmod(join(root, 'skills/x/references/a'), 0o000);
+    try {
+      const result = await discoverArtifacts(root);
+      // The readable rest of x (SKILL.md, notes.md) is not returned as a smaller version of x.
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+        'skills/y/SKILL.md',
+      ]);
+      // One error for the skill, naming the first unreadable directory by path.
+      expect(result.errors).toEqual([
+        {
+          path: 'skills/x/SKILL.md',
+          code: 'read-failed',
+          message:
+            'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned',
+        },
+      ]);
+    } finally {
+      await chmod(join(root, 'skills/x/references/a'), 0o755);
+      await chmod(join(root, 'skills/x/references/b'), 0o755);
+    }
+  });
+
+  it('charges an unreadable directory to the deepest skill containing it only', async () => {
+    await write('skills/outer/SKILL.md', SKILL);
+    await write('skills/outer/inner/SKILL.md', SKILL);
+    await write('skills/outer/inner/locked/a.md', 'a');
+    await write('SKILL.md', SKILL);
+    await write('other/locked/b.md', 'b');
+    // With a root SKILL.md, every directory outside a deeper skill belongs to the root skill.
+    await chmod(join(root, 'skills/outer/inner/locked'), 0o000);
+    await chmod(join(root, 'other/locked'), 0o000);
+    try {
+      const result = await discoverArtifacts(root);
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+        'skills/outer/SKILL.md',
+      ]);
+      expect(result.errors.map((error) => [error.path, error.code])).toEqual([
+        ['SKILL.md', 'read-failed'],
+        ['skills/outer/inner/SKILL.md', 'read-failed'],
+      ]);
+    } finally {
+      await chmod(join(root, 'skills/outer/inner/locked'), 0o755);
+      await chmod(join(root, 'other/locked'), 0o755);
+    }
+  });
+
+  it('keeps an unreadable directory that may hold skills as an error of its own', async () => {
+    await write('.agents/skills/pdf/SKILL.md', SKILL);
+    await write('AGENTS.md', '# Rules\n');
+    await chmod(join(root, '.agents/skills'), 0o000);
+    try {
+      const result = await discoverArtifacts(root);
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual(['AGENTS.md']);
+      expect(result.errors).toEqual([
+        {
+          path: '.agents/skills',
+          code: 'read-failed',
+          message: 'Cannot read directory .agents/skills (EACCES); its files were not scanned',
+        },
+      ]);
+    } finally {
+      await chmod(join(root, '.agents/skills'), 0o755);
+    }
+  });
+
   it('sorts directory and artifact errors together by path', async () => {
     await write('a/AGENTS.md', '\0binary');
     await write('b/CLAUDE.md', '# Hidden\n');
@@ -391,6 +464,7 @@ describe('discoverArtifacts limits', () => {
       maxArtifactBytes: 20 * 1024 * 1024,
       maxFilesPerArtifact: 500,
       maxCandidatesPerScan: 10_000,
+      maxScanBytes: 256 * 1024 * 1024,
     });
   });
 
@@ -455,8 +529,39 @@ describe('discoverArtifacts limits', () => {
   it('aborts the scan when there are more candidates than the per-scan limit', async () => {
     await write('AGENTS.md', '# a');
     await write('CLAUDE.md', '# c');
-    await expect(discoverArtifacts(root, { limits: { maxCandidatesPerScan: 1 } })).rejects.toThrow(
+    const aborted = discoverArtifacts(root, { limits: { maxCandidatesPerScan: 1 } });
+    await expect(aborted).rejects.toThrow(
       'Discovery aborted: 2 candidate artifacts exceed the limit of 1 per scan',
     );
+    await expect(aborted).rejects.toMatchObject({
+      name: 'DiscoveryLimitError',
+      limit: 'maxCandidatesPerScan',
+    });
+  });
+
+  it('aborts the scan once the kept content would exceed the per-scan byte limit', async () => {
+    await write('AGENTS.md', '# a\n'); // 4 bytes
+    await write('b/AGENTS.md', '\0binary'); // an error: not kept, not counted
+    await write('skills/x/SKILL.md', SKILL);
+    await write('skills/x/notes.md', '12345'); // 5 bytes
+    const skillBytes = Buffer.byteLength(SKILL) + 5;
+    const all = await discoverArtifacts(root, { limits: { maxScanBytes: 4 + skillBytes } });
+    expect(all.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+      'AGENTS.md',
+      'skills/x/SKILL.md',
+    ]);
+    expect(all.errors.map((error) => error.path)).toEqual(['b/AGENTS.md']);
+
+    // One byte less: the skill's last file would cross the limit, so the scan is aborted.
+    const aborted = discoverArtifacts(root, { limits: { maxScanBytes: 3 + skillBytes } });
+    await expect(aborted).rejects.toThrow(DiscoveryLimitError);
+    await expect(aborted).rejects.toMatchObject({
+      limit: 'maxScanBytes',
+      message: `Discovery aborted: the discovered artifacts exceed the limit of ${3 + skillBytes} bytes per scan`,
+    });
+    // A single-file artifact is checked before it is kept, too.
+    await expect(discoverArtifacts(root, { limits: { maxScanBytes: 3 } })).rejects.toMatchObject({
+      limit: 'maxScanBytes',
+    });
   });
 });

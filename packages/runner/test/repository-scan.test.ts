@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as core from '@directivebench/core';
 import { discoverArtifacts } from '@directivebench/core';
 import {
   enqueueRepositoryScanJob,
@@ -46,6 +47,19 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
+// The scan's discovery stays real; a test can lower its limits (FR-102-16).
+const discoveryHooks = vi.hoisted(() => ({
+  limits: undefined as Partial<core.DiscoveryLimits> | undefined,
+}));
+vi.mock('@directivebench/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof core>();
+  return {
+    ...actual,
+    discoverArtifacts: (root: string, options?: core.DiscoveryOptions) =>
+      actual.discoverArtifacts(root, { ...options, limits: discoveryHooks.limits }),
+  };
+});
+
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 
 /** Fixture git commands ignore the developer's system and global config. */
@@ -70,6 +84,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  discoveryHooks.limits = undefined;
   vi.unstubAllEnvs();
   handle.close();
   rmSync(dataDir, { recursive: true, force: true });
@@ -474,6 +489,94 @@ describe('repository-scan jobs', () => {
       ok: false,
       code: 'permission-denied',
       message: 'DirectiveBench cannot access the registered directory.',
+    });
+  });
+
+  it('keeps the stored version of a skill it cannot read completely, or not at all', async () => {
+    const repo = buildRepository();
+    const repository = await register(repo, 'local-git');
+    await scan(repository.id);
+    const skillOccurrence = () =>
+      handle.sqlite
+        .prepare("select * from artifact_occurrences where path = '.agents/skills/review'")
+        .get();
+    const before = skillOccurrence();
+    expect(await handle.db.$count(schema.artifactVersions)).toBe(4);
+
+    // Changed content in a directory the scan cannot list: reading the rest of the skill would
+    // store a new, incomplete version and make it the latest.
+    writeFileSync(join(repo, '.agents/skills/review/templates/report.md'), '# Report v2\n');
+    writeFileSync(join(repo, 'AGENTS.md'), '# Repository rules v2\n');
+    const templates = join(repo, '.agents/skills/review/templates');
+    chmodSync(templates, 0o000);
+    try {
+      expect(await scan(repository.id)).toMatchObject({
+        ok: true,
+        discovered: 3,
+        createdVersions: 1,
+        errors: expect.arrayContaining([
+          {
+            path: '.agents/skills/review/SKILL.md',
+            code: 'read-failed',
+            message:
+              'Skill .agents/skills/review/SKILL.md is incomplete and was not discovered. Cannot read directory .agents/skills/review/templates (EACCES); its files were not scanned',
+          },
+        ]),
+      });
+    } finally {
+      chmodSync(templates, 0o755);
+    }
+    // Same version, same status, same last-seen time: a read failure is neither a change nor a
+    // removal.
+    expect(skillOccurrence()).toEqual(before);
+    expect(await handle.db.$count(schema.artifactVersions)).toBe(5);
+
+    // The directory that holds the skills cannot be listed: the skill is not even a candidate.
+    const skills = join(repo, '.agents/skills');
+    chmodSync(skills, 0o000);
+    try {
+      expect(await scan(repository.id)).toMatchObject({
+        ok: true,
+        discovered: 3,
+        createdVersions: 0,
+        errors: expect.arrayContaining([
+          {
+            path: '.agents/skills',
+            code: 'read-failed',
+            message: 'Cannot read directory .agents/skills (EACCES); its files were not scanned',
+          },
+        ]),
+      });
+    } finally {
+      chmodSync(skills, 0o755);
+    }
+    expect(skillOccurrence()).toEqual(before);
+    expect(await handle.db.$count(schema.artifactVersions)).toBe(5);
+
+    // Readable again: the change becomes the next version.
+    expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 1 });
+    expect(skillOccurrence()).not.toEqual(before);
+  });
+
+  it('aborts a scan whose content exceeds the per-scan byte limit and writes nothing', async () => {
+    const project = join(sources, 'project');
+    write(project, { 'AGENTS.md': '# Project rules\n', 'CLAUDE.md': '# Claude\n' });
+    const repository = await register(project, 'local-directory');
+    discoveryHooks.limits = { maxScanBytes: 20 };
+
+    const result = await scan(repository.id);
+    expect(result).toEqual({
+      ok: false,
+      code: 'scan-failed',
+      message:
+        'The scan failed: Discovery aborted: the discovered artifacts exceed the limit of 20 bytes per scan',
+    });
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+    expect(await handle.db.$count(schema.artifactOccurrences)).toBe(0);
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({
+      syncStatus: 'error',
+      syncError: result.ok ? null : result.message,
+      lastSyncAt: null,
     });
   });
 

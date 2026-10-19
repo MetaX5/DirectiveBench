@@ -1,6 +1,6 @@
 import { isUtf8 } from 'node:buffer';
-import { constants } from 'node:fs';
-import { open, readdir, realpath, stat } from 'node:fs/promises';
+import { constants, type BigIntStats } from 'node:fs';
+import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, posix, resolve } from 'node:path';
 import {
   classifyArtifactPath,
@@ -24,6 +24,15 @@ export const DISCOVERY_LIMITS = {
   maxFilesPerArtifact: 500,
   /** Most candidate artifacts in one scan; exceeding it aborts the scan. */
   maxCandidatesPerScan: 10_000,
+  /**
+   * Most bytes of file content one scan keeps for its artifacts; exceeding it aborts the scan.
+   * `discoverArtifacts` returns every artifact's contents at once, so without this cap the other
+   * limits allow 10 000 × 20 MiB. 256 MiB is far above real agent-instruction repositories
+   * (typically well under 10 MiB of text) and room for a dozen maximal skills, while the runner,
+   * which holds the contents again as strings and query parameters when it stores them, stays
+   * within the memory of an ordinary development machine.
+   */
+  maxScanBytes: 256 * 1024 * 1024,
 } as const;
 
 export type DiscoveryLimits = { [K in keyof typeof DISCOVERY_LIMITS]: number };
@@ -57,7 +66,11 @@ export interface DiscoveredArtifact {
 }
 
 export interface DiscoveryError {
-  /** Primary file (or, for `read-failed`, an unreadable directory) relative to the scanned root. */
+  /**
+   * Primary file relative to the scanned root — or, for a `read-failed` directory that lies outside
+   * every skill, that directory. A skill with an unreadable or changed directory inside it is an
+   * error for its `SKILL.md`: an artifact is discovered completely or not at all.
+   */
   path: string;
   code: 'too-large' | 'binary-primary' | 'symlink' | 'too-many-files' | 'read-failed';
   message: string;
@@ -105,10 +118,34 @@ export class DiscoveryRootChangedError extends Error {
   override name = 'DiscoveryRootChangedError';
 }
 
+/** A per-scan limit of {@link DISCOVERY_LIMITS} was exceeded: the whole scan is aborted. */
+export class DiscoveryLimitError extends Error {
+  override name = 'DiscoveryLimitError';
+  constructor(
+    readonly limit: 'maxCandidatesPerScan' | 'maxScanBytes',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 interface TreeEntry {
   /** POSIX path relative to the scanned root. */
   path: string;
   kind: 'file' | 'symlink';
+}
+
+/** A directory the walk could not list, or that changed during the scan. */
+interface UnreadableDirectory {
+  /** POSIX path relative to the scanned root. */
+  path: string;
+  message: string;
+}
+
+/** What belongs to one skill: the entries and unreadable directories it is the deepest skill of. */
+interface SkillContents {
+  owned: TreeEntry[];
+  unreadable: UnreadableDirectory[];
 }
 
 /** Thrown inside one artifact's processing; becomes a {@link DiscoveryError}. */
@@ -128,16 +165,16 @@ function byCodeUnit(a: string, b: string): number {
 
 /**
  * Lists regular files and symlinks below `root` without following symlinks. A subdirectory that
- * cannot be listed (permissions, removed during the walk) becomes a `read-failed` error and the
- * walk continues; an unreadable root is rethrown.
+ * cannot be listed (permissions, removed during the walk) or that changed during the scan is
+ * returned in `unreadable` and the walk continues; an unreadable root is rethrown.
  */
 async function walk(
   root: string,
   signal: AbortSignal | undefined,
   skipDirectories: ReadonlySet<string>,
-): Promise<{ entries: TreeEntry[]; unreadable: DiscoveryError[]; skipped: string[] }> {
+): Promise<{ entries: TreeEntry[]; unreadable: UnreadableDirectory[]; skipped: string[] }> {
   const entries: TreeEntry[] = [];
-  const unreadable: DiscoveryError[] = [];
+  const unreadable: UnreadableDirectory[] = [];
   const skipped: string[] = [];
   async function visit(dir: string, prefix: string): Promise<void> {
     signal?.throwIfAborted();
@@ -148,7 +185,6 @@ async function walk(
       if (prefix !== '' && (await realpath(dir)) !== dir) {
         unreadable.push({
           path: prefix,
-          code: 'read-failed',
           message: `Directory ${prefix} changed during the scan and no longer resolves inside the scanned root; its files were not scanned`,
         });
         return;
@@ -158,7 +194,6 @@ async function walk(
       if (prefix === '') throw error;
       unreadable.push({
         path: prefix,
-        code: 'read-failed',
         message: `Cannot read directory ${prefix} (${errorCode(error)}); its files were not scanned`,
       });
       return;
@@ -180,7 +215,7 @@ async function walk(
   await visit(root, '');
   return {
     entries: entries.sort((a, b) => byCodeUnit(a.path, b.path)),
-    unreadable,
+    unreadable: unreadable.sort((a, b) => byCodeUnit(a.path, b.path)),
     skipped: skipped.sort(byCodeUnit),
   };
 }
@@ -191,31 +226,66 @@ function errorCode(error: unknown): string {
   return typeof code === 'string' ? code : 'unknown error';
 }
 
-/** The entries of the deepest skill directory containing `path`, or `undefined` when none does. */
+/**
+ * The contents of the deepest skill whose directory is `dir` or one of its ancestors, or
+ * `undefined` when none is. `dir` is relative to the scanned root (`''` or `.` for the root).
+ */
 function owningSkill(
-  path: string,
-  skills: ReadonlyMap<string, TreeEntry[]>,
-): TreeEntry[] | undefined {
-  let dir = posix.dirname(path);
+  dir: string,
+  skills: ReadonlyMap<string, SkillContents>,
+): SkillContents | undefined {
+  let key = dir === '.' ? '' : dir;
   for (;;) {
-    const key = dir === '.' ? '' : dir;
-    const owned = skills.get(key);
-    if (owned) return owned;
+    const contents = skills.get(key);
+    if (contents) return contents;
     if (key === '') return undefined;
-    dir = posix.dirname(dir);
+    const parent = posix.dirname(key);
+    key = parent === '.' ? '' : parent;
   }
 }
 
 /**
- * Returns the file's bytes, or its size when it is larger than `maxBytes` (nothing is read then).
- * The file is opened with `O_NOFOLLOW`, so a file replaced by a symlink after the walk is not
- * followed, and only the size reported by `fstat` is read, so a file growing during the scan
- * cannot exhaust memory.
+ * The opened handle and the path are the same regular file: the path is not a symlink (Node reports
+ * Windows junctions as symlinks too), both are on the same device with the same, known inode.
  */
-async function readUpTo(abs: string, maxBytes: number): Promise<Buffer | number> {
-  const handle = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW);
+function isSameRegularFile(opened: BigIntStats, path: BigIntStats): boolean {
+  return (
+    opened.isFile() &&
+    !path.isSymbolicLink() &&
+    opened.ino !== 0n &&
+    opened.ino === path.ino &&
+    opened.dev === path.dev
+  );
+}
+
+/**
+ * Returns the file's bytes, or its size when it is larger than `maxBytes` (nothing is read then).
+ * Only the size reported by `fstat` is read, so a file growing during the scan cannot exhaust
+ * memory.
+ *
+ * The walk saw a regular file at `abs`, but it may have been replaced since by a symlink (on
+ * Windows also a junction or another reparse point). `O_NOFOLLOW` makes the open itself refuse a
+ * symlink in the last path component where the platform has the flag (Linux, macOS); Windows has
+ * none (`constants.O_NOFOLLOW` is undefined) and its open follows the link. So, on every platform,
+ * the handle (`fstat`) and the path (`lstat`, after the open) must be the same regular file —
+ * neither a symlink nor a different device and inode — or the read fails (FR-102-18). A link
+ * swapped in before the open makes the handle refer to the link's target: `lstat` then reports a
+ * symlink, and if the attacker swaps the original file back right after the open, the path is a
+ * regular file again but the handle still refers to the target, which the inode comparison
+ * catches. A file system that reports no inode (`ino` 0) cannot prove identity, so the read fails
+ * closed there. A swap after the `lstat` cannot redirect the read: the handle is already open.
+ */
+async function readUpTo(abs: string, relPath: string, maxBytes: number): Promise<Buffer | number> {
+  const handle = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    const { size } = await handle.stat();
+    const opened = await handle.stat({ bigint: true });
+    if (!isSameRegularFile(opened, await lstat(abs, { bigint: true }))) {
+      throw new ArtifactError(
+        'read-failed',
+        `Cannot read ${relPath}: it changed during the scan and is no longer the regular file the walk found`,
+      );
+    }
+    const size = Number(opened.size);
     if (size > maxBytes) return size;
     const buffer = Buffer.alloc(size);
     const { bytesRead } = await handle.read(buffer, 0, size, 0);
@@ -226,9 +296,9 @@ async function readUpTo(abs: string, maxBytes: number): Promise<Buffer | number>
 }
 
 /**
- * Reads a file found by the walk. Its directory must still resolve to itself: `O_NOFOLLOW` covers
- * only the last path component, so a directory swapped for a symlink after the walk would
- * otherwise redirect the read outside the root (FR-102-18).
+ * Reads a file found by the walk. Its directory must still resolve to itself: the identity check
+ * of {@link readUpTo} covers only the last path component, so a directory swapped for a symlink
+ * after the walk would otherwise redirect the read outside the root (FR-102-18).
  */
 async function readBounded(abs: string, relPath: string, maxBytes: number): Promise<Buffer> {
   let result: Buffer | number;
@@ -240,7 +310,7 @@ async function readBounded(abs: string, relPath: string, maxBytes: number): Prom
         `Cannot read ${relPath}: its directory changed during the scan and no longer resolves inside the scanned root`,
       );
     }
-    result = await readUpTo(abs, maxBytes);
+    result = await readUpTo(abs, relPath, maxBytes);
   } catch (error) {
     if (error instanceof ArtifactError) throw error;
     throw new ArtifactError('read-failed', `Cannot read ${relPath} (${errorCode(error)})`);
@@ -278,13 +348,33 @@ async function readPrimary(
   return bytes;
 }
 
+/** Throws once keeping `adding` more bytes would exceed `maxScanBytes` (FR-102-16). */
+function checkScanBytes(retained: number, adding: number, limits: DiscoveryLimits): void {
+  if (retained + adding > limits.maxScanBytes) {
+    throw new DiscoveryLimitError(
+      'maxScanBytes',
+      `Discovery aborted: the discovered artifacts exceed the limit of ${limits.maxScanBytes} bytes per scan`,
+    );
+  }
+}
+
 async function discoverSkill(
   root: string,
   primaryPath: string,
   skillDir: string,
-  owned: readonly TreeEntry[],
+  contents: SkillContents,
   limits: DiscoveryLimits,
+  retained: number,
 ): Promise<DiscoveredArtifact> {
+  // A skill missing part of its tree would be stored as a new, incomplete version (FR-102-12).
+  const [unreadable] = contents.unreadable;
+  if (unreadable) {
+    throw new ArtifactError(
+      'read-failed',
+      `Skill ${primaryPath} is incomplete and was not discovered. ${unreadable.message}`,
+    );
+  }
+  const owned = contents.owned;
   const regularFiles = owned.filter((entry) => entry.kind === 'file');
   if (regularFiles.length > limits.maxFilesPerArtifact) {
     throw new ArtifactError(
@@ -325,6 +415,7 @@ async function discoverSkill(
         `Skill ${primaryPath} is larger than the limit of ${limits.maxArtifactBytes} bytes`,
       );
     }
+    checkScanBytes(retained, total, limits);
     files.push(toFile(path, bytes));
   }
   return {
@@ -343,8 +434,10 @@ async function discoverSingleFile(
   root: string,
   primaryPath: string,
   limits: DiscoveryLimits,
+  retained: number,
 ): Promise<DiscoveredArtifact> {
   const bytes = await readPrimary(root, primaryPath, limits);
+  checkScanBytes(retained, bytes.length, limits);
   const parsed = parseArtifactFile(primaryPath, bytes.toString('utf8'));
   const primaryFile = posix.basename(primaryPath);
   const files = [toFile(primaryFile, bytes)];
@@ -368,10 +461,15 @@ async function discoverSingleFile(
  * `.git/`, `node_modules/` and the `skipDirectories` are skipped. Before a directory is listed or
  * a file is opened, its directory must still resolve to itself, so a directory swapped for a
  * symlink during the scan is a `read-failed` error, not a way out of the root; a swap landing
- * between that check and the read itself is not detected (Node has no `openat`). A limit
- * violation or unreadable file is a
- * {@link DiscoveryError} for that artifact only; more than `maxCandidatesPerScan` candidates
- * aborts the scan. The result is deterministic for the same tree.
+ * between that check and the read itself is not detected (Node has no `openat`). An opened file
+ * must still be the regular file the walk found, on every platform (see `readUpTo`).
+ *
+ * An artifact is discovered completely or not at all: a limit violation, an unreadable file, or an
+ * unreadable or changed directory inside a skill is a {@link DiscoveryError} for that artifact
+ * only, and the artifact is not returned. An unreadable directory outside every skill is an error
+ * of its own. More than `maxCandidatesPerScan` candidates, or more than `maxScanBytes` of content
+ * kept, aborts the scan with a {@link DiscoveryLimitError}. The result is deterministic for the
+ * same tree.
  */
 export async function discoverArtifacts(
   root: string,
@@ -397,41 +495,58 @@ export async function discoverArtifacts(
   const candidates: {
     entry: TreeEntry;
     classification: ArtifactClassification;
-    /** Skills: every file and symlink whose deepest enclosing skill this is (FR-102-12). */
-    owned: TreeEntry[];
+    /** Skills: what this is the deepest enclosing skill of (FR-102-12). */
+    contents: SkillContents;
   }[] = [];
   for (const entry of entries) {
     const classification = classifyArtifactPath(entry.path);
-    if (classification) candidates.push({ entry, classification, owned: [] });
+    if (classification) {
+      candidates.push({ entry, classification, contents: { owned: [], unreadable: [] } });
+    }
   }
   if (candidates.length > limits.maxCandidatesPerScan) {
-    throw new Error(
+    throw new DiscoveryLimitError(
+      'maxCandidatesPerScan',
       `Discovery aborted: ${candidates.length} candidate artifacts exceed the limit of ${limits.maxCandidatesPerScan} per scan`,
     );
   }
 
-  const skills = new Map<string, TreeEntry[]>();
-  for (const { classification, owned } of candidates) {
-    if (classification.rootDir !== null) skills.set(classification.rootDir, owned);
+  const skills = new Map<string, SkillContents>();
+  for (const { classification, contents } of candidates) {
+    if (classification.rootDir !== null) skills.set(classification.rootDir, contents);
   }
   for (const entry of entries) {
-    const owner = owningSkill(entry.path, skills);
-    if (owner !== undefined) owner.push(entry);
+    owningSkill(posix.dirname(entry.path), skills)?.owned.push(entry);
+  }
+  const errors: DiscoveryError[] = [];
+  for (const dir of unreadable) {
+    const owner = owningSkill(dir.path, skills);
+    if (owner) owner.unreadable.push(dir);
+    else errors.push({ path: dir.path, code: 'read-failed', message: dir.message });
   }
 
   const artifacts: DiscoveredArtifact[] = [];
-  const errors: DiscoveryError[] = [...unreadable];
-  for (const { entry, classification, owned } of candidates) {
+  /** Bytes of file content held by `artifacts` (FR-102-16 `maxScanBytes`). */
+  let retained = 0;
+  for (const { entry, classification, contents } of candidates) {
     options.signal?.throwIfAborted();
     try {
       if (entry.kind === 'symlink') {
         throw new ArtifactError('symlink', `${entry.path} is a symbolic link and is not followed`);
       }
-      artifacts.push(
+      const artifact =
         classification.rootDir === null
-          ? await discoverSingleFile(realRoot, entry.path, limits)
-          : await discoverSkill(realRoot, entry.path, classification.rootDir, owned, limits),
-      );
+          ? await discoverSingleFile(realRoot, entry.path, limits, retained)
+          : await discoverSkill(
+              realRoot,
+              entry.path,
+              classification.rootDir,
+              contents,
+              limits,
+              retained,
+            );
+      artifacts.push(artifact);
+      retained += artifact.files.reduce((sum, file) => sum + file.size, 0);
     } catch (error) {
       if (!(error instanceof ArtifactError)) throw error;
       errors.push({ path: entry.path, code: error.code, message: error.message });

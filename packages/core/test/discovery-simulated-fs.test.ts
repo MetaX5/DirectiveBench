@@ -1,4 +1,12 @@
-import { renameSync, symlinkSync, type Dirent } from 'node:fs';
+import {
+  mkdirSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  type BigIntStats,
+  type Dirent,
+} from 'node:fs';
+import type * as Fs from 'node:fs';
 import type * as FsPromises from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,8 +18,10 @@ import { buildDiscoveryFixture } from './discovery-fixture';
 
 /**
  * Behaviour the real filesystem does not produce on demand: directory listings in an order other
- * than the one the platform returns, a file that cannot be opened, and an unexpected parser
- * failure. Hooks wrap the real modules; without a hook every call goes to the real implementation.
+ * than the one the platform returns, a file that cannot be opened or that is swapped around its
+ * open, file systems without inodes, a platform without `O_NOFOLLOW` (Windows), and an unexpected
+ * parser failure. Hooks wrap the real modules; without a hook every call goes to the real
+ * implementation.
  */
 const hooks = vi.hoisted(() => ({
   reorderEntries: null as ((entries: Dirent[]) => Dirent[]) | null,
@@ -21,7 +31,24 @@ const hooks = vi.hoisted(() => ({
   afterList: null as ((path: string) => void) | null,
   /** Runs before a primary file is parsed, i.e. after the walk and before supporting reads. */
   beforeParse: null as ((relPath: string) => void) | null,
+  /** Run right before and right after a file is opened for reading. */
+  beforeOpen: null as ((path: string) => void) | null,
+  afterOpen: null as ((path: string) => void) | null,
+  /** Changes the stats of an opened handle (`fstat`) or of a path (`lstat`). */
+  patchStats: null as ((stats: BigIntStats, source: 'handle' | 'path') => void) | null,
+  /** Simulates Windows, where `constants.O_NOFOLLOW` is undefined. */
+  noNoFollow: false,
 }));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof Fs>();
+  // `fs.constants` is frozen, so a copy carries the switchable flag.
+  const constants = { ...actual.constants };
+  Object.defineProperty(constants, 'O_NOFOLLOW', {
+    get: () => (hooks.noNoFollow ? undefined : actual.constants.O_NOFOLLOW),
+  });
+  return { ...actual, constants };
+});
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
@@ -35,7 +62,21 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     open: async (path: string, flags: number) => {
       const failure = hooks.failOpen?.(path);
       if (failure) throw failure;
-      return actual.open(path, flags);
+      hooks.beforeOpen?.(path);
+      const handle = await actual.open(path, flags);
+      hooks.afterOpen?.(path);
+      const stat = handle.stat.bind(handle);
+      handle.stat = (async (options: { bigint: true }) => {
+        const stats = await stat(options);
+        hooks.patchStats?.(stats, 'handle');
+        return stats;
+      }) as typeof handle.stat;
+      return handle;
+    },
+    lstat: async (path: string, options: { bigint: true }) => {
+      const stats = await actual.lstat(path, options);
+      hooks.patchStats?.(stats, 'path');
+      return stats;
     },
   };
 });
@@ -67,6 +108,10 @@ afterEach(async () => {
   hooks.failParse = false;
   hooks.afterList = null;
   hooks.beforeParse = null;
+  hooks.beforeOpen = null;
+  hooks.afterOpen = null;
+  hooks.patchStats = null;
+  hooks.noNoFollow = false;
   await rm(root, { recursive: true, force: true });
   await rm(outside, { recursive: true, force: true });
 });
@@ -166,6 +211,129 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
       code: 'read-failed',
       message:
         'Cannot read .agents/skills/validate/references/api.md: its directory changed during the scan and no longer resolves inside the scanned root',
+    });
+  });
+
+  it('reports a skill whose inner directory was swapped during the walk as one error', async () => {
+    hooks.afterList = (path) => {
+      if (path.endsWith('/.agents/skills/validate')) {
+        hooks.afterList = null;
+        swapForSymlink(join(path, 'references'), join(outside, 'references-moved'));
+      }
+    };
+    const result = await discoverArtifacts(root);
+    expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(
+      '.agents/skills/validate/SKILL.md',
+    );
+    expect(result.errors).toContainEqual({
+      path: '.agents/skills/validate/SKILL.md',
+      code: 'read-failed',
+      message:
+        'Skill .agents/skills/validate/SKILL.md is incomplete and was not discovered. Directory .agents/skills/validate/references changed during the scan and no longer resolves inside the scanned root; its files were not scanned',
+    });
+    expect(result.errors.map((error) => error.path)).not.toContain(
+      '.agents/skills/validate/references',
+    );
+  });
+
+  const API = '.agents/skills/validate/references/api.md';
+  const swapped = {
+    path: '.agents/skills/validate/SKILL.md',
+    code: 'read-failed',
+    message: `Cannot read ${API}: it changed during the scan and is no longer the regular file the walk found`,
+  };
+
+  /** Runs `swap` once, for the open of `api.md`, at the given moment. */
+  function onApiOpen(moment: 'beforeOpen' | 'afterOpen', swap: (abs: string) => void): void {
+    hooks[moment] = (path) => {
+      if (path.endsWith(API)) {
+        hooks[moment] = null;
+        swap(path);
+      }
+    };
+  }
+
+  it('rejects a file that became a symlink between the open and the identity check', async () => {
+    onApiOpen('afterOpen', (abs) => {
+      renameSync(abs, join(outside, 'api-moved.md'));
+      symlinkSync(join(outside, 'secret.md'), abs);
+    });
+    const result = await discoverArtifacts(root);
+    expect(result.errors).toContainEqual(swapped);
+    expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(swapped.path);
+  });
+
+  it('rejects a file that became a directory before the open', async () => {
+    onApiOpen('beforeOpen', (abs) => {
+      renameSync(abs, join(outside, 'api-moved.md'));
+      mkdirSync(abs);
+    });
+    expect((await discoverArtifacts(root)).errors).toContainEqual(swapped);
+  });
+
+  it('rejects a handle whose device or inode differs from the path, or whose inode is unknown', async () => {
+    const patches: ((stats: BigIntStats, source: 'handle' | 'path') => void)[] = [
+      (stats, source) => {
+        if (source === 'handle') stats.ino += 1n;
+      },
+      (stats, source) => {
+        if (source === 'handle') stats.dev += 1n;
+      },
+      // A file system without inodes reports 0 for both: identity cannot be proven.
+      (stats) => {
+        stats.ino = 0n;
+      },
+    ];
+    for (const patch of patches) {
+      hooks.patchStats = patch;
+      const result = await discoverArtifacts(root);
+      // Every read fails closed, so not even a single-file artifact is discovered.
+      expect(result.artifacts).toEqual([]);
+      expect(result.errors).toContainEqual({
+        path: 'AGENTS.md',
+        code: 'read-failed',
+        message:
+          'Cannot read AGENTS.md: it changed during the scan and is no longer the regular file the walk found',
+      });
+    }
+  });
+
+  describe('on a platform without O_NOFOLLOW (Windows)', () => {
+    beforeEach(() => {
+      hooks.noNoFollow = true;
+    });
+
+    it('reads unchanged files as usual', async () => {
+      hooks.noNoFollow = false;
+      const baseline = await discoverArtifacts(root);
+      hooks.noNoFollow = true;
+      expect(await discoverArtifacts(root)).toEqual(baseline);
+    });
+
+    it('rejects a file swapped for a symlink before the open, which the open follows', async () => {
+      onApiOpen('beforeOpen', (abs) => {
+        renameSync(abs, join(outside, 'api-moved.md'));
+        symlinkSync(join(outside, 'secret.md'), abs);
+      });
+      const result = await discoverArtifacts(root);
+      expect(result.errors).toContainEqual(swapped);
+      expect(JSON.stringify(result.artifacts)).not.toContain('outside the root');
+    });
+
+    it('rejects a symlink swapped back to the original file right after the open', async () => {
+      // The path is a regular file again when it is checked, but the handle is the link target.
+      const stash = join(outside, 'api-stash.md');
+      onApiOpen('beforeOpen', (abs) => {
+        renameSync(abs, stash);
+        symlinkSync(join(outside, 'secret.md'), abs);
+        onApiOpen('afterOpen', () => {
+          unlinkSync(abs);
+          renameSync(stash, abs);
+        });
+      });
+      const result = await discoverArtifacts(root);
+      expect(result.errors).toContainEqual(swapped);
+      expect(JSON.stringify(result.artifacts)).not.toContain('outside the root');
     });
   });
 

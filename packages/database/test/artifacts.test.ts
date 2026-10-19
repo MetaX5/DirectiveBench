@@ -549,6 +549,39 @@ describe('applyRepositoryScan', () => {
     expect(await handle.db.$count(schema.artifacts)).toBe(1);
   });
 
+  it('leaves an occurrence the scan did not deliver exactly as it was (a discovery error)', async () => {
+    // A skill with an unreadable directory, or one below an unreadable `.agents/skills`, is not
+    // in `artifacts`: no new version, not marked missing, not deleted, not even touched.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const apply = (artifacts: ScannedArtifactInput[]) =>
+      applyRepositoryScan(handle, { repositoryId: repository.id, jobId, artifacts });
+    await apply([scanned('AGENTS.md', 'v1'), scanned('packages/api/AGENTS.md', 'v1', 'api')]);
+    const before = await handle.db.select().from(schema.artifactOccurrences);
+    const versionsBefore = await handle.db.select().from(schema.artifactVersions);
+    const artifactsBefore = await handle.db.select().from(schema.artifacts);
+
+    vi.setSystemTime(new Date('2026-04-02T00:00:00.000Z'));
+    expect(await apply([scanned('AGENTS.md', 'v2')])).toEqual({
+      createdArtifacts: 0,
+      createdVersions: 1,
+    });
+    const after = await handle.db.select().from(schema.artifactOccurrences);
+    const untouched = before.find((o) => o.path === 'packages/api/AGENTS.md');
+    expect(after.find((o) => o.path === 'packages/api/AGENTS.md')).toEqual(untouched);
+    expect(untouched).toMatchObject({ status: 'active', lastSeenAt: '2026-04-01T00:00:00.000Z' });
+    const apiArtifact = artifactsBefore.find((a) => a.id === untouched?.artifactId);
+    expect(await handle.db.select().from(schema.artifacts)).toContainEqual(apiArtifact);
+    const versionsAfter = await handle.db.select().from(schema.artifactVersions);
+    expect(versionsAfter.filter((v) => v.artifactId === untouched?.artifactId)).toEqual(
+      versionsBefore.filter((v) => v.artifactId === untouched?.artifactId),
+    );
+    // The delivered artifact moved on, so the scan itself did run.
+    expect(after.find((o) => o.path === 'AGENTS.md')?.lastSeenAt).toBe('2026-04-02T00:00:00.000Z');
+  });
+
   it('never merges same-named artifacts by slug, in either order with bundled examples', async () => {
     const handle = getHandle();
     // Bundled example first, then a repository skill with the same name.
