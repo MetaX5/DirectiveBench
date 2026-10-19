@@ -1,6 +1,7 @@
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { classifyArtifactPath, parseArtifactFile, slugify, type ParsedArtifact } from './artifacts';
+import { isBinary } from './discovery';
 import { hashManifest, sha256 } from './hash';
 import type { ArtifactFile } from './models';
 
@@ -35,7 +36,7 @@ async function collectFiles(root: string, warnings: string[]): Promise<ArtifactF
         await walk(abs, rel);
       } else if (entry.isFile()) {
         const bytes = await readFile(abs);
-        if (bytes.includes(0)) {
+        if (isBinary(bytes)) {
           warnings.push(`Skipped binary file ${rel}`);
           continue;
         }
@@ -62,6 +63,8 @@ async function collectFiles(root: string, warnings: string[]): Promise<ArtifactF
  * Reads one artifact from a local source. `relPath` is the primary file relative to
  * `sourceRoot` (e.g. `.claude/skills/pdf/SKILL.md`). For skills the whole skill directory
  * (supporting scripts, references, assets) becomes part of the version; nothing is executed.
+ * Binary files (NUL byte or invalid UTF-8, SPEC-102 FR-102-17) are skipped with a warning; a
+ * binary primary file is an error. Stored content therefore re-encodes to the source bytes.
  */
 export async function loadLocalArtifact(
   sourceRoot: string,
@@ -72,7 +75,9 @@ export async function loadLocalArtifact(
   const primaryAbs = join(sourceRoot, relPath);
   const info = await lstat(primaryAbs);
   if (!info.isFile()) throw new Error(`Artifact file is not a regular file: ${relPath}`);
-  const content = await readFile(primaryAbs, 'utf8');
+  const bytes = await readFile(primaryAbs);
+  if (isBinary(bytes)) throw new Error(`Artifact file is not a UTF-8 text file: ${relPath}`);
+  const content = bytes.toString('utf8');
   const parsed = parseArtifactFile(relPath, content);
   const warnings = [...parsed.warnings];
 
@@ -86,9 +91,7 @@ export async function loadLocalArtifact(
   } else {
     path = relPath.replaceAll('\\', '/');
     primaryFile = posix.basename(path);
-    files = [
-      { path: primaryFile, sha256: sha256(content), size: Buffer.byteLength(content), content },
-    ];
+    files = [{ path: primaryFile, sha256: sha256(bytes), size: bytes.length, content }];
   }
 
   return {

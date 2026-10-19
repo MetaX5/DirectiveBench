@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ARTIFACT_LIMITS, loadLocalArtifact } from '../src/artifact-loader';
+import { BINARY_SNIFF_BYTES } from '../src/discovery';
 import { hashManifest, sha256 } from '../src/hash';
 
 let root: string;
@@ -91,6 +92,41 @@ describe('loadLocalArtifact', () => {
       'Skipped binary file image.png',
       'Skipped symbolic link link.txt',
     ]);
+  });
+
+  it('skips non-UTF-8 supporting files so stored content re-encodes to the source bytes', async () => {
+    await write('skills/x/SKILL.md', SKILL);
+    // Latin-1 "café": no NUL byte, but not valid UTF-8 (SPEC-102 FR-102-17).
+    await write('skills/x/latin1.txt', new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+    await write('skills/x/bom-crlf.md', '\uFEFFZażółć\r\n');
+    // Only the first BINARY_SNIFF_BYTES are checked for NUL, as in the repository walker.
+    await write('skills/x/late-nul.txt', `${'a'.repeat(BINARY_SNIFF_BYTES)}\0`);
+
+    const loaded = await loadLocalArtifact(root, 'skills/x/SKILL.md');
+
+    expect(loaded.files.map((file) => file.path)).toEqual([
+      'SKILL.md',
+      'bom-crlf.md',
+      'late-nul.txt',
+    ]);
+    expect(loaded.warnings).toEqual(['Skipped binary file latin1.txt']);
+    // What importArtifactVersion recomputes from content equals the hash of the raw bytes.
+    for (const file of loaded.files) {
+      const bytes = Buffer.from(file.content, 'utf8');
+      expect(sha256(bytes)).toBe(file.sha256);
+      expect(bytes.length).toBe(file.size);
+    }
+  });
+
+  it('rejects a primary file that is not UTF-8 text', async () => {
+    await write('skills/x/SKILL.md', new Uint8Array([0x23, 0x20, 0xe9, 0x0a]));
+    await expect(loadLocalArtifact(root, 'skills/x/SKILL.md')).rejects.toThrow(
+      'Artifact file is not a UTF-8 text file: skills/x/SKILL.md',
+    );
+    await write('AGENTS.md', new Uint8Array([0x23, 0x00, 0x0a]));
+    await expect(loadLocalArtifact(root, 'AGENTS.md')).rejects.toThrow(
+      'Artifact file is not a UTF-8 text file: AGENTS.md',
+    );
   });
 
   it('ignores entries that are neither files, directories nor links', async () => {
