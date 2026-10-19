@@ -234,7 +234,8 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-const JOB_TYPES = ['benchmark-run', 'repository-registration'] as const;
+export const JOB_TYPES = ['benchmark-run', 'repository-registration', 'repository-scan'] as const;
+export type JobType = (typeof JOB_TYPES)[number];
 
 /** Persistent local job queue (no Redis). */
 export const jobs = sqliteTable(

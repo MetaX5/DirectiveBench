@@ -4,6 +4,7 @@ import {
   expandHomePath,
   isFilesystemRoot,
   pathRelation,
+  repositoryLocationSchema,
   repositoryPathInputSchema,
 } from '../src/repository-path';
 
@@ -79,5 +80,24 @@ describe('pathRelation', () => {
     expect(pathRelation('/srv/repository', '/srv/repo')).toBe('unrelated');
     expect(pathRelation('/srv/repo', '/srv/repository')).toBe('unrelated');
     expect(pathRelation('/srv/repo/..cache', '/srv/repo')).toBe('inside');
+  });
+});
+
+describe('repositoryLocationSchema', () => {
+  it('accepts canonical absolute locations verbatim, without trimming', () => {
+    expect(repositoryLocationSchema.parse('/srv/repo ')).toBe('/srv/repo ');
+    expect(repositoryLocationSchema.parse('/')).toBe('/');
+  });
+
+  it('rejects empty, relative, home-relative, NUL-containing and overlong values', () => {
+    for (const value of [
+      '',
+      'srv/repo',
+      '~/repo',
+      '/srv/\0repo',
+      `/${'a'.repeat(MAX_REPOSITORY_PATH_LENGTH)}`,
+    ]) {
+      expect(repositoryLocationSchema.safeParse(value).success).toBe(false);
+    }
   });
 });

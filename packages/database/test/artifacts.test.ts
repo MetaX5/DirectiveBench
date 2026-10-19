@@ -2,7 +2,16 @@ import { hashManifest, sha256 } from '@directivebench/core';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  acquireNextJob,
+  applyRepositoryScan,
   assignBenchmarkSuite,
+  enqueueRepositoryScanJob,
+  JobNoLongerRunningError,
+  markRepositoryScanFailed,
+  NotFoundError,
+  requestJobCancellation,
+  type DatabaseHandle,
+  type ScannedArtifactInput,
   assignCategoriesBySlug,
   finishBenchmarkRun,
   getArtifactBundle,
@@ -14,7 +23,7 @@ import {
   seedPredefinedCategories,
   upsertRepository,
 } from '../src/index';
-import { artifactInput, seedRun, seedTargets } from './support/fixtures';
+import { artifactInput, registerLocal, seedRun, seedTargets } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -188,13 +197,13 @@ describe('importArtifactVersion', () => {
     await importArtifactVersion(
       handle,
       artifactInput('v1', {
-        repository: { provider: 'local-git', name: 'fixtures', location: '/srv/mirror' },
+        repository: { provider: 'local-directory', name: 'fixtures', location: '/srv/mirror' },
       }),
     );
     await importArtifactVersion(
       handle,
       artifactInput('v1', {
-        repository: { provider: 'github', name: 'upstream', location: 'https://x/y.git' },
+        repository: { provider: 'local-directory', name: 'upstream', location: '/srv/upstream' },
       }),
     );
 
@@ -211,6 +220,25 @@ describe('importArtifactVersion', () => {
 
     await importArtifactVersion(handle, artifactInput('v1'));
     expect((await listArtifacts(handle.db))[0]?.sources).toEqual(['fixtures']);
+  });
+
+  it('matches slugs only among artifacts of the same provider', async () => {
+    const handle = getHandle();
+    const bundled = { provider: 'bundled-examples' as const, name: 'Bundled', location: '/a' };
+    const first = await importArtifactVersion(handle, artifactInput('v1'));
+    const other = await importArtifactVersion(handle, artifactInput('v1', { repository: bundled }));
+    // A later install moves the examples: the same provider still finds the artifact by slug.
+    const moved = await importArtifactVersion(
+      handle,
+      artifactInput('v2', { repository: { ...bundled, location: '/b' } }),
+    );
+    expect(other.artifactId).not.toBe(first.artifactId);
+    expect(moved).toMatchObject({ artifactId: other.artifactId, version: 2 });
+    const slugs = await handle.db
+      .select({ slug: schema.artifacts.slug })
+      .from(schema.artifacts)
+      .orderBy(schema.artifacts.slug);
+    expect(slugs.map((row) => row.slug)).toEqual(['validate', 'validate-2']);
   });
 });
 
@@ -415,5 +443,233 @@ describe('getLatestArtifactVersionId', () => {
     expect(await getLatestArtifactVersionId(handle.db, v1.artifactId)).toBe(v1.versionId);
     const v2 = await importArtifactVersion(handle, artifactInput('v2'));
     expect(await getLatestArtifactVersionId(handle.db, v1.artifactId)).toBe(v2.versionId);
+  });
+});
+
+function scanned(path: string, content: string, name = 'AGENTS.md'): ScannedArtifactInput {
+  return {
+    path,
+    name,
+    type: 'instruction',
+    description: null,
+    format: 'agents-md',
+    primaryFile: 'AGENTS.md',
+    files: [{ path: 'AGENTS.md', content }],
+    parsedMetadata: { warnings: [] },
+  };
+}
+
+/** Registers a repository and returns it with a running scan job, as the runner would hold it. */
+async function runningScan(handle: DatabaseHandle, location: string) {
+  const { repository } = await registerLocal(handle, { location });
+  const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+  await acquireNextJob(handle.db, 'runner');
+  return { repository, jobId: job.id };
+}
+
+async function slugsByPath(handle: DatabaseHandle): Promise<string[][]> {
+  const rows = await handle.db
+    .select({
+      repository: schema.repositories.name,
+      path: schema.artifactOccurrences.path,
+      slug: schema.artifacts.slug,
+    })
+    .from(schema.artifactOccurrences)
+    .innerJoin(schema.artifacts, eq(schema.artifactOccurrences.artifactId, schema.artifacts.id))
+    .innerJoin(
+      schema.repositories,
+      eq(schema.artifactOccurrences.repositoryId, schema.repositories.id),
+    )
+    .orderBy(schema.repositories.name, schema.artifactOccurrences.path);
+  return rows.map((row) => [row.repository, row.path, row.slug]);
+}
+
+describe('applyRepositoryScan', () => {
+  it('stores discovered artifacts with recomputed hashes and records a successful scan', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const input = scanned('AGENTS.md', '# Rules\n');
+    // A caller-supplied hash and size are ignored (SPEC-103 FR-103-04).
+    input.files = [{ path: 'AGENTS.md', content: '# Rules\n', sha256: 'f'.repeat(64), size: 1 }];
+    const summary = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      artifacts: [input, scanned('packages/api/AGENTS.md', '# API\n', 'packages/api/AGENTS.md')],
+    });
+    expect(summary).toEqual({ createdArtifacts: 2, createdVersions: 2 });
+
+    const versions = await handle.db.select().from(schema.artifactVersions);
+    const root = versions.find((version) => version.sourcePath === 'AGENTS.md');
+    const bytes = Buffer.from('# Rules\n');
+    expect(root).toMatchObject({
+      sourceRepositoryId: repository.id,
+      sourceCommitSha: null,
+      files: [
+        { path: 'AGENTS.md', sha256: sha256(bytes), size: bytes.length, content: '# Rules\n' },
+      ],
+      contentHash: hashManifest([{ path: 'AGENTS.md', sha256: sha256(bytes) }]),
+    });
+    expect(await slugsByPath(handle)).toEqual([
+      ['repo', 'AGENTS.md', 'agents-md'],
+      ['repo', 'packages/api/AGENTS.md', 'packages-api-agents-md'],
+    ]);
+    const occurrences = await handle.db.select().from(schema.artifactOccurrences);
+    expect(occurrences.every((o) => o.commitSha === null && o.status === 'active')).toBe(true);
+    const stored = await handle.db
+      .select()
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored).toMatchObject({
+      lastSyncAt: '2026-04-01T00:00:00.000Z',
+      syncStatus: 'ok',
+      syncError: null,
+      lastCommitSha: null,
+    });
+  });
+
+  it('keeps the artifact of an occurrence and versions only changed content', async () => {
+    const handle = getHandle();
+    const first = await runningScan(handle, '/srv/skills');
+    const apply = (content: string, jobId: string) =>
+      applyRepositoryScan(handle, {
+        repositoryId: first.repository.id,
+        jobId,
+        artifacts: [scanned('AGENTS.md', content)],
+      });
+    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 1, createdVersions: 1 });
+    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 0 });
+    expect(await apply('v2', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 1 });
+    const versions = await handle.db
+      .select({ version: schema.artifactVersions.version })
+      .from(schema.artifactVersions);
+    expect(versions.map((v) => v.version).sort()).toEqual([1, 2]);
+    expect(await handle.db.$count(schema.artifacts)).toBe(1);
+  });
+
+  it('never merges same-named artifacts by slug, in either order with bundled examples', async () => {
+    const handle = getHandle();
+    // Bundled example first, then a repository skill with the same name.
+    await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/a' },
+        slug: 'agents-md',
+        name: 'AGENTS.md',
+        type: 'instruction',
+      }),
+    );
+    const a = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: a.repository.id,
+      jobId: a.jobId,
+      artifacts: [scanned('AGENTS.md', 'same'), scanned('docs/x/AGENTS.md', 'same')],
+    });
+    const b = await runningScan(handle, '/srv/b');
+    await applyRepositoryScan(handle, {
+      repositoryId: b.repository.id,
+      jobId: b.jobId,
+      artifacts: [scanned('AGENTS.md', 'same')],
+    });
+    // A later bundled import (moved install) still finds its own artifact, not a scanned one.
+    const moved = await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/b' },
+        slug: 'agents-md',
+        name: 'AGENTS.md',
+        type: 'instruction',
+      }),
+    );
+    expect(moved.createdVersion).toBe(false);
+
+    expect(await slugsByPath(handle)).toEqual([
+      ['Bundled', 'skills/validate', 'agents-md'],
+      ['Bundled', 'skills/validate', 'agents-md'],
+      ['repo', 'AGENTS.md', 'agents-md-2'],
+      ['repo', 'AGENTS.md', 'agents-md-4'],
+      ['repo', 'docs/x/AGENTS.md', 'agents-md-3'],
+    ]);
+  });
+
+  it('assigns a scanned skill a free slug when a bundled skill already uses it, and vice versa', async () => {
+    const handle = getHandle();
+    const scan = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: scan.repository.id,
+      jobId: scan.jobId,
+      artifacts: [{ ...scanned('skills/validate', 'mine', 'validate'), type: 'skill' }],
+    });
+    // Scan first, bundled example second: the bundled import must not attach to the scanned skill.
+    const bundled = await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/a' },
+      }),
+    );
+    expect(bundled.version).toBe(1);
+    expect(await slugsByPath(handle)).toEqual([
+      ['Bundled', 'skills/validate', 'validate-2'],
+      ['repo', 'skills/validate', 'validate'],
+    ]);
+  });
+
+  it('writes nothing when the job was cancelled or finished meanwhile, or the repository is gone', async () => {
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const application = {
+      repositoryId: repository.id,
+      jobId,
+      artifacts: [scanned('AGENTS.md', 'x')],
+    };
+    await requestJobCancellation(handle.db, jobId);
+    await expect(applyRepositoryScan(handle, application)).rejects.toThrow(JobNoLongerRunningError);
+    await expect(
+      applyRepositoryScan(handle, { ...application, jobId: 'job_missing' }),
+    ).rejects.toThrow(JobNoLongerRunningError);
+
+    const other = await runningScan(handle, '/srv/other');
+    handle.sqlite.exec(`delete from repositories where id = '${other.repository.id}'`);
+    await expect(
+      applyRepositoryScan(handle, {
+        repositoryId: other.repository.id,
+        jobId: other.jobId,
+        artifacts: [scanned('AGENTS.md', 'x')],
+      }),
+    ).rejects.toThrow(NotFoundError);
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('rejects content that is not well-formed Unicode before writing anything', async () => {
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    await expect(
+      applyRepositoryScan(handle, {
+        repositoryId: repository.id,
+        jobId,
+        artifacts: [scanned('AGENTS.md', 'bad \ud800')],
+      }),
+    ).rejects.toThrow(/not well-formed Unicode/);
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+});
+
+describe('markRepositoryScanFailed', () => {
+  it('records the error without touching artifacts or the last successful scan time', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    await markRepositoryScanFailed(handle.db, repository.id, 'No directory exists at this path.');
+    const stored = await handle.db
+      .select()
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored).toMatchObject({
+      syncStatus: 'error',
+      syncError: 'No directory exists at this path.',
+      lastSyncAt: null,
+    });
   });
 });
