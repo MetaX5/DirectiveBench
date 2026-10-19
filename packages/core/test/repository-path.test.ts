@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_REPOSITORY_PATH_LENGTH,
   expandHomePath,
+  isFilesystemRoot,
+  pathRelation,
   repositoryPathInputSchema,
 } from '../src/repository-path';
 
@@ -53,5 +55,29 @@ describe('repositoryPathInputSchema', () => {
       `The path is longer than ${MAX_REPOSITORY_PATH_LENGTH} characters.`,
     );
     expect(repositoryPathInputSchema.safeParse(null).success).toBe(false);
+  });
+});
+
+describe('isFilesystemRoot', () => {
+  it('is true only for the filesystem root', () => {
+    expect(isFilesystemRoot('/')).toBe(true);
+    expect(isFilesystemRoot('/home')).toBe(false);
+    expect(isFilesystemRoot('/home/me')).toBe(false);
+  });
+});
+
+describe('pathRelation', () => {
+  it('tells same, inside, contains and unrelated paths apart', () => {
+    expect(pathRelation('/srv/repo', '/srv/repo')).toBe('same');
+    expect(pathRelation('/srv/repo/skills', '/srv/repo')).toBe('inside');
+    expect(pathRelation('/srv', '/srv/repo')).toBe('contains');
+    expect(pathRelation('/', '/srv/repo')).toBe('contains');
+    expect(pathRelation('/srv/other', '/srv/repo')).toBe('unrelated');
+  });
+
+  it('does not treat a shared name prefix or a name starting with .. as nesting', () => {
+    expect(pathRelation('/srv/repository', '/srv/repo')).toBe('unrelated');
+    expect(pathRelation('/srv/repo', '/srv/repository')).toBe('unrelated');
+    expect(pathRelation('/srv/repo/..cache', '/srv/repo')).toBe('inside');
   });
 });
