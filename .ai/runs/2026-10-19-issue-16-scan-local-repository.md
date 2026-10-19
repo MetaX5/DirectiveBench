@@ -112,20 +112,20 @@ identity (rule 1/4 only, tests for cross-repository and bundled-example collisio
 
 ### Phase 1: Core
 
-- [ ] 1.1 Path relation helpers (filesystem root, same/inside) in core
-- [ ] 1.2 Cancellation signal for discoverArtifacts
+- [x] 1.1 Path relation helpers (filesystem root, same/inside) in core — f9f09be
+- [x] 1.2 Cancellation signal for discoverArtifacts — 8876f60, d6da2f0
 
 ### Phase 2: Database
 
-- [ ] 2.1 Registration payload confirmation, root and confirmation results, atomic overlap check
-- [ ] 2.2 Typed job acquisition and repository-scan job type with enqueue dedupe and read model
-- [ ] 2.3 Shared version writer with location identity and applyRepositoryScan
+- [x] 2.1 Registration payload confirmation, root and confirmation results, atomic overlap check — 7c1f888
+- [x] 2.2 Typed job acquisition and repository-scan job type with enqueue dedupe and read model — 7c1f888
+- [x] 2.3 Shared version writer with location identity and applyRepositoryScan — 17c7e78, 7c1f888
 
 ### Phase 3: Runner
 
-- [ ] 3.1 Registration rejects the filesystem root and asks for confirmation
-- [ ] 3.2 scanLocalRepository job handler
-- [ ] 3.3 Short-job lane and repository-scan dispatch in LocalRunner
+- [x] 3.1 Registration rejects the filesystem root and asks for confirmation — ff65d91
+- [x] 3.2 scanLocalRepository job handler — ff65d91
+- [x] 3.3 Short-job lane and repository-scan dispatch in LocalRunner — ff65d91
 
 ### Phase 4: Web
 
