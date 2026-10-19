@@ -67,10 +67,9 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
   const raw = formData.get('path');
   const input = registerRepositorySchema.safeParse({ path: raw });
   if (!input.success) {
-    const params = new URLSearchParams({
-      path: typeof raw === 'string' ? raw : '',
-      error: input.error.issues.map((issue) => issue.message).join(' '),
-    });
+    // Only the entered path travels back; the page re-validates it to show the field error, so
+    // no free text from the URL is ever rendered as an error message.
+    const params = new URLSearchParams({ path: typeof raw === 'string' ? raw : '' });
     redirect(`/repositories?${params.toString()}`);
   }
   const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {

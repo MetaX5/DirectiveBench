@@ -22,6 +22,7 @@ import { getDatabase } from '@/lib/db';
 import {
   branchLabel,
   describeRegistration,
+  pathFieldError,
   providerLabel,
   type RegistrationNotice,
 } from '@/lib/repositories';
@@ -33,7 +34,7 @@ const PLANNED = 'Planned — not implemented: scanning, hosted URLs';
 export default async function RepositoriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ registration?: string; path?: string; error?: string }>;
+  searchParams: Promise<{ registration?: string; path?: string }>;
 }) {
   const handle = getDatabase();
   if (!handle)
@@ -48,8 +49,9 @@ export default async function RepositoriesPage({
     ? await getRepositoryRegistration(handle.db, params.registration)
     : null;
   let notice: RegistrationNotice | null = registration ? describeRegistration(registration) : null;
-  if (!notice && params.error) {
-    notice = { kind: 'fieldError', path: params.path ?? '', message: params.error };
+  const invalidPath = !notice && params.path !== undefined ? pathFieldError(params.path) : null;
+  if (invalidPath !== null) {
+    notice = { kind: 'fieldError', path: params.path ?? '', message: invalidPath };
   }
   const repositories = await listRepositories(handle.db);
   const checking = notice?.kind === 'active';

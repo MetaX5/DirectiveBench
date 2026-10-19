@@ -20,6 +20,8 @@ describe('expandHomePath', () => {
 });
 
 describe('repositoryPathInputSchema', () => {
+  const messages = (input: unknown) =>
+    repositoryPathInputSchema.safeParse(input).error?.issues.map((issue) => issue.message);
   const message = (input: unknown) =>
     repositoryPathInputSchema.safeParse(input).error?.issues[0]?.message;
 
@@ -35,6 +37,12 @@ describe('repositoryPathInputSchema', () => {
     expect(message('code/skills')).toBe(relative);
     expect(message('./skills')).toBe(relative);
     expect(message('~other/repo')).toBe(relative);
+  });
+
+  it('reports exactly one message per invalid path', () => {
+    expect(messages('')).toEqual(['Enter the path of a local directory.']);
+    expect(messages('rel\0ative')).toEqual(['The path contains a NUL character.']);
+    expect(messages(`r${'a'.repeat(MAX_REPOSITORY_PATH_LENGTH)}`)).toHaveLength(1);
   });
 
   it('rejects NUL characters, overlong paths and non-strings', () => {

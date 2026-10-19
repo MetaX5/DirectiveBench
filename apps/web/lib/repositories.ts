@@ -1,3 +1,4 @@
+import { repositoryPathInputSchema } from '@directivebench/core';
 import type { RepositoryRecord, RepositoryRegistration } from '@directivebench/database';
 
 export type RepositoryProvider = RepositoryRecord['provider'];
@@ -30,6 +31,12 @@ export function branchLabel(
 ): string | null {
   if (!BRANCHED_PROVIDERS.has(repository.provider)) return null;
   return repository.selectedBranch ?? repository.defaultBranch ?? 'not detected';
+}
+
+/** The field error for a path the action sent back (`?path=`), or null when it is valid. */
+export function pathFieldError(path: string): string | null {
+  const parsed = repositoryPathInputSchema.safeParse(path);
+  return parsed.success ? null : parsed.error.issues.map((issue) => issue.message).join(' ');
 }
 
 /**

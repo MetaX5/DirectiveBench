@@ -25,13 +25,16 @@ export function expandHomePath(path: string, homeDir: string): string {
 export const repositoryPathInputSchema = z
   .string()
   .trim()
-  .min(1, 'Enter the path of a local directory.')
-  .max(
-    MAX_REPOSITORY_PATH_LENGTH,
-    `The path is longer than ${MAX_REPOSITORY_PATH_LENGTH} characters.`,
-  )
-  .refine((path) => !path.includes('\0'), 'The path contains a NUL character.')
-  .refine(
-    (path) => isHomeRelative(path) || isAbsolute(path),
-    'Enter an absolute path, for example /home/you/project or ~/project.',
-  );
+  // `abort` stops at the first failed check, so the field shows exactly one message.
+  .min(1, { message: 'Enter the path of a local directory.', abort: true })
+  .max(MAX_REPOSITORY_PATH_LENGTH, {
+    message: `The path is longer than ${MAX_REPOSITORY_PATH_LENGTH} characters.`,
+    abort: true,
+  })
+  .refine((path) => !path.includes('\0'), {
+    message: 'The path contains a NUL character.',
+    abort: true,
+  })
+  .refine((path) => isHomeRelative(path) || isAbsolute(path), {
+    message: 'Enter an absolute path, for example /home/you/project or ~/project.',
+  });

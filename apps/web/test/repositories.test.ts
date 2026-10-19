@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { RepositoryRecord, RepositoryRegistration } from '@directivebench/database';
-import { branchLabel, describeRegistration, providerLabel } from '../lib/repositories';
+import {
+  branchLabel,
+  describeRegistration,
+  pathFieldError,
+  providerLabel,
+} from '../lib/repositories';
 
 const repository: RepositoryRecord = {
   id: 'repo_1',
@@ -50,6 +55,16 @@ describe('branchLabel', () => {
   it('has no branch for directories and bundled examples', () => {
     expect(branchLabel({ ...repository, provider: 'local-directory' })).toBeNull();
     expect(branchLabel({ ...repository, provider: 'bundled-examples' })).toBeNull();
+  });
+});
+
+describe('pathFieldError', () => {
+  it('re-validates the path sent back by the action', () => {
+    expect(pathFieldError('/srv/skills')).toBeNull();
+    expect(pathFieldError('relative')).toBe(
+      'Enter an absolute path, for example /home/you/project or ~/project.',
+    );
+    expect(pathFieldError('')).toBe('Enter the path of a local directory.');
   });
 });
 

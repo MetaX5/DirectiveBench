@@ -298,10 +298,8 @@ describe('registerRepositoryAction', () => {
 
     const params = new URL(url, 'http://localhost').searchParams;
     expect(url.startsWith('/repositories?')).toBe(true);
+    expect([...params.keys()]).toEqual(['path']);
     expect(params.get('path')).toBe('code/skills');
-    expect(params.get('error')).toBe(
-      'Enter an absolute path, for example /home/you/project or ~/project.',
-    );
     expect(jobCount()).toBe(0);
     expect(next.revalidatePath).not.toHaveBeenCalled();
   });
@@ -318,7 +316,6 @@ describe('registerRepositoryAction', () => {
       const params = new URL(await redirectOf(registerRepositoryAction(data)), 'http://localhost')
         .searchParams;
       expect(params.get('path')).toBe('');
-      expect(params.get('error')).toBeTruthy();
     }
     expect(jobCount()).toBe(0);
   });
