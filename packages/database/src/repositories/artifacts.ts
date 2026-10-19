@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
-import { createId, hashManifest, nowIso } from '@directivebench/core';
+import { createId, hashManifest, nowIso, sha256 } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import {
   artifactBenchmarkAssignments,
@@ -23,6 +23,13 @@ export interface RepositoryRef {
   location: string;
 }
 
+/** A file to import: `sha256` and `size` are accepted for convenience and ignored. */
+export type ImportArtifactFile = Pick<StoredArtifactFile, 'path' | 'content'> &
+  Partial<Pick<StoredArtifactFile, 'sha256' | 'size'>>;
+
+/** Matches an unpaired UTF-16 surrogate: such a string has no exact UTF-8 encoding. */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
 export interface ImportArtifactInput {
   repository: RepositoryRef;
   /** Repository-relative path of the artifact (directory for skills). */
@@ -33,7 +40,12 @@ export interface ImportArtifactInput {
   description: string | null;
   format: ArtifactFormat;
   primaryFile: string;
-  files: StoredArtifactFile[];
+  /**
+   * Files of the version. Only `path` and `content` are used: `sha256` and `size` are always
+   * recomputed from `content` (SPEC-103 §12), so a caller cannot pair one file's content with
+   * another file's hash. They stay optional so loader output can be passed through unchanged.
+   */
+  files: ImportArtifactFile[];
   parsedMetadata: Record<string, unknown>;
   commitSha?: string | null;
 }
@@ -68,15 +80,26 @@ export async function upsertRepository(db: Database, ref: RepositoryRef): Promis
 /**
  * Records an artifact found in a source. Creates the logical artifact on first sight, adds an
  * immutable version only when the content hash is new, and points the occurrence at it.
- * The content hash is always computed here from `files` (SPEC-103 FR-103-04, §12); callers cannot
- * supply one. User-managed metadata (notes, tags, categories, benchmark assignments) is never
- * touched.
+ * Each file's `sha256` and `size` and the manifest content hash are always computed here from the
+ * stored content (SPEC-103 FR-103-03, FR-103-04, §12); callers cannot supply them. Content is
+ * UTF-8 text (SPEC-102 FR-102-17), so hashing its UTF-8 encoding hashes the source bytes; content
+ * that is not well-formed Unicode is rejected before anything is written.
+ * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
  */
 export async function importArtifactVersion(
   handle: DatabaseHandle,
   input: ImportArtifactInput,
 ): Promise<ImportArtifactResult> {
-  const contentHash = hashManifest(input.files.map(({ path, sha256 }) => ({ path, sha256 })));
+  const files: StoredArtifactFile[] = input.files.map(({ path, content }) => {
+    // Encoding replaces a lone surrogate with U+FFFD, so two different paths or contents would
+    // share one hash (and one version). Fail closed instead.
+    if (LONE_SURROGATE.test(path) || LONE_SURROGATE.test(content)) {
+      throw new Error(`File path or content is not well-formed Unicode: ${JSON.stringify(path)}`);
+    }
+    const bytes = Buffer.from(content, 'utf8');
+    return { path, sha256: sha256(bytes), size: bytes.length, content };
+  });
+  const contentHash = hashManifest(files);
   return withTransaction(handle, async (db) => {
     const now = nowIso();
     const repositoryId = await upsertRepository(db, input.repository);
@@ -130,7 +153,7 @@ export async function importArtifactVersion(
         contentHash,
         format: input.format,
         primaryFile: input.primaryFile,
-        files: input.files,
+        files,
         parsedMetadata: input.parsedMetadata,
         sourceRepositoryId: repositoryId,
         sourcePath: input.path,

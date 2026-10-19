@@ -160,8 +160,11 @@ async function readBounded(abs: string, relPath: string, maxBytes: number): Prom
   return result;
 }
 
-/** A NUL byte in the first {@link BINARY_SNIFF_BYTES} bytes, or invalid UTF-8 (FR-102-17). */
-function isBinary(bytes: Buffer): boolean {
+/**
+ * A NUL byte in the first {@link BINARY_SNIFF_BYTES} bytes, or invalid UTF-8 (FR-102-17). Text
+ * files are valid UTF-8, so their decoded `content` re-encodes to exactly the source bytes.
+ */
+export function isBinary(bytes: Buffer): boolean {
   return bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0) || !isUtf8(bytes);
 }
 

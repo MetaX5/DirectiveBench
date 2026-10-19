@@ -1,3 +1,4 @@
+import { sha256 } from '@directivebench/core';
 import {
   createBenchmarkRun,
   importArtifactVersion,
@@ -21,7 +22,9 @@ export function artifactInput(
     description: 'Validate input',
     format: 'skill-md',
     primaryFile: 'SKILL.md',
-    files: [{ path: 'SKILL.md', sha256: content, size: content.length, content }],
+    files: [
+      { path: 'SKILL.md', sha256: sha256(content), size: Buffer.byteLength(content), content },
+    ],
     parsedMetadata: {},
     ...overrides,
   };

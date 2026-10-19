@@ -1,4 +1,4 @@
-import { hashManifest } from '@directivebench/core';
+import { hashManifest, sha256 } from '@directivebench/core';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -79,8 +79,8 @@ describe('importArtifactVersion', () => {
       { path: 'SKILL.md', sha256: 'a'.repeat(64), size: 1, content: 'a' },
     ];
     const expected = hashManifest([
-      { path: 'SKILL.md', sha256: 'a'.repeat(64) },
-      { path: 'scripts/check.sh', sha256: 'b'.repeat(64) },
+      { path: 'SKILL.md', sha256: sha256('a') },
+      { path: 'scripts/check.sh', sha256: sha256('b') },
     ]);
     // An untyped caller (or a future untrusted source) smuggling in a forged hash.
     const forged = { ...artifactInput('v1', { files }), contentHash: 'forged' };
@@ -100,6 +100,75 @@ describe('importArtifactVersion', () => {
     };
     const again = await importArtifactVersion(handle, reordered);
     expect(again).toEqual({ ...first, createdVersion: false });
+  });
+
+  it('recomputes each file sha256 and size from its content and ignores the caller values', async () => {
+    const handle = getHandle();
+    const content = 'Zażółć gęślą jaźń\n';
+    const decoy = 'Decoy content\n';
+    // A caller pairing `content` with the hash of another file to borrow that file's identity.
+    const forged = artifactInput('unused', {
+      files: [{ path: 'SKILL.md', sha256: sha256(decoy), size: 1, content }],
+    });
+    const first = await importArtifactVersion(handle, forged);
+
+    const stored = await handle.db
+      .select({
+        contentHash: schema.artifactVersions.contentHash,
+        files: schema.artifactVersions.files,
+      })
+      .from(schema.artifactVersions)
+      .where(eq(schema.artifactVersions.id, first.versionId))
+      .get();
+    const recomputed = sha256(Buffer.from(content, 'utf8'));
+    expect(recomputed).not.toBe(sha256(decoy));
+    expect(stored?.files).toEqual([
+      { path: 'SKILL.md', sha256: recomputed, size: Buffer.byteLength(content), content },
+    ]);
+    expect(stored?.contentHash).toBe(hashManifest([{ path: 'SKILL.md', sha256: recomputed }]));
+
+    // The decoy's identity was not taken: importing the decoy creates its own version, and an
+    // honest import of `content` reuses the first one.
+    const decoyImport = await importArtifactVersion(
+      handle,
+      artifactInput('unused', {
+        files: [{ path: 'SKILL.md', sha256: sha256(decoy), size: decoy.length, content: decoy }],
+      }),
+    );
+    expect(decoyImport).toMatchObject({ version: 2, createdVersion: true });
+    const honest = await importArtifactVersion(
+      handle,
+      artifactInput('unused', {
+        files: [{ path: 'SKILL.md', sha256: recomputed, size: 1, content }],
+      }),
+    );
+    expect(honest).toEqual({ ...first, createdVersion: false });
+  });
+
+  it('rejects a path or content that is not well-formed Unicode and writes nothing', async () => {
+    const handle = getHandle();
+    // '\uD800' and '\uFFFD' encode to the same UTF-8 bytes, so they would share one identity.
+    const loneSurrogate = artifactInput('unused', {
+      files: [{ path: 'SKILL.md', content: 'a\uD800b' }],
+    });
+    await expect(importArtifactVersion(handle, loneSurrogate)).rejects.toThrow(
+      'File path or content is not well-formed Unicode: "SKILL.md"',
+    );
+    // The manifest hash encodes paths the same way, so a lone surrogate in a path is rejected too.
+    const loneSurrogatePath = artifactInput('unused', {
+      files: [{ path: 'ref\uD800.md', content: 'fine' }],
+    });
+    await expect(importArtifactVersion(handle, loneSurrogatePath)).rejects.toThrow(
+      'File path or content is not well-formed Unicode: "ref\\ud800.md"',
+    );
+    expect(await handle.db.select().from(schema.artifacts).all()).toEqual([]);
+
+    // A well-formed surrogate pair (an emoji) is fine, and sha256/size may be omitted.
+    const emoji = await importArtifactVersion(
+      handle,
+      artifactInput('unused', { files: [{ path: 'SKILL.md', content: 'ok \u{1F600}' }] }),
+    );
+    expect(emoji).toMatchObject({ version: 1, createdVersion: true });
   });
 
   it('records the commit on the version and the occurrence', async () => {
@@ -332,8 +401,8 @@ describe('getArtifactBundle', () => {
       name: 'validate',
       type: 'skill',
       format: 'skill-md',
-      contentHash: hashManifest([{ path: 'SKILL.md', sha256: 'v1' }]),
-      files: [{ path: 'SKILL.md', sha256: 'v1', size: 2, content: 'v1' }],
+      contentHash: hashManifest([{ path: 'SKILL.md', sha256: sha256('v1') }]),
+      files: [{ path: 'SKILL.md', sha256: sha256('v1'), size: 2, content: 'v1' }],
     });
     expect(await getArtifactBundle(handle.db, 'artv_missing')).toBeNull();
   });
