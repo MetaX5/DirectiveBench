@@ -3,7 +3,7 @@ title: Register a local repository by path and list repositories (issue #15, E01
 date: 2026-10-19
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request — om-auto-fix-issue 15 (feature route → om-auto-implement-spec → om-auto-create-pr)
-status: in-progress
+status: completed
 branch: feat/issue-15-register-local-repository
 specs: [SPEC-104, SPEC-003, SPEC-006, SPEC-007, SPEC-014, SPEC-114]
 ---
@@ -119,8 +119,8 @@ relative, missing, file, unreadable paths).
   ("Packaging verification passed").
 - `pnpm test`: exit 0, 100% statements/branches/functions/lines in every package — after the
   review fixes: cli 75, agent-adapters 34, benchmark-engine 110, core 125, database 76, web 78,
-  runner 66 tests. The runner test files were run 3–5 times in a row without a failure.
-- `pnpm test:e2e`: 22 passed (port 4417 before the review, port 4418 after the review fixes),
+  runner 67 tests (final run at `19d9999`; build and verify:pack also re-run there). The runner test files were run 3–5 times in a row without a failure.
+- `pnpm test:e2e`: 22 passed (before the review, after the review fixes, and at `19d9999`),
   including the 5 new tests in `e2e/repositories.spec.ts`.
 - Real app: built CLI, `init` + `serve --port 4431` on a temporary data directory, driven with
   headless Chromium. Registered a nested path with trailing slash inside a new git repo on branch
@@ -150,6 +150,10 @@ relative, missing, file, unreadable paths).
     `fcf1de0`; the rollback rehearsal did not remove the migration row — `feb6f22`; NFR-104-01 was
     over-claimed (now partial, incl. queueing behind benchmarks) and the "hooks armed" claim was not
     asserted (now asserted) — `9428d9d`.
+  - Re-review by the same independent reviewer at `71ce332`: APPROVE (all 13 findings verified
+    fixed, including re-run reproductions). Its two optional follow-ups — Windows should look only for
+    `git.exe`/`git.com` (Node refuses `.cmd`/`.bat` without a shell) and a neutral message for a
+    top-level mismatch — were fixed in `19d9999`.
 
 - SPEC-104 had no `## Implementation Plan`/`## Phasing` section, which `om-auto-implement-spec`
   requires, and its §9 data flow ran git in the web process (OQ-104-01 proposal), contradicting
