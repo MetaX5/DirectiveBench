@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-19
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -160,9 +160,10 @@ PK (artifact_id, suite_id); both FK cascade; `created_at`. User metadata — pre
 | Column | Type | Notes |
 |---|---|---|
 | id | text PK | |
-| type | text NOT NULL | `benchmark-run` (future: `repository-sync`) |
+| type | text NOT NULL | `benchmark-run` \| `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) (future: `repository-sync`) |
 | status | text NOT NULL | `pending` \| `running` \| `completed` \| `failed` \| `cancelled` \| `interrupted`; **I** (status, created_at) |
-| payload | json NOT NULL | e.g. `{suiteVersionId, artifactVersionId, agent, repetitions}` |
+| payload | json NOT NULL | input, validated per type: `{suiteVersionId, artifactVersionId}` (`benchmark-run`), `{path}` (`repository-registration`) |
+| result | json | outcome written by the runner when the job type has one; `repository-registration`: `{ok: true, repositoryId, created}` \| `{ok: false, code, message}`; null otherwise (migration `0001`) |
 | runner_id | text | acquiring runner instance |
 | attempts | int NOT NULL default 0 | incremented on acquire; no automatic retry |
 | error | text | redacted |
