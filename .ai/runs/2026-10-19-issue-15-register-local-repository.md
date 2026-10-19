@@ -94,18 +94,18 @@ Recorded at the end of the run.
 
 ### Phase 1: Specs
 
-- [ ] 1.1 Update SPEC-104, SPEC-006 and SPEC-114 for the registration job
+- [x] 1.1 Update SPEC-104, SPEC-006 and SPEC-114 for the registration job — fde712c
 
 ### Phase 2: Persistence
 
-- [ ] 2.1 Shared path input schema and home expansion in core
-- [ ] 2.2 Registration job type, jobs.result column and migration
-- [ ] 2.3 Insert-or-return repository and repository list with branch and artifact count
+- [x] 2.1 Shared path input schema and home expansion in core — 4bde9d0
+- [x] 2.2 Registration job type, jobs.result column and migration — 65f47ba
+- [x] 2.3 Insert-or-return repository and repository list with branch and artifact count — 65f47ba
 
 ### Phase 3: Runner
 
-- [ ] 3.1 Path canonicalisation and hardened read-only git inspection
-- [ ] 3.2 LocalRunner executes repository-registration jobs
+- [x] 3.1 Path canonicalisation and hardened read-only git inspection — 0399f13
+- [x] 3.2 LocalRunner executes repository-registration jobs — d011219
 
 ### Phase 4: Web
 
