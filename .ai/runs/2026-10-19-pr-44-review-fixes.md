@@ -45,7 +45,8 @@ independent review of the final head.
   `$XDG_CONFIG_HOME/cursor` (default `~/.config/cursor`), plus `CLAUDE_CONFIG_DIR` and `CODEX_HOME`
   when absolute; both the spelling below the canonical home and the symlink target are skipped.
   Whole folders are skipped, not only their `skills/` subfolders. A location that is or lies
-  inside one reads nothing. Reported as `skippedUserLevelFolders` (one informational line), not
+  inside one reads nothing. When the location contains the home directory, sibling homes' folders
+  are skipped too; other users' homes elsewhere (e.g. `/root`) remain a documented residual. Reported as `skippedUserLevelFolders` (one informational line), not
   as discovery errors. The confirmation copy does not cite "D05" (users do not know the id).
 - **Decisions 1–4** are recorded as decided in SPEC-104 OQ-104-02/OQ-104-06, SPEC-102 Phasing and
   §20, SPEC-105 §20 (NFR-105-03 as an accepted M1 deviation with the 2.4 s measurement and a
@@ -81,8 +82,8 @@ Commits on `feat/issue-16-scan-local-repository` after ca1cbf2 (see `git log`):
     `references/` swapped between the walk and the read) — failed on the old walker, pass now.
   - `runner-lanes.test.ts` "stop() waits for a job that a poll is claiming…" — failed on the old
     runner (job never aborted), passes now.
-- `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test`: all green; 649 tests (core 141,
-  database 104, runner 93, web 92, CLI 75, benchmark-engine 110, agent-adapters 34), 100% lines,
+- `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test`: all green; 651 tests (core 141,
+  database 104, runner 95, web 92, CLI 75, benchmark-engine 110, agent-adapters 34), 100% lines,
   branches, functions and statements in every package. No threshold, exclusion or `v8 ignore`
   change.
 - `pnpm build && pnpm verify:pack`: passed. `pnpm test:e2e`: 27 passed (one new).
@@ -92,8 +93,16 @@ Commits on `feat/issue-16-scan-local-repository` after ca1cbf2 (see `git log`):
   skipped."; after **Register anyway** and **Scan**: "2 artifacts found (2 new, 2 new versions),
   0 errors" and "Skipped user-level agent folders, which are never scanned: .claude, .codex.";
   `?scanError=not-found` shows the page-level error.
-- Independent review of the final head: posted on PR #44 as a COMMENT review (the PR author and
-  the agent share one account).
+- Independent review at 121bb0d (a separate reviewer agent, gate re-run with `--force`, old-code
+  reproduction confirmed): **APPROVE** with three minors and two nits, all fixed in the next
+  commit: `stop()` now keeps the claim wait inside `shutdownTimeoutMs` and aborts a job claimed
+  after the deadline (test); a scan of a location that contains the home directory also skips the
+  user-level folders of sibling homes (other users under `/home`), while a repository next to the
+  home directory keeps its own folders (tests); this log no longer claimed a review that had not
+  happened; the `stop()` doc comment is rewrapped; the confirmation says "such as". After that
+  commit the gate was re-run (results above apply to it too: 651 tests, e2e 27 passed) and the
+  final head was re-reviewed; that verdict is posted on PR #44 as a COMMENT review (the PR author
+  and the agent share one account).
 - Not verified: macOS/Windows (`realpath` case and drive-letter behaviour of the new re-checks),
   a real home directory scan, the race window that remains between a `realpath` re-check and the
   read (by design not testable deterministically; documented in SPEC-102 §14).
