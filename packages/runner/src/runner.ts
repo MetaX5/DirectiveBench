@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '@directivebench/agent-adapters';
@@ -24,9 +24,11 @@ import {
   interruptJobs,
   isCancellationRequested,
   recoverStaleJobs,
+  repositoryRegistrationPayloadSchema,
   type DatabaseHandle,
   type JobRecord,
 } from '@directivebench/database';
+import { RegistrationCancelledError, registerLocalPath } from './repository-registration';
 
 /** Structured context attached to runner log events (job id, event name, …). */
 export type RunnerLogFields = Record<string, string | number | boolean | null>;
@@ -64,7 +66,8 @@ export interface JobExecutionResult {
 const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefined };
 
 /**
- * Executes benchmark jobs from the SQLite queue with bounded concurrency. It runs inside the CLI
+ * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs and repository
+ * registrations (SPEC-104 §9). It runs inside the CLI
  * process; the web UI only enqueues jobs. Remote runners will implement the same lifecycle over
  * an authenticated outbound connection (see .ai/specs/2026-10-14-runner-management.md).
  */
@@ -212,8 +215,9 @@ export class LocalRunner {
     const finishAs = async (
       status: JobExecutionResult['status'],
       error: string | null,
+      result?: Record<string, unknown>,
     ): Promise<JobExecutionResult> => {
-      await finishJob(db, job.id, status, error ?? undefined);
+      await finishJob(db, job.id, status, error ?? undefined, result);
       logger.info(`Job ${job.id} ${status}${error ? `: ${error}` : ''}`, {
         event: 'finished',
         jobId: job.id,
@@ -224,6 +228,15 @@ export class LocalRunner {
     };
 
     try {
+      if (job.type === 'repository-registration') {
+        const { path } = repositoryRegistrationPayloadSchema.parse(job.payload);
+        const result = await registerLocalPath(db, path, {
+          homeDir: homedir(),
+          env: process.env,
+          signal: controller.signal,
+        });
+        return await finishAs('completed', null, result);
+      }
       const payload = benchmarkJobPayloadSchema.parse(job.payload);
       const suiteVersion = await getSuiteVersion(db, payload.suiteVersionId);
       const artifact = await getArtifactBundle(db, payload.artifactVersionId);
@@ -311,6 +324,12 @@ export class LocalRunner {
         );
       }
     } catch (error) {
+      if (error instanceof RegistrationCancelledError) {
+        return await finishAs(
+          controller.signal.reason === 'shutdown' ? 'interrupted' : 'cancelled',
+          null,
+        );
+      }
       return await finishAs('failed', error instanceof Error ? error.message : String(error));
     } finally {
       clearInterval(heartbeat);
