@@ -72,6 +72,10 @@ export async function listRepositories(db: Database) {
     .orderBy(repositories.name, repositories.location);
 }
 
+export async function getRepository(db: Database, id: string): Promise<RepositoryRecord | null> {
+  return (await db.select().from(repositories).where(eq(repositories.id, id)).get()) ?? null;
+}
+
 /** A local source the user registers by path (SPEC-104 FR-104-01, FR-104-03). */
 export interface LocalRepositoryRegistration {
   provider: 'local-git' | 'local-directory';

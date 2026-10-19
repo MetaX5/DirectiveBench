@@ -5,6 +5,7 @@ import {
   assignCategoriesBySlug,
   finishBenchmarkRun,
   getDashboardStats,
+  getRepository,
   importArtifactVersion,
   listCategories,
   listRepositories,
@@ -108,6 +109,15 @@ describe('listRepositories', () => {
       '/a/skills',
       '/b/skills',
     ]);
+  });
+});
+
+describe('getRepository', () => {
+  it('returns a repository by id, or null', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    expect(await getRepository(handle.db, repository.id)).toEqual(repository);
+    expect(await getRepository(handle.db, 'repo_missing')).toBeNull();
   });
 });
 

@@ -538,6 +538,10 @@ describe('git invocation', () => {
 describe('registerLocalPath', () => {
   let handle: DatabaseHandle;
 
+  function request(path: string, confirmedLocation: string | null = null) {
+    return { path, confirmedLocation };
+  }
+
   beforeEach(async () => {
     handle = openDatabase(join(root, 'test.db'));
     await migrateDatabase(handle, migrations);
@@ -548,13 +552,13 @@ describe('registerLocalPath', () => {
   it('stores the repository once and returns it for every variant of the path', async () => {
     const repo = makeRepo('skills');
 
-    const first = await registerLocalPath(handle.db, `${repo}/`, options());
+    const first = await registerLocalPath(handle, request(`${repo}/`), options());
     expect(first).toEqual({
       ok: true,
       repositoryId: expect.stringMatching(/^repo_/),
       created: true,
     });
-    const again = await registerLocalPath(handle.db, '~/skills', options());
+    const again = await registerLocalPath(handle, request('~/skills'), options());
     expect(again).toEqual({ ...first, created: false });
 
     const rows = await handle.db.select().from(schema.repositories);
@@ -570,11 +574,67 @@ describe('registerLocalPath', () => {
   });
 
   it('stores nothing for a rejected path', async () => {
-    expect(await registerLocalPath(handle.db, join(root, 'nope'), options())).toEqual({
+    expect(await registerLocalPath(handle, request(join(root, 'nope')), options())).toEqual({
       ok: false,
       code: 'path-not-found',
       message: 'No directory exists at this path.',
     });
     expect(await handle.db.$count(schema.repositories)).toBe(0);
+  });
+
+  it('rejects the filesystem root and stores nothing (FR-104-18)', async () => {
+    expect(await registerLocalPath(handle, request('/'), options())).toEqual({
+      ok: false,
+      code: 'filesystem-root',
+      message:
+        'The filesystem root cannot be registered: a scan would read the whole disk. Register a project directory instead.',
+    });
+    expect(await handle.db.$count(schema.repositories)).toBe(0);
+  });
+
+  it('asks to confirm the home directory and registers it once exactly that is confirmed', async () => {
+    // `options()` uses `root` as the home directory.
+    expect(await registerLocalPath(handle, request('~'), options())).toEqual({
+      ok: false,
+      code: 'confirmation-required',
+      location: root,
+      home: 'home',
+      overlaps: [],
+    });
+    expect(await handle.db.$count(schema.repositories)).toBe(0);
+    expect(await registerLocalPath(handle, request('~', root), options())).toMatchObject({
+      ok: true,
+      created: true,
+    });
+  });
+
+  it('compares with the configured home directory when it cannot be resolved', async () => {
+    const plain = makeDir('plain');
+    expect(
+      await registerLocalPath(handle, request(plain), options({ homeDir: join(plain, 'gone') })),
+    ).toMatchObject({ ok: false, code: 'confirmation-required', home: 'contains-home' });
+  });
+
+  it('asks to confirm a path inside a registered repository, naming it', async () => {
+    const outer = makeDir('outer');
+    const inner = makeDir('outer/inner');
+    const first = await registerLocalPath(handle, request(outer), options());
+    expect(first).toMatchObject({ ok: true });
+    const repositoryId = first.ok ? first.repositoryId : '';
+    expect(await registerLocalPath(handle, request(inner), options())).toEqual({
+      ok: false,
+      code: 'confirmation-required',
+      location: inner,
+      home: null,
+      overlaps: [{ repositoryId, name: 'outer', location: outer, relation: 'inside' }],
+    });
+    // A confirmation for another location does not count.
+    expect(await registerLocalPath(handle, request(inner, outer), options())).toMatchObject({
+      code: 'confirmation-required',
+    });
+    expect(await registerLocalPath(handle, request(inner, inner), options())).toMatchObject({
+      ok: true,
+      created: true,
+    });
   });
 });

@@ -102,6 +102,7 @@ export type RepositoryScanPayload = z.infer<typeof repositoryScanPayloadSchema>;
 export const REPOSITORY_SCAN_ERROR_CODES = [
   'repository-not-found',
   'unsupported-provider',
+  'filesystem-root',
   'location-changed',
   'path-not-found',
   'not-a-directory',

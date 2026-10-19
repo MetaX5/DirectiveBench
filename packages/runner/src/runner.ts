@@ -25,10 +25,26 @@ import {
   isCancellationRequested,
   recoverStaleJobs,
   repositoryRegistrationPayloadSchema,
+  repositoryScanPayloadSchema,
   type DatabaseHandle,
   type JobRecord,
+  type JobType,
 } from '@directivebench/database';
 import { RegistrationCancelledError, registerLocalPath } from './repository-registration';
+import { ScanCancelledError, scanLocalRepository } from './repository-scan';
+
+/**
+ * The runner's lanes (SPEC-114, SPEC-104 OQ-104-06): `runner.concurrency` slots for long jobs —
+ * benchmark runs and repository scans, whose duration grows with the work — plus one slot for
+ * short jobs, so a registration never waits behind a running benchmark or scan.
+ */
+type Lane = 'long' | 'short';
+const LANE_JOB_TYPES: Record<Lane, readonly JobType[]> = {
+  long: ['benchmark-run', 'repository-scan'],
+  short: ['repository-registration'],
+};
+/** Slots of the short lane, in addition to `concurrency`. */
+export const SHORT_JOB_SLOTS = 1;
 
 /** Structured context attached to runner log events (job id, event name, …). */
 export type RunnerLogFields = Record<string, string | number | boolean | null>;
@@ -66,8 +82,8 @@ export interface JobExecutionResult {
 const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefined };
 
 /**
- * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs and repository
- * registrations (SPEC-104 §9). It runs inside the CLI process; the web UI only enqueues jobs.
+ * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs, repository
+ * registrations (SPEC-104 §9) and repository scans (SPEC-105, local repositories). It runs inside the CLI process; the web UI only enqueues jobs.
  * Remote runners will implement the same lifecycle over an authenticated outbound connection
  * (see .ai/specs/2026-10-14-runner-management.md).
  */
@@ -76,8 +92,10 @@ export class LocalRunner {
   private readonly options: Required<Omit<LocalRunnerOptions, 'logger'>> & { logger: RunnerLogger };
   private readonly active = new Map<
     string,
-    { controller: AbortController; done: Promise<JobExecutionResult> }
+    { lane: Lane; controller: AbortController; done: Promise<JobExecutionResult> }
   >();
+  /** Result lists of `runUntilIdle` calls in progress; every finished job is appended. */
+  private readonly finished = new Set<JobExecutionResult[]>();
   private pollTimer: NodeJS.Timeout | null = null;
   private stopping = false;
   private polling = false;
@@ -122,19 +140,16 @@ export class LocalRunner {
     tick();
   }
 
-  /** Claims jobs until the concurrency limit is reached or the queue is empty. */
+  /**
+   * Claims jobs until both lanes are full or have nothing pending: up to `concurrency` long jobs
+   * and up to {@link SHORT_JOB_SLOTS} short ones, each lane in FIFO order.
+   */
   async poll(): Promise<void> {
     if (this.polling) return;
     this.polling = true;
     try {
-      while (!this.stopping && this.active.size < this.options.concurrency) {
-        const job = await acquireNextJob(this.options.handle.db, this.runnerId);
-        if (!job) break;
-        this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
-        const controller = new AbortController();
-        const done = this.execute(job, controller).finally(() => this.active.delete(job.id));
-        this.active.set(job.id, { controller, done });
-      }
+      await this.fill('long', this.options.concurrency);
+      await this.fill('short', SHORT_JOB_SLOTS);
     } catch (error) {
       this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
         event: 'poll-failed',
@@ -144,13 +159,42 @@ export class LocalRunner {
     }
   }
 
+  private laneSize(lane: Lane): number {
+    return [...this.active.values()].filter((job) => job.lane === lane).length;
+  }
+
+  private async fill(lane: Lane, slots: number): Promise<void> {
+    while (!this.stopping && this.laneSize(lane) < slots) {
+      const job = await acquireNextJob(this.options.handle.db, this.runnerId, {
+        types: LANE_JOB_TYPES[lane],
+      });
+      if (!job) return;
+      this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
+      const controller = new AbortController();
+      const done = this.execute(job, controller)
+        .then((result) => {
+          for (const results of this.finished) results.push(result);
+          return result;
+        })
+        .finally(() => this.active.delete(job.id));
+      this.active.set(job.id, { lane, controller, done });
+    }
+  }
+
   /** Processes the queue until no job is pending or running. Used by `directivebench demo` and tests. */
   async runUntilIdle(): Promise<JobExecutionResult[]> {
+    // Collected as jobs finish, so a job that completes while `poll` is still filling the other
+    // lane — and is gone from `active` by the time `poll` returns — is not lost.
     const results: JobExecutionResult[] = [];
-    for (;;) {
-      await this.poll();
-      if (this.active.size === 0) return results;
-      results.push(await Promise.race([...this.active.values()].map((a) => a.done)));
+    this.finished.add(results);
+    try {
+      for (;;) {
+        await this.poll();
+        if (this.active.size === 0) return results;
+        await Promise.race([...this.active.values()].map((a) => a.done));
+      }
+    } finally {
+      this.finished.delete(results);
     }
   }
 
@@ -234,11 +278,24 @@ export class LocalRunner {
           const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
           return await finishAs('failed', `The stored registration request is invalid: ${reasons}`);
         }
-        const result = await registerLocalPath(db, payload.data.path, {
-          homeDir: homedir(),
-          env: process.env,
-          signal: controller.signal,
-        });
+        const result = await registerLocalPath(
+          handle,
+          { path: payload.data.path, confirmedLocation: payload.data.confirmedLocation ?? null },
+          { homeDir: homedir(), env: process.env, signal: controller.signal },
+        );
+        return await finishAs('completed', null, result);
+      }
+      if (job.type === 'repository-scan') {
+        const payload = repositoryScanPayloadSchema.safeParse(job.payload);
+        if (!payload.success) {
+          const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
+          return await finishAs('failed', `The stored scan request is invalid: ${reasons}`);
+        }
+        const result = await scanLocalRepository(
+          handle,
+          { jobId: job.id, repositoryId: payload.data.repositoryId },
+          { signal: controller.signal },
+        );
         return await finishAs('completed', null, result);
       }
       const payload = benchmarkJobPayloadSchema.parse(job.payload);
@@ -328,7 +385,7 @@ export class LocalRunner {
         );
       }
     } catch (error) {
-      if (error instanceof RegistrationCancelledError) {
+      if (error instanceof RegistrationCancelledError || error instanceof ScanCancelledError) {
         return await finishAs(
           controller.signal.reason === 'shutdown' ? 'interrupted' : 'cancelled',
           null,
