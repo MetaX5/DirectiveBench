@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
@@ -34,6 +35,7 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): D
 
   const db = drizzle(
     async (query, params, method) => {
+      await waitForForeignTransaction(sqlite);
       const statement = sqlite.prepare(query);
       const values = params as SQLInputValue[];
       if (method === 'run') {
@@ -86,10 +88,41 @@ export async function migrateDatabase(
 
 const transactionQueues = new WeakMap<DatabaseSync, Promise<unknown>>();
 
+/** A promise with its resolver (`Promise.withResolvers` is ES2024, above the configured lib). */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Resolves when the transaction currently open on a connection ends (commit or rollback). */
+const activeTransactions = new WeakMap<DatabaseSync, Promise<void>>();
+
+/** The connection whose `withTransaction` callback the current async context belongs to. */
+const transactionScope = new AsyncLocalStorage<DatabaseSync>();
+
+/**
+ * The connection is shared by concurrent jobs (SPEC-114 runner lanes) and the Drizzle proxy is
+ * asynchronous, so a statement from outside a running `withTransaction` could otherwise execute
+ * inside it and be committed or rolled back with someone else's work. Such a statement waits until
+ * the transaction ends. Statements of the transaction's own callback run immediately; a
+ * transaction opened outside `withTransaction` (raw `BEGIN`) is not waited for.
+ */
+async function waitForForeignTransaction(sqlite: DatabaseSync): Promise<void> {
+  while (sqlite.isTransaction && transactionScope.getStore() !== sqlite) {
+    const active = activeTransactions.get(sqlite);
+    if (!active) return;
+    await active;
+  }
+}
+
 /**
  * Runs `fn` inside an IMMEDIATE transaction. Transactions on the same connection are serialised
- * because the Drizzle proxy API is asynchronous while the connection is shared. Callers must not
- * await unrelated I/O inside the callback.
+ * because the Drizzle proxy API is asynchronous while the connection is shared, and statements
+ * issued outside `fn` meanwhile wait for the transaction to end. Callers must not await unrelated
+ * I/O inside the callback.
  */
 export async function withTransaction<T>(
   handle: DatabaseHandle,
@@ -98,17 +131,24 @@ export async function withTransaction<T>(
   const previous = transactionQueues.get(handle.sqlite) ?? Promise.resolve();
   const run = previous
     .catch(() => undefined)
-    .then(async () => {
-      handle.sqlite.exec('BEGIN IMMEDIATE');
-      try {
-        const result = await fn(handle.db);
-        handle.sqlite.exec('COMMIT');
-        return result;
-      } catch (error) {
-        if (handle.sqlite.isTransaction) handle.sqlite.exec('ROLLBACK');
-        throw error;
-      }
-    });
+    .then(() =>
+      transactionScope.run(handle.sqlite, async () => {
+        const ended = deferred();
+        activeTransactions.set(handle.sqlite, ended.promise);
+        try {
+          handle.sqlite.exec('BEGIN IMMEDIATE');
+          const result = await fn(handle.db);
+          handle.sqlite.exec('COMMIT');
+          return result;
+        } catch (error) {
+          if (handle.sqlite.isTransaction) handle.sqlite.exec('ROLLBACK');
+          throw error;
+        } finally {
+          activeTransactions.delete(handle.sqlite);
+          ended.resolve();
+        }
+      }),
+    );
   transactionQueues.set(handle.sqlite, run);
   return run;
 }

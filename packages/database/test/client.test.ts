@@ -239,6 +239,49 @@ describe('withTransaction', () => {
   });
 });
 
+describe('withTransaction isolation on a shared connection', () => {
+  const getHandle = useTestDatabase();
+
+  it('makes a statement issued outside a running transaction wait instead of joining it', async () => {
+    const handle = getHandle();
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const failing = withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow('inside'));
+      order.push('inside');
+      await gate;
+      throw new Error('rolled back');
+    });
+    // Let the transaction start, then write from outside it while it is still open.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(handle.sqlite.isTransaction).toBe(true);
+    const outside = handle.db
+      .insert(categories)
+      .values(categoryRow('outside'))
+      .then(() => order.push('outside'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(order).toEqual(['inside']);
+    release();
+
+    await expect(failing).rejects.toThrow('rolled back');
+    await outside;
+    expect(order).toEqual(['inside', 'outside']);
+    const rows = await handle.db.select({ slug: categories.slug }).from(categories);
+    expect(rows.map((row) => row.slug)).toEqual(['outside']);
+  });
+
+  it('does not wait for a transaction opened outside withTransaction', async () => {
+    const handle = getHandle();
+    handle.sqlite.exec('BEGIN');
+    await handle.db.insert(categories).values(categoryRow('raw'));
+    handle.sqlite.exec('ROLLBACK');
+    expect(await handle.db.$count(categories)).toBe(0);
+  });
+});
+
 describe('migration 0001_add_job_result', () => {
   /** A migrations folder holding only the first `count` entries of the real journal. */
   function partialMigrations(dir: string, count: number): string {
