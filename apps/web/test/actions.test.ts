@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { MAX_REPOSITORY_PATH_LENGTH } from '@directivebench/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
@@ -302,6 +303,16 @@ describe('registerRepositoryAction', () => {
     expect(params.get('path')).toBe('code/skills');
     expect(jobCount()).toBe(0);
     expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('echoes an overlong path only up to one character over the limit', async () => {
+    const long = `/${'a'.repeat(20_000)}`;
+    const params = new URL(
+      await redirectOf(registerRepositoryAction(form({ path: long }))),
+      'http://localhost',
+    ).searchParams;
+    expect(params.get('path')).toBe(long.slice(0, MAX_REPOSITORY_PATH_LENGTH + 1));
+    expect(jobCount()).toBe(0);
   });
 
   it('rejects a missing field or a file upload without echoing it', async () => {

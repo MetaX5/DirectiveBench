@@ -2,7 +2,7 @@
 
 import { executionBlockers } from '@directivebench/benchmark-engine/definition';
 import { validateDefinition } from '@directivebench/benchmark-engine/load';
-import { repositoryPathInputSchema } from '@directivebench/core';
+import { MAX_REPOSITORY_PATH_LENGTH, repositoryPathInputSchema } from '@directivebench/core';
 import {
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
@@ -68,8 +68,10 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
   const input = registerRepositorySchema.safeParse({ path: raw });
   if (!input.success) {
     // Only the entered path travels back; the page re-validates it to show the field error, so
-    // no free text from the URL is ever rendered as an error message.
-    const params = new URLSearchParams({ path: typeof raw === 'string' ? raw : '' });
+    // no free text from the URL is ever rendered as an error message. One character over the
+    // limit is enough to reproduce "too long" without building an oversized URL.
+    const echoed = typeof raw === 'string' ? raw.slice(0, MAX_REPOSITORY_PATH_LENGTH + 1) : '';
+    const params = new URLSearchParams({ path: echoed });
     redirect(`/repositories?${params.toString()}`);
   }
   const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {
