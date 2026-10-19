@@ -688,6 +688,8 @@ describe('applyRepositoryScan', () => {
   it('writes nothing when its signal is aborted while it waits behind another transaction', async () => {
     // Runner shutdown aborts the signal but records nothing in the job row, so the transaction
     // must check the signal itself: the scan checked it before queueing, the abort came after.
+    // The held transaction mirrors that wait; the runner test in repository-scan.test.ts proves
+    // the wait itself, by shutting down once the apply transaction is queued.
     const handle = getHandle();
     const { repository, jobId } = await runningScan(handle, '/srv/skills');
     let release!: () => void;

@@ -50,7 +50,7 @@ Acceptance:
 - **`signal` is required in `RepositoryScanApplication`.** That is fail closed: a future caller cannot forget it. The database tests pass a signal that never aborts.
 - **The abort maps to `JobNoLongerRunningError`.** The runner path already treats this error as "nothing written, the job stopped". There is no new error type.
 - **The cheap pre-apply check stays.** It saves queueing when the abort came earlier.
-- **The all-ones ID and inode 0 are checked before the identity comparison.** Each has its own message ("its file identity cannot be verified on this file system").
+- **The all-ones ID and inode 0 are checked before the identity comparison.** They share one message ("its file identity cannot be verified on this file system"), distinct from the identity-mismatch message.
 - **The path-is-not-a-symlink check stays as defence in depth.** It is isolated by a simulated-fs test: the path is reported as a symlink but has the handle's `dev` and `ino`. Without the check, that read is accepted.
 - **The FIFO test uses `mkfifo` through `child_process`, for Linux only (`it.runIf`).** Node has no `mkfifo` API, `mkfifo` is part of coreutils on `ubuntu-latest`, and the test does not depend on timing.
 - **Windows and `O_NONBLOCK`:** Windows does not define the flag, and its named pipes live in `\\.\pipe\`, not in directories, so nothing more is done there. This is recorded in SPEC-102 §14 and closes the open question of #47.
@@ -111,4 +111,12 @@ Acceptance:
 
 - #48: a Windows CI job for core discovery.
 - #47: resolved by this round (`Closes #47` in the PR body).
-- The independent review of the final head is recorded below.
+- Independent review of `73880fb`: APPROVE, no blocker or major. Its 2 minors and 4 nits were all done in the next commit:
+  - this log's unrecorded review
+  - the §3 residual for sibling links that cannot be resolved
+  - wording in this log
+  - a test comment
+  - the "verified by" note in §20
+  - a 2 s timeout on the FIFO test
+  That commit is the final head. It was re-reviewed independently, and the verdict is posted on PR #44.
+- CI at `73880fb`: green on all four jobs.

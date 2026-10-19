@@ -346,6 +346,8 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
       expect(result.errors).toContainEqual(swapped);
       expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(swapped.path);
     },
+    // A blocked open would hold a thread-pool thread: fail fast and clearly instead.
+    2_000,
   );
 
   describe('on a platform without O_NOFOLLOW and O_NONBLOCK (Windows)', () => {
