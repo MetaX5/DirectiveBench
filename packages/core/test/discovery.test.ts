@@ -334,7 +334,7 @@ describe('discoverArtifacts robustness', () => {
           path: 'skills/x/SKILL.md',
           code: 'read-failed',
           message:
-            'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned',
+            'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned (and 1 more directory)',
         },
       ]);
     } finally {
@@ -348,10 +348,11 @@ describe('discoverArtifacts robustness', () => {
     await write('skills/outer/inner/SKILL.md', SKILL);
     await write('skills/outer/inner/locked/a.md', 'a');
     await write('SKILL.md', SKILL);
-    await write('other/locked/b.md', 'b');
+    const rootLocked = ['other/locked', 'other/locked-2', 'other/locked-3'];
+    for (const dir of rootLocked) await write(`${dir}/b.md`, 'b');
     // With a root SKILL.md, every directory outside a deeper skill belongs to the root skill.
     await chmod(join(root, 'skills/outer/inner/locked'), 0o000);
-    await chmod(join(root, 'other/locked'), 0o000);
+    for (const dir of rootLocked) await chmod(join(root, dir), 0o000);
     try {
       const result = await discoverArtifacts(root);
       expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
@@ -361,9 +362,13 @@ describe('discoverArtifacts robustness', () => {
         ['SKILL.md', 'read-failed'],
         ['skills/outer/inner/SKILL.md', 'read-failed'],
       ]);
+      // The first unreadable directory by path is named; the others are counted.
+      expect(result.errors[0]?.message).toBe(
+        'Skill SKILL.md is incomplete and was not discovered. Cannot read directory other/locked (EACCES); its files were not scanned (and 2 more directories)',
+      );
     } finally {
       await chmod(join(root, 'skills/outer/inner/locked'), 0o755);
-      await chmod(join(root, 'other/locked'), 0o755);
+      for (const dir of rootLocked) await chmod(join(root, dir), 0o755);
     }
   });
 

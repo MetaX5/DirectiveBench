@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   renameSync,
@@ -19,7 +20,7 @@ import { buildDiscoveryFixture } from './discovery-fixture';
 /**
  * Behaviour the real filesystem does not produce on demand: directory listings in an order other
  * than the one the platform returns, a file that cannot be opened or that is swapped around its
- * open, file systems without inodes, a platform without `O_NOFOLLOW` (Windows), and an unexpected
+ * open, file systems without inodes, a platform without `O_NOFOLLOW` and `O_NONBLOCK` (Windows), and an unexpected
  * parser failure. Hooks wrap the real modules; without a hook every call goes to the real
  * implementation.
  */
@@ -36,17 +37,19 @@ const hooks = vi.hoisted(() => ({
   afterOpen: null as ((path: string) => void) | null,
   /** Changes the stats of an opened handle (`fstat`) or of a path (`lstat`). */
   patchStats: null as ((stats: BigIntStats, source: 'handle' | 'path') => void) | null,
-  /** Simulates Windows, where `constants.O_NOFOLLOW` is undefined. */
-  noNoFollow: false,
+  /** Simulates Windows, where `constants.O_NOFOLLOW` and `constants.O_NONBLOCK` are undefined. */
+  windowsFlags: false,
 }));
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof Fs>();
   // `fs.constants` is frozen, so a copy carries the switchable flag.
   const constants = { ...actual.constants };
-  Object.defineProperty(constants, 'O_NOFOLLOW', {
-    get: () => (hooks.noNoFollow ? undefined : actual.constants.O_NOFOLLOW),
-  });
+  for (const flag of ['O_NOFOLLOW', 'O_NONBLOCK'] as const) {
+    Object.defineProperty(constants, flag, {
+      get: () => (hooks.windowsFlags ? undefined : actual.constants[flag]),
+    });
+  }
   return { ...actual, constants };
 });
 
@@ -111,7 +114,7 @@ afterEach(async () => {
   hooks.beforeOpen = null;
   hooks.afterOpen = null;
   hooks.patchStats = null;
-  hooks.noNoFollow = false;
+  hooks.windowsFlags = false;
   await rm(root, { recursive: true, force: true });
   await rm(outside, { recursive: true, force: true });
 });
@@ -271,7 +274,7 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
     expect((await discoverArtifacts(root)).errors).toContainEqual(swapped);
   });
 
-  it('rejects a handle whose device or inode differs from the path, or whose inode is unknown', async () => {
+  it('rejects a handle whose device or inode differs from the path, or a path that is a symlink', async () => {
     const patches: ((stats: BigIntStats, source: 'handle' | 'path') => void)[] = [
       (stats, source) => {
         if (source === 'handle') stats.ino += 1n;
@@ -279,9 +282,9 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
       (stats, source) => {
         if (source === 'handle') stats.dev += 1n;
       },
-      // A file system without inodes reports 0 for both: identity cannot be proven.
-      (stats) => {
-        stats.ino = 0n;
+      // Defence in depth: a path reported as a symlink with its target's device and inode.
+      (stats, source) => {
+        if (source === 'path') stats.isSymbolicLink = () => true;
       },
     ];
     for (const patch of patches) {
@@ -298,15 +301,62 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
     }
   });
 
-  describe('on a platform without O_NOFOLLOW (Windows)', () => {
+  it('fails closed on a file system without a usable file ID', async () => {
+    // 0: no inodes; all ones: an invalid or unknown ReFS file ID (Windows). Equal on both sides.
+    for (const ino of [0n, 0xffff_ffff_ffff_ffffn]) {
+      hooks.patchStats = (stats) => {
+        stats.ino = ino;
+      };
+      const result = await discoverArtifacts(root);
+      expect(result.artifacts).toEqual([]);
+      expect(result.errors).toContainEqual({
+        path: 'AGENTS.md',
+        code: 'read-failed',
+        message: 'Cannot read AGENTS.md: its file identity cannot be verified on this file system',
+      });
+    }
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'refuses in the open itself a file swapped for a symlink before the open (O_NOFOLLOW)',
+    async () => {
+      onApiOpen('beforeOpen', (abs) => {
+        renameSync(abs, join(outside, 'api-moved.md'));
+        symlinkSync(join(outside, 'secret.md'), abs);
+      });
+      const result = await discoverArtifacts(root);
+      expect(result.errors).toContainEqual({
+        path: swapped.path,
+        code: 'read-failed',
+        message: `Cannot read ${API} (ELOOP)`,
+      });
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(swapped.path);
+    },
+  );
+
+  it.runIf(process.platform === 'linux')(
+    'does not block on a file swapped for a FIFO before the open (O_NONBLOCK)',
+    async () => {
+      // Without O_NONBLOCK the open would wait for a writer forever and the test would time out.
+      onApiOpen('beforeOpen', (abs) => {
+        renameSync(abs, join(outside, 'api-moved.md'));
+        execFileSync('mkfifo', [abs]);
+      });
+      const result = await discoverArtifacts(root);
+      expect(result.errors).toContainEqual(swapped);
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(swapped.path);
+    },
+  );
+
+  describe('on a platform without O_NOFOLLOW and O_NONBLOCK (Windows)', () => {
     beforeEach(() => {
-      hooks.noNoFollow = true;
+      hooks.windowsFlags = true;
     });
 
     it('reads unchanged files as usual', async () => {
-      hooks.noNoFollow = false;
+      hooks.windowsFlags = false;
       const baseline = await discoverArtifacts(root);
-      hooks.noNoFollow = true;
+      hooks.windowsFlags = true;
       expect(await discoverArtifacts(root)).toEqual(baseline);
     });
 

@@ -245,16 +245,20 @@ function owningSkill(
 }
 
 /**
- * The opened handle and the path are the same regular file: the path is not a symlink (Node reports
- * Windows junctions as symlinks too), both are on the same device with the same, known inode.
+ * File IDs that identify nothing: 0 on a file system without inodes, and all ones, which Windows
+ * reports for an invalid or unknown ReFS file ID. Identity cannot be proven with them.
+ */
+const UNKNOWN_FILE_IDS: readonly bigint[] = [0n, 0xffff_ffff_ffff_ffffn];
+
+/**
+ * The opened handle and the path are the same regular file: both are on the same device with the
+ * same inode, and the path is not a symlink (Node reports Windows junctions as symlinks too). A
+ * symlink has an inode of its own, so the inode comparison already rejects one; the symlink check
+ * stays as defence in depth, should a platform report a link with its target's ID.
  */
 function isSameRegularFile(opened: BigIntStats, path: BigIntStats): boolean {
   return (
-    opened.isFile() &&
-    !path.isSymbolicLink() &&
-    opened.ino !== 0n &&
-    opened.ino === path.ino &&
-    opened.dev === path.dev
+    opened.isFile() && !path.isSymbolicLink() && opened.ino === path.ino && opened.dev === path.dev
   );
 }
 
@@ -272,13 +276,26 @@ function isSameRegularFile(opened: BigIntStats, path: BigIntStats): boolean {
  * swapped in before the open makes the handle refer to the link's target: `lstat` then reports a
  * symlink, and if the attacker swaps the original file back right after the open, the path is a
  * regular file again but the handle still refers to the target, which the inode comparison
- * catches. A file system that reports no inode (`ino` 0) cannot prove identity, so the read fails
- * closed there. A swap after the `lstat` cannot redirect the read: the handle is already open.
+ * catches. A file system that reports no usable file ID ({@link UNKNOWN_FILE_IDS}) cannot prove
+ * identity, so the read fails closed there. A swap after the `lstat` cannot redirect the read: the
+ * handle is already open.
+ *
+ * `O_NONBLOCK` (where defined; regular files ignore it) keeps a FIFO swapped in before the open
+ * from blocking the open until a writer appears; the identity check then rejects it. Windows has
+ * no `O_NONBLOCK`, and its named pipes live in their own namespace (`\\.\pipe\`), not in a
+ * directory where they could replace a walked file.
  */
 async function readUpTo(abs: string, relPath: string, maxBytes: number): Promise<Buffer | number> {
-  const handle = await open(abs, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  const handle = await open(abs, flags);
   try {
     const opened = await handle.stat({ bigint: true });
+    if (UNKNOWN_FILE_IDS.includes(opened.ino)) {
+      throw new ArtifactError(
+        'read-failed',
+        `Cannot read ${relPath}: its file identity cannot be verified on this file system`,
+      );
+    }
     if (!isSameRegularFile(opened, await lstat(abs, { bigint: true }))) {
       throw new ArtifactError(
         'read-failed',
@@ -367,11 +384,15 @@ async function discoverSkill(
   retained: number,
 ): Promise<DiscoveredArtifact> {
   // A skill missing part of its tree would be stored as a new, incomplete version (FR-102-12).
-  const [unreadable] = contents.unreadable;
+  const [unreadable, ...more] = contents.unreadable;
   if (unreadable) {
+    const others =
+      more.length === 0
+        ? ''
+        : ` (and ${more.length} more ${more.length === 1 ? 'directory' : 'directories'})`;
     throw new ArtifactError(
       'read-failed',
-      `Skill ${primaryPath} is incomplete and was not discovered. ${unreadable.message}`,
+      `Skill ${primaryPath} is incomplete and was not discovered. ${unreadable.message}${others}`,
     );
   }
   const owned = contents.owned;
