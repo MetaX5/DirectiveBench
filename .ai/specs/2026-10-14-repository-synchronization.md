@@ -3,7 +3,7 @@ id: SPEC-105
 title: Repository Synchronization
 status: draft
 created: 2026-10-14
-updated: 2026-10-17
+updated: 2026-10-19
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-103, SPEC-104, SPEC-106, SPEC-006, SPEC-007, SPEC-114, SPEC-201, SPEC-202, ADR-0007, ADR-0008, ADR-0012]
 ---
@@ -272,6 +272,12 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 20. Implementation status
 
-- **Implemented (schema only, verified by `packages/database/test/client.test.ts` migrations):** repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`) exist; the job queue supports only the `benchmark-run` job type.
-- **Partially implemented:** none.
-- **Not implemented:** `repository-sync` job type, fetching/cloning, cache, `planSync`/`applySyncPlan`, change detection, deletion handling, `sync_runs`/`sync_run_items` tables, sync UI and CLI `sync` command, dry run.
+- **Implemented (schema only, verified by `packages/database/test/client.test.ts` migrations):** repository status columns (`last_commit_sha`, `last_sync_at`, `sync_status`, `sync_error`).
+- **Partially implemented — scan of local repositories (issue #16; verified on 2026-10-19 by `packages/runner/test/repository-scan.test.ts`, `packages/database/test/{artifacts,jobs}.test.ts` and the Playwright tests):**
+  - FR-105-01/02: manual "Scan" per local repository on the Repositories page enqueues a runner job; it is named `repository-scan` (not `repository-sync`) because it covers local repositories only and has no plan/apply change detection yet. FR-105-03: one pending or running scan per repository (check and insert in one transaction; a second request returns the existing job).
+  - FR-105-05/06 for local providers — **deviation for `local-git` (interim decision, [SPEC-104](2026-10-14-repository-management.md) OQ-104-02):** both local providers walk the files on disk; `local-git` is not read from the object store, so uncommitted, untracked and git-ignored files are included, submodule contents are walked like directories (not skipped by mode), and no commit is resolved or recorded. No git command runs during a scan.
+  - FR-105-07, FR-105-11, FR-105-18: discovery per [SPEC-102](2026-10-14-artifact-discovery.md); per-artifact errors are listed in the result and do not fail the scan; nothing is executed.
+  - FR-105-09 subset: all versions and occurrences of one scan and the repository status (`last_sync_at`, `sync_status = 'ok'`, `sync_error = null`, `last_commit_sha = null`) are written in one transaction; identity is SPEC-101 §8.3 rule 1 (same repository and path) and rule 4 (new artifact, slug suffixed on collision); parser-owned `name`/`description` follow the newest observation. FR-105-15: a scan that cannot run (location missing, moved, replaced by a symlink, unreadable, filesystem root) sets `sync_status = 'error'` with the message and changes no artifact. FR-105-17: cancellation is honoured until the apply transaction starts, and the transaction itself re-checks that the job is still running.
+  - NFR-105-04 for local scans: an unchanged tree creates no versions on rescan. NFR-105-03 is **not met in the worst case**: 10,000 changed artifacts held the write lock for about 2.4 s (measured 2026-10-19; below the 5 s `busy_timeout`, so web writes wait but do not fail); 200 artifacts take well under 0.1 s.
+  - The outcome is stored in `jobs.result` (`{ ok, scannedFiles, discovered, createdArtifacts, createdVersions, warningCount, errorCount, errors[≤ 100], durationMs }` or `{ ok: false, code, message }`) instead of `sync_runs`.
+- **Not implemented:** hosted fetching/cloning and cache, `planSync`/`applySyncPlan` with move detection and change kinds, deletion handling and `reappeared` (#21), rules 2–3 of identity (#20), FR-105-10 fast path, `sync_runs`/`sync_run_items` tables and sync history, "Sync all", CLI `sync` command, dry run, batching of large applies.

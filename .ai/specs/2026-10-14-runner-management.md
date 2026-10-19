@@ -31,7 +31,7 @@ Benchmarks run for minutes, spawn processes, and must survive browser reloads. R
 
 - Distributed scheduling, priorities, or automatic retries in the MVP.
 - A standalone `directivebench runner` command or remote runners in the bootstrap.
-- Job types other than `benchmark-run` and `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) in the bootstrap (sync jobs are future, [SPEC-105](2026-10-14-repository-synchronization.md)).
+- Job types other than `benchmark-run`, `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) and `repository-scan` (local repositories, [SPEC-102](2026-10-14-artifact-discovery.md) Phasing); hosted sync jobs are future ([SPEC-105](2026-10-14-repository-synchronization.md)).
 
 ## 5. User stories
 
@@ -54,7 +54,7 @@ Benchmarks run for minutes, spawn processes, and must survive browser reloads. R
 | FR-114-08 | Cancellation: the web app sets `cancel_requested_at` (for `pending` or `running` jobs). A `pending` job with a cancel request SHALL be moved directly to `cancelled` (atomic update guarded by `status='pending'`). |
 | FR-114-09 | For a `running` job, the runner SHALL observe `cancel_requested_at` (checked at least on every heartbeat), abort the job's `AbortController`, wait for the engine to finish cleanup, and set `status='cancelled'`. |
 | FR-114-10 | On normal completion the job SHALL become `completed` (even if the benchmark verdict is `failed`/`regression`); on an unhandled error before or during execution, `failed` with `error` (redacted). Quality outcomes never make a job `failed`. |
-| FR-114-11 | The runner SHALL execute at most `runner.concurrency` jobs simultaneously (default 1, range 1–16, [SPEC-115](2026-10-14-settings-and-configuration.md)). |
+| FR-114-11 | The runner SHALL execute at most `runner.concurrency` **long** jobs simultaneously (default 1, range 1–16, [SPEC-115](2026-10-14-settings-and-configuration.md)) — `benchmark-run` and `repository-scan`, whose duration grows with the work — plus at most one **short** job (`repository-registration`) in its own slot, so a registration never waits behind a long job ([SPEC-104](2026-10-14-repository-management.md) OQ-104-06, decided 2026-10-19 pending the maintainer's confirmation). Each lane acquires in FIFO order (`acquireNextJob` limited to the lane's job types). |
 | FR-114-12 | The runner SHALL run inside the CLI process for `serve` and `demo`; `demo` runs a single job headless and exits. |
 | FR-114-13 | Graceful shutdown (SIGINT/SIGTERM): stop acquiring, abort running jobs, wait up to 10 s for cleanup, mark them `interrupted` (not `cancelled` — the user did not cancel them), then stop the web child process and exit. A second signal forces exit. |
 | FR-114-14 | Each status transition SHALL be a single guarded UPDATE (`WHERE id=? AND status=<expected>`) so that concurrent actors cannot produce invalid transitions. |
@@ -93,10 +93,10 @@ stateDiagram-v2
 | Column | Type | Notes |
 |---|---|---|
 | `id` | text PK | prefixed random id |
-| `type` | text | `benchmark-run` \| `repository-registration` |
+| `type` | text | `benchmark-run` \| `repository-registration` \| `repository-scan` |
 | `status` | text | see FR-114-01 |
-| `payload` | JSON text | `{ suiteVersionId, artifactVersionId }` (`benchmark-run`), `{ path }` (`repository-registration`) |
-| `result` | JSON text | outcome recorded by the runner (`repository-registration` only); null otherwise |
+| `payload` | JSON text | `{ suiteVersionId, artifactVersionId }` (`benchmark-run`), `{ path, confirmedLocation? }` (`repository-registration`), `{ repositoryId }` (`repository-scan`) |
+| `result` | JSON text | outcome recorded by the runner (`repository-registration`, `repository-scan`); null otherwise |
 | `runner_id` | text | set at acquisition |
 | `attempts` | integer | incremented at acquisition (diagnostics; no auto retry) |
 | `error` | text | redacted |
@@ -219,7 +219,7 @@ sequenceDiagram
 
 - **Standalone runner:** `directivebench runner` process using the same `JobStore` against the local DB.
 - **Remote runners (self-hosted):** lease-based protocol over an outbound authenticated connection (HTTPS/WebSocket) to the server. Runner requests a lease (`jobId`, `leaseExpiresAt`), renews it like a heartbeat, streams events/results, and the server reassigns nothing automatically on lease expiry (job → `interrupted`, consistent with local behaviour). Runner advertises capabilities (environments, adapters, platforms). Same `AgentRunInput`/`AgentRunResult` contracts as [SPEC-110](2026-10-14-benchmark-execution.md).
-- Job types for repository sync and discovery.
+- Job types for hosted repository sync.
 - Optional opt-in automatic retry for `infrastructure-error`-only failures.
 
 ## 20. Implementation status
@@ -230,4 +230,5 @@ sequenceDiagram
 - **FR-114-17:** runner ids are `local-<hostname>-<pid>-<8 hex>` (test "uses a runner id of the form local-<hostname>-<pid>-<random>").
 - **Implemented without an automated test:** concurrency > 1; the forced exit on a second signal (FR-114-13, `apps/cli/src/serve.ts`).
 - **`repository-registration` jobs (verified by `packages/runner/test/runner-registration.test.ts` on 2026-10-19):** the runner dispatches on `jobs.type`; a registration job completes with its outcome in `jobs.result` (a rejected path is a `completed` job with `{ ok: false }`, per FR-114-10), a payload that no longer validates fails the job, a cancellation request observed by the heartbeat aborts git and records `cancelled`, and shutdown records `interrupted`.
-- **Not implemented:** standalone `directivebench runner` command, remote runners and lease protocol, job types other than `benchmark-run` and `repository-registration`, data-dir lock, "Run again" for interrupted jobs.
+- **Lanes, `repository-scan` jobs and guarded finish (issue #16; verified by `packages/runner/test/{runner-lanes,repository-scan,repository-scan-errors}.test.ts` and `packages/database/test/{jobs,client}.test.ts` on 2026-10-19):** FR-114-11 as amended — with `concurrency = 1` a registration completes while a scan holds the long slot, two scans run strictly one after the other, a free long slot never takes a registration, `stop()` aborts both lanes; a scan job completes with its outcome in `jobs.result`, a cancellation observed by the heartbeat or a cancel request seen inside the apply transaction records `cancelled` and writes nothing; `finishJob` no longer overwrites a terminal status (FR-114-14 for late finishes after a shutdown timeout); a statement issued outside a running `withTransaction` on the shared connection (a heartbeat, another lane's finish) waits for the transaction instead of joining it and being rolled back with it; `runUntilIdle` collects every finished job.
+- **Not implemented:** standalone `directivebench runner` command, remote runners and lease protocol, hosted sync jobs, data-dir lock, "Run again" for interrupted jobs.

@@ -5,7 +5,7 @@ status: draft
 created: 2026-10-14
 updated: 2026-10-19
 category: feature
-related: [SPEC-101, SPEC-103, SPEC-104, SPEC-105, SPEC-005, SPEC-007, SPEC-012, SPEC-203, SPEC-204, SPEC-205]
+related: [SPEC-101, SPEC-103, SPEC-104, SPEC-105, SPEC-114, SPEC-005, SPEC-007, SPEC-012, SPEC-203, SPEC-204, SPEC-205]
 ---
 
 # SPEC-102 — Artifact Discovery
@@ -222,6 +222,8 @@ Discovered content is untrusted ([SPEC-007](2026-10-14-security-and-privacy.md))
 - `alwaysApply: "true"` (string) → not interpreted; raw value kept; warning recommended (future).
 - Empty file or frontmatter-only file → artifact with empty body; warning.
 - Frontmatter not at file start → treated as body.
+- A subdirectory that cannot be listed (permissions, removed during the walk) → a `read-failed` discovery error with the directory path; the rest of the tree is scanned (an unreadable root still fails the scan).
+- The registered root replaced by a symlink or moved → the scan reads nothing (`expectedRoot`). Residual risk: `O_NOFOLLOW` protects only the last path component, so a directory *inside* the tree swapped for a symlink between the walk and the read could redirect that read; Node has no `openat`. Accepted for the local, single-user threat model ([SPEC-007](2026-10-14-security-and-privacy.md)).
 - Windows checkouts with CRLF → frontmatter parsed; hashes reflect raw bytes (see [SPEC-103](2026-10-14-artifact-versioning.md) §14).
 - `.github/instructions/sub/x.instructions.md` → detected (subdirectories allowed).
 
@@ -262,10 +264,38 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - User-level artifact discovery (opt-in, read-only).
 - Activation simulator: "which artifacts would apply to `src/app/page.tsx`?" per agent.
 
+## Phasing
+
+Implementation follows the backlog stories in `.ai/specs/backlog.md` (epic E01).
+
+### Phase 1 — Local tree walker (issue #24)
+
+`discoverArtifacts(root)` in `packages/core/src/discovery.ts`: walk, skipped directories, skill file collection, limits, binary detection, symlinks, determinism (FR-102-12…20). Library only.
+
+### Phase 2 — Scan of a registered local repository (E01-S02, issue #16)
+
+Scope: a `repository-scan` runner job triggered from the Repositories page reads a registered `local-git` or `local-directory` repository with `discoverArtifacts` and stores every artifact through the `importArtifactVersion` writer (SPEC-103, hashes recomputed); SPEC-104 FR-104-18 and OQ-104-06 ship with it. Out of scope: rescan rules beyond dedup (#19), cross-repository identity (#20), removed files (#21), exclude globs, user-level folders (D05), hosted repositories (#18).
+
+1. Walker: abort signal, unreadable subdirectories as `read-failed` errors, `expectedRoot` (`core`).
+2. `repository-scan` job type (one pending/running scan per repository), `applyRepositoryScan` in one transaction with location identity (SPEC-101 §8.3 rules 1 and 4), registration checks of FR-104-18 (`database`).
+3. Scan job handler and the runner's short-job lane (`runner`).
+4. Scan action, scan status and FR-104-18 confirmation on the Repositories page, Playwright coverage (`web`).
+
+**Working tree, not a commit (interim decision, 2026-10-19, issue #16).** Both local providers are scanned as files on disk — for `local-git` too: uncommitted and untracked (also git-ignored) files are included, submodule and nested-repository contents are walked like any directory, and no commit is recorded (`commit_sha = null`). The scan runs no process, so no hook, filter or fsmonitor can run. Restricting `local-git` to the files tracked at a commit (FR-102-15, second sentence; SPEC-105 FR-105-05/06) is deferred to local git awareness in M2 ([SPEC-013](2026-10-14-implementation-roadmap.md)); switching then changes manifests of skills with untracked files, which creates new versions once. Awaiting the maintainer's confirmation (SPEC-104 OQ-104-02).
+
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/core/test/artifacts.test.ts` and the `core` hashing tests):** `ARTIFACT_TYPES`, `ARTIFACT_FORMATS`, `classifyArtifactPath` (incl. Windows separators and `./`), `parseArtifactFile` (SKILL.md frontmatter/activation/references and missing-metadata fallback, Cursor rule globs/`alwaysApply`, Copilot `applyTo`, Claude rules; unknown paths rejected), `parseFrontmatter`, `hashManifest`, `slugify` in `packages/core/src`. Not every one of the eight formats has a dedicated test.
-- **Implemented (verified by `packages/core/test/discovery.test.ts` and `discovery-simulated-fs.test.ts`, issue #24):** `discoverArtifacts(root, { limits })` in `packages/core/src/discovery.ts` walks a local root without following symlinks, skips `.git/` and `node_modules/` at any depth (FR-102-15, first sentence), collects every regular file of a directory-based skill except nested skills (FR-102-12, incl. the root-`SKILL.md` warning of §14), returns a manifest and `hashManifest` content hash per artifact (FR-102-14), enforces the FR-102-16 defaults as the named `DISCOVERY_LIMITS` (per-artifact errors; the per-scan cap aborts the scan), detects binary files (NUL in the first 8 KiB or invalid UTF-8: supporting file skipped, primary file a `binary-primary` error — FR-102-17), reports a symlink at a candidate path as a `symlink` error and lists symlinks inside a skill in `skipped` (FR-102-18), reads files as bytes only (FR-102-19, security fixture), and returns the same artifacts, order, hashes and warnings for any directory listing order (FR-102-20). It is a library function only: no scan job, database import or UI uses it yet (story #16).
-- **Deviations from §8.3:** `discoverArtifacts` takes a local root path, not a `FileTree` (the abstraction waits for a second tree source, SPEC-105); it has no `exclude` option; `DiscoveredArtifact` adds `primaryFile` and `warnings` (parser plus discovery warnings, as in `LoadedArtifact`); `skipped` reasons are `symlink` and `binary` only, because an oversized file is an error (FR-102-16) and walked paths cannot leave the root.
+- **Implemented (verified by `packages/core/test/discovery.test.ts` and `discovery-simulated-fs.test.ts`, issue #24):** `discoverArtifacts(root, { limits })` in `packages/core/src/discovery.ts` walks a local root without following symlinks, skips `.git/` and `node_modules/` at any depth (FR-102-15, first sentence), collects every regular file of a directory-based skill except nested skills (FR-102-12, incl. the root-`SKILL.md` warning of §14), returns a manifest and `hashManifest` content hash per artifact (FR-102-14), enforces the FR-102-16 defaults as the named `DISCOVERY_LIMITS` (per-artifact errors; the per-scan cap aborts the scan), detects binary files (NUL in the first 8 KiB or invalid UTF-8: supporting file skipped, primary file a `binary-primary` error — FR-102-17), reports a symlink at a candidate path as a `symlink` error and lists symlinks inside a skill in `skipped` (FR-102-18), reads files as bytes only (FR-102-19, security fixture), and returns the same artifacts, order, hashes and warnings for any directory listing order (FR-102-20). Since issue #16 the repository scan uses it (below).
+- **Implemented — Phase 2, scan of a registered local repository (issue #16; verified on 2026-10-19 by `packages/core/test/discovery.test.ts`, `packages/runner/test/{repository-scan,repository-scan-errors,runner-lanes}.test.ts`, `packages/database/test/{artifacts,jobs}.test.ts`, the Playwright test "scanning a repository discovers its artifacts and reports discovery errors" and a manual run of the built CLI):**
+  - A `repository-scan` job reads a registered local repository with `discoverArtifacts(location, { signal, expectedRoot: location })`: `.agents/skills/*/SKILL.md`, `AGENTS.md`, `.cursor/rules/*.mdc` and `.github/copilot-instructions.md` each become an artifact with type, format and occurrence path, and every regular file of a skill directory is in the version's manifest (FR-102-12, SPEC-013 M1 AC1).
+  - FR-102-15 (first sentence), FR-102-18: `.git/` and `node_modules/` are skipped, symlinks are never followed, a symlink at a candidate path is a `symlink` discovery error listed in the scan result and on the page, a symlink inside a skill is in `skipped`.
+  - FR-102-19: the scan spawns no process at all (a test spies on every `child_process` function) and a fixture whose git hooks, fsmonitor, filter driver, package script and executable skill script would create a marker leaves none.
+  - No path outside the registered location is read: symlinked directories are not followed, a location replaced by a symlink is refused (`location-changed`), and user-level folders such as `~/.claude/skills` are not scanned unless the user registers their home directory, which asks for a confirmation naming them (FR-104-18, D05).
+  - FR-102-20: the same tree scanned twice gives identical discovery output and a second scan creates no artifact and no version.
+  - The walker stops on an abort signal (cancellation, shutdown) and reports an unreadable subdirectory as a `read-failed` error instead of failing the scan.
+  - Performance (built CLI, 2026-10-19, Linux laptop): 1,000 files / 50 artifacts in 56 ms including the database write (M1 AC5, target < 5 s); 50,000 files / 200 artifacts in 207 ms (NFR-102-01).
+- **Deviations from §8.3:** `discoverArtifacts` takes a local root path, not a `FileTree` (the abstraction waits for a second tree source, SPEC-105); it has no `exclude` option but takes `signal` and `expectedRoot`; `DiscoveredArtifact` adds `primaryFile` and `warnings` (parser plus discovery warnings, as in `LoadedArtifact`); `skipped` reasons are `symlink` and `binary` only, because an oversized file is an error (FR-102-16) and walked paths cannot leave the root.
 - **Partially implemented:** file collection for a single local artifact (`loadLocalArtifact` in `packages/core/src/artifact-loader.ts`: sorted walk, symlinks skipped with a warning, limits of 200 files / 1 MiB, binary detection shared with the walker — supporting files with a NUL in the first 8 KiB or invalid UTF-8 are skipped with a warning and a binary primary file is rejected, FR-102-17, issue #39, verified by `packages/core/test/artifact-loader.test.ts`) used to import bundled examples.
-- **Not implemented:** binary file storage, handler registry, `FileTree` abstraction, exclude globs, restricting git repositories to files tracked at the scanned commit (FR-102-15, second sentence), `scopeDir`, `@path` import resolution, compatibility mapping per format, scan jobs and sync integration (story #16).
+- **Deviation (FR-102-15, second sentence):** `local-git` repositories are scanned as a working tree, not as the files tracked at a commit (Phasing, interim decision).
+- **Not implemented:** binary file storage, handler registry, `FileTree` abstraction, exclude globs, restricting git repositories to files tracked at the scanned commit (FR-102-15, second sentence), `scopeDir`, `@path` import resolution, compatibility mapping per format, hosted-repository sync (SPEC-105).

@@ -3,7 +3,7 @@ id: SPEC-013
 title: Implementation Roadmap
 status: draft
 created: 2026-10-14
-updated: 2026-10-16
+updated: 2026-10-19
 category: foundation
 related: [SPEC-001, SPEC-002, SPEC-003, SPEC-009, SPEC-011, SPEC-012, SPEC-101, SPEC-102, SPEC-104, SPEC-105, SPEC-107, SPEC-109, SPEC-111, SPEC-112, SPEC-114, SPEC-201, SPEC-202, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-211, SPEC-212]
 ---
@@ -32,7 +32,7 @@ flowchart LR
 | Milestone | Priority | Status |
 | --- | --- | --- |
 | M0 Bootstrap | P0 | In progress — all deliverables done (CI ran green on PR #1); UI cancellation and crash-restart not yet verified end to end (§3 M0, §5) |
-| M1 Artifact Registry | P0 | Not started (recommended next) |
+| M1 Artifact Registry | P0 | In progress — local registration (#15) and the scan of registered local repositories (#16) |
 | M2 Git Integrations | P1 | Not started |
 | M3 Benchmark Engine | P0 | Not started beyond the bootstrap subset in M0 |
 | M4 Real Agent Integration | P1 | Not started (detection only in M0) |
@@ -185,4 +185,5 @@ This slice is local-only (no network, no secrets), builds directly on M0 code, a
 ## 5. Implementation status
 
 - **M0:** in progress. Verified on 2026-10-14 (Node 24.21, Linux): the packed tarball, installed with npm into an empty project, runs `demo` (verdict `improved`, labelled as mock, exit 0) and `serve`; `GET /api/health` returns 200 with `database: ready`; a foreign `Host` header is rejected with 403; `/results` lists the run; `SIGTERM` exits cleanly; `pnpm verify:pack` passes. "Run" from the benchmark page enqueues a job that the runner completes (`pnpm test:e2e`). Runner-level cancellation, shutdown → `interrupted` and stale-job recovery are verified by `runner.test.ts`. The CI workflow ran green on PR #1 on 2026-10-14. Verified on 2026-10-15: 468 unit/integration tests, `pnpm build && pnpm verify:pack`, `pnpm test:e2e` 17/17. Cancelling from the UI is verified in two halves: the Executions page records the cancel request for a running job (`management.spec.ts`), and the runner turns a request into `cancelled` (`runner-lifecycle.test.ts`). Not yet verified end to end: one browser test covering both halves against a real running job, killing the CLI mid-run and restarting. M0 is not marked complete until these are verified.
-- **M1–M8:** not implemented. Bootstrap contains only preparatory pieces (agent CLI detection, format v1, mock-only execution, local-process environment).
+- **M1:** in progress. Local repository registration (#15) and the scan of registered local repositories (#16) are implemented: AC1 (every format discovered with type, format and occurrence path) is verified by `packages/runner/test/repository-scan.test.ts` and the Playwright scan test; AC5 measured on 2026-10-19 with the built CLI on a Linux laptop: 1,000 files in 56 ms including the database write. The other acceptance criteria (rescan versioning #19, cross-repository identity #20, removed files #21, public GitHub #18, end-to-end preview #17) are not verified yet.
+- **M2–M8:** not implemented. Bootstrap contains only preparatory pieces (agent CLI detection, format v1, mock-only execution, local-process environment).
