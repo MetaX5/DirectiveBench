@@ -22,8 +22,13 @@ Windows in a test, a `Proxy` over `fs.constants` threw an uncoded `TypeError` (a
   rely on it alone for a safety property.
 - To make "the file I read is the file the walk found" hold on every platform: open (with
   `O_NOFOLLOW ?? 0`), `fstat` the handle, `lstat` the path, and require a regular file, no symlink,
-  equal `dev` and `ino` (as `bigint`, Windows file IDs are 64-bit), and `ino !== 0n` (no identity
-  means fail closed). A link swapped back right after the open is caught by the inode comparison.
+  equal `dev` and `ino` (as `bigint`, Windows file IDs are 64-bit), and a usable `ino` — neither
+  `0n` nor `0xffff_ffff_ffff_ffffn`, the value Windows reports for an invalid or unknown ReFS ID (no
+  identity means fail closed; updated after the PR #44 review). A link swapped back right after the
+  open is caught by the inode comparison.
+- The identity check runs after the open, so it cannot help if the open itself blocks: add
+  `O_NONBLOCK ?? 0` so a FIFO swapped in returns at once (regular files ignore the flag) and is then
+  rejected as not a regular file.
 - To simulate a missing constant, mock `node:fs` with a copy of `constants` and a getter, not a
   `Proxy` over the frozen original.
 

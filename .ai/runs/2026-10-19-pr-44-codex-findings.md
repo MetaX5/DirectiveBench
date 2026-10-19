@@ -3,7 +3,7 @@ title: Fix the three Codex review findings on PR #44 (partial skills, scan byte 
 date: 2026-10-19
 agent: Claude Code / claude-opus-5-5
 trigger: coordinator request — the maintainer ran an adversarial Codex review of PR #44 (issue #16) at b0689cd and asked for its findings to be fixed
-status: in-progress
+status: completed
 branch: feat/issue-16-scan-local-repository
 specs: [SPEC-102, SPEC-105]
 ---
@@ -71,8 +71,11 @@ CLI, SPEC-102 updated, and an independent review of the final head.
 
 ## Verification
 
-- Old-code checks: with the identity check disabled, 5 of the new simulated-fs tests fail (each
-  identity condition is hit by a distinct test). The runner test's unreadable-`templates/` case
+- Old-code checks: with the identity check disabled, 5 of the new simulated-fs tests fail. Not
+  every identity condition had a test of its own at this head: the path-is-not-a-symlink check was
+  covered only together with the inode comparison, which already rejects a symlink (corrected by
+  the independent review; the next round adds a test that isolates it — see
+  [2026-10-19-pr-44-second-codex-review.md](2026-10-19-pr-44-second-codex-review.md)). The runner test's unreadable-`templates/` case
   would store a smaller version on the old walker (the old code emitted the skill without the
   unreadable directory's files).
 - `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test`: all green; core 152, database
@@ -104,4 +107,9 @@ CLI, SPEC-102 updated, and an independent review of the final head.
 
 ## Follow-ups
 
-- Independent review of the final head: pending at the time of writing (recorded below when done).
+- Independent review of `871393c`: APPROVE with minors and nits (Windows file IDs, this log's
+  overclaim, `O_NOFOLLOW`/`O_NONBLOCK` tests, error messages). A second Codex review of `871393c`
+  found two medium issues (an aborted scan committing during shutdown; sibling homes' symlinked
+  agent folders). All of them are handled in
+  [2026-10-19-pr-44-second-codex-review.md](2026-10-19-pr-44-second-codex-review.md).
+- Filed #47 (FIFO swapped in before the open); fixed in the next round.
