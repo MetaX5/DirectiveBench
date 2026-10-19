@@ -145,6 +145,25 @@ describe('importArtifactVersion', () => {
     expect(honest).toEqual({ ...first, createdVersion: false });
   });
 
+  it('rejects content that is not well-formed Unicode and writes nothing', async () => {
+    const handle = getHandle();
+    // '\uD800' and '\uFFFD' encode to the same UTF-8 bytes, so they would share one identity.
+    const loneSurrogate = artifactInput('unused', {
+      files: [{ path: 'SKILL.md', content: 'a\uD800b' }],
+    });
+    await expect(importArtifactVersion(handle, loneSurrogate)).rejects.toThrow(
+      'File content is not well-formed Unicode: SKILL.md',
+    );
+    expect(await handle.db.select().from(schema.artifacts).all()).toEqual([]);
+
+    // A well-formed surrogate pair (an emoji) is fine, and sha256/size may be omitted.
+    const emoji = await importArtifactVersion(
+      handle,
+      artifactInput('unused', { files: [{ path: 'SKILL.md', content: 'ok \u{1F600}' }] }),
+    );
+    expect(emoji).toMatchObject({ version: 1, createdVersion: true });
+  });
+
   it('records the commit on the version and the occurrence', async () => {
     const handle = getHandle();
     const first = await importArtifactVersion(handle, artifactInput('v1', { commitSha: 'abc' }));

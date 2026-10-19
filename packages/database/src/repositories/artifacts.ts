@@ -23,6 +23,13 @@ export interface RepositoryRef {
   location: string;
 }
 
+/** A file to import: `sha256` and `size` are accepted for convenience and ignored. */
+export type ImportArtifactFile = Pick<StoredArtifactFile, 'path' | 'content'> &
+  Partial<Pick<StoredArtifactFile, 'sha256' | 'size'>>;
+
+/** Matches an unpaired UTF-16 surrogate: such a string has no exact UTF-8 encoding. */
+const LONE_SURROGATE = /\p{Surrogate}/u;
+
 export interface ImportArtifactInput {
   repository: RepositoryRef;
   /** Repository-relative path of the artifact (directory for skills). */
@@ -36,9 +43,9 @@ export interface ImportArtifactInput {
   /**
    * Files of the version. Only `path` and `content` are used: `sha256` and `size` are always
    * recomputed from `content` (SPEC-103 §12), so a caller cannot pair one file's content with
-   * another file's hash.
+   * another file's hash. They stay optional so loader output can be passed through unchanged.
    */
-  files: StoredArtifactFile[];
+  files: ImportArtifactFile[];
   parsedMetadata: Record<string, unknown>;
   commitSha?: string | null;
 }
@@ -75,7 +82,8 @@ export async function upsertRepository(db: Database, ref: RepositoryRef): Promis
  * immutable version only when the content hash is new, and points the occurrence at it.
  * Each file's `sha256` and `size` and the manifest content hash are always computed here from the
  * stored content (SPEC-103 FR-103-03, FR-103-04, §12); callers cannot supply them. Content is
- * UTF-8 text (SPEC-102 FR-102-17), so hashing its UTF-8 encoding hashes the source bytes.
+ * UTF-8 text (SPEC-102 FR-102-17), so hashing its UTF-8 encoding hashes the source bytes; content
+ * that is not well-formed Unicode is rejected before anything is written.
  * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
  */
 export async function importArtifactVersion(
@@ -83,6 +91,11 @@ export async function importArtifactVersion(
   input: ImportArtifactInput,
 ): Promise<ImportArtifactResult> {
   const files: StoredArtifactFile[] = input.files.map(({ path, content }) => {
+    // Encoding replaces a lone surrogate with U+FFFD, so two different strings would share one
+    // hash (and one version). Fail closed instead.
+    if (LONE_SURROGATE.test(content)) {
+      throw new Error(`File content is not well-formed Unicode: ${path}`);
+    }
     const bytes = Buffer.from(content, 'utf8');
     return { path, sha256: sha256(bytes), size: bytes.length, content };
   });

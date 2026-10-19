@@ -41,6 +41,15 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
   hash still satisfies FR-103-03 (hash of the raw bytes).
 - Side effect, intended: the loader now checks for NUL only in the first 8 KiB, as the walker
   and FR-102-17 do. A valid UTF-8 file with a NUL after 8 KiB is now stored, not skipped.
+- Consequence for existing databases: re-importing an artifact whose earlier version held a
+  lossily decoded non-UTF-8 supporting file, or skipped a file with a late NUL, yields a different
+  manifest and therefore a new version. Bundled examples are unaffected: none of their files is
+  invalid UTF-8 or contains a NUL.
+- After review: `sha256`/`size` are now optional on `ImportArtifactFile` (still ignored), and
+  content containing an unpaired UTF-16 surrogate is rejected. `'\uD800'` and `'\uFFFD'`
+  encode to the same UTF-8 bytes, so they would otherwise share one identity. The check is a
+  `/\p{Surrogate}/u` regex, because `String.prototype.isWellFormed` is not in the repository's
+  `ES2023` TypeScript lib.
 
 ## Work performed
 
@@ -53,6 +62,11 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
 4. `packages/core`: `isBinary` exported. `loadLocalArtifact` reads the primary file as bytes,
    rejects a binary primary file, and skips non-UTF-8 supporting files. Tests added.
 5. SPEC-103 and SPEC-102 implementation status updated.
+6. PR #41 opened. An independent review (subagent, `om-code-review` standards) approved it with
+   minor and nit findings only. Fixed in a follow-up commit: the lone-surrogate guard and test,
+   optional ignored fields, the SPEC-103 §12 invariant sentence and this run log. Declined: adding
+   the `.ai/lessons.md` entry (this run may not edit that file). Follow-up: the existing
+   double read of a skill's primary file.
 
 ## Verification
 
@@ -61,8 +75,9 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
   `packages/core/src`, the 2 new loader tests fail. All pass with the fix.
 - `pnpm format:check`: pass (after running prettier on `test/support/fixtures.ts`).
 - `pnpm lint`: pass. `pnpm typecheck`: pass (7/7 tasks).
-- `pnpm test`: pass, 100% statements/branches/functions/lines in every package. Counts: core 119,
-  database 61, runner 31, benchmark-engine 110, agent-adapters 34, web 66, cli 74.
+- `pnpm test`: pass, 100% statements/branches/functions/lines in every package. Counts after
+  the review fixes: core 119, database 62, runner 31, benchmark-engine 110, agent-adapters 34,
+  web 66, cli 74.
 - `pnpm build`: pass. `pnpm verify:pack`: pass (packed CLI demo and serve smoke test).
 - Real path: in the SQLite database left by `verify:pack`'s demo, the stored `SKILL.md` of the
   bundled example has `sha256` equal to the sha256 of the file's bytes on disk and to the sha256
@@ -82,7 +97,11 @@ case of `loadLocalArtifact`; update SPEC-103's implementation status; keep 100% 
 
 ## Follow-ups
 
-- Optional: narrow `ImportArtifactInput.files` to `{ path, content }` once the callers that set
-  `sha256`/`size` (`apps/web/test/actions.test.ts`, `packages/runner/src/import.ts`) are updated
-  in the same change.
-- Add the lesson's one-line entry to `.ai/lessons.md`.
+- Optional: drop `sha256`/`size` from `ImportArtifactFile` once the callers that still set them
+  (`apps/web/test/actions.test.ts`, `packages/runner/src/import.ts`) are updated.
+- `loadLocalArtifact` reads a skill's primary file twice: once to parse it, again in
+  `collectFiles`. If the file changes between the reads, the parsed metadata can disagree with
+  the stored content, or the primary file can drop out of the manifest. This predates the PR.
+  Reuse the first read or assert that the primary file is in the manifest.
+- Pending outside this run: the lesson's one-line entry in `.ai/lessons.md` (handed to the
+  coordinator, because a parallel run edits that file).
