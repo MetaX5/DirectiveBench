@@ -56,7 +56,7 @@ export interface DiscoveredArtifact {
 }
 
 export interface DiscoveryError {
-  /** Primary file relative to the scanned root. */
+  /** Primary file (or, for `read-failed`, an unreadable directory) relative to the scanned root. */
   path: string;
   code: 'too-large' | 'binary-primary' | 'symlink' | 'too-many-files' | 'read-failed';
   message: string;
@@ -79,6 +79,17 @@ export interface DiscoveryOptions {
    * cancelled or shut-down job stops walking a large tree. The abort reason is thrown.
    */
   signal?: AbortSignal;
+  /**
+   * The canonical path the root must resolve to, e.g. a registered repository's stored location.
+   * When the root resolves elsewhere (it was replaced by a symlink or moved), nothing is read and
+   * a {@link DiscoveryRootChangedError} is thrown.
+   */
+  expectedRoot?: string;
+}
+
+/** The discovery root no longer resolves to the expected canonical path. */
+export class DiscoveryRootChangedError extends Error {
+  override name = 'DiscoveryRootChangedError';
 }
 
 interface TreeEntry {
@@ -102,12 +113,33 @@ function byCodeUnit(a: string, b: string): number {
   return Number(a > b) - Number(a < b);
 }
 
-/** Lists regular files and symlinks below `root` without following symlinks. */
-async function walk(root: string, signal: AbortSignal | undefined): Promise<TreeEntry[]> {
+/**
+ * Lists regular files and symlinks below `root` without following symlinks. A subdirectory that
+ * cannot be listed (permissions, removed during the walk) becomes a `read-failed` error and the
+ * walk continues; an unreadable root is rethrown.
+ */
+async function walk(
+  root: string,
+  signal: AbortSignal | undefined,
+): Promise<{ entries: TreeEntry[]; unreadable: DiscoveryError[] }> {
   const entries: TreeEntry[] = [];
+  const unreadable: DiscoveryError[] = [];
   async function visit(dir: string, prefix: string): Promise<void> {
     signal?.throwIfAborted();
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
+    let listing;
+    try {
+      listing = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (prefix === '') throw error;
+      const code = String((error as NodeJS.ErrnoException).code);
+      unreadable.push({
+        path: prefix,
+        code: 'read-failed',
+        message: `Cannot read directory ${prefix} (${code}); its files were not scanned`,
+      });
+      return;
+    }
+    for (const entry of listing) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) {
         entries.push({ path, kind: 'symlink' });
@@ -120,15 +152,19 @@ async function walk(root: string, signal: AbortSignal | undefined): Promise<Tree
     }
   }
   await visit(root, '');
-  return entries.sort((a, b) => byCodeUnit(a.path, b.path));
+  return { entries: entries.sort((a, b) => byCodeUnit(a.path, b.path)), unreadable };
 }
 
-/** The deepest skill directory containing `path`, or `undefined` when none does. */
-function owningSkill(path: string, skillRoots: ReadonlySet<string>): string | undefined {
+/** The entries of the deepest skill directory containing `path`, or `undefined` when none does. */
+function owningSkill(
+  path: string,
+  skills: ReadonlyMap<string, TreeEntry[]>,
+): TreeEntry[] | undefined {
   let dir = posix.dirname(path);
   for (;;) {
     const key = dir === '.' ? '' : dir;
-    if (skillRoots.has(key)) return key;
+    const owned = skills.get(key);
+    if (owned) return owned;
     if (key === '') return undefined;
     dir = posix.dirname(dir);
   }
@@ -287,15 +323,25 @@ export async function discoverArtifacts(
 ): Promise<DiscoveryResult> {
   const limits: DiscoveryLimits = { ...DISCOVERY_LIMITS, ...options.limits };
   const realRoot = await realpath(resolve(root));
+  if (options.expectedRoot !== undefined && realRoot !== options.expectedRoot) {
+    throw new DiscoveryRootChangedError(
+      `Discovery root ${root} resolves to ${realRoot}, not ${options.expectedRoot}`,
+    );
+  }
   if (!(await stat(realRoot)).isDirectory()) {
     throw new Error(`Discovery root is not a directory: ${root}`);
   }
 
-  const entries = await walk(realRoot, options.signal);
-  const candidates: { entry: TreeEntry; classification: ArtifactClassification }[] = [];
+  const { entries, unreadable } = await walk(realRoot, options.signal);
+  const candidates: {
+    entry: TreeEntry;
+    classification: ArtifactClassification;
+    /** Skills: every file and symlink whose deepest enclosing skill this is (FR-102-12). */
+    owned: TreeEntry[];
+  }[] = [];
   for (const entry of entries) {
     const classification = classifyArtifactPath(entry.path);
-    if (classification) candidates.push({ entry, classification });
+    if (classification) candidates.push({ entry, classification, owned: [] });
   }
   if (candidates.length > limits.maxCandidatesPerScan) {
     throw new Error(
@@ -303,15 +349,18 @@ export async function discoverArtifacts(
     );
   }
 
-  const skillRoots = new Set<string>();
-  for (const { classification } of candidates) {
-    if (classification.rootDir !== null) skillRoots.add(classification.rootDir);
+  const skills = new Map<string, TreeEntry[]>();
+  for (const { classification, owned } of candidates) {
+    if (classification.rootDir !== null) skills.set(classification.rootDir, owned);
   }
-  const owners = entries.map((entry) => owningSkill(entry.path, skillRoots));
+  for (const entry of entries) {
+    const owner = owningSkill(entry.path, skills);
+    if (owner !== undefined) owner.push(entry);
+  }
 
   const artifacts: DiscoveredArtifact[] = [];
-  const errors: DiscoveryError[] = [];
-  for (const { entry, classification } of candidates) {
+  const errors: DiscoveryError[] = [...unreadable];
+  for (const { entry, classification, owned } of candidates) {
     options.signal?.throwIfAborted();
     try {
       if (entry.kind === 'symlink') {
@@ -320,14 +369,7 @@ export async function discoverArtifacts(
       artifacts.push(
         classification.rootDir === null
           ? await discoverSingleFile(realRoot, entry.path, limits)
-          : await discoverSkill(
-              realRoot,
-              entry.path,
-              classification.rootDir,
-              // Every file and symlink whose deepest enclosing skill is this one (FR-102-12).
-              entries.filter((_, index) => owners[index] === classification.rootDir),
-              limits,
-            ),
+          : await discoverSkill(realRoot, entry.path, classification.rootDir, owned, limits),
       );
     } catch (error) {
       if (!(error instanceof ArtifactError)) throw error;
@@ -337,7 +379,7 @@ export async function discoverArtifacts(
 
   return {
     artifacts,
-    errors,
+    errors: errors.sort((a, b) => byCodeUnit(a.path, b.path)),
     scannedFiles: entries.filter((entry) => entry.kind === 'file').length,
   };
 }

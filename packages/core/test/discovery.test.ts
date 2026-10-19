@@ -1,10 +1,15 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DISCOVERY_LIMITS, discoverArtifacts, SKIPPED_DIRECTORY_NAMES } from '../src/discovery';
+import {
+  DISCOVERY_LIMITS,
+  discoverArtifacts,
+  DiscoveryRootChangedError,
+  SKIPPED_DIRECTORY_NAMES,
+} from '../src/discovery';
 import { hashManifest, sha256 } from '../src/hash';
 import { buildDiscoveryFixture, SKILL } from './discovery-fixture';
 
@@ -248,6 +253,68 @@ describe('discoverArtifacts edge cases', () => {
       `Discovery root is not a directory: ${join(root, 'file.txt')}`,
     );
     await expect(discoverArtifacts(join(root, 'missing'))).rejects.toThrow(/ENOENT/);
+  });
+});
+
+describe('discoverArtifacts robustness', () => {
+  it('reports an unreadable subdirectory as an error and scans the rest', async () => {
+    await write('AGENTS.md', '# Rules\n');
+    await write('locked/CLAUDE.md', '# Hidden\n');
+    await write('z/CLAUDE.md', '# Visible\n');
+    await chmod(join(root, 'locked'), 0o000);
+    try {
+      const result = await discoverArtifacts(root);
+      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+        'AGENTS.md',
+        'z/CLAUDE.md',
+      ]);
+      expect(result.errors).toEqual([
+        {
+          path: 'locked',
+          code: 'read-failed',
+          message: 'Cannot read directory locked (EACCES); its files were not scanned',
+        },
+      ]);
+    } finally {
+      await chmod(join(root, 'locked'), 0o755);
+    }
+  });
+
+  it('sorts directory and artifact errors together by path', async () => {
+    await write('a/AGENTS.md', '\0binary');
+    await write('b/CLAUDE.md', '# Hidden\n');
+    await write('c/AGENTS.md', '\0binary');
+    await chmod(join(root, 'b'), 0o000);
+    try {
+      const result = await discoverArtifacts(root);
+      expect(result.errors.map((error) => [error.path, error.code])).toEqual([
+        ['a/AGENTS.md', 'binary-primary'],
+        ['b', 'read-failed'],
+        ['c/AGENTS.md', 'binary-primary'],
+      ]);
+    } finally {
+      await chmod(join(root, 'b'), 0o755);
+    }
+  });
+
+  it('rethrows when the root itself cannot be listed', async () => {
+    await chmod(root, 0o000);
+    try {
+      await expect(discoverArtifacts(root)).rejects.toThrow(/EACCES/);
+    } finally {
+      await chmod(root, 0o755);
+    }
+  });
+
+  it('reads nothing when the root no longer resolves to the expected location', async () => {
+    await write('AGENTS.md', '# Rules\n');
+    const canonical = await realpath(root);
+    expect((await discoverArtifacts(root, { expectedRoot: canonical })).artifacts).toHaveLength(1);
+    const link = join(outside, 'swapped');
+    await symlink(root, link);
+    await expect(discoverArtifacts(link, { expectedRoot: link })).rejects.toThrow(
+      DiscoveryRootChangedError,
+    );
   });
 });
 
