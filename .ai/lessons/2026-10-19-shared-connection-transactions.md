@@ -23,7 +23,13 @@ winners of jobs still in `active`.
 SQLite transactions belong to the connection, not to the async call chain. Any code that shares a
 connection between concurrent async work needs to keep foreign statements out of an open
 transaction. `withTransaction` now records the open transaction in an `AsyncLocalStorage` scope,
-and the proxy makes any statement from outside that scope wait until the transaction ends. A
+and the proxy makes any statement from outside that scope wait until the transaction ends. The
+check and the statement must run in the same synchronous step: the first version awaited between
+them and still lost writes (see
+[2026-10-19-no-await-between-check-and-act.md](2026-10-19-no-await-between-check-and-act.md)).
+The scope identifies the `withTransaction` call, not the connection, so a callback continuation
+that outlives its transaction is treated as outside code, and a nested `withTransaction` is
+rejected instead of deadlocking. A
 second connection in the same process is not a fix: `node:sqlite` waits for locks synchronously
 (`busy_timeout`), so it would block the event loop that has to finish the first transaction.
 Collect job results as they finish, not by racing the jobs that are still active.
