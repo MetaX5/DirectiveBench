@@ -1,4 +1,4 @@
-import type { Dirent } from 'node:fs';
+import { renameSync, symlinkSync, type Dirent } from 'node:fs';
 import type * as FsPromises from 'node:fs/promises';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,8 +15,12 @@ import { buildDiscoveryFixture } from './discovery-fixture';
  */
 const hooks = vi.hoisted(() => ({
   reorderEntries: null as ((entries: Dirent[]) => Dirent[]) | null,
-  failOpen: null as ((path: string) => boolean) | null,
+  failOpen: null as ((path: string) => Error | null) | null,
   failParse: false,
+  /** Runs after a directory was listed, before the walk descends into its entries. */
+  afterList: null as ((path: string) => void) | null,
+  /** Runs before a primary file is parsed, i.e. after the walk and before supporting reads. */
+  beforeParse: null as ((relPath: string) => void) | null,
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -25,10 +29,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     readdir: async (path: string, options: { withFileTypes: true }) => {
       const entries = await actual.readdir(path, options);
+      hooks.afterList?.(path);
       return hooks.reorderEntries ? hooks.reorderEntries(entries) : entries;
     },
     open: async (path: string, flags: number) => {
-      if (hooks.failOpen?.(path)) throw new Error(`EACCES: permission denied, open '${path}'`);
+      const failure = hooks.failOpen?.(path);
+      if (failure) throw failure;
       return actual.open(path, flags);
     },
   };
@@ -40,6 +46,7 @@ vi.mock('../src/artifacts', async (importOriginal) => {
     ...actual,
     parseArtifactFile: (relPath: string, content: string) => {
       if (hooks.failParse) throw new TypeError('unexpected parser failure');
+      hooks.beforeParse?.(relPath);
       return actual.parseArtifactFile(relPath, content);
     },
   };
@@ -58,6 +65,8 @@ afterEach(async () => {
   hooks.reorderEntries = null;
   hooks.failOpen = null;
   hooks.failParse = false;
+  hooks.afterList = null;
+  hooks.beforeParse = null;
   await rm(root, { recursive: true, force: true });
   await rm(outside, { recursive: true, force: true });
 });
@@ -86,7 +95,11 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
   });
 
   it('reports a file that cannot be read as an error for its artifact only', async () => {
-    hooks.failOpen = (path) => path.endsWith('references/api.md');
+    // The message names the relative path and the error code, never the absolute path.
+    hooks.failOpen = (path) =>
+      path.endsWith('references/api.md')
+        ? Object.assign(new Error(`EACCES: permission denied, open '${path}'`), { code: 'EACCES' })
+        : null;
     const result = await discoverArtifacts(root);
     expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(
       '.agents/skills/validate/SKILL.md',
@@ -96,12 +109,64 @@ describe('discoverArtifacts with simulated filesystem behaviour', () => {
       {
         path: '.agents/skills/validate/SKILL.md',
         code: 'read-failed',
-        message: expect.stringMatching(
-          /^Cannot read \.agents\/skills\/validate\/references\/api\.md: Error: EACCES/,
-        ) as string,
+        message: 'Cannot read .agents/skills/validate/references/api.md (EACCES)',
       },
       expect.objectContaining({ path: 'linked/CLAUDE.md', code: 'symlink' }),
     ]);
+
+    hooks.failOpen = (path) => (path.endsWith('AGENTS.md') ? new Error(`no code: ${path}`) : null);
+    const uncoded = await discoverArtifacts(root);
+    expect(uncoded.errors).toContainEqual({
+      path: 'AGENTS.md',
+      code: 'read-failed',
+      message: 'Cannot read AGENTS.md (unknown error)',
+    });
+  });
+
+  // A directory replaced by a symlink while the scan runs must not redirect it outside the root.
+  function swapForSymlink(dir: string, target: string): void {
+    renameSync(dir, target);
+    symlinkSync(target, dir);
+  }
+
+  it('does not enter a directory that was swapped for a symlink after its parent was listed', async () => {
+    const skills = join(root, '.agents/skills');
+    hooks.afterList = (path) => {
+      if (path.endsWith('/.agents/skills')) {
+        hooks.afterList = null;
+        swapForSymlink(join(skills, 'validate'), join(outside, 'validate-moved'));
+      }
+    };
+    const result = await discoverArtifacts(root);
+    expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContainEqual(
+      expect.stringMatching(/^\.agents\/skills\/validate/),
+    );
+    expect(result.errors).toContainEqual({
+      path: '.agents/skills/validate',
+      code: 'read-failed',
+      message:
+        'Directory .agents/skills/validate changed during the scan and no longer resolves inside the scanned root; its files were not scanned',
+    });
+  });
+
+  it('does not read through a directory that was swapped for a symlink after the walk', async () => {
+    const references = join(root, '.agents/skills/validate/references');
+    hooks.beforeParse = (relPath) => {
+      if (relPath === '.agents/skills/validate/SKILL.md') {
+        hooks.beforeParse = null;
+        swapForSymlink(references, join(outside, 'references-moved'));
+      }
+    };
+    const result = await discoverArtifacts(root);
+    expect(result.artifacts.map((artifact) => artifact.primaryPath)).not.toContain(
+      '.agents/skills/validate/SKILL.md',
+    );
+    expect(result.errors).toContainEqual({
+      path: '.agents/skills/validate/SKILL.md',
+      code: 'read-failed',
+      message:
+        'Cannot read .agents/skills/validate/references/api.md: its directory changed during the scan and no longer resolves inside the scanned root',
+    });
   });
 
   it('does not swallow unexpected errors', async () => {

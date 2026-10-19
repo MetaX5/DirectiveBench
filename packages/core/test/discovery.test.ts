@@ -236,7 +236,7 @@ describe('discoverArtifacts edge cases', () => {
     await writeFile(join(outside, 'skills/evil/SKILL.md'), SKILL);
     await symlink(join(outside, 'skills'), join(root, 'skills'));
     const result = await discoverArtifacts(root);
-    expect(result).toEqual({ artifacts: [], errors: [], scannedFiles: 0 });
+    expect(result).toEqual({ artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: [] });
   });
 
   it('scans through a root that is itself a symlink to a directory', async () => {
@@ -253,6 +253,39 @@ describe('discoverArtifacts edge cases', () => {
       `Discovery root is not a directory: ${join(root, 'file.txt')}`,
     );
     await expect(discoverArtifacts(join(root, 'missing'))).rejects.toThrow(/ENOENT/);
+  });
+});
+
+describe('discoverArtifacts skipDirectories (user-level folders, D05)', () => {
+  it('never enters a skipped directory and reports where it skipped', async () => {
+    await write('home/AGENTS.md', '# Home rules\n');
+    await write('home/.claude/skills/global/SKILL.md', SKILL);
+    await write('home/.claude/CLAUDE.md', '# User-level\n');
+    await write('home/project/.claude/skills/local/SKILL.md', SKILL);
+    const realRoot = await realpath(root);
+    const result = await discoverArtifacts(realRoot, {
+      skipDirectories: [join(realRoot, 'home/.claude'), join(realRoot, 'home/.codex')],
+    });
+    expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+      'home/AGENTS.md',
+      'home/project/.claude/skills/local/SKILL.md',
+    ]);
+    expect(result.errors).toEqual([]);
+    expect(result.scannedFiles).toBe(2);
+    expect(result.skippedDirectories).toEqual(['home/.claude']);
+  });
+
+  it('reads nothing when the root is a skipped directory or lies inside one', async () => {
+    await write('home/.claude/skills/global/SKILL.md', SKILL);
+    const realRoot = await realpath(root);
+    const skipDirectories = [join(realRoot, 'home/.claude')];
+    const empty = { artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: ['.'] };
+    expect(await discoverArtifacts(join(realRoot, 'home/.claude'), { skipDirectories })).toEqual(
+      empty,
+    );
+    expect(
+      await discoverArtifacts(join(realRoot, 'home/.claude/skills'), { skipDirectories }),
+    ).toEqual(empty);
   });
 });
 

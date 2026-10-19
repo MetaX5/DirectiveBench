@@ -1,7 +1,7 @@
 import { isUtf8 } from 'node:buffer';
 import { constants } from 'node:fs';
 import { open, readdir, realpath, stat } from 'node:fs/promises';
-import { join, posix, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import {
   classifyArtifactPath,
   parseArtifactFile,
@@ -10,6 +10,7 @@ import {
 } from './artifacts';
 import { hashManifest, sha256 } from './hash';
 import type { ArtifactFile } from './models';
+import { pathRelation } from './repository-path';
 
 /** Default safety limits of a repository scan (SPEC-102 FR-102-16). */
 export const DISCOVERY_LIMITS = {
@@ -69,6 +70,12 @@ export interface DiscoveryResult {
   errors: DiscoveryError[];
   /** Regular files seen by the walk, excluding skipped directories. */
   scannedFiles: number;
+  /**
+   * Directories of {@link DiscoveryOptions.skipDirectories} the walk met and did not enter, as
+   * POSIX paths relative to the root, sorted; `.` when the root itself is one of them or lies
+   * inside one (nothing is read then). Not errors.
+   */
+  skippedDirectories: string[];
 }
 
 export interface DiscoveryOptions {
@@ -85,6 +92,12 @@ export interface DiscoveryOptions {
    * a {@link DiscoveryRootChangedError} is thrown.
    */
   expectedRoot?: string;
+  /**
+   * Canonical absolute directories that are never entered, wherever they occur below the root —
+   * the agents' user-level folders such as `~/.claude` (product decision D05). A root equal to or
+   * inside one of them is not read at all.
+   */
+  skipDirectories?: readonly string[];
 }
 
 /** The discovery root no longer resolves to the expected canonical path. */
@@ -121,21 +134,32 @@ function byCodeUnit(a: string, b: string): number {
 async function walk(
   root: string,
   signal: AbortSignal | undefined,
-): Promise<{ entries: TreeEntry[]; unreadable: DiscoveryError[] }> {
+  skipDirectories: ReadonlySet<string>,
+): Promise<{ entries: TreeEntry[]; unreadable: DiscoveryError[]; skipped: string[] }> {
   const entries: TreeEntry[] = [];
   const unreadable: DiscoveryError[] = [];
+  const skipped: string[] = [];
   async function visit(dir: string, prefix: string): Promise<void> {
     signal?.throwIfAborted();
     let listing;
     try {
+      // `dir` was a directory when its parent was listed. If it has been replaced by a symlink
+      // (or a parent has) since, it no longer resolves to itself and is not entered (FR-102-18).
+      if (prefix !== '' && (await realpath(dir)) !== dir) {
+        unreadable.push({
+          path: prefix,
+          code: 'read-failed',
+          message: `Directory ${prefix} changed during the scan and no longer resolves inside the scanned root; its files were not scanned`,
+        });
+        return;
+      }
       listing = await readdir(dir, { withFileTypes: true });
     } catch (error) {
       if (prefix === '') throw error;
-      const code = String((error as NodeJS.ErrnoException).code);
       unreadable.push({
         path: prefix,
         code: 'read-failed',
-        message: `Cannot read directory ${prefix} (${code}); its files were not scanned`,
+        message: `Cannot read directory ${prefix} (${errorCode(error)}); its files were not scanned`,
       });
       return;
     }
@@ -144,7 +168,9 @@ async function walk(
       if (entry.isSymbolicLink()) {
         entries.push({ path, kind: 'symlink' });
       } else if (entry.isDirectory()) {
-        if (!SKIPPED_DIRECTORY_NAMES.includes(entry.name)) await visit(join(dir, entry.name), path);
+        const abs = join(dir, entry.name);
+        if (skipDirectories.has(abs)) skipped.push(path);
+        else if (!SKIPPED_DIRECTORY_NAMES.includes(entry.name)) await visit(abs, path);
       } else if (entry.isFile()) {
         entries.push({ path, kind: 'file' });
       }
@@ -152,7 +178,17 @@ async function walk(
     }
   }
   await visit(root, '');
-  return { entries: entries.sort((a, b) => byCodeUnit(a.path, b.path)), unreadable };
+  return {
+    entries: entries.sort((a, b) => byCodeUnit(a.path, b.path)),
+    unreadable,
+    skipped: skipped.sort(byCodeUnit),
+  };
+}
+
+/** The error's `code` (`EACCES`, `ENOENT`, …): messages never carry the absolute path. */
+function errorCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' ? code : 'unknown error';
 }
 
 /** The entries of the deepest skill directory containing `path`, or `undefined` when none does. */
@@ -189,10 +225,26 @@ async function readUpTo(abs: string, maxBytes: number): Promise<Buffer | number>
   }
 }
 
+/**
+ * Reads a file found by the walk. Its directory must still resolve to itself: `O_NOFOLLOW` covers
+ * only the last path component, so a directory swapped for a symlink after the walk would
+ * otherwise redirect the read outside the root (FR-102-18).
+ */
 async function readBounded(abs: string, relPath: string, maxBytes: number): Promise<Buffer> {
-  const result = await readUpTo(abs, maxBytes).catch((error: unknown) => {
-    throw new ArtifactError('read-failed', `Cannot read ${relPath}: ${String(error)}`);
-  });
+  let result: Buffer | number;
+  try {
+    const parent = dirname(abs);
+    if ((await realpath(parent)) !== parent) {
+      throw new ArtifactError(
+        'read-failed',
+        `Cannot read ${relPath}: its directory changed during the scan and no longer resolves inside the scanned root`,
+      );
+    }
+    result = await readUpTo(abs, maxBytes);
+  } catch (error) {
+    if (error instanceof ArtifactError) throw error;
+    throw new ArtifactError('read-failed', `Cannot read ${relPath} (${errorCode(error)})`);
+  }
   if (typeof result === 'number') {
     throw new ArtifactError(
       'too-large',
@@ -313,7 +365,11 @@ async function discoverSingleFile(
  *
  * Discovery is read-only: files are read as bytes and parsed as text, never executed, imported
  * or spawned, and no git hooks, package scripts or LFS filters run. Symlinks are never followed;
- * `.git/` and `node_modules/` are skipped. A limit violation or unreadable file is a
+ * `.git/`, `node_modules/` and the `skipDirectories` are skipped. Before a directory is listed or
+ * a file is opened, its directory must still resolve to itself, so a directory swapped for a
+ * symlink during the scan is a `read-failed` error, not a way out of the root; a swap landing
+ * between that check and the read itself is not detected (Node has no `openat`). A limit
+ * violation or unreadable file is a
  * {@link DiscoveryError} for that artifact only; more than `maxCandidatesPerScan` candidates
  * aborts the scan. The result is deterministic for the same tree.
  */
@@ -331,8 +387,13 @@ export async function discoverArtifacts(
   if (!(await stat(realRoot)).isDirectory()) {
     throw new Error(`Discovery root is not a directory: ${root}`);
   }
+  const skipDirectories = new Set(options.skipDirectories ?? []);
+  const insideSkipped = (dir: string) => ['same', 'inside'].includes(pathRelation(realRoot, dir));
+  if ([...skipDirectories].some(insideSkipped)) {
+    return { artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: ['.'] };
+  }
 
-  const { entries, unreadable } = await walk(realRoot, options.signal);
+  const { entries, unreadable, skipped } = await walk(realRoot, options.signal, skipDirectories);
   const candidates: {
     entry: TreeEntry;
     classification: ArtifactClassification;
@@ -381,5 +442,6 @@ export async function discoverArtifacts(
     artifacts,
     errors: errors.sort((a, b) => byCodeUnit(a.path, b.path)),
     scannedFiles: entries.filter((entry) => entry.kind === 'file').length,
+    skippedDirectories: skipped,
   };
 }
