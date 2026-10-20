@@ -386,6 +386,11 @@ export interface RepositoryScanApplication {
   jobId: string;
   artifacts: readonly ScannedArtifactInput[];
   /**
+   * The commit the artifacts were read at — a hosted repository's snapshot (SPEC-105 FR-105-06) —
+   * recorded on every occurrence, new version and the repository; null for a working-tree scan.
+   */
+  commitSha: string | null;
+  /**
    * The job's abort signal (user cancellation or runner shutdown). It is checked inside the
    * transaction, before anything is written: the transaction may have waited behind another one
    * on the shared connection, and a shutdown records nothing in the `jobs` row to re-check.
@@ -398,7 +403,8 @@ export interface RepositoryScanApplication {
  * (SPEC-105 FR-105-09 subset): every version goes through the same writer as
  * `importArtifactVersion` (hashes recomputed from content, dedup by content hash) with location
  * identity, and the repository records a successful scan (`last_sync_at`, `sync_status = 'ok'`,
- * `sync_error = null`). A scan reads the working tree, so no commit is recorded. Occurrences that
+ * `sync_error = null`) with the commit read (`last_commit_sha`; null for a working-tree scan, which
+ * reads no commit). Occurrences that
  * were not found again are left as they are (removed files are issue #21). The job is re-checked
  * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
  * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
@@ -443,7 +449,7 @@ export async function applyRepositoryScan(
           provider: repository.provider,
           identity: 'location',
           slug: slugify(input.name),
-          commitSha: null,
+          commitSha: application.commitSha,
         },
         input,
         recomputed,
@@ -457,7 +463,7 @@ export async function applyRepositoryScan(
     await db
       .update(repositories)
       .set({
-        lastCommitSha: null,
+        lastCommitSha: application.commitSha,
         lastSyncAt: now,
         syncStatus: 'ok',
         syncError: null,

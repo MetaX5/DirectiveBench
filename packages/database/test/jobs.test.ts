@@ -106,6 +106,26 @@ describe('enqueueRepositoryRegistrationJob', () => {
     expect(job.id).toMatch(/^job_/);
   });
 
+  it('enqueues a normalised hosted URL and nothing else that looks like one', async () => {
+    const handle = getHandle();
+    const job = await enqueueRepositoryRegistrationJob(handle.db, {
+      url: 'https://github.com/acme/skills',
+    });
+    expect(job.payload).toEqual({ url: 'https://github.com/acme/skills' });
+    for (const payload of [
+      { url: 'https://user:ghp_abcdefghijklmnopqrstuvwxyz@github.com/acme/skills' },
+      { url: 'https://github.com/Acme/skills.git' },
+      { url: 'https://gitlab.com/acme/skills' },
+      { url: 'https://github.com/acme/skills', path: '/srv' },
+    ]) {
+      await expect(
+        enqueueRepositoryRegistrationJob(handle.db, payload as { url: string }),
+      ).rejects.toThrow();
+    }
+    expect(await handle.db.$count(schema.jobs)).toBe(1);
+    expect(JSON.stringify(await handle.db.select().from(schema.jobs))).not.toContain('ghp_');
+  });
+
   it('rejects relative paths and unknown fields without storing anything', async () => {
     const handle = getHandle();
     await expect(enqueueRepositoryRegistrationJob(handle.db, { path: 'code' })).rejects.toThrow(
@@ -195,7 +215,8 @@ describe('getRepositoryRegistration', () => {
     expect(await getRepositoryRegistration(handle.db, pending.id)).toEqual({
       jobId: pending.id,
       status: 'pending',
-      path: '/srv/pending',
+      input: '/srv/pending',
+      source: 'path',
       error: null,
       result: null,
       repository: null,
@@ -220,7 +241,8 @@ describe('getRepositoryRegistration', () => {
     const success = { ok: true, repositoryId: repository.id, created: true };
     await finishJob(handle.db, done.id, 'completed', undefined, success);
     expect(await getRepositoryRegistration(handle.db, done.id)).toMatchObject({
-      path: '/srv/skills/',
+      input: '/srv/skills/',
+      source: 'path',
       result: success,
       repository,
     });
@@ -233,6 +255,23 @@ describe('getRepositoryRegistration', () => {
     });
     expect(await getRepositoryRegistration(handle.db, gone.id)).toMatchObject({
       repository: null,
+    });
+  });
+
+  it('describes the registration of a hosted URL', async () => {
+    const handle = getHandle();
+    const job = await enqueueRepositoryRegistrationJob(handle.db, {
+      url: 'https://github.com/acme/skills',
+    });
+    expect(await getRepositoryRegistration(handle.db, job.id)).toMatchObject({
+      input: 'https://github.com/acme/skills',
+      source: 'url',
+      result: null,
+    });
+    const rejection = { ok: false, code: 'auth-required', message: 'Not found or not public.' };
+    await finishJob(handle.db, job.id, 'completed', undefined, rejection);
+    expect(await getRepositoryRegistration(handle.db, job.id)).toMatchObject({
+      result: rejection,
     });
   });
 
@@ -443,7 +482,21 @@ describe('getRepositoryScan', () => {
     expect((await getRepositoryScan(handle.db, job.id))?.result).toEqual({
       ...success,
       skippedUserLevelFolders: ['.claude'],
+      commitSha: null,
     });
+    // A hosted scan names the commit it read; anything but a full hex object ID is rejected.
+    const commitSha = 'a'.repeat(40);
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify({ ...success, commitSha }), job.id);
+    expect((await getRepositoryScan(handle.db, job.id))?.result).toMatchObject({ commitSha });
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify({ ...success, commitSha: 'HEAD' }), job.id);
+    expect(await getRepositoryScan(handle.db, job.id)).toBeNull();
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify(success), job.id);
     handle.sqlite.exec('delete from repositories');
     expect(await getRepositoryScan(handle.db, job.id)).toMatchObject({ repository: null });
   });

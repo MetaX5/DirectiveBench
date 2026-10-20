@@ -8,7 +8,7 @@ import {
   categories,
   repositories,
 } from '../schema';
-import { SCANNABLE_PROVIDERS, type RepositoryOverlap } from './jobs';
+import { LOCAL_PROVIDERS, type RepositoryOverlap } from './jobs';
 import { countRunsByVerdict, listBenchmarkRuns } from './runs';
 
 /** Inserts predefined categories that do not exist yet. Renamed or archived ones are kept as-is. */
@@ -138,7 +138,7 @@ export async function registerLocalRepository(
     const local = await db
       .select({ id: repositories.id, name: repositories.name, location: repositories.location })
       .from(repositories)
-      .where(inArray(repositories.provider, [...SCANNABLE_PROVIDERS]))
+      .where(inArray(repositories.provider, [...LOCAL_PROVIDERS]))
       .orderBy(repositories.location, repositories.id);
     const overlaps: RepositoryOverlap[] = [];
     for (const repository of local) {
@@ -172,6 +172,52 @@ export async function registerLocalRepository(
     if (!inserted) throw new Error(`Repository ${input.location} could not be inserted`);
     return { status: 'registered', repository: inserted, created: true };
   });
+}
+
+/** A hosted repository registered by URL (SPEC-104 FR-104-02). */
+export interface HostedRepositoryRegistration {
+  provider: 'github';
+  name: string;
+  /** Normalised, credential-free URL (FR-104-04, FR-104-05). */
+  location: string;
+  /** The remote's default branch; null when it reports none (an empty repository). */
+  defaultBranch: string | null;
+}
+
+/**
+ * Registers a hosted repository, or returns the one already registered at the same provider and
+ * location, unchanged (FR-104-04). One `INSERT … ON CONFLICT DO NOTHING`, then a read of the row,
+ * so concurrent registrations of the same URL never create two rows. Hosted locations do not
+ * overlap with anything (FR-104-18 applies to local paths only).
+ */
+export async function registerHostedRepository(
+  db: Database,
+  input: HostedRepositoryRegistration,
+): Promise<{ repository: RepositoryRecord; created: boolean }> {
+  const now = nowIso();
+  const [inserted] = await db
+    .insert(repositories)
+    .values({
+      id: createId('repo'),
+      provider: input.provider,
+      name: input.name,
+      location: input.location,
+      defaultBranch: input.defaultBranch,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (inserted) return { repository: inserted, created: true };
+  const existing = await db
+    .select()
+    .from(repositories)
+    .where(
+      and(eq(repositories.provider, input.provider), eq(repositories.location, input.location)),
+    )
+    .get();
+  if (!existing) throw new Error(`Repository ${input.location} could not be inserted`);
+  return { repository: existing, created: false };
 }
 
 export async function getDashboardStats(db: Database) {

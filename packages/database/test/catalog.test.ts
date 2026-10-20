@@ -9,6 +9,7 @@ import {
   importArtifactVersion,
   listCategories,
   listRepositories,
+  registerHostedRepository,
   registerLocalRepository,
   schema,
   seedPredefinedCategories,
@@ -199,6 +200,12 @@ describe('registerLocalRepository', () => {
         repository: { provider: 'bundled-examples', name: 'Bundled', location: '/srv/examples' },
       }),
     );
+    await registerHostedRepository(handle.db, {
+      provider: 'github',
+      name: 'acme/srv',
+      location: 'https://github.com/acme/srv',
+      defaultBranch: 'main',
+    });
 
     const outer = await registerLocalRepository(handle, { ...input, location: '/srv' }, scope);
     expect(outer).toEqual({
@@ -221,7 +228,7 @@ describe('registerLocalRepository', () => {
         { repositoryId: skills.id, name: 'skills', location: '/srv/skills', relation: 'inside' },
       ],
     });
-    expect(await handle.db.$count(schema.repositories)).toBe(3);
+    expect(await handle.db.$count(schema.repositories)).toBe(4);
   });
 
   it('registers a broad or overlapping location only when exactly that location was confirmed', async () => {
@@ -252,6 +259,43 @@ describe('registerLocalRepository', () => {
     );
     await expect(registerLocalRepository(handle, input, scope)).rejects.toThrow(
       'Repository /srv/skills could not be inserted',
+    );
+  });
+});
+
+describe('registerHostedRepository', () => {
+  const input = {
+    provider: 'github' as const,
+    name: 'Acme/Skills',
+    location: 'https://github.com/acme/skills',
+    defaultBranch: 'main',
+  };
+
+  it('creates a repository that has never been synchronised', async () => {
+    const handle = getHandle();
+    const { repository, created } = await registerHostedRepository(handle.db, input);
+    expect(created).toBe(true);
+    expect(repository).toMatchObject({ ...input, syncStatus: 'never', lastCommitSha: null });
+  });
+
+  it('returns the existing repository unchanged, also for concurrent registrations', async () => {
+    const handle = getHandle();
+    const results = await Promise.all([
+      registerHostedRepository(handle.db, input),
+      registerHostedRepository(handle.db, { ...input, name: 'acme/skills', defaultBranch: 'dev' }),
+    ]);
+    expect(results.map((result) => result.created).sort()).toEqual([false, true]);
+    expect(results[1]?.repository).toEqual(results[0]?.repository);
+    expect(await handle.db.$count(schema.repositories)).toBe(1);
+  });
+
+  it('fails loudly when the insert is dropped', async () => {
+    const handle = getHandle();
+    handle.sqlite.exec(
+      'CREATE TRIGGER drop_repositories BEFORE INSERT ON repositories BEGIN SELECT RAISE(IGNORE); END',
+    );
+    await expect(registerHostedRepository(handle.db, input)).rejects.toThrow(
+      'Repository https://github.com/acme/skills could not be inserted',
     );
   });
 });
