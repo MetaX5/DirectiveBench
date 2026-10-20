@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lt, max, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, gte, inArray, lt, max, or, sql } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
 import { createId, hashManifest, nowIso, sha256, slugify } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
@@ -538,9 +538,26 @@ export interface ArtifactListItem {
   format: string | null;
   latestVersion: number | null;
   categories: { slug: string; name: string }[];
-  sources: string[];
+  /** Repositories with at least one active occurrence, ordered by name (FR-101-10). */
+  repositories: { id: string; name: string }[];
+  /** Active occurrences across all repositories (a path found in several places counts each). */
+  occurrenceCount: number;
   benchmarkCount: number;
   latestEvaluation: LatestEvaluation | null;
+}
+
+/**
+ * Filters of the artifacts list (SPEC-101 FR-101-11 subset). Every field is optional and they
+ * combine with AND. Values are compared exactly, except `q`, a case-insensitive substring of the
+ * name or description.
+ */
+export interface ArtifactListFilter {
+  q?: string;
+  type?: ArtifactType;
+  /** A category slug: artifacts assigned to that category. */
+  category?: string;
+  /** A repository id: artifacts with an active occurrence in that repository. */
+  repository?: string;
 }
 
 interface RunSummaryShape {
@@ -587,8 +604,57 @@ async function latestRunsByArtifact(
   return result;
 }
 
-export async function listArtifacts(db: Database): Promise<ArtifactListItem[]> {
-  const rows = await db.select().from(artifacts).orderBy(artifacts.name);
+function matchesText(row: { name: string; description: string | null }, q: string): boolean {
+  return row.name.toLowerCase().includes(q) || (row.description ?? '').toLowerCase().includes(q);
+}
+
+export async function listArtifacts(
+  db: Database,
+  filter: ArtifactListFilter = {},
+): Promise<ArtifactListItem[]> {
+  const conditions = [];
+  if (filter.type) conditions.push(eq(artifacts.type, filter.type));
+  if (filter.category) {
+    conditions.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(artifactCategories)
+          .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
+          .where(
+            and(
+              eq(artifactCategories.artifactId, artifacts.id),
+              eq(categories.slug, filter.category),
+            ),
+          ),
+      ),
+    );
+  }
+  if (filter.repository) {
+    conditions.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(artifactOccurrences)
+          .where(
+            and(
+              eq(artifactOccurrences.artifactId, artifacts.id),
+              eq(artifactOccurrences.repositoryId, filter.repository),
+              eq(artifactOccurrences.status, 'active'),
+            ),
+          ),
+      ),
+    );
+  }
+  const q = filter.q?.trim().toLowerCase() ?? '';
+  // Text search runs in JavaScript: SQLite's lower() folds ASCII only, `toLowerCase` folds all.
+  const rows = (
+    await db
+      .select()
+      .from(artifacts)
+      .where(and(...conditions))
+      .orderBy(artifacts.name, artifacts.id)
+  ).filter((row) => !q || matchesText(row, q));
   const ids = rows.map((r) => r.id);
   if (ids.length === 0) return [];
 
@@ -611,13 +677,18 @@ export async function listArtifacts(db: Database): Promise<ArtifactListItem[]> {
     .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
     .where(inArray(artifactCategories.artifactId, ids))
     .orderBy(categories.name);
-  const sources = await db
-    .select({ artifactId: artifactOccurrences.artifactId, name: repositories.name })
+  const occurrences = await db
+    .select({
+      artifactId: artifactOccurrences.artifactId,
+      repositoryId: repositories.id,
+      name: repositories.name,
+    })
     .from(artifactOccurrences)
     .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
     .where(
       and(inArray(artifactOccurrences.artifactId, ids), eq(artifactOccurrences.status, 'active')),
-    );
+    )
+    .orderBy(repositories.name, repositories.id);
   const assignments = await db
     .select({ artifactId: artifactBenchmarkAssignments.artifactId })
     .from(artifactBenchmarkAssignments)
@@ -626,6 +697,7 @@ export async function listArtifacts(db: Database): Promise<ArtifactListItem[]> {
 
   return rows.map((row) => {
     const latestVersion = versions.find((v) => v.artifactId === row.id);
+    const found = occurrences.filter((o) => o.artifactId === row.id);
     return {
       id: row.id,
       slug: row.slug,
@@ -637,7 +709,12 @@ export async function listArtifacts(db: Database): Promise<ArtifactListItem[]> {
       categories: cats
         .filter((c) => c.artifactId === row.id)
         .map(({ slug, name }) => ({ slug, name })),
-      sources: [...new Set(sources.filter((s) => s.artifactId === row.id).map((s) => s.name))],
+      repositories: [
+        ...new Map(
+          found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.name }]),
+        ).values(),
+      ],
+      occurrenceCount: found.length,
       benchmarkCount: assignments.filter((a) => a.artifactId === row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
     };
@@ -656,7 +733,8 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
     .select({ occurrence: artifactOccurrences, repository: repositories })
     .from(artifactOccurrences)
     .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
-    .where(eq(artifactOccurrences.artifactId, artifactId));
+    .where(eq(artifactOccurrences.artifactId, artifactId))
+    .orderBy(repositories.name, repositories.id, artifactOccurrences.path);
   const cats = await db
     .select({ slug: categories.slug, name: categories.name })
     .from(artifactCategories)

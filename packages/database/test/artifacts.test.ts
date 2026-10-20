@@ -218,16 +218,25 @@ describe('importArtifactVersion', () => {
     const detail = await getArtifactDetail(handle.db, first.artifactId);
     expect(detail?.versions).toHaveLength(1);
     expect(detail?.occurrences).toHaveLength(3);
-    expect((await listArtifacts(handle.db))[0]?.sources.sort()).toEqual(['fixtures', 'upstream']);
+    const [listed] = await listArtifacts(handle.db);
+    // Two repositories are both named "fixtures": they are listed separately, by name.
+    expect(listed?.repositories.map((r) => r.name)).toEqual(['fixtures', 'fixtures', 'upstream']);
+    expect(listed?.occurrenceCount).toBe(3);
 
     await handle.db
       .update(schema.artifactOccurrences)
       .set({ status: 'removed' })
       .where(eq(schema.artifactOccurrences.artifactId, first.artifactId));
-    expect((await listArtifacts(handle.db))[0]?.sources).toEqual([]);
+    expect((await listArtifacts(handle.db))[0]).toMatchObject({
+      repositories: [],
+      occurrenceCount: 0,
+    });
 
     await importArtifactVersion(handle, artifactInput('v1'));
-    expect((await listArtifacts(handle.db))[0]?.sources).toEqual(['fixtures']);
+    expect((await listArtifacts(handle.db))[0]).toMatchObject({
+      repositories: [{ name: 'fixtures' }],
+      occurrenceCount: 1,
+    });
   });
 
   it('matches slugs only among artifacts of the same provider', async () => {
@@ -359,7 +368,8 @@ describe('listArtifacts', () => {
       format: null,
       latestVersion: null,
       categories: [],
-      sources: [],
+      repositories: [],
+      occurrenceCount: 0,
       benchmarkCount: 0,
       latestEvaluation: null,
     });
@@ -455,7 +465,119 @@ describe('listArtifacts', () => {
   });
 });
 
+describe('listArtifacts filters', () => {
+  async function seedTwoRepositories(handle: DatabaseHandle) {
+    await seedPredefinedCategories(handle.db);
+    const team = { provider: 'local-directory', name: 'team', location: '/srv/team' } as const;
+    const client = { provider: 'local-git', name: 'client', location: '/srv/client' } as const;
+    const review = await importArtifactVersion(
+      handle,
+      artifactInput('review', {
+        repository: team,
+        path: '.agents/skills/review',
+        slug: 'review',
+        name: 'Review',
+        description: 'Reviews ZAŻÓŁĆ pull requests',
+      }),
+    );
+    // The same artifact twice in one repository: one repository, two occurrences.
+    await importArtifactVersion(
+      handle,
+      artifactInput('review', {
+        repository: team,
+        path: '.claude/skills/review',
+        slug: 'review',
+        name: 'Review',
+        description: 'Reviews ZAŻÓŁĆ pull requests',
+      }),
+    );
+    const rules = await importArtifactVersion(
+      handle,
+      artifactInput('rules', {
+        repository: client,
+        path: 'AGENTS.md',
+        slug: 'agents',
+        name: 'Agents',
+        type: 'instruction',
+        description: null,
+        format: 'agents-md',
+        primaryFile: 'AGENTS.md',
+      }),
+    );
+    await assignCategoriesBySlug(handle.db, review.artifactId, ['security']);
+    const ids = Object.fromEntries(
+      (await handle.db.select().from(schema.repositories)).map((r) => [r.name, r.id]),
+    );
+    return { review: review.artifactId, rules: rules.artifactId, ids };
+  }
+
+  it('lists repositories and occurrence counts of artifacts from several repositories', async () => {
+    const handle = getHandle();
+    const { ids } = await seedTwoRepositories(handle);
+    const list = await listArtifacts(handle.db);
+    expect(list.map((a) => [a.name, a.type, a.repositories, a.occurrenceCount])).toEqual([
+      ['Agents', 'instruction', [{ id: ids.client, name: 'client' }], 1],
+      ['Review', 'skill', [{ id: ids.team, name: 'team' }], 2],
+    ]);
+  });
+
+  it('narrows by type, category, repository and text, combined with AND', async () => {
+    const handle = getHandle();
+    const { ids } = await seedTwoRepositories(handle);
+    const names = async (filter: Parameters<typeof listArtifacts>[1]) =>
+      (await listArtifacts(handle.db, filter)).map((a) => a.name);
+
+    expect(await names({})).toEqual(['Agents', 'Review']);
+    expect(await names({ type: 'instruction' })).toEqual(['Agents']);
+    expect(await names({ type: 'rule' })).toEqual([]);
+    expect(await names({ category: 'security' })).toEqual(['Review']);
+    expect(await names({ category: 'python' })).toEqual([]);
+    expect(await names({ repository: ids.team })).toEqual(['Review']);
+    expect(await names({ repository: ids.client })).toEqual(['Agents']);
+    expect(await names({ repository: 'repo_unknown' })).toEqual([]);
+    // Case-insensitive beyond ASCII, over name and description; blank text matches everything.
+    expect(await names({ q: '  zażółć ' })).toEqual(['Review']);
+    expect(await names({ q: 'AGE' })).toEqual(['Agents']);
+    expect(await names({ q: '   ' })).toEqual(['Agents', 'Review']);
+    expect(await names({ q: 'review', type: 'skill', repository: ids.client })).toEqual([]);
+    expect(await names({ type: 'skill', category: 'security', repository: ids.team })).toEqual([
+      'Review',
+    ]);
+  });
+
+  it('matches a repository only through its active occurrences', async () => {
+    const handle = getHandle();
+    const { review, ids } = await seedTwoRepositories(handle);
+    await handle.db
+      .update(schema.artifactOccurrences)
+      .set({ status: 'removed' })
+      .where(eq(schema.artifactOccurrences.artifactId, review));
+    expect(await listArtifacts(handle.db, { repository: ids.team })).toEqual([]);
+    expect((await listArtifacts(handle.db, { q: 'review' }))[0]).toMatchObject({
+      repositories: [],
+      occurrenceCount: 0,
+    });
+  });
+});
+
 describe('getArtifactDetail', () => {
+  it('orders occurrences by repository name and path', async () => {
+    const handle = getHandle();
+    const team = { provider: 'local-directory', name: 'team', location: '/srv/team' } as const;
+    const first = await importArtifactVersion(
+      handle,
+      artifactInput('v1', { repository: team, path: 'z/skill' }),
+    );
+    await importArtifactVersion(handle, artifactInput('v1', { repository: team, path: 'a/skill' }));
+    await importArtifactVersion(handle, artifactInput('v1'));
+    const detail = await getArtifactDetail(handle.db, first.artifactId);
+    expect(detail?.occurrences.map((o) => `${o.repository.name}:${o.occurrence.path}`)).toEqual([
+      'fixtures:skills/validate',
+      'team:a/skill',
+      'team:z/skill',
+    ]);
+  });
+
   it('returns null for an unknown artifact', async () => {
     expect(await getArtifactDetail(getHandle().db, 'art_missing')).toBeNull();
   });
