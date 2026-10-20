@@ -84,7 +84,7 @@ Feature route of `om-auto-fix-issue`: the covering specs exist (SPEC-104, SPEC-1
 ## Verification
 
 - `pnpm format:check` — pass. `pnpm lint` — pass. `pnpm typecheck` — 7/7 tasks.
-- `pnpm test` — all packages pass at 100% coverage (core 238, database 116, runner 185, web 98,
+- `pnpm test` — all packages pass at 100% coverage (core 238, database 116, runner 185 — 187 after the review fixes — web 98,
   cli 75, benchmark-engine 110, agent-adapters 34 tests); run 4 times in a row after making the
   timing-dependent coverage deterministic (see Problems).
 - `pnpm build` — pass. `pnpm verify:pack` — "Packaging verification passed".
@@ -149,6 +149,15 @@ against github.com (tested locally only).
     unusual modes fail the scan, a hosted registration can hold the short lane ~35 s, custom CA
     certificates are not forwarded (SPEC-104/105 §20).
   - Gate after the fixes: format, lint, typecheck, test (100%), build, verify:pack, e2e 31 — pass.
+
+- Independent re-review at `d99a2a2`: APPROVE (no blocker/major), 4 minors, 4 nits. Fixed: the
+  late-watch test now spies on `process.kill` (proved to fail without the guard); `result.error`
+  gets the same `<cache>` replacement as stderr; cache deletion asserted after a failed listing and
+  a failed read; a re-registration whose remote reports no default branch keeps the known one
+  (`coalesce`); SPEC-104 §9 wording (`@`, `?`, `#`); run log test count. Not changed: the
+  "already registered" wording after a branch refresh, `error` before `timedOut` in `abnormal()`,
+  and exceptions from `prepare()`/`rm`/`chmod` reaching the generic job error (same as local
+  scans; follow-up). Full gate passed again.
 
 ## Lessons recorded
 
