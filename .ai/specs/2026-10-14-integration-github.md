@@ -140,6 +140,12 @@ works as intended is an Assumption until it passes the transport tests in §11.
    empty file. User hooks, filters, credential helpers and URL rewrites (`insteadOf`) therefore cannot
    run or redirect traffic. Exception: credential source `git-default` keeps the user's global config,
    since its purpose is to use the user's helpers. This is shown in the UI.
+   Ignoring system and global config does not stop git from discovering a repository that encloses
+   its working directory and loading that repository's `.git/config` (for example a data directory
+   inside a git work tree). git therefore never discovers a repository: a call on the cache names it
+   with `GIT_DIR`, and every other call (`version`, `ls-remote`, `clone`) runs in the empty `HOME`
+   with `GIT_CEILING_DIRECTORIES` set to its parent. The only repository config git reads is the
+   cache's own, written by DirectiveBench's `clone`.
 5. **No redirects**: `http.followRedirects=false` (default is `initial`, [G10]). A redirect fails
    validation with a message that tells the user to register the final URL.
 6. **Schemes**: `protocol.allow=never`, `protocol.https.allow=always`. Also `protocol.ssh.allow=always`
@@ -281,8 +287,10 @@ GET costing 1 point ([G2]).
   from `ls-remote` (SPEC-104 Phase 3) and the scan's partial fetch of candidate blobs (SPEC-105 §20).
   Transport rules of §5.1 in force: 1 (argv, timeouts, process-group kill, bounded and redacted
   error output), 2 (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=false`), 4 (system and global
-  config ignored, `HOME` an empty DirectiveBench directory; there is no `git-default` exception yet,
-  since no credentials are used), 5 (`http.followRedirects=false`; a 3xx is `invalid-url` "register
+  config ignored, `HOME` an empty DirectiveBench directory, no repository discovery — `GIT_DIR` for
+  cache steps, `GIT_CEILING_DIRECTORIES` for the others, tested with a data directory inside a git
+  work tree whose config rewrites URLs, adds headers and disables TLS verification; there is no
+  `git-default` exception yet, since no credentials are used), 5 (`http.followRedirects=false`; a 3xx is `invalid-url` "register
   its new URL"), 6 (`protocol.allow=never`, `protocol.https.allow=always`), 7 (`core.hooksPath=/dev/null`
   — not an empty directory — `core.fsmonitor=false`, `GIT_LFS_SKIP_SMUDGE=1`, no submodules), 8 (bare,
   shallow, single-branch, blob-less partial clone without tags or templates). Observed: without

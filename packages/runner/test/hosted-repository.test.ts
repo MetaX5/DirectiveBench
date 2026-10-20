@@ -46,6 +46,7 @@ import {
   objectsIn,
   writeFiles,
 } from './support/hosted-fixtures';
+import { buildHostedGitEnv, hostedGitArgs } from '../src/hosted-git';
 
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 const posixOnly = it.skipIf(process.platform === 'win32');
@@ -363,6 +364,102 @@ describe('scanHostedRepository', () => {
     });
     expect(result).toMatchObject({ ok: true, discovered: 4 });
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it('reads no configuration of a git repository that encloses the data directory', async () => {
+    const remote = teamSkills();
+    // Where the hostile configuration points instead: another repository with another branch.
+    const evil = new FixtureRemote(remotes, 'evil', 'team-skills', {
+      'AGENTS.md': '# Evil rules\n',
+      '.agents/skills/evil/SKILL.md': SKILL.replaceAll('review', 'evil'),
+    });
+    git(evil.bare, ['update-ref', 'refs/heads/evil', evil.head()]);
+    git(evil.bare, ['symbolic-ref', 'HEAD', 'refs/heads/evil']);
+    const acmeBase = fileTransport(remotes)
+      .remoteUrl(remote.location)
+      .replace(/team-skills\.git$/, '');
+    const evilBase = acmeBase.replace(/acme\/$/, 'evil/');
+    const outer = join(remotes, 'outer');
+    mkdirSync(outer);
+    git(outer, ['init', '-q']);
+    writeFiles(outer, { 'rewrite.gitconfig': `[url "${evilBase}"]\n\tinsteadOf = ${acmeBase}\n` });
+    for (const [key, value] of [
+      ['include.path', join(outer, 'rewrite.gitconfig')],
+      ['http.extraHeader', 'Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789'],
+      ['http.sslVerify', 'false'],
+      ['http.proxy', 'http://127.0.0.1:9'],
+      ['credential.helper', `!touch ${marker}`],
+      ['remote.origin.url', evil.bare],
+      ['remote.origin.fetch', '+refs/heads/*:refs/heads/*'],
+    ] as const) {
+      git(outer, ['config', key, value]);
+    }
+    const cache = join(outer, 'data', 'cache');
+    mkdirSync(cache, { recursive: true });
+    // Armed: plain git anywhere below the data directory loads all of it, the include too.
+    const plain = git(cache, ['config', '--show-origin', '--list']);
+    expect(plain).toContain(`insteadof=${acmeBase}`);
+    expect(plain).toContain('http.sslverify=false');
+    expect(plain).toContain('http.extraheader=Authorization');
+
+    // Registration (ls-remote) detects the real repository's default branch, not evil's.
+    const registration = await registerHostedUrl(
+      handle,
+      remote.location,
+      options({ cacheDir: cache }),
+    );
+    if (!registration.ok) throw new Error(registration.message);
+    const repository = (await getRepository(
+      handle.db,
+      registration.repositoryId,
+    )) as RepositoryRecord;
+    expect(repository.defaultBranch).toBe('main');
+
+    // Clone, listing, blob fetch and reads use the real repository.
+    expect(await scan(repository, { cacheDir: cache })).toMatchObject({
+      ok: true,
+      discovered: 4,
+      commitSha: remote.head(),
+    });
+    // Fetch into the existing cache.
+    const commit = remote.commit({ 'AGENTS.md': '# Repository rules, edited\n' });
+    expect(await scan(repository, { cacheDir: cache })).toMatchObject({
+      ok: true,
+      createdVersions: 1,
+      commitSha: commit,
+    });
+    // A broken cache is not a repository: git must not walk up to the enclosing one.
+    const cacheRepo = join(cache, 'repos', `${repository.id}.git`);
+    rmSync(join(cacheRepo, 'HEAD'));
+    expect(await scan(repository, { cacheDir: cache })).toMatchObject({
+      ok: true,
+      commitSha: commit,
+    });
+    const versions = await handle.db.select().from(schema.artifactVersions);
+    expect(versions.map((v) => v.sourcePath).filter((path) => path?.includes('evil'))).toEqual([]);
+    expect(git(outer, ['for-each-ref'])).toBe('');
+    expect(existsSync(marker)).toBe(false);
+
+    // What each kind of hosted invocation sees: the command line, and the cache's own config.
+    const home = join(cache, 'git-home');
+    for (const [cwd, gitDir, origins] of [
+      [home, null, ['command line:']],
+      [cacheRepo, cacheRepo, ['command line:', `file:${cacheRepo}/config`]],
+    ] as const) {
+      const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', gitDir);
+      const listing = execFileSync(
+        'git',
+        hostedGitArgs('file', ['config', '--show-origin', '--list']),
+        { cwd, env },
+      ).toString();
+      const seen = new Set(
+        listing
+          .trim()
+          .split('\n')
+          .map((line) => line.split('\t')[0]),
+      );
+      expect([...seen].sort()).toEqual([...origins].sort());
+    }
   });
 
   it('reports symlinks at candidate paths, skips submodules and never fetches either', async () => {

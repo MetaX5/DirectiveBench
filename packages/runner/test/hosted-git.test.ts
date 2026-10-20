@@ -63,7 +63,7 @@ describe('buildHostedGitEnv', () => {
       GIT_CONFIG_PARAMETERS: "'credential.helper'='store'",
       GITHUB_TOKEN: 'ghp_abcdefghijklmnopqrstuvwxyz',
     };
-    const network = buildHostedGitEnv(base, '/data/cache/git-home', 'network');
+    const network = buildHostedGitEnv(base, '/data/cache/git-home', 'network', null);
     expect(network).toEqual({
       env: {
         PATH: '/usr/bin:/bin',
@@ -72,6 +72,7 @@ describe('buildHostedGitEnv', () => {
         HOME: '/data/cache/git-home',
         GIT_CONFIG_NOSYSTEM: '1',
         GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CEILING_DIRECTORIES: '/data/cache',
         GIT_TERMINAL_PROMPT: '0',
         GCM_INTERACTIVE: 'never',
         GIT_LFS_SKIP_SMUDGE: '1',
@@ -82,8 +83,13 @@ describe('buildHostedGitEnv', () => {
       },
       knownSecrets: ['http://user:secret@proxy:3128', 'localhost'],
     });
-    const local = buildHostedGitEnv({}, '/h', 'local');
-    expect(local.env).toMatchObject({ PATH: '', GIT_NO_LAZY_FETCH: '1' });
+    const local = buildHostedGitEnv({}, '/data/cache/git-home', 'local', '/data/cache/repos/r.git');
+    expect(local.env).toMatchObject({
+      PATH: '',
+      GIT_NO_LAZY_FETCH: '1',
+      GIT_DIR: '/data/cache/repos/r.git',
+      GIT_CEILING_DIRECTORIES: '/data/cache',
+    });
     expect(Object.keys(local.env)).not.toContain('TZ');
   });
 });
@@ -221,6 +227,7 @@ function fakeContext(
   overrides: Partial<HostedGitContext> = {},
 ) {
   const git = fakeGit(join(dir, 'bin'), answers);
+  mkdirSync(join(dir, 'git-home'), { recursive: true });
   const context: HostedGitContext = {
     git,
     env: { PATH: process.env.PATH },
@@ -246,7 +253,7 @@ describePosix('hosted git steps with a fake git', () => {
     ] as const) {
       rmSync(join(dir, 'bin'), { recursive: true, force: true });
       const { context } = fakeContext({ version: { stdout } });
-      const result = await checkGitVersion(context, dir);
+      const result = await checkGitVersion(context);
       expect(result === null).toBe(ok);
       if (!ok) expect(result).toMatchObject({ code: 'git-too-old' });
     }
@@ -255,25 +262,23 @@ describePosix('hosted git steps with a fake git', () => {
   it('reports a git that times out or cannot be started', async () => {
     const { context } = fakeContext({ version: { sleepMs: 5_000 } });
     expect(
-      await checkGitVersion({ ...context, timeouts: { ...context.timeouts, version: 50 } }, dir),
+      await checkGitVersion({ ...context, timeouts: { ...context.timeouts, version: 50 } }),
     ).toEqual({
       ok: false,
       code: 'timeout',
       message: 'git version did not finish within the time limit.',
     });
-    expect(await checkGitVersion({ ...context, git: join(dir, 'missing-git') }, dir)).toMatchObject(
-      {
-        code: 'git-failed',
-        message: expect.stringMatching(/^git version failed: .*ENOENT/),
-      },
-    );
+    expect(await checkGitVersion({ ...context, git: join(dir, 'missing-git') })).toMatchObject({
+      code: 'git-failed',
+      message: expect.stringMatching(/^git version failed: .*ENOENT/),
+    });
   });
 
   it('runs ls-remote with the location after `--` and drops an unsafe default branch', async () => {
     const { git, context } = fakeContext({
       'ls-remote': { stdout: `ref: refs/heads/-x\tHEAD\n${OID_A}\tHEAD\n` },
     });
-    expect(await detectDefaultBranch(context, LOCATION, dir)).toEqual({
+    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
       ok: true,
       defaultBranch: null,
     });
@@ -285,7 +290,7 @@ describePosix('hosted git steps with a fake git', () => {
 
   it('reports output beyond what is read', async () => {
     const { context } = fakeContext({ 'ls-remote': { stdout: Buffer.alloc(2 * 1024 * 1024) } });
-    expect(await detectDefaultBranch(context, LOCATION, dir)).toEqual({
+    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
       ok: false,
       code: 'git-failed',
       message: 'git ls-remote printed more output than DirectiveBench reads.',
@@ -294,8 +299,8 @@ describePosix('hosted git steps with a fake git', () => {
 
   it('fails a clone whose commit cannot be read, or whose cache exceeds the limit afterwards', async () => {
     const cacheDir = join(dir, 'repos', 'repo_x.git');
-    const target = { location: LOCATION, branch: 'main', cacheDir, parentDir: join(dir, 'repos') };
-    mkdirSync(target.parentDir);
+    const target = { location: LOCATION, branch: 'main', cacheDir };
+    mkdirSync(join(dir, 'repos'));
     let { context } = fakeContext({ clone: { creates: { HEAD: 1 } }, 'rev-parse': { exit: 128 } });
     expect(await fetchSnapshot(context, target)).toEqual({
       ok: false,
@@ -329,7 +334,6 @@ describePosix('hosted git steps with a fake git', () => {
       location: LOCATION,
       branch: 'main',
       cacheDir,
-      parentDir: join(dir, 'repos'),
     });
     expect(result).toMatchObject({ ok: false, code: 'cache-limit-exceeded' });
     expect(Date.now() - started).toBeLessThan(10_000);
@@ -351,7 +355,6 @@ describePosix('hosted git steps with a fake git', () => {
       location: LOCATION,
       branch: 'main',
       cacheDir,
-      parentDir: join(dir, 'repos'),
     });
     expect(result).toEqual({
       ok: false,

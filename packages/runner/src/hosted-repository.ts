@@ -75,7 +75,7 @@ async function prepare(
     cacheLimitBytes: options.cacheLimitBytes ?? HOSTED_CACHE_LIMIT_BYTES,
     cacheSizePollIntervalMs: options.cacheSizePollIntervalMs ?? CACHE_SIZE_POLL_INTERVAL_MS,
   };
-  const tooOld = await checkGitVersion(context, home);
+  const tooOld = await checkGitVersion(context);
   return tooOld ?? { context, reposDir };
 }
 
@@ -95,11 +95,7 @@ export async function registerHostedUrl(
   if (!parsed.ok) return { ok: false, code: 'invalid-url', message: parsed.message };
   const prepared = await prepare(options);
   if (!('context' in prepared)) return prepared;
-  const detected = await detectDefaultBranch(
-    prepared.context,
-    parsed.location,
-    prepared.context.home,
-  );
+  const detected = await detectDefaultBranch(prepared.context, parsed.location);
   if (!detected.ok) return detected;
   const { repository, created } = await registerHostedRepository(handle.db, {
     provider: parsed.provider,
@@ -156,7 +152,7 @@ export async function scanHostedRepository(
   if (!('context' in prepared)) return fail(prepared);
   const { context } = prepared;
   const cacheDir = join(prepared.reposDir, `${repository.id}.git`);
-  const target = { location: repository.location, branch, cacheDir, parentDir: prepared.reposDir };
+  const target = { location: repository.location, branch, cacheDir };
 
   const snapshot = await fetchSnapshot(context, target);
   if (!snapshot.ok) return fail(snapshot);

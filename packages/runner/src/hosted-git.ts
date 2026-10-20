@@ -1,5 +1,5 @@
 import { mkdir, chmod, lstat, readdir, rm } from 'node:fs/promises';
-import { delimiter, dirname, join } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import type { RepositoryTreeEntry } from '@directivebench/core';
 import { runGitProcess, type GitProcessResult } from './git-process';
 import { absolutePathEntries } from './repository-registration';
@@ -83,11 +83,19 @@ export type GitStepKind = 'network' | 'local';
  * programs never apply; `GIT_ASKPASS`/`SSH_ASKPASS`, `GIT_SSL_NO_VERIFY` and every other `GIT_*`
  * variable are simply absent. `local` steps disable lazy fetching, so reading a missing object
  * fails instead of downloading it. Returns the proxy values to redact as well.
+ *
+ * git never discovers a repository: ignoring system and global config does not stop it from
+ * walking up from its working directory and loading the `.git/config` of a repository enclosing
+ * the data directory (lesson 2026-10-20-git-config-isolation-needs-no-discovery). A step on the cache names it as `GIT_DIR` (`gitDir`), so
+ * the only repository config read is the cache's own, which DirectiveBench created; every other
+ * step runs in `HOME` with `GIT_CEILING_DIRECTORIES` set to its parent, so git looks at the empty
+ * `HOME` and nowhere above it.
  */
 export function buildHostedGitEnv(
   base: NodeJS.ProcessEnv,
   home: string,
   kind: GitStepKind,
+  gitDir: string | null,
 ): { env: Record<string, string>; knownSecrets: string[] } {
   const env: Record<string, string> = {
     PATH: absolutePathEntries(base.PATH).join(delimiter),
@@ -96,10 +104,12 @@ export function buildHostedGitEnv(
     HOME: home,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CEILING_DIRECTORIES: resolve(dirname(home)),
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
     GIT_LFS_SKIP_SMUDGE: '1',
   };
+  if (gitDir !== null) env.GIT_DIR = resolve(gitDir);
   if (kind === 'local') env.GIT_NO_LAZY_FETCH = '1';
   const knownSecrets: string[] = [];
   for (const name of ['TZ', ...WINDOWS_VARIABLES, ...PROXY_VARIABLES]) {
@@ -250,7 +260,8 @@ export interface HostedGitContext {
 }
 
 interface StepOptions {
-  cwd: string;
+  /** The cache repository the step works on (`GIT_DIR` and working directory); null: none, in `HOME`. */
+  gitDir: string | null;
   kind: GitStepKind;
   timeoutMs: number;
   maxStdoutBytes: number;
@@ -264,10 +275,15 @@ async function runStep(
   args: readonly string[],
   options: StepOptions,
 ): Promise<GitProcessResult> {
-  const { env, knownSecrets } = buildHostedGitEnv(context.env, context.home, options.kind);
+  const { env, knownSecrets } = buildHostedGitEnv(
+    context.env,
+    context.home,
+    options.kind,
+    options.gitDir,
+  );
   const { watchSize } = options;
   const result = await runGitProcess(context.git, hostedGitArgs(context.transport.protocol, args), {
-    cwd: options.cwd,
+    cwd: options.gitDir ?? context.home,
     env,
     ...(options.stdin ? { stdin: options.stdin } : {}),
     timeoutMs: options.timeoutMs,
@@ -343,12 +359,9 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
  * Checks that git supports `GIT_NO_LAZY_FETCH` (≥ 2.44, NFR-104-03). Older git would ignore it
  * and download on any read of a missing object, so hosted repositories are refused (fail closed).
  */
-export async function checkGitVersion(
-  context: HostedGitContext,
-  cwd: string,
-): Promise<HostedGitFailure | null> {
+export async function checkGitVersion(context: HostedGitContext): Promise<HostedGitFailure | null> {
   const result = await runStep(context, ['version'], {
-    cwd,
+    gitDir: null,
     kind: 'local',
     timeoutMs: context.timeouts.version,
     maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -403,13 +416,12 @@ function utf8(bytes: Buffer): string | null {
 export async function detectDefaultBranch(
   context: HostedGitContext,
   location: string,
-  cwd: string,
 ): Promise<{ ok: true; defaultBranch: string | null } | HostedGitFailure> {
   const result = await runStep(
     context,
     ['ls-remote', '--symref', '--', context.transport.remoteUrl(location), 'HEAD'],
     {
-      cwd,
+      gitDir: null,
       kind: 'network',
       timeoutMs: context.timeouts.lsRemote,
       maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -442,7 +454,7 @@ const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
  */
 export async function fetchSnapshot(
   context: HostedGitContext,
-  target: { location: string; branch: string; cacheDir: string; parentDir: string },
+  target: { location: string; branch: string; cacheDir: string },
 ): Promise<{ ok: true; commitSha: string } | HostedGitFailure> {
   const exists = await lstat(target.cacheDir).then(
     () => true,
@@ -460,7 +472,7 @@ export async function fetchSnapshot(
 
 async function cloneInto(
   context: HostedGitContext,
-  target: { location: string; branch: string; cacheDir: string; parentDir: string },
+  target: { location: string; branch: string; cacheDir: string },
 ): Promise<{ ok: true; commitSha: string } | HostedGitFailure> {
   const result = await runStep(
     context,
@@ -477,10 +489,11 @@ async function cloneInto(
       target.branch,
       '--',
       context.transport.remoteUrl(target.location),
-      target.cacheDir,
+      // Absolute: the clone runs in HOME.
+      resolve(target.cacheDir),
     ],
     {
-      cwd: target.parentDir,
+      gitDir: null,
       kind: 'network',
       timeoutMs: context.timeouts.fetch,
       maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -509,7 +522,7 @@ async function fetchInto(
       `+${ref}:${ref}`,
     ],
     {
-      cwd: target.cacheDir,
+      gitDir: target.cacheDir,
       kind: 'network',
       timeoutMs: context.timeouts.fetch,
       maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -544,7 +557,7 @@ async function finishDownload(
     context,
     ['rev-parse', '--verify', `refs/heads/${target.branch}^{commit}`],
     {
-      cwd: target.cacheDir,
+      gitDir: target.cacheDir,
       kind: 'local',
       timeoutMs: context.timeouts.read,
       maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -578,7 +591,7 @@ export async function listSnapshot(
   commitSha: string,
 ): Promise<{ ok: true; entries: SnapshotEntry[] } | HostedGitFailure> {
   const result = await runStep(context, ['ls-tree', '-r', '-z', '--full-tree', commitSha], {
-    cwd: cacheDir,
+    gitDir: cacheDir,
     kind: 'local',
     timeoutMs: context.timeouts.read,
     maxStdoutBytes: TREE_LISTING_MAX_BYTES,
@@ -623,7 +636,7 @@ async function presentBlobs(
   const sizes = new Map<string, number>();
   if (oids.length === 0) return { ok: true, sizes };
   const result = await runStep(context, ['cat-file', '--batch-check'], {
-    cwd: cacheDir,
+    gitDir: cacheDir,
     kind: 'local',
     timeoutMs: context.timeouts.read,
     maxStdoutBytes: oids.length * 128,
@@ -670,7 +683,7 @@ export async function fetchBlobs(
       'origin',
     ],
     {
-      cwd: target.cacheDir,
+      gitDir: target.cacheDir,
       kind: 'network',
       timeoutMs: context.timeouts.fetch,
       maxStdoutBytes: SMALL_OUTPUT_BYTES,
@@ -709,7 +722,7 @@ export async function readBlobs(
   const total = [...blobs.values()].reduce((sum, size) => sum + size, 0);
   // Each object is `<oid> blob <size>\n<content>\n`.
   const result = await runStep(context, ['cat-file', '--batch'], {
-    cwd: cacheDir,
+    gitDir: cacheDir,
     kind: 'local',
     timeoutMs: context.timeouts.read,
     maxStdoutBytes: total + oids.length * 128,

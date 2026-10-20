@@ -159,9 +159,58 @@ against github.com (tested locally only).
   and exceptions from `prepare()`/`rm`/`chmod` reaching the generic job error (same as local
   scans; follow-up). Full gate passed again.
 
+## Codex review finding and fix
+
+- Finding (Codex adversarial review at `a8bea74`, confirmed): `GIT_CONFIG_NOSYSTEM=1` and
+  `GIT_CONFIG_GLOBAL=/dev/null` do not stop git from discovering a repository from its working
+  directory. With `--data-dir` inside a git work tree, `ls-remote` (cwd `<cache>/git-home`) loaded
+  the enclosing `.git/config`: `url.*.insteadOf` (also through `include.path`), `http.extraHeader`,
+  `http.sslVerify=false`, `http.proxy`, `credential.helper` — against FR-104-12/D06 and "never
+  disable TLS verification". Audit of every hosted invocation (probe with a broken config line in
+  the enclosing `.git/config` as a tripwire, git 2.53): `version` and `clone` do not discover;
+  `ls-remote` does; `fetch`, `rev-parse`, `ls-tree`, `cat-file` and the blob fetch run in the bare
+  cache and find it first — but when the cache is broken (e.g. `HEAD` missing) git walks up, and
+  `fetch origin` fetched the enclosing repository's `origin` into the enclosing repository, after
+  which `rev-parse` read its commit. The cache's own config is written only by DirectiveBench's
+  `clone` (remote URL, promisor settings); fetched content cannot change it. `GIT_CONFIG_PARAMETERS`
+  / `GIT_CONFIG_COUNT` were already absent (allowlisted environment, existing test).
+- Fix (`packages/runner/src/hosted-git.ts`): git never discovers a repository. Every step names its
+  repository: steps on the cache pass `gitDir`, which sets `GIT_DIR` (and the working directory);
+  steps without one (`version`, `ls-remote`, `clone`) run in the empty `HOME`. Every step also gets
+  `GIT_CEILING_DIRECTORIES` = the parent of `HOME` (`<dataDir>/cache`), so discovery could look at
+  `HOME` only. Chosen over a nonexistent `GIT_DIR` for repository-less steps because `clone`
+  overrides `GIT_DIR` itself and the ceiling is git's documented "stop here" mechanism; `GIT_DIR` on
+  cache steps makes a broken cache fail ("not a git repository: '<cache>/…'", then the existing
+  fresh-clone retry) instead of falling through. `parentDir` (clone cwd) was removed.
+- Regression test (`hosted-repository.test.ts`, "reads no configuration of a git repository that
+  encloses the data directory"): data directory inside a git work tree whose config has an
+  `include.path` with an `insteadOf` to a different bare repository (other content, other default
+  branch), `http.extraHeader`, `http.sslVerify=false`, `http.proxy`, `credential.helper`,
+  `remote.origin` = the other repository. Armed first (plain `git config --show-origin --list`
+  below the data dir shows all of it). Registration gets `main` (not `evil`), clone, rescan fetch,
+  blob fetch, reads and the fetch into a broken cache all read the right repository, the enclosing
+  repository gets no refs, no marker; finally `config --show-origin --list` with the hardened
+  argv and environment shows only `command line:` (in `HOME`) and `command line:` + the cache's
+  `config` (with `gitDir`). On the old code the test failed (`expected 'evil' to be 'main'`).
+  `buildHostedGitEnv` unit test asserts `GIT_CEILING_DIRECTORIES` and `GIT_DIR`.
+- Gate: `pnpm format:check`, `lint`, `typecheck`, `test` (runner 189 tests, all packages 100%),
+  `build`, `verify:pack` ("Packaging verification passed"), `test:e2e` (31 passed) — pass.
+- Manual, built CLI against github.com: `--data-dir` inside a temporary git repository whose
+  `.git/config` has `url."https://gitlab.com/".insteadOf=https://github.com/`, an
+  `http.extraHeader` with a fake `ghp_` token, `http.sslVerify=false` and `http.proxy=127.0.0.1:9`
+  (armed: plain `git ls-remote` from the data dir went to gitlab.com through the dead proxy and
+  failed). Registered `https://github.com/anthropics/skills` through the UI: provider `github`,
+  branch `main`; Scan: 445 files, 20 artifacts, commit `dbd4588f9e10`, `sync_status` ok; the
+  enclosing repository has no refs; the cache config holds only `core` and `remote.origin`
+  (github.com URL, promisor); no `gitlab`, `ghp_` or proxy value in `logs/` or the cache config.
+- Not verified: Windows (`GIT_CEILING_DIRECTORIES`/`GIT_DIR` with drive-letter paths) and macOS;
+  git versions other than 2.53.
+- Lesson: [2026-10-20-git-config-isolation-needs-no-discovery.md](../lessons/2026-10-20-git-config-isolation-needs-no-discovery.md).
+
 ## Lessons recorded
 
 - [2026-10-20-record-git-errors-of-the-exact-invocation.md](../lessons/2026-10-20-record-git-errors-of-the-exact-invocation.md) (new)
+- [2026-10-20-git-config-isolation-needs-no-discovery.md](../lessons/2026-10-20-git-config-isolation-needs-no-discovery.md) (new)
 - [2026-10-15-deterministic-full-coverage.md](../lessons/2026-10-15-deterministic-full-coverage.md) (updated)
 - [2026-10-14-testing-processes-and-http.md](../lessons/2026-10-14-testing-processes-and-http.md) (updated)
 
