@@ -186,19 +186,22 @@ export interface HostedRepositoryRegistration {
 
 /**
  * Registers a hosted repository, or returns the one already registered at the same provider and
- * location, unchanged (FR-104-04). One `INSERT … ON CONFLICT DO NOTHING`, then a read of the row,
- * so concurrent registrations of the same URL never create two rows. Hosted locations do not
- * overlap with anything (FR-104-18 applies to local paths only).
+ * location (FR-104-04) with its default branch refreshed from the remote's answer, so registering
+ * the URL again repairs a repository that was empty or whose default branch was renamed (name and
+ * everything else stay unchanged). One `INSERT … ON CONFLICT DO UPDATE … RETURNING`, so concurrent
+ * registrations of the same URL never create two rows. Hosted locations do not overlap with
+ * anything (FR-104-18 applies to local paths only).
  */
 export async function registerHostedRepository(
   db: Database,
   input: HostedRepositoryRegistration,
 ): Promise<{ repository: RepositoryRecord; created: boolean }> {
   const now = nowIso();
-  const [inserted] = await db
+  const id = createId('repo');
+  const [row] = await db
     .insert(repositories)
     .values({
-      id: createId('repo'),
+      id,
       provider: input.provider,
       name: input.name,
       location: input.location,
@@ -206,18 +209,13 @@ export async function registerHostedRepository(
       createdAt: now,
       updatedAt: now,
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: [repositories.provider, repositories.location],
+      set: { defaultBranch: input.defaultBranch, updatedAt: now },
+    })
     .returning();
-  if (inserted) return { repository: inserted, created: true };
-  const existing = await db
-    .select()
-    .from(repositories)
-    .where(
-      and(eq(repositories.provider, input.provider), eq(repositories.location, input.location)),
-    )
-    .get();
-  if (!existing) throw new Error(`Repository ${input.location} could not be inserted`);
-  return { repository: existing, created: false };
+  if (!row) throw new Error(`Repository ${input.location} could not be inserted`);
+  return { repository: row, created: row.id === id };
 }
 
 export async function getDashboardStats(db: Database) {

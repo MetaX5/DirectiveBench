@@ -278,14 +278,18 @@ describe('registerHostedRepository', () => {
     expect(repository).toMatchObject({ ...input, syncStatus: 'never', lastCommitSha: null });
   });
 
-  it('returns the existing repository unchanged, also for concurrent registrations', async () => {
+  it('returns the existing repository with its default branch refreshed, also concurrently', async () => {
     const handle = getHandle();
     const results = await Promise.all([
       registerHostedRepository(handle.db, input),
       registerHostedRepository(handle.db, { ...input, name: 'acme/skills', defaultBranch: 'dev' }),
     ]);
-    expect(results.map((result) => result.created).sort()).toEqual([false, true]);
-    expect(results[1]?.repository).toEqual(results[0]?.repository);
+    expect(results.map((result) => result.created)).toEqual([true, false]);
+    expect(results[1]?.repository).toMatchObject({
+      id: results[0]?.repository.id,
+      name: 'Acme/Skills',
+      defaultBranch: 'dev',
+    });
     expect(await handle.db.$count(schema.repositories)).toBe(1);
   });
 
