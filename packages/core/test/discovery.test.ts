@@ -11,6 +11,7 @@ import {
   DiscoveryRootChangedError,
   SKIPPED_DIRECTORY_NAMES,
 } from '../src/discovery';
+import { parseFrontmatter } from '../src/frontmatter';
 import { hashManifest, sha256 } from '../src/hash';
 import { buildDiscoveryFixture, SKILL } from './discovery-fixture';
 
@@ -545,28 +546,56 @@ describe('discoverArtifacts limits', () => {
   });
 
   it('aborts the scan once the kept content would exceed the per-scan byte limit', async () => {
-    await write('AGENTS.md', '# a\n'); // 4 bytes
+    await write('AGENTS.md', '# a\n'); // 4 bytes, and `{}` (2 bytes) as its frontmatter JSON
     await write('b/AGENTS.md', '\0binary'); // an error: not kept, not counted
     await write('skills/x/SKILL.md', SKILL);
     await write('skills/x/notes.md', '12345'); // 5 bytes
-    const skillBytes = Buffer.byteLength(SKILL) + 5;
-    const all = await discoverArtifacts(root, { limits: { maxScanBytes: 4 + skillBytes } });
+    const agentsBytes = 4 + 2;
+    const skillFileBytes = Buffer.byteLength(SKILL) + 5;
+    const skillBytes =
+      skillFileBytes + Buffer.byteLength(JSON.stringify(parseFrontmatter(SKILL).frontmatter));
+    const all = await discoverArtifacts(root, {
+      limits: { maxScanBytes: agentsBytes + skillBytes },
+    });
     expect(all.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
       'AGENTS.md',
       'skills/x/SKILL.md',
     ]);
     expect(all.errors.map((error) => error.path)).toEqual(['b/AGENTS.md']);
 
-    // One byte less: the skill's last file would cross the limit, so the scan is aborted.
-    const aborted = discoverArtifacts(root, { limits: { maxScanBytes: 3 + skillBytes } });
+    // One byte less: the skill's frontmatter JSON would cross the limit, so the scan is aborted.
+    const aborted = discoverArtifacts(root, {
+      limits: { maxScanBytes: agentsBytes + skillBytes - 1 },
+    });
     await expect(aborted).rejects.toThrow(DiscoveryLimitError);
     await expect(aborted).rejects.toMatchObject({
       limit: 'maxScanBytes',
-      message: `Discovery aborted: the discovered artifacts exceed the limit of ${3 + skillBytes} bytes per scan`,
+      message: `Discovery aborted: the discovered artifacts exceed the limit of ${agentsBytes + skillBytes - 1} bytes per scan`,
     });
+    // Less still: the skill's last file would cross it, before the rest of the skill is read.
+    await expect(
+      discoverArtifacts(root, { limits: { maxScanBytes: agentsBytes + skillFileBytes - 1 } }),
+    ).rejects.toMatchObject({ limit: 'maxScanBytes' });
     // A single-file artifact is checked before it is kept, too.
     await expect(discoverArtifacts(root, { limits: { maxScanBytes: 3 } })).rejects.toMatchObject({
       limit: 'maxScanBytes',
     });
+  });
+
+  // Regression (review of PR #44 at 2d668f3): the frontmatter is stored as JSON with its aliases
+  // expanded, so a small file can store far more than its own size. The per-file cap
+  // (MAX_FRONTMATTER_JSON_BYTES) bounds one file; the scan limit must count the expansion too.
+  it('counts the expanded frontmatter JSON, not only the file, against the per-scan limit', async () => {
+    const long = 'x'.repeat(1000);
+    const skill = `---\nname: wide\ndescription: d\na: &a "${long}"\nb: [${Array(50).fill('*a').join(', ')}]\n---\n# Wide\n`;
+    await write('skills/wide/SKILL.md', skill);
+    expect(Buffer.byteLength(skill)).toBeLessThan(2_000);
+    const aborted = discoverArtifacts(root, { limits: { maxScanBytes: 10_000 } });
+    await expect(aborted).rejects.toMatchObject({
+      name: 'DiscoveryLimitError',
+      limit: 'maxScanBytes',
+    });
+    const allowed = await discoverArtifacts(root, { limits: { maxScanBytes: 60_000 } });
+    expect(allowed.artifacts[0]?.parsed.frontmatter.b).toHaveLength(50);
   });
 });

@@ -31,7 +31,9 @@ artifact of that scan.
   ancestors for cycles. Treat anything else as invalid input with a warning, so the artifact is
   still discovered and the others are unaffected.
 - Pin library resource limits as named constants (`MAX_FRONTMATTER_ALIAS_COUNT` passed as
-  `maxAliasCount`), so an upgrade cannot loosen them.
+  `maxAliasCount`), so an upgrade cannot loosen them — but an alias limit does not bound size:
+  see [An alias limit is not a size limit](2026-10-20-alias-limits-are-not-size-limits.md)
+  (updated 2026-10-20).
 - When a loop of writes runs inside one transaction, wrap each item's failure with its identity
   (`ArtifactStoreError` with the repository-relative path), so the error says which item failed
   without quoting its contents.

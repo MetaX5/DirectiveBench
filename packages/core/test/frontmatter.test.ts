@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MAX_FRONTMATTER_ALIAS_COUNT, parseFrontmatter } from '../src/frontmatter';
+import { Buffer } from 'node:buffer';
+import { parse } from 'yaml';
+import {
+  MAX_FRONTMATTER_ALIAS_COUNT,
+  MAX_FRONTMATTER_JSON_BYTES,
+  parseFrontmatter,
+} from '../src/frontmatter';
 
 describe('parseFrontmatter', () => {
   afterEach(() => {
@@ -52,10 +58,17 @@ describe('parseFrontmatter', () => {
     expect(result).toEqual({
       frontmatter: {},
       body: 'body',
-      error: 'frontmatter cannot be stored as JSON: it contains an alias that refers to itself',
+      error:
+        'frontmatter cannot be stored as JSON: it contains an alias that refers to itself under the key "metadata"',
     });
-    // A list that contains itself, deeper down.
-    expect(parseFrontmatter('---\na:\n  b: &l [1, *l]\n---\n').error).toMatch(/refers to itself/);
+    // A list that contains itself, deeper down: the warning names the top-level key.
+    expect(parseFrontmatter('---\nname: x\na:\n  b: &l [1, *l]\n---\n').error).toBe(
+      'frontmatter cannot be stored as JSON: it contains an alias that refers to itself under the key "a"',
+    );
+    // The whole mapping refers to itself.
+    expect(parseFrontmatter('---\n&r\nself: *r\n---\n').error).toMatch(
+      /refers to itself under the key "self"$/,
+    );
   });
 
   it('keeps a node that two aliases share, which is not circular', () => {
@@ -68,12 +81,12 @@ describe('parseFrontmatter', () => {
   });
 
   it.each([
-    ['.inf', 'size: .inf', 'it contains .inf or .nan'],
-    ['.nan', 'size: [1, .nan]', 'it contains .inf or .nan'],
-    ['!!binary', 'logo: !!binary aGVsbG8=', 'it contains a Buffer'],
-    ['!!set', 'tags: !!set {a, b}', 'it contains a Set'],
-    ['!!omap', 'order: !!omap [{a: 1}]', 'it contains a Map'],
-    ['!!timestamp', 'date: !!timestamp 2026-10-19', 'it contains a Date'],
+    ['.inf', 'size: .inf', 'it contains .inf or .nan under the key "size"'],
+    ['.nan', 'size: [1, .nan]', 'it contains .inf or .nan under the key "size"'],
+    ['!!binary', 'logo: !!binary aGVsbG8=', 'it contains a Buffer under the key "logo"'],
+    ['!!set', 'tags: !!set {a, b}', 'it contains a Set under the key "tags"'],
+    ['!!omap', 'order: !!omap [{a: 1}]', 'it contains a Map under the key "order"'],
+    ['!!timestamp', 'date: !!timestamp 2026-10-19', 'it contains a Date under the key "date"'],
   ])('rejects a %s value that JSON would drop or rewrite', (_tag, yaml, problem) => {
     expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
       frontmatter: {},
@@ -110,15 +123,75 @@ describe('parseFrontmatter', () => {
     });
   });
 
+  // Regression (review of PR #44 at 2d668f3): `maxAliasCount` weights an alias by the aliases
+  // inside the node it repeats, so 99 aliases of a 1 MB string passed it and became ~100 MB of
+  // JSON in `parsedMetadata` — per file, under the 256 MiB scan limit.
+  it('rejects a 1 MB string repeated by 99 aliases, which the alias limit lets through', () => {
+    const long = 'x'.repeat(1024 * 1024 - 600);
+    const yaml = `name: big\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]`;
+    // The alias limit alone accepts it, and its JSON is about 100 times the file.
+    const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as object;
+    expect(JSON.stringify(expanded).length).toBeGreaterThan(100_000_000);
+    expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
+      frontmatter: {},
+      body: 'body',
+      error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+    });
+    // The same string once, or a few times, is within the limit.
+    const { frontmatter, error } = parseFrontmatter(
+      `---\nname: big\na: &a "${long}"\nb: [*a, *a]\n---\n`,
+    );
+    expect(error).toBeUndefined();
+    expect(frontmatter.b).toEqual([long, long]);
+  });
+
+  it('counts the exact UTF-8 bytes of the JSON against MAX_FRONTMATTER_JSON_BYTES', () => {
+    expect(MAX_FRONTMATTER_JSON_BYTES).toBe(4 * 1024 * 1024);
+    // Every kind of value, multi-byte and escaped text, nesting and a shared alias; `pad` fills
+    // the rest so that the whole is exactly at the limit, then one byte over it. The last byte
+    // counted is the closing bracket of `last`.
+    const rest =
+      'shared: &s {ok: true, off: false, none: null, n: -1.5e+30, list: [1, "two"]}\n' +
+      'again: [*s, *s, []]\nempty: {}\ntext: "zażółć 😀 \\t \\" \\\\ \\x01"\nnested: {a: {b: [{}]}}\n' +
+      'last: []';
+    const sized = (padding: number) =>
+      parseFrontmatter(`---\npad: "${'p'.repeat(padding)}"\n${rest}\n---\n`);
+    const base = Buffer.byteLength(JSON.stringify(sized(0).frontmatter));
+    const atLimit = sized(MAX_FRONTMATTER_JSON_BYTES - base);
+    expect(atLimit.error).toBeUndefined();
+    expect(Buffer.byteLength(JSON.stringify(atLimit.frontmatter))).toBe(MAX_FRONTMATTER_JSON_BYTES);
+    expect(sized(MAX_FRONTMATTER_JSON_BYTES - base + 1)).toEqual({
+      frontmatter: {},
+      body: '',
+      error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "last"`,
+    });
+  });
+
+  it('names a long offending key only up to a safe length, escaped', () => {
+    const key = `k\t${'e'.repeat(100)}`;
+    expect(parseFrontmatter(`---\n"${key.replace('\t', '\\t')}": .inf\n---\n`).error).toBe(
+      `frontmatter cannot be stored as JSON: it contains .inf or .nan under the key ${JSON.stringify(`${key.slice(0, 64)}…`)}`,
+    );
+  });
+
   it.each([
-    ['a bigint', { n: 1n }, 'it contains an unsupported bigint value'],
-    ['an undefined value', { u: undefined }, 'it contains an unsupported undefined value'],
+    ['a bigint', { n: 1n }, 'it contains an unsupported bigint value under the key "n"'],
+    [
+      'an undefined value',
+      { u: undefined },
+      'it contains an unsupported undefined value under the key "u"',
+    ],
     [
       'an object without a constructor',
       { o: Object.create(Object.create(null) as object) },
-      'it contains a non-plain object',
+      'it contains a non-plain object under the key "o"',
     ],
-    ['an anonymous class instance', { o: new (class {})() }, 'it contains a non-plain object'],
+    [
+      'an anonymous class instance',
+      { o: new (class {})() },
+      'it contains a non-plain object under the key "o"',
+    ],
+    ['a non-plain root mapping', new Map([['k', 'v']]), 'it contains a Map'],
   ])(
     'rejects %s a YAML parser could hand back, failing closed',
     async (_label, parsed, problem) => {

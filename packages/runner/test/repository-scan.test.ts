@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as core from '@directivebench/core';
-import { discoverArtifacts } from '@directivebench/core';
+import { discoverArtifacts, MAX_FRONTMATTER_JSON_BYTES } from '@directivebench/core';
 import {
   enqueueRepositoryScanJob,
   getJob,
@@ -615,6 +615,36 @@ describe('repository-scan jobs', () => {
     });
   });
 
+  // Regression (review of PR #44 at 2d668f3): 99 aliases of a 1 MB string pass the alias limit
+  // and were stored as ~100 MB of JSON for one file.
+  it('stores a skill whose aliases expand past the frontmatter JSON limit without its frontmatter', async () => {
+    const project = join(sources, 'project');
+    const long = 'x'.repeat(1024 * 1024 - 1000);
+    write(project, {
+      '.agents/skills/wide/SKILL.md': `---\nname: wide-name\ndescription: Wide.\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]\n---\n# Wide\n`,
+      'AGENTS.md': '# Project rules\n',
+    });
+    const repository = await register(project, 'local-directory');
+
+    expect(await scan(repository.id)).toMatchObject({ ok: true, discovered: 2, errorCount: 0 });
+    const [skill] = storedOccurrences();
+    expect(skill?.path).toBe('.agents/skills/wide');
+    // The whole block is discarded, so the name falls back to the skill's directory.
+    expect(handle.sqlite.prepare("select name from artifacts where type = 'skill'").get()).toEqual({
+      name: 'wide',
+    });
+    expect(skill?.parsedMetadata).toMatchObject({
+      frontmatter: {},
+      warnings: expect.arrayContaining([
+        `Invalid frontmatter: frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+      ]) as unknown,
+    });
+    const stored = handle.sqlite
+      .prepare('select max(length(parsed_metadata)) as size from artifact_versions')
+      .get() as { size: number };
+    expect(stored.size).toBeLessThan(10_000);
+  });
+
   it('stores an artifact whose frontmatter JSON cannot represent, with a warning, next to the others', async () => {
     // YAML is not JSON: a self-referring alias parses to a circular object. Stored as is, it
     // threw inside the one scan transaction and failed every scan of the repository.
@@ -633,7 +663,7 @@ describe('repository-scan jobs', () => {
     expect(occurrences[0]?.parsedMetadata).toMatchObject({
       frontmatter: {},
       warnings: expect.arrayContaining([
-        'Invalid frontmatter: frontmatter cannot be stored as JSON: it contains an alias that refers to itself',
+        'Invalid frontmatter: frontmatter cannot be stored as JSON: it contains an alias that refers to itself under the key "metadata"',
       ]) as unknown,
     });
     expect(occurrences[1]?.parsedMetadata).toMatchObject({ warnings: [] });

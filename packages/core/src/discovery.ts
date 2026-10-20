@@ -1,4 +1,4 @@
-import { isUtf8 } from 'node:buffer';
+import { Buffer, isUtf8 } from 'node:buffer';
 import { constants, type BigIntStats } from 'node:fs';
 import { lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, posix, resolve } from 'node:path';
@@ -25,7 +25,8 @@ export const DISCOVERY_LIMITS = {
   /** Most candidate artifacts in one scan; exceeding it aborts the scan. */
   maxCandidatesPerScan: 10_000,
   /**
-   * Most bytes of file content one scan keeps for its artifacts; exceeding it aborts the scan.
+   * Most bytes one scan keeps for its artifacts: their file content plus their parsed frontmatter
+   * as JSON (stored next to it). Exceeding it aborts the scan.
    * `discoverArtifacts` returns every artifact's contents at once, so without this cap the other
    * limits allow 10 000 × 20 MiB. 256 MiB is far above real agent-instruction repositories
    * (typically well under 10 MiB of text) and room for a dozen maximal skills, while the runner,
@@ -489,8 +490,8 @@ async function discoverSingleFile(
  * unreadable or changed directory inside a skill is a {@link DiscoveryError} for that artifact
  * only, and the artifact is not returned. An unreadable directory outside every skill is an error
  * of its own. More than `maxCandidatesPerScan` candidates, or more than `maxScanBytes` of content
- * kept, aborts the scan with a {@link DiscoveryLimitError}. The result is deterministic for the
- * same tree.
+ * and frontmatter JSON kept, aborts the scan with a {@link DiscoveryLimitError}. The result is
+ * deterministic for the same tree.
  */
 export async function discoverArtifacts(
   root: string,
@@ -547,7 +548,7 @@ export async function discoverArtifacts(
   }
 
   const artifacts: DiscoveredArtifact[] = [];
-  /** Bytes of file content held by `artifacts` (FR-102-16 `maxScanBytes`). */
+  /** Bytes of file content and frontmatter JSON held by `artifacts` (FR-102-16 `maxScanBytes`). */
   let retained = 0;
   for (const { entry, classification, contents } of candidates) {
     options.signal?.throwIfAborted();
@@ -566,8 +567,14 @@ export async function discoverArtifacts(
               limits,
               retained,
             );
+      // The parsed frontmatter is stored as JSON next to the files, with its aliases expanded, so
+      // it counts too: each file's is capped (MAX_FRONTMATTER_JSON_BYTES), not their total.
+      const kept =
+        artifact.files.reduce((sum, file) => sum + file.size, 0) +
+        Buffer.byteLength(JSON.stringify(artifact.parsed.frontmatter));
+      checkScanBytes(retained, kept, limits);
       artifacts.push(artifact);
-      retained += artifact.files.reduce((sum, file) => sum + file.size, 0);
+      retained += kept;
     } catch (error) {
       if (!(error instanceof ArtifactError)) throw error;
       errors.push({ path: entry.path, code: error.code, message: error.message });
