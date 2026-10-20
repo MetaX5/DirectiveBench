@@ -69,6 +69,9 @@ vi.mock('@directivebench/core', async (importOriginal) => {
   };
 });
 
+/** Scanning a 1 MB primary file takes ~0.7 s locally and up to ~2 s on a loaded CI runner. */
+const LARGE_SOURCE_TIMEOUT_MS = 20_000;
+
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 
 /** Fixture git commands ignore the developer's system and global config. */
@@ -617,33 +620,39 @@ describe('repository-scan jobs', () => {
 
   // Regression (review of PR #44 at 2d668f3): 99 aliases of a 1 MB string pass the alias limit
   // and were stored as ~100 MB of JSON for one file.
-  it('stores a skill whose aliases expand past the frontmatter JSON limit without its frontmatter', async () => {
-    const project = join(sources, 'project');
-    const long = 'x'.repeat(1024 * 1024 - 1000);
-    write(project, {
-      '.agents/skills/wide/SKILL.md': `---\nname: wide-name\ndescription: Wide.\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]\n---\n# Wide\n`,
-      'AGENTS.md': '# Project rules\n',
-    });
-    const repository = await register(project, 'local-directory');
+  it(
+    'stores a skill whose aliases expand past the frontmatter JSON limit without its frontmatter',
+    async () => {
+      const project = join(sources, 'project');
+      const long = 'x'.repeat(1024 * 1024 - 1000);
+      write(project, {
+        '.agents/skills/wide/SKILL.md': `---\nname: wide-name\ndescription: Wide.\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]\n---\n# Wide\n`,
+        'AGENTS.md': '# Project rules\n',
+      });
+      const repository = await register(project, 'local-directory');
 
-    expect(await scan(repository.id)).toMatchObject({ ok: true, discovered: 2, errorCount: 0 });
-    const [skill] = storedOccurrences();
-    expect(skill?.path).toBe('.agents/skills/wide');
-    // The whole block is discarded, so the name falls back to the skill's directory.
-    expect(handle.sqlite.prepare("select name from artifacts where type = 'skill'").get()).toEqual({
-      name: 'wide',
-    });
-    expect(skill?.parsedMetadata).toMatchObject({
-      frontmatter: {},
-      warnings: expect.arrayContaining([
-        `Invalid frontmatter: frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
-      ]) as unknown,
-    });
-    const stored = handle.sqlite
-      .prepare('select max(length(parsed_metadata)) as size from artifact_versions')
-      .get() as { size: number };
-    expect(stored.size).toBeLessThan(10_000);
-  });
+      expect(await scan(repository.id)).toMatchObject({ ok: true, discovered: 2, errorCount: 0 });
+      const [skill] = storedOccurrences();
+      expect(skill?.path).toBe('.agents/skills/wide');
+      // The whole block is discarded, so the name falls back to the skill's directory.
+      expect(
+        handle.sqlite.prepare("select name from artifacts where type = 'skill'").get(),
+      ).toEqual({
+        name: 'wide',
+      });
+      expect(skill?.parsedMetadata).toMatchObject({
+        frontmatter: {},
+        warnings: expect.arrayContaining([
+          `Invalid frontmatter: frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+        ]) as unknown,
+      });
+      const stored = handle.sqlite
+        .prepare('select max(length(parsed_metadata)) as size from artifact_versions')
+        .get() as { size: number };
+      expect(stored.size).toBeLessThan(10_000);
+    },
+    LARGE_SOURCE_TIMEOUT_MS,
+  );
 
   it('stores an artifact whose frontmatter JSON cannot represent, with a warning, next to the others', async () => {
     // YAML is not JSON: a self-referring alias parses to a circular object. Stored as is, it

@@ -131,8 +131,11 @@ what the findings need:
   `no such table: jobs` and got "Failed query: update … params: …". The log now reports the cause.
 - CI at `e6c0736` failed the unit job: the exact-boundary test parsed three 4 MiB YAML sources and
   took 5.7 s on the runner (0.9 s locally), past Vitest's 5 s default. It now reaches the limit
-  with 99 aliases of a 41,000-character chunk (a ~135 kB source; 67 ms locally), and the 1 MB test
-  sums the expanded lengths instead of serialising 100 MB. Same assertions, same exact boundary.
+  with 99 aliases of a 41,000-character chunk (a ~135 kB source; 67 ms locally; 762 ms on CI), and
+  the 1 MB test sums the expanded lengths instead of serialising 100 MB. Same exact boundary. The
+  1 MB test took 1.8 s on CI at `2b6cd5e`, so it parses one source fewer (acceptance below the
+  limit is the boundary test's job) and, like the 1 MB runner scan test, has a named
+  `LARGE_SOURCE_TIMEOUT_MS` (20 s).
 - Deviation from the finding's literal request: the frontmatter JSON also counts towards
   `maxScanBytes` (see Decisions). SPEC-102 FR-102-16 is updated to say so.
 - No change to the maintainer's decisions or to earlier rounds' fixes beyond these findings.

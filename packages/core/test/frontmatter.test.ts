@@ -7,6 +7,9 @@ import {
   parseFrontmatter,
 } from '../src/frontmatter';
 
+/** Parsing a 1 MB YAML source takes ~0.5 s locally and up to ~2 s on a loaded CI runner. */
+const LARGE_SOURCE_TIMEOUT_MS = 20_000;
+
 describe('parseFrontmatter', () => {
   afterEach(() => {
     vi.doUnmock('yaml');
@@ -126,26 +129,24 @@ describe('parseFrontmatter', () => {
   // Regression (review of PR #44 at 2d668f3): `maxAliasCount` weights an alias by the aliases
   // inside the node it repeats, so 99 aliases of a 1 MB string passed it and became ~100 MB of
   // JSON in `parsedMetadata` — per file, under the 256 MiB scan limit.
-  it('rejects a 1 MB string repeated by 99 aliases, which the alias limit lets through', () => {
-    const long = 'x'.repeat(1024 * 1024 - 600);
-    const yaml = `name: big\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]`;
-    // The alias limit alone accepts it, and its JSON would be about 100 times the file.
-    const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as {
-      b: string[];
-    };
-    expect(expanded.b.reduce((sum, item) => sum + item.length, 0)).toBeGreaterThan(100_000_000);
-    expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
-      frontmatter: {},
-      body: 'body',
-      error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
-    });
-    // The same string a few times is within the limit.
-    const { frontmatter, error } = parseFrontmatter(
-      `---\nname: big\na: &a "${long}"\nb: [*a, *a]\n---\n`,
-    );
-    expect(error).toBeUndefined();
-    expect(frontmatter.b).toEqual([long, long]);
-  });
+  it(
+    'rejects a 1 MB string repeated by 99 aliases, which the alias limit lets through',
+    () => {
+      const long = 'x'.repeat(1024 * 1024 - 600);
+      const yaml = `name: big\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]`;
+      // The alias limit alone accepts it, and its JSON would be about 100 times the file.
+      const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as {
+        b: string[];
+      };
+      expect(expanded.b.reduce((sum, item) => sum + item.length, 0)).toBeGreaterThan(100_000_000);
+      expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
+        frontmatter: {},
+        body: 'body',
+        error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+      });
+    },
+    LARGE_SOURCE_TIMEOUT_MS,
+  );
 
   it('counts the exact UTF-8 bytes of the JSON against MAX_FRONTMATTER_JSON_BYTES', () => {
     expect(MAX_FRONTMATTER_JSON_BYTES).toBe(4 * 1024 * 1024);
