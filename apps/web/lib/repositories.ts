@@ -59,18 +59,39 @@ export function pathFieldError(input: string): string | null {
   return parsed.success ? null : parsed.error.issues.map((issue) => issue.message).join(' ');
 }
 
-/** Fixed messages for a URL the action sent back without the input (`?urlError=`). */
-const URL_ERRORS: Record<RepositoryUrlErrorCode, string> = {
+/**
+ * Whether rejected registration input may carry credentials, so it must never be echoed into a
+ * redirect URL or pre-filled into the field again (SPEC-104 FR-104-05). Every way to put a
+ * secret into a URL needs one of these characters — user info (`@`), a query (`?`), a fragment
+ * (`#`) — or its percent-encoding, whether or not the input is a well-formed URL
+ * (`https:/github.com/a/b?access_token=…`, `http//user:token@github.com/…`). The rule depends on
+ * the characters only, not on how the action classified the input, so no branch can leak.
+ */
+export function mayCarryCredentials(input: string): boolean {
+  return /[@?#]|%(?:40|3f|23)/i.test(input);
+}
+
+/**
+ * Why the action sent the input back without it (`?urlError=`): a URL rejection reason, or
+ * `not-echoed` for input that is neither a valid path nor recognised as a URL but may hold
+ * credentials.
+ */
+export type RejectedInputCode = RepositoryUrlErrorCode | 'not-echoed';
+
+/** Fixed messages for input the action sent back without the input (`?urlError=`). */
+const URL_ERRORS: Record<RejectedInputCode, string> = {
   'credentials-in-url': CREDENTIALS_IN_URL_MESSAGE,
   'unsupported-provider':
     'Only public GitHub repositories can be registered by URL so far. Enter https://github.com/<owner>/<repo>.',
   'invalid-url': 'Enter a GitHub repository URL such as https://github.com/<owner>/<repo>.',
+  'not-echoed':
+    'This is not a valid local path or GitHub URL. It is not shown again because it contains @, ? or #, which can carry credentials. Enter an absolute path such as /home/you/project or ~/project, or https://github.com/<owner>/<repo>.',
 };
 
 /** The field error for `?urlError=`, or null for no or an unknown value. */
 export function urlFieldError(code: string | undefined): string | null {
   return code !== undefined && Object.hasOwn(URL_ERRORS, code)
-    ? URL_ERRORS[code as RepositoryUrlErrorCode]
+    ? URL_ERRORS[code as RejectedInputCode]
     : null;
 }
 

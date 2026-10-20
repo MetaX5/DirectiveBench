@@ -216,8 +216,48 @@ against github.com (tested locally only).
     `GIT_DIR` it lists the enclosing `.git/config`).
 - Lesson: [2026-10-20-git-config-isolation-needs-no-discovery.md](../lessons/2026-10-20-git-config-isolation-needs-no-discovery.md).
 
+## Codex review round 2
+
+- Finding (Codex adversarial review round 2 at `c26ee6b`, confirmed): the "no echo of input with
+  `@`, `?` or `#`" rule lived only in `registerUrl`, which runs only when `looksLikeRepositoryUrl`
+  matches. Malformed URLs (`https:/github.com/acme/repo?access_token=…`, `https:github.com/…`,
+  `http//user:tok@github.com/…`, `HTTPS:\\github.com…?token=…`, `github.com/acme/repo?token=…`)
+  fell through to path validation and were echoed verbatim in `/repositories?path=…` — browser
+  history and request logs (FR-104-05).
+- Rule chosen: guard at the sink, by content. Both branches return to the form through one helper,
+  `returnToForm` (`apps/web/lib/actions.ts`), which echoes the input only when
+  `mayCarryCredentials` (`apps/web/lib/repositories.ts`) is false: no `@`, `?`, `#` and no
+  `%40`/`%3F`/`%23`. Every way to put a secret into a URL (user info, query, fragment) needs one of
+  them, whether or not the URL is well-formed; scp-like `user@host:` is caught by `@`. Otherwise
+  only a reason code travels (`?urlError=<code>`); the path branch uses the new `not-echoed` code
+  with a fixed message ("not a valid local path or GitHub URL … not shown again because it
+  contains @, ? or #…"). Not chosen: widening `looksLikeRepositoryUrl` to scheme-like prefixes —
+  WHATWG `new URL` silently repairs `https:/` and `HTTPS:\\`, so it would change parsing
+  semantics in `core` and still leave the guard tied to the classifier.
+- Page: `/repositories?path=` with such characters (hand-made or an old history entry) still shows
+  the re-validated, fixed error but is not pre-filled into the field.
+- Trade-offs: a valid local path containing `@`, `?` or `#` registers exactly as before (it is a
+  path; unit test). An invalid one (relative, too long, NUL) is no longer echoed and gets the
+  generic `not-echoed` message instead of the specific path message — not echoing was chosen over
+  echoing. The path-branch echo is now trimmed (the field error is computed from the trimmed
+  value anyway).
+- Tests: `actions.test.ts` "never echoes a malformed URL that may carry a token, whichever branch
+  rejects it" (10 variants incl. percent-encoded and scp-like with a token; failed on the old
+  code with `?path=https%3A%2Fgithub.com…ghp_…`), "still registers a valid local path that
+  contains @, ? or #"; `repositories.test.ts` `mayCarryCredentials` and the `not-echoed` message;
+  e2e "a malformed URL with a token is rejected without echoing it anywhere" (page URL, field,
+  page content, no job; a hand-made `?path=` with a token is not pre-filled).
+- Gate: `pnpm format:check`, `lint`, `typecheck`, `test` (web 143 tests, all packages 100%),
+  `build`, `verify:pack` ("Packaging verification passed"), `test:e2e` (36 passed) — pass.
+- Manual, built CLI (`node apps/cli/dist/cli.js --data-dir <tmp> serve`), three malformed
+  URLs with a fake `ghp_` token through the form: each landed on `?urlError=not-echoed` with the
+  fixed message and an empty field; the token was in none of the 93 browser requests, not in the
+  page, `logs/web.log`, the database (no jobs) or any file of the data directory.
+- Lesson: [2026-10-20-guard-secrets-at-the-sink.md](../lessons/2026-10-20-guard-secrets-at-the-sink.md).
+
 ## Lessons recorded
 
+- [2026-10-20-guard-secrets-at-the-sink.md](../lessons/2026-10-20-guard-secrets-at-the-sink.md) (new)
 - [2026-10-20-record-git-errors-of-the-exact-invocation.md](../lessons/2026-10-20-record-git-errors-of-the-exact-invocation.md) (new)
 - [2026-10-20-git-config-isolation-needs-no-discovery.md](../lessons/2026-10-20-git-config-isolation-needs-no-discovery.md) (new)
 - [2026-10-15-deterministic-full-coverage.md](../lessons/2026-10-15-deterministic-full-coverage.md) (updated)

@@ -24,6 +24,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireDatabase } from './db';
+import { mayCarryCredentials, type RejectedInputCode } from './repositories';
 
 const enqueueSchema = z.object({
   suiteVersionId: z.string().min(1),
@@ -69,22 +70,28 @@ export async function cancelJobAction(formData: FormData): Promise<void> {
 const registerRepositorySchema = z.object({ path: repositoryPathInputSchema });
 
 /**
+ * Sends rejected input back to the form (SPEC-104 FR-104-05). Input that may carry credentials
+ * goes back without itself, only with the fixed reason code, so it never lands in the browser
+ * history or a request log; other input is echoed, up to one character over `limit` (enough to
+ * reproduce "too long" without building an oversized URL), and the page re-validates it to show
+ * the field error. Both the URL and the path branch return through here, so a malformed URL that
+ * falls through to path validation is guarded the same way.
+ */
+function returnToForm(value: string, code: RejectedInputCode, limit: number): never {
+  const params = new URLSearchParams(
+    mayCarryCredentials(value) ? { urlError: code } : { path: value.trim().slice(0, limit + 1) },
+  );
+  redirect(`/repositories?${params.toString()}`);
+}
+
+/**
  * Registers a public GitHub repository by URL (SPEC-104 FR-104-02, FR-104-05): only its
  * normalised, credential-free location is enqueued, and the runner asks the remote for the
- * default branch. A rejected URL goes back to the form; one containing `@`, `?` or `#` — which
- * may carry credentials or a token — goes back without the input, only with the reason, so it
- * never lands in the browser history, a log or the job table.
+ * default branch. A rejected URL goes back to the form (see `returnToForm`).
  */
 async function registerUrl(value: string): Promise<never> {
   const parsed = parseRepositoryUrl(value);
-  if (!parsed.ok) {
-    const params = new URLSearchParams(
-      /[@?#]/.test(value)
-        ? { urlError: parsed.code }
-        : { path: value.trim().slice(0, MAX_REPOSITORY_URL_LENGTH + 1) },
-    );
-    redirect(`/repositories?${params.toString()}`);
-  }
+  if (!parsed.ok) returnToForm(value, parsed.code, MAX_REPOSITORY_URL_LENGTH);
   const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {
     url: parsed.location,
   });
@@ -97,19 +104,15 @@ async function registerUrl(value: string): Promise<never> {
  * validates the field and enqueues a `repository-registration` job; the runner in the CLI
  * process resolves the path (or asks GitHub), runs git read-only and, for paths, decides whether
  * the canonical location needs a confirmation (FR-104-18). Invalid input returns to the form with
- * a field-level error.
+ * a field-level error; a valid path is registered as entered, `@`, `?` or `#` included.
  */
 export async function registerRepositoryAction(formData: FormData): Promise<void> {
   const raw = formData.get('path');
   if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw);
   const input = registerRepositorySchema.safeParse({ path: raw });
   if (!input.success) {
-    // Only the entered path travels back; the page re-validates it to show the field error, so
-    // no free text from the URL is ever rendered as an error message. One character over the
-    // limit is enough to reproduce "too long" without building an oversized URL.
-    const echoed = typeof raw === 'string' ? raw.slice(0, MAX_REPOSITORY_PATH_LENGTH + 1) : '';
-    const params = new URLSearchParams({ path: echoed });
-    redirect(`/repositories?${params.toString()}`);
+    // A missing field or a file upload is not echoed at all.
+    returnToForm(typeof raw === 'string' ? raw : '', 'not-echoed', MAX_REPOSITORY_PATH_LENGTH);
   }
   // Present only when the user confirmed a broad or overlapping location (FR-104-18). An invalid
   // value is dropped, so the runner simply asks again; it never skips the check on its own.

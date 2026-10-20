@@ -319,6 +319,29 @@ test.describe('GitHub repositories by URL', () => {
     });
   });
 
+  test('a malformed URL with a token is rejected without echoing it anywhere', async ({ page }) => {
+    // Not recognised as a URL, so it is rejected by path validation (Codex review round 2).
+    const jobsBefore = await withDatabase((db) => count(db, 'select count(*) as n from jobs'));
+    await register(page, `https:/github.com/acme/skills?access_token=${token}`);
+
+    await expect(page.getByTestId('path-error')).toContainText(
+      'It is not shown again because it contains @, ? or #, which can carry credentials.',
+    );
+    expect(page.url()).toContain('urlError=not-echoed');
+    expect(page.url()).not.toContain(token);
+    expect(page.url()).not.toContain('access_token');
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveValue('');
+    expect(await page.content()).not.toContain(token);
+    await withDatabase((db) => {
+      expect(count(db, 'select count(*) as n from jobs')).toBe(jobsBefore);
+    });
+
+    // A hand-made `?path=` with a token shows the error but is not put back into the field.
+    await page.goto(`/repositories?path=${encodeURIComponent(`code/x?token=${token}`)}`);
+    await expect(page.getByTestId('path-error')).toContainText('Enter an absolute path');
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveValue('');
+  });
+
   test('an unsupported URL returns to the form with the reason', async ({ page }) => {
     await register(page, 'https://gitlab.com/acme/skills');
 

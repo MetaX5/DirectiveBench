@@ -11,6 +11,7 @@ import {
   describeRegistration,
   describeScan,
   lastScanLabel,
+  mayCarryCredentials,
   pathFieldError,
   providerLabel,
   scanRequestError,
@@ -86,11 +87,32 @@ describe('pathFieldError', () => {
   });
 });
 
+describe('mayCarryCredentials', () => {
+  it('flags user info, queries and fragments, also percent-encoded, in any shape', () => {
+    for (const input of [
+      'https://u:t@github.com/a/b',
+      'http//u:t@github.com/a/b',
+      'https:/github.com/a/b?access_token=t',
+      'github.com/a/b#t',
+      'https:/github.com/a/b%3Ftoken',
+      'https:/github.com/a/b%3ftoken',
+      'u%40github.com/a',
+      '/a/b%23c',
+    ]) {
+      expect(mayCarryCredentials(input)).toBe(true);
+    }
+    for (const input of ['/srv/skills', '~/skills', 'https:/github.com/a/b', 'code/skills', '']) {
+      expect(mayCarryCredentials(input)).toBe(false);
+    }
+  });
+});
+
 describe('urlFieldError', () => {
   it('names the reason for a URL sent back without its input', () => {
     expect(urlFieldError('credentials-in-url')).toBe(CREDENTIALS_IN_URL_MESSAGE);
     expect(urlFieldError('unsupported-provider')).toContain('Only public GitHub repositories');
     expect(urlFieldError('invalid-url')).toContain('https://github.com/<owner>/<repo>');
+    expect(urlFieldError('not-echoed')).toContain('It is not shown again because');
     expect(urlFieldError(undefined)).toBeNull();
     expect(urlFieldError('toString')).toBeNull();
   });

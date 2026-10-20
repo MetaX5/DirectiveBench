@@ -30,6 +30,7 @@ import {
   describeRegistration,
   describeScan,
   lastScanLabel,
+  mayCarryCredentials,
   pathFieldError,
   providerLabel,
   scanRequestError,
@@ -68,7 +69,14 @@ export default async function RepositoriesPage({
   let notice: RegistrationNotice | null = registration ? describeRegistration(registration) : null;
   const invalidPath = !notice && params.path !== undefined ? pathFieldError(params.path) : null;
   if (invalidPath !== null) {
-    notice = { kind: 'fieldError', path: params.path ?? '', message: invalidPath };
+    // The action never echoes input that may carry credentials; a hand-made or old `?path=` with
+    // `@`, `?` or `#` is not put back into the field either (FR-104-05).
+    const path = params.path ?? '';
+    notice = {
+      kind: 'fieldError',
+      path: mayCarryCredentials(path) ? '' : path,
+      message: invalidPath,
+    };
   }
   // A rejected URL that may hold credentials comes back without the input, only with the reason.
   const invalidUrl = !notice ? urlFieldError(params.urlError) : null;

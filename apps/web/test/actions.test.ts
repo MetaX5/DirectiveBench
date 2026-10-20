@@ -337,6 +337,40 @@ describe('registerRepositoryAction', () => {
     expect(jobCount()).toBe(0);
   });
 
+  it('never echoes a malformed URL that may carry a token, whichever branch rejects it', async () => {
+    // Codex review round 2 of PR #51: these are not recognised as URLs, fell through to path
+    // validation and were echoed in `?path=`.
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz0123';
+    const cases: [string, string][] = [
+      [`https:/github.com/acme/repo?access_token=${secret}`, 'not-echoed'],
+      [`https:github.com/acme/repo?access_token=${secret}`, 'not-echoed'],
+      [`http//user:${secret}@github.com/acme/repo`, 'not-echoed'],
+      [`HTTPS:\\\\github.com\\acme\\repo?token=${secret}`, 'not-echoed'],
+      [`github.com/acme/repo?token=${secret}`, 'not-echoed'],
+      [`github.com/acme/repo#${secret}`, 'not-echoed'],
+      [`https:/github.com/acme/repo%3Faccess_token%3D${secret}`, 'not-echoed'],
+      [`code/skills@${secret}`, 'not-echoed'],
+      [`x-access-token:${secret}@github.com:acme/repo.git`, 'unsupported-provider'],
+      [`https://github.com/acme/repo%3Ftoken%3D${secret}`, 'invalid-url'],
+    ];
+    for (const [input, code] of cases) {
+      const url = await redirectOf(registerRepositoryAction(form({ path: input })));
+      expect(url).toBe(`/repositories?urlError=${code}`);
+      expect(url).not.toContain(secret.slice(4, 12));
+    }
+    expect(jobCount()).toBe(0);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('still registers a valid local path that contains @, ? or #', async () => {
+    for (const path of ['/srv/team@skills', '~/notes/a@b?c#d']) {
+      const url = await redirectOf(registerRepositoryAction(form({ path })));
+      const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+      expect(url).toBe(`/repositories?registration=${jobId}`);
+      expect((await getJob(handle.db, jobId))?.payload).toEqual({ path });
+    }
+  });
+
   it('returns an unsupported URL without credentials to the form', async () => {
     const url = await redirectOf(
       registerRepositoryAction(form({ path: ` https://gitlab.com/acme/${'x'.repeat(3000)} ` })),
