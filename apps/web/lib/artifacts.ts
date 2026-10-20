@@ -9,11 +9,17 @@ export type SearchParams = Record<string, string | string[] | undefined>;
 export const MAX_SEARCH_LENGTH = 200;
 /** The longest file path accepted from the URL (a manifest path is never longer in practice). */
 export const MAX_FILE_PARAM_LENGTH = 4096;
+/** The longest category slug accepted from the URL; `slugify` itself sets no length. */
+export const MAX_SLUG_PARAM_LENGTH = 256;
 
 const listParamSchemas = {
   q: z.string().max(MAX_SEARCH_LENGTH),
   type: z.enum(ARTIFACT_TYPES),
-  category: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  // The shape `slugify` produces: lower-case letters and digits, separated by single hyphens.
+  category: z
+    .string()
+    .max(MAX_SLUG_PARAM_LENGTH)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   repository: z.string().regex(/^repo_[A-Za-z0-9_-]{1,64}$/),
 } as const;
 

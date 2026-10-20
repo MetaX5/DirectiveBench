@@ -1,5 +1,10 @@
 import { ARTIFACT_TYPES } from '@directivebench/core';
-import { listArtifacts, listCategories, listRepositories } from '@directivebench/database';
+import {
+  hasArtifacts,
+  listArtifacts,
+  listCategories,
+  listRepositories,
+} from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
@@ -51,8 +56,7 @@ export default async function ArtifactsPage({
   const { value: filter, invalid } = parseArtifactListParams(await searchParams);
   const filtered = Object.keys(filter).length > 0;
   const artifacts = await listArtifacts(handle.db, filter);
-  const registryEmpty =
-    artifacts.length === 0 && (!filtered || (await listArtifacts(handle.db)).length === 0);
+  const registryEmpty = artifacts.length === 0 && (!filtered || !(await hasArtifacts(handle.db)));
   const repositories = repositoryOptions(await listRepositories(handle.db));
   const categories = (await listCategories(handle.db)).filter((c) => c.archivedAt === null);
   const notice = invalidParamsNotice(invalid);

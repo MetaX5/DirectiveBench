@@ -188,15 +188,12 @@ describe('parseMarkdown blocks', () => {
     ]);
   });
 
-  it('parses GFM tables, padding short rows and keeping escaped pipes', () => {
+  it('parses GFM tables, keeping short rows short and escaped pipes literal', () => {
     expect(parseMarkdown('| a | b |\n| :- | -: |\n| 1 | x \\| y |\n| 2 |\nafter')).toEqual([
       {
         kind: 'table',
         header: [[text('a')], [text('b')]],
-        rows: [
-          [[text('1')], [text('x | y')]],
-          [[text('2')], []],
-        ],
+        rows: [[[text('1')], [text('x | y')]], [[text('2')]]],
       },
       paragraph(text('after')),
     ]);
@@ -239,10 +236,25 @@ describe('parseMarkdown blocks', () => {
     expect(JSON.stringify(parseMarkdown(list.join('\n')))).toContain('- i17');
   });
 
+  it('keeps a wide table with many empty rows as small as its input (PR #50 review)', () => {
+    const columns = 25_000;
+    const input = `${'|a'.repeat(columns)}\n${'|-'.repeat(columns)}\n${'|\n'.repeat(2_000)}`;
+    const [table] = parseMarkdown(input);
+    expect(table?.kind).toBe('table');
+    const cells = table?.kind === 'table' ? table.rows.reduce((n, row) => n + row.length, 0) : -1;
+    expect(cells).toBe(2_000);
+    // Extra cells beyond the header are dropped.
+    expect(parseMarkdown('a |\n- |\nx | y | z')).toEqual([
+      { kind: 'table', header: [[text('a')]], rows: [[[text('x')]]] },
+    ]);
+  });
+
   it('parses pathological input in linear time', () => {
     const size = 100_000;
     const inputs = [
       '['.repeat(size),
+      `${'['.repeat(size)}]`,
+      `${'*a'.repeat(size / 2)}*`,
       '[a]'.repeat(size / 3),
       '`'.repeat(size),
       Array.from({ length: 400 }, (_, i) => '`'.repeat(i + 1)).join(' '),

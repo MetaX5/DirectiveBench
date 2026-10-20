@@ -110,10 +110,22 @@ No re-planning was needed.
 - `registry.spec.ts` must sort after `management.spec.ts`: the latter expects no `rule` artifacts.
   This ordering dependency already existed for `repositories.spec.ts`.
 
+## Independent review (PR #50)
+
+- Round 1 at `0b825e3`: REQUEST_CHANGES. Major: GFM table rows padded to the header width let a
+  104 KB file produce 50 million cells (4.3 s, out-of-memory rendering) — fixed by keeping each
+  row's own cells (at most the header's), regression test with the reviewer's input (now 13 ms,
+  2 000 cells; the full 200 000-character variant 27 ms). Also fixed: `find` now remembers
+  successful searches too (`[`×199 999 + `]` 4 ms instead of quadratic `indexOf`), list rows are
+  grouped with maps instead of a filter per row, the empty state uses `hasArtifacts` instead of a
+  second full list query, the category parameter accepts any `slugify`-shaped slug up to
+  `MAX_SLUG_PARAM_LENGTH`, SPEC-101 §12/§20 wording corrected.
+
 ## Lessons recorded
 
 - [The DOM cannot show a carriage return](../lessons/2026-10-20-html-normalises-carriage-returns.md)
 - [getByLabel matches substrings](../lessons/2026-10-20-getbylabel-matches-wrapping-label-options.md)
+- Updated [An alias limit is not a size limit](../lessons/2026-10-20-alias-limits-are-not-size-limits.md) with the table amplification case.
 
 ## Follow-ups
 

@@ -288,8 +288,10 @@ function parseBlocks(lines: string[], depth: number, topLevel: boolean): Block[]
         !isBlank(lines[i] as string) &&
         (lines[i] as string).includes('|')
       ) {
-        const cells = tableCells(lines[i] as string);
-        rows.push(header.map((_, column) => parseInline(cells[column] ?? '')));
+        // A row keeps its own cells (at most the header's): padding short rows to the header's
+        // width would let a wide header and many empty rows multiply the output (PR #50 review).
+        const cells = tableCells(lines[i] as string).slice(0, header.length);
+        rows.push(cells.map((cell) => parseInline(cell)));
         i += 1;
       }
       blocks.push({ kind: 'table', header: header.map((cell) => parseInline(cell)), rows });
@@ -326,22 +328,26 @@ function runLength(text: string, start: number, char: string): number {
 }
 
 /**
- * Parses inline Markdown. Every closing-delimiter search that fails is remembered for the rest of
- * the text (a later search would fail as well), which keeps the scan linear on unmatched input.
+ * Parses inline Markdown. The result of every closing-delimiter search is remembered: searches for
+ * one delimiter start at non-decreasing positions, so a remembered match at or after the start is
+ * still the next one, and a failed search stays failed. That keeps the scan linear on input such
+ * as many `[` before one `]`.
  */
 export function parseInline(text: string): Inline[] {
   const nodes: Inline[] = [];
   let buffer = '';
-  const missing = new Set<string>();
+  /** Per delimiter, the index of its last search result (-1: none after that point). */
+  const found = new Map<string, number>();
   const flush = () => {
     if (buffer) nodes.push({ kind: 'text', text: buffer });
     buffer = '';
   };
-  /** The index of `needle` at or after `from`, or -1 (remembered when there is none). */
+  /** The index of `needle` at or after `from`, or -1. */
   const find = (needle: string, from: number): number => {
-    if (missing.has(needle)) return -1;
+    const known = found.get(needle);
+    if (known !== undefined && (known < 0 || known >= from)) return known;
     const index = text.indexOf(needle, from);
-    if (index < 0) missing.add(needle);
+    found.set(needle, index);
     return index;
   };
 

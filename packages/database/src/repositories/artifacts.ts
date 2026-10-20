@@ -695,9 +695,24 @@ export async function listArtifacts(
     .where(inArray(artifactBenchmarkAssignments.artifactId, ids));
   const latest = await latestRunsByArtifact(db, ids);
 
+  // Grouped once, so building the rows is linear in the number of related rows (NFR-101-01).
+  const byArtifact = <T extends { artifactId: string }>(items: T[]) => {
+    const groups = new Map<string, T[]>();
+    for (const item of items) {
+      const group = groups.get(item.artifactId);
+      if (group) group.push(item);
+      else groups.set(item.artifactId, [item]);
+    }
+    return (id: string): T[] => groups.get(id) ?? [];
+  };
+  const versionsOf = byArtifact(versions);
+  const categoriesOf = byArtifact(cats);
+  const occurrencesOf = byArtifact(occurrences);
+  const assignmentsOf = byArtifact(assignments);
+
   return rows.map((row) => {
-    const latestVersion = versions.find((v) => v.artifactId === row.id);
-    const found = occurrences.filter((o) => o.artifactId === row.id);
+    const latestVersion = versionsOf(row.id)[0];
+    const found = occurrencesOf(row.id);
     return {
       id: row.id,
       slug: row.slug,
@@ -706,19 +721,22 @@ export async function listArtifacts(
       description: row.description,
       format: latestVersion?.format ?? null,
       latestVersion: latestVersion?.version ?? null,
-      categories: cats
-        .filter((c) => c.artifactId === row.id)
-        .map(({ slug, name }) => ({ slug, name })),
+      categories: categoriesOf(row.id).map(({ slug, name }) => ({ slug, name })),
       repositories: [
         ...new Map(
           found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.name }]),
         ).values(),
       ],
       occurrenceCount: found.length,
-      benchmarkCount: assignments.filter((a) => a.artifactId === row.id).length,
+      benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
     };
   });
+}
+
+/** Whether the registry holds any artifact (the list's empty state). */
+export async function hasArtifacts(db: Database): Promise<boolean> {
+  return (await db.select({ id: artifacts.id }).from(artifacts).limit(1).get()) !== undefined;
 }
 
 export async function getArtifactDetail(db: Database, artifactId: string) {

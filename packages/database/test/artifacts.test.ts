@@ -19,6 +19,7 @@ import {
   getArtifactDetail,
   getLatestArtifactVersionId,
   importArtifactVersion,
+  hasArtifacts,
   listArtifacts,
   schema,
   seedPredefinedCategories,
@@ -342,6 +343,9 @@ describe('assignBenchmarkSuite', () => {
 describe('listArtifacts', () => {
   it('returns an empty list for an empty database', async () => {
     expect(await listArtifacts(getHandle().db)).toEqual([]);
+    expect(await hasArtifacts(getHandle().db)).toBe(false);
+    await importArtifactVersion(getHandle(), artifactInput('v1'));
+    expect(await hasArtifacts(getHandle().db)).toBe(true);
   });
 
   it('orders by name and handles artifacts without versions', async () => {

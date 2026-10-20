@@ -3,6 +3,7 @@ import type { StoredArtifactFile } from '@directivebench/database';
 import {
   MAX_FILE_PARAM_LENGTH,
   MAX_SEARCH_LENGTH,
+  MAX_SLUG_PARAM_LENGTH,
   artifactHref,
   buildFileTree,
   formatBytes,
@@ -52,6 +53,12 @@ describe('parseArtifactListParams', () => {
       'category',
       'repository',
     ]);
+    for (const category of ['-a', 'a-', 'a--b', 'x'.repeat(MAX_SLUG_PARAM_LENGTH + 1)]) {
+      expect(parseArtifactListParams({ category }).invalid, category).toEqual(['category']);
+    }
+    // A long custom category slug (issue #22) is still a valid value.
+    const long = 'x'.repeat(MAX_SLUG_PARAM_LENGTH);
+    expect(parseArtifactListParams({ category: long }).value).toEqual({ category: long });
   });
 });
 
