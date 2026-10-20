@@ -129,15 +129,17 @@ describe('parseFrontmatter', () => {
   it('rejects a 1 MB string repeated by 99 aliases, which the alias limit lets through', () => {
     const long = 'x'.repeat(1024 * 1024 - 600);
     const yaml = `name: big\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]`;
-    // The alias limit alone accepts it, and its JSON is about 100 times the file.
-    const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as object;
-    expect(JSON.stringify(expanded).length).toBeGreaterThan(100_000_000);
+    // The alias limit alone accepts it, and its JSON would be about 100 times the file.
+    const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as {
+      b: string[];
+    };
+    expect(expanded.b.reduce((sum, item) => sum + item.length, 0)).toBeGreaterThan(100_000_000);
     expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
       frontmatter: {},
       body: 'body',
       error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
     });
-    // The same string once, or a few times, is within the limit.
+    // The same string a few times is within the limit.
     const { frontmatter, error } = parseFrontmatter(
       `---\nname: big\na: &a "${long}"\nb: [*a, *a]\n---\n`,
     );
@@ -147,16 +149,19 @@ describe('parseFrontmatter', () => {
 
   it('counts the exact UTF-8 bytes of the JSON against MAX_FRONTMATTER_JSON_BYTES', () => {
     expect(MAX_FRONTMATTER_JSON_BYTES).toBe(4 * 1024 * 1024);
-    // Every kind of value, multi-byte and escaped text, nesting and a shared alias; `pad` fills
-    // the rest so that the whole is exactly at the limit, then one byte over it. The last byte
-    // counted is the closing bracket of `last`.
+    // Every kind of value, multi-byte and escaped text, nesting and shared aliases. 99 aliases of
+    // a 41 000-character chunk bring the JSON near the limit from a small source (a 4 MiB source
+    // is slow to parse on CI); `pad` fills the rest so that the whole is exactly at the limit,
+    // then one byte over it. The last byte counted is the closing bracket of `last`.
     const rest =
+      `chunk: &c "${'c'.repeat(41_000)}"\ncopies: [${Array(99).fill('*c').join(', ')}]\n` +
       'shared: &s {ok: true, off: false, none: null, n: -1.5e+30, list: [1, "two"]}\n' +
       'again: [*s, *s, []]\nempty: {}\ntext: "zażółć 😀 \\t \\" \\\\ \\x01"\nnested: {a: {b: [{}]}}\n' +
       'last: []';
     const sized = (padding: number) =>
       parseFrontmatter(`---\npad: "${'p'.repeat(padding)}"\n${rest}\n---\n`);
     const base = Buffer.byteLength(JSON.stringify(sized(0).frontmatter));
+    expect(MAX_FRONTMATTER_JSON_BYTES - base).toBeGreaterThan(0);
     const atLimit = sized(MAX_FRONTMATTER_JSON_BYTES - base);
     expect(atLimit.error).toBeUndefined();
     expect(Buffer.byteLength(JSON.stringify(atLimit.frontmatter))).toBe(MAX_FRONTMATTER_JSON_BYTES);
