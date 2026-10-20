@@ -206,7 +206,7 @@ describe('scanLocalRepository with unexpected errors', () => {
     });
   });
 
-  it('names the artifact whose results could not be stored, without its contents', async () => {
+  it('names where storing the results failed, for a connection or an artifact cause, without contents', async () => {
     const sqlite = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
     mocks.applyRepositoryScan.mockRejectedValueOnce(
       new ArtifactStoreError('.agents/skills/review', {
@@ -217,7 +217,7 @@ describe('scanLocalRepository with unexpected errors', () => {
       ok: false,
       code: 'scan-failed',
       message:
-        'The scan failed: the results for .agents/skills/review could not be stored (ERR_SQLITE_ERROR).',
+        'The scan failed while storing the results at .agents/skills/review (ERR_SQLITE_ERROR).',
     };
     expect(await run()).toEqual(stored);
     expect(mocks.markRepositoryScanFailed).toHaveBeenLastCalledWith(
@@ -225,15 +225,15 @@ describe('scanLocalRepository with unexpected errors', () => {
       'repo_1',
       stored.message,
     );
-    // A serialisation error has no code; the path still says where it happened (redacted).
+    // A connection-level failure (above: a locked database) does not blame the artifact; neither
+    // does an artifact-level one. A serialisation error has no code; the path is redacted.
     mocks.applyRepositoryScan.mockRejectedValueOnce(
       new ArtifactStoreError('skills/ghp_abcdefghijklmnopqrstuvwxyz0123456789', {
         cause: new TypeError('Converting circular structure to JSON'),
       }),
     );
     expect(await run()).toMatchObject({
-      message:
-        'The scan failed: the results for skills/[REDACTED] could not be stored (unknown error).',
+      message: 'The scan failed while storing the results at skills/[REDACTED] (unknown error).',
     });
   });
 

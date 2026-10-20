@@ -686,7 +686,7 @@ describe('applyRepositoryScan', () => {
     expect(await handle.db.$count(schema.artifacts)).toBe(0);
   });
 
-  it('rolls back and names the artifact whose metadata cannot be stored', async () => {
+  it('rolls back and reports the path when an artifact-level cause (its metadata) fails the write', async () => {
     // Core never hands over such metadata any more (parseFrontmatter rejects it); this guards
     // whatever else could fail while one artifact is written.
     const handle = getHandle();
@@ -703,9 +703,35 @@ describe('applyRepositoryScan', () => {
     expect(failure).toBeInstanceOf(ArtifactStoreError);
     expect(failure).toMatchObject({
       path: 'docs/AGENTS.md',
-      message: 'A scanned artifact could not be stored',
+      message: 'Storing the scan results failed',
       cause: expect.any(TypeError),
     });
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('reports a connection-level failure as an ArtifactStoreError at the path it stopped at', async () => {
+    // A full database fails whichever artifact is written next: the error carries where, and the
+    // SQLite cause says why (review of PR #44: the path must not be presented as the culprit).
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const { page_count: pages } = handle.sqlite.prepare('pragma page_count').get() as {
+      page_count: number;
+    };
+    handle.sqlite.exec(`pragma max_page_count = ${pages}`);
+    const failure = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'x'.repeat(256 * 1024))],
+    }).catch((error: unknown) => error);
+    handle.sqlite.exec('pragma max_page_count = 1073741823');
+    expect(failure).toBeInstanceOf(ArtifactStoreError);
+    expect(failure).toMatchObject({
+      path: 'AGENTS.md',
+      message: 'Storing the scan results failed',
+    });
+    const cause = (failure as ArtifactStoreError).cause as Error & { cause?: unknown };
+    expect(cause.cause).toMatchObject({ errstr: 'database or disk is full' });
     expect(await handle.db.$count(schema.artifacts)).toBe(0);
   });
 

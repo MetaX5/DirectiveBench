@@ -282,14 +282,13 @@ export async function scanLocalRepository(
     const stored = error instanceof ArtifactStoreError ? error.cause : error;
     const cause = (stored as { cause?: unknown } | null)?.cause;
     const code = errorCode(stored) ?? errorCode(cause) ?? 'unknown error';
-    const what =
-      error instanceof ArtifactStoreError ? `the results for ${error.path}` : 'the results';
-    return fail(
-      failure(
-        'scan-failed',
-        redactSecrets(`The scan failed: ${what} could not be stored (${code}).`),
-      ),
-    );
+    // The path says where the write stopped, not that the artifact there is at fault: a full
+    // disk or a closed connection fails at whichever artifact comes next.
+    const message =
+      error instanceof ArtifactStoreError
+        ? `The scan failed while storing the results at ${error.path} (${code}).`
+        : `The scan failed: the results could not be stored (${code}).`;
+    return fail(failure('scan-failed', redactSecrets(message)));
   }
   return {
     ok: true,

@@ -325,9 +325,12 @@ export async function importArtifactVersion(
 export type ScannedArtifactInput = VersionContent;
 
 /**
- * Storing one scanned artifact failed (the whole scan transaction is rolled back). `path` is the
- * artifact's repository-relative occurrence path; the original error is the `cause`. The message
- * never carries the cause's text, which can hold query parameters, i.e. file contents.
+ * Storing the scan results failed while one artifact was being written (the whole scan
+ * transaction is rolled back). `path` is that artifact's repository-relative occurrence path: it
+ * says where the write stopped, not why. The cause can be the artifact itself (metadata that
+ * cannot be serialised) or the connection (`SQLITE_FULL`, an I/O error, a closed handle); the
+ * original error is the `cause`. The message never carries the cause's text, which can hold query
+ * parameters, i.e. file contents.
  */
 export class ArtifactStoreError extends Error {
   override name = 'ArtifactStoreError';
@@ -335,7 +338,7 @@ export class ArtifactStoreError extends Error {
     readonly path: string,
     options: { cause: unknown },
   ) {
-    super('A scanned artifact could not be stored', options);
+    super('Storing the scan results failed', options);
   }
 }
 
@@ -366,8 +369,8 @@ export interface RepositoryScanApplication {
  * were not found again are left as they are (removed files are issue #21). The job is re-checked
  * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
  * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
- * meanwhile is a `NotFoundError`. A failure to store one artifact rolls everything back and is
- * an `ArtifactStoreError` naming that artifact's path.
+ * meanwhile is a `NotFoundError`. A failure while one artifact is written rolls everything back
+ * and is an `ArtifactStoreError` carrying the path where it happened.
  */
 export async function applyRepositoryScan(
   handle: DatabaseHandle,
