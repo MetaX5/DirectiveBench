@@ -87,3 +87,12 @@ too old for hosted repositories.
 
 Proposed. Revisit if GitHub or GitLab stop serving blob-by-ID fetches on partial clones, if the git
 minimum version is a problem for users, or when credentialed fetch is specified.
+
+## Validation (2026-10-20, issue #18)
+
+Implemented in `packages/runner/src/hosted-git.ts` and `hosted-repository.ts` (not in a separate
+`packages/git-providers` yet). A manual run of the built CLI with git 2.53 against
+`https://github.com/anthropics/skills` confirmed that github.com serves the blob-less shallow clone
+and the batched blob-by-ID fetch with `fetch.negotiationAlgorithm=noop`: 324 candidate blobs of 445
+files were downloaded, none of the non-candidates. The status stays Proposed until the maintainer
+reviews it.
