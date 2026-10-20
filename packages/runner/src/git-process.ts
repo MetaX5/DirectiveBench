@@ -123,6 +123,7 @@ export function runGitProcess(
             },
             // A check that cannot run cannot vouch for the limit: stop git (fail closed).
             (error: unknown) => {
+              if (closed) return;
               result.error ??= `The running check failed: ${(error as Error).message}`;
               result.watchTriggered = true;
               terminate();

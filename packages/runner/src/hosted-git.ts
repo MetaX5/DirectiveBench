@@ -1,5 +1,5 @@
 import { mkdir, chmod, lstat, readdir, rm } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import type { RepositoryTreeEntry } from '@directivebench/core';
 import { runGitProcess, type GitProcessResult } from './git-process';
 import { absolutePathEntries } from './repository-registration';
@@ -182,7 +182,7 @@ const NOT_FOUND_PATTERNS = [
   /terminal prompts disabled/i,
   /Authentication failed/i,
   /Repository not found/i,
-  /The requested URL returned error: (?:401|403|404)/i,
+  /The requested URL returned error: (?:401|404)/i,
   /does not appear to be a git repository/i,
 ];
 
@@ -212,6 +212,13 @@ export function classifyRemoteFailure(stderr: string, host: string): HostedGitFa
     return failure(
       'invalid-url',
       'The repository URL redirects elsewhere (it was probably renamed or moved). Register its new URL.',
+    );
+  }
+  // GitHub also answers 403 for rate and abuse limits: not evidence that the repository is private.
+  if (/The requested URL returned error: 403/.test(stderr)) {
+    return failure(
+      'unreachable',
+      `${host} refused the request (HTTP 403, for example a rate limit). Try again later.`,
     );
   }
   if (NOT_FOUND_PATTERNS.some((pattern) => pattern.test(stderr))) {
@@ -278,17 +285,19 @@ async function runStep(
       : {}),
   });
   if (result.cancelled) throw new GitCancelledError('git was stopped: the job was cancelled');
-  return result;
+  // Messages built from git's errors never name the absolute cache location (FR-105-15).
+  return { ...result, stderr: result.stderr.split(dirname(context.home)).join('<cache>') };
 }
 
 /** The typed failure for a git run that did not finish normally, or null when it exited. */
 function abnormal(result: GitProcessResult, step: string, context: HostedGitContext) {
+  // First: a size check that itself failed also stops git, but the limit was not proven exceeded.
+  if (result.error !== null) return failure('git-failed', `${step} failed: ${result.error}`);
   if (result.watchTriggered) return cacheLimitFailure(context);
   if (result.timedOut) return failure('timeout', `${step} did not finish within the time limit.`);
   if (result.outputExceeded) {
     return failure('git-failed', `${step} printed more output than DirectiveBench reads.`);
   }
-  if (result.error !== null) return failure('git-failed', `${step} failed: ${result.error}`);
   return null;
 }
 
@@ -517,7 +526,7 @@ async function finishDownload(
     if (/Remote branch .* not found|couldn't find remote ref/i.test(result.stderr)) {
       return failure(
         'branch-not-found',
-        `The branch ${target.branch} does not exist in the repository.`,
+        `The branch ${target.branch} does not exist in the repository. If its default branch was renamed, register its URL again to detect the new one.`,
       );
     }
     return classifyRemoteFailure(result.stderr, new URL(target.location).host);

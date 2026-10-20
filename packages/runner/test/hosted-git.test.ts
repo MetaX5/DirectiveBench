@@ -133,9 +133,14 @@ describe('classifyRemoteFailure', () => {
       NOT_FOUND_OR_NOT_PUBLIC,
     ],
     [
-      "fatal: unable to access 'https://github.com/a/b/': The requested URL returned error: 403\n",
+      "fatal: unable to access 'https://github.com/a/b/': The requested URL returned error: 404\n",
       'auth-required',
       NOT_FOUND_OR_NOT_PUBLIC,
+    ],
+    [
+      "fatal: unable to access 'https://github.com/a/b/': The requested URL returned error: 403\n",
+      'unreachable',
+      'github.com refused the request (HTTP 403, for example a rate limit). Try again later.',
     ],
     [
       "fatal: unable to access 'https://github.com/a/b/': The requested URL returned error: 301\n",
@@ -219,7 +224,7 @@ function fakeContext(
   const context: HostedGitContext = {
     git,
     env: { PATH: process.env.PATH },
-    home: dir,
+    home: join(dir, 'git-home'),
     transport: HTTPS_TRANSPORT,
     signal: new AbortController().signal,
     timeouts: HOSTED_GIT_TIMEOUTS,
@@ -352,12 +357,16 @@ describePosix('hosted git steps with a fake git', () => {
     expect(await listSnapshot(slow.context, dir, OID_B)).toMatchObject({ code: 'timeout' });
     rmSync(join(dir, 'bin'), { recursive: true, force: true });
     const { context } = fakeContext({
-      'ls-tree': { exit: 128, stderr: 'fatal: not a tree object\n' },
+      'ls-tree': {
+        exit: 128,
+        stderr: `fatal: not a tree object in ${join(dir, 'repos', 'x.git')}\n`,
+      },
     });
     expect(await listSnapshot(context, dir, OID_B)).toEqual({
       ok: false,
       code: 'git-failed',
-      message: 'git ls-tree failed: not a tree object',
+      // The absolute cache location is never part of a message.
+      message: 'git ls-tree failed: not a tree object in <cache>/repos/x.git',
     });
   });
 

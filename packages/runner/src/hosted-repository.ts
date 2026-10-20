@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
@@ -148,7 +149,7 @@ export async function scanHostedRepository(
       ok: false,
       code: 'branch-not-found',
       message:
-        'No default branch was detected for this repository (it may be empty). Register it again once it has commits.',
+        'No default branch was detected for this repository (it may be empty). Register its URL again once it has commits: that detects the default branch again.',
     });
   }
   const prepared = await prepare(options);
@@ -159,8 +160,14 @@ export async function scanHostedRepository(
 
   const snapshot = await fetchSnapshot(context, target);
   if (!snapshot.ok) return fail(snapshot);
+  // A git step that fails on the cache (listing, blob download, read) deletes it: it may be over
+  // the size limit or inconsistent, and the next scan starts from a fresh clone (SPEC-105 §13).
+  const drop = async (result: ScanFailure): Promise<ScanFailure> => {
+    await rm(cacheDir, { recursive: true, force: true });
+    return fail(result);
+  };
   const listing = await listSnapshot(context, cacheDir, snapshot.commitSha);
-  if (!listing.ok) return fail(listing);
+  if (!listing.ok) return drop(listing);
 
   let selected: string[];
   try {
@@ -174,7 +181,7 @@ export async function scanHostedRepository(
   const oidOf = new Map(listing.entries.map((entry) => [entry.path, entry.oid]));
   const oids = [...new Set(selected.map((path) => String(oidOf.get(path))))].sort();
   const blobs = await fetchBlobs(context, target, oids);
-  if (!blobs.ok) return fail(blobs);
+  if (!blobs.ok) return drop(blobs);
 
   // Blobs above the largest per-file limit are never loaded: discovery only needs their size.
   const perFileLimit = Math.max(
@@ -191,7 +198,7 @@ export async function scanHostedRepository(
     });
   }
   const read = await readBlobs(context, cacheDir, loadable);
-  if (!read.ok) return fail(read);
+  if (!read.ok) return drop(read);
   const contents = new Map<string, Buffer | number>();
   for (const path of selected) {
     const oid = String(oidOf.get(path));

@@ -161,6 +161,26 @@ describe('runGitProcess', () => {
     expect(exceeded).toHaveBeenCalledTimes(1);
   });
 
+  posixOnly('ignores a watch failure that arrives after git exited', async () => {
+    let fail = (_error: Error): void => undefined;
+    const result = await runGitProcess(
+      SH,
+      ['-c', 'sleep 0.1'],
+      options({
+        watch: {
+          intervalMs: 1,
+          exceeded: () =>
+            new Promise<boolean>((_resolve, reject) => {
+              fail = reject;
+            }),
+        },
+      }),
+    );
+    fail(new Error('late'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(result).toMatchObject({ watchTriggered: false, error: null });
+  });
+
   posixOnly('survives a process group that is already gone when it is signalled', async () => {
     const kill = vi.spyOn(process, 'kill').mockImplementationOnce(() => {
       throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });

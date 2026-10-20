@@ -153,11 +153,21 @@ describe('registerHostedUrl', () => {
     });
   });
 
-  it('stores no default branch for an empty repository', async () => {
+  it('stores no default branch for an empty repository, and detects it on a new registration', async () => {
     const remote = new FixtureRemote(remotes, 'acme', 'empty');
-    const result = await registerHostedUrl(handle, remote.location, options());
-    expect(result).toMatchObject({ ok: true });
-    expect((await handle.db.select().from(schema.repositories))[0]?.defaultBranch).toBeNull();
+    expect(await registerHostedUrl(handle, remote.location, options())).toMatchObject({ ok: true });
+    const [empty] = await handle.db.select().from(schema.repositories);
+    expect(empty?.defaultBranch).toBeNull();
+    expect(await scan(empty as RepositoryRecord)).toMatchObject({ code: 'branch-not-found' });
+    // Regression (review of PR #51): registering the URL again is the way out the error names.
+    remote.commit({ 'AGENTS.md': '# Rules\n' });
+    expect(await registerHostedUrl(handle, remote.location, options())).toMatchObject({
+      ok: true,
+      created: false,
+    });
+    const repository = (await getRepository(handle.db, String(empty?.id))) as RepositoryRecord;
+    expect(repository.defaultBranch).toBe('main');
+    expect(await scan(repository)).toMatchObject({ ok: true, discovered: 1 });
   });
 
   it('rejects a missing repository as not found or not public and stores nothing', async () => {
@@ -413,7 +423,8 @@ describe('scanHostedRepository', () => {
     expect(await scan(repository)).toEqual({
       ok: false,
       code: 'branch-not-found',
-      message: 'The branch gone does not exist in the repository.',
+      message:
+        'The branch gone does not exist in the repository. If its default branch was renamed, register its URL again to detect the new one.',
     });
     expect(existsSync(cacheOf(repository.id))).toBe(false);
     expect(await getRepository(handle.db, repository.id)).toMatchObject({ syncStatus: 'error' });
@@ -452,6 +463,8 @@ describe('scanHostedRepository', () => {
     const repository = await registered(remote);
     const result = await scan(repository, { cacheLimitBytes: 64 * 1024 });
     expect(result).toMatchObject({ ok: false, code: 'cache-limit-exceeded' });
+    // Regression (review of PR #51): the oversized cache does not stay on disk.
+    expect(existsSync(cacheOf(repository.id))).toBe(false);
   });
 
   it('fails when git is missing at scan time', async () => {
