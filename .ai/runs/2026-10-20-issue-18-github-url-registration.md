@@ -131,6 +131,25 @@ against github.com (tested locally only).
 - Deviations from SPEC-105 (recorded in §20): no step 0 / fast path (rescans are #19), no retry
   after a blob still missing, cache limit not configurable, scan job named `repository-scan`.
 
+## Review rounds
+
+- Independent review at `6b08c4f` (security focus, `om-code-review`, offline run under
+  `unshare -rn` plus read-only probes of github.com and a local 301 server): REQUEST CHANGES,
+  2 majors, 6 minors, nits. Fixed:
+  - Major: a failed blob fetch (incl. `cache-limit-exceeded`) left the cache on disk — git-step
+    failures after the snapshot now delete it (regression assertion in the blob-limit test).
+  - Major: an empty repository or a renamed default branch could never be scanned, and
+    "register again" did nothing — `registerHostedRepository` now refreshes the default branch
+    on conflict (regression test: empty → push → register again → scan).
+  - Minor: a token in a query or fragment was echoed — inputs with `@`, `?` or `#` go back
+    without the input. Minor: absolute cache paths in git messages are replaced by `<cache>`.
+    Minor: HTTP 403 is `unreachable` (rate limits), not "not found or not public".
+    Nits: a late watch failure after exit is ignored; a failed size check reports `git-failed`.
+  - Documented instead of changed: the hosted per-scan byte pre-check counts binary candidates,
+    unusual modes fail the scan, a hosted registration can hold the short lane ~35 s, custom CA
+    certificates are not forwarded (SPEC-104/105 §20).
+  - Gate after the fixes: format, lint, typecheck, test (100%), build, verify:pack, e2e 31 — pass.
+
 ## Lessons recorded
 
 - [2026-10-20-record-git-errors-of-the-exact-invocation.md](../lessons/2026-10-20-record-git-errors-of-the-exact-invocation.md) (new)
