@@ -40,16 +40,26 @@ test.describe('artifacts', () => {
 
     await expect(page).toHaveURL(/\/artifacts\/[\w-]+$/);
     await expect(page.getByRole('heading', { level: 1, name: DEMO_ARTIFACT })).toBeVisible();
-    await expect(page.getByTestId('artifact-content')).toContainText(
+    await expect(page.getByText(MOCK_LABEL).first()).toBeVisible();
+    await expect(page.getByTestId('occurrences')).toContainText('Bundled examples');
+
+    const sections = page.getByRole('navigation', { name: 'Artifact sections' });
+    await sections.getByRole('link', { name: 'Content' }).click();
+    await expect(page).toHaveURL(/\?tab=content$/);
+    await expect(page.getByTestId('artifact-raw')).toContainText(
       'Always validate all external input',
     );
-    await expect(page.getByText(MOCK_LABEL).first()).toBeVisible();
+    await sections.getByRole('link', { name: 'Versions' }).click();
     await expect(page.getByRole('row', { name: /^v1 / })).toBeVisible();
+    await sections.getByRole('link', { name: 'Benchmarks' }).click();
     await expect(page.getByRole('link', { name: DEMO_SUITE })).toHaveAttribute(
       'href',
       /^\/benchmarks\//,
     );
+    await sections.getByRole('link', { name: 'Evaluation history' }).click();
+    await expect(page.getByText(MOCK_LABEL).first()).toBeVisible();
 
+    await sections.getByRole('link', { name: 'Overview' }).click();
     await page.getByRole('link', { name: 'Open run details and traces' }).click();
     await expect(page).toHaveURL(/\/results\/run_[\w-]+$/);
     await expect(page.getByTestId('verdict')).toHaveText('improved');
