@@ -2,10 +2,10 @@ import { constants } from 'node:fs';
 import { access, lstat, realpath, stat } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { runCommand, type CommandResult } from '@directivebench/benchmark-engine';
-import { REDACTION_MARKER, expandHomePath } from '@directivebench/core';
+import { REDACTION_MARKER, expandHomePath, isFilesystemRoot } from '@directivebench/core';
 import {
   registerLocalRepository,
-  type Database,
+  type DatabaseHandle,
   type RepositoryRegistrationErrorCode,
   type RepositoryRegistrationResult,
 } from '@directivebench/database';
@@ -325,22 +325,63 @@ export async function inspectLocalPath(
 }
 
 /**
+ * The home directory as registered locations are stored: canonical. When it cannot be resolved
+ * (e.g. `HOME` points nowhere), the configured value is compared as is; the comparison only
+ * decides whether to ask for a confirmation, it grants nothing.
+ */
+async function canonicalHome(homeDir: string): Promise<string> {
+  return realpath(homeDir).catch(() => resolve(homeDir));
+}
+
+export interface RegistrationRequest {
+  /** The path as the user entered it. */
+  path: string;
+  /** The canonical location the user confirmed after a FR-104-18 notice, if any. */
+  confirmedLocation: string | null;
+}
+
+/**
  * Executes a `repository-registration` job: inspects the path and stores the repository, or
- * returns the existing one for the same canonical location (FR-104-04). A rejected path stores
+ * returns the existing one for the same canonical location (FR-104-04). The filesystem root is
+ * rejected; the home directory, its ancestors and locations that contain or lie inside another
+ * registered local repository are stored only once the user confirmed exactly that canonical
+ * location, otherwise the result asks for that confirmation (FR-104-18). A rejected path stores
  * nothing.
  */
 export async function registerLocalPath(
-  db: Database,
-  path: string,
+  handle: DatabaseHandle,
+  request: RegistrationRequest,
   options: LocalPathInspectionOptions,
 ): Promise<RepositoryRegistrationResult> {
-  const inspection = await inspectLocalPath(path, options);
+  const inspection = await inspectLocalPath(request.path, options);
   if (!inspection.ok) return inspection;
-  const { repository, created } = await registerLocalRepository(db, {
-    provider: inspection.provider,
-    name: inspection.name,
-    location: inspection.location,
-    defaultBranch: inspection.defaultBranch,
-  });
-  return { ok: true, repositoryId: repository.id, created };
+  if (isFilesystemRoot(inspection.location)) {
+    return reject(
+      'filesystem-root',
+      'The filesystem root cannot be registered: a scan would read the whole disk. Register a project directory instead.',
+    );
+  }
+  const outcome = await registerLocalRepository(
+    handle,
+    {
+      provider: inspection.provider,
+      name: inspection.name,
+      location: inspection.location,
+      defaultBranch: inspection.defaultBranch,
+    },
+    {
+      homeDirectory: await canonicalHome(options.homeDir),
+      confirmedLocation: request.confirmedLocation,
+    },
+  );
+  if (outcome.status === 'confirmation-required') {
+    return {
+      ok: false,
+      code: 'confirmation-required',
+      location: inspection.location,
+      home: outcome.home,
+      overlaps: outcome.overlaps,
+    };
+  }
+  return { ok: true, repositoryId: outcome.repository.id, created: outcome.created };
 }

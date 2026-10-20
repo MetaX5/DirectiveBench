@@ -6,15 +6,19 @@ import {
   acquireNextJob,
   getJob,
   getRepositoryRegistration,
+  getRepositoryScan,
   importArtifactVersion,
+  registerLocalRepository,
   importSuiteVersion,
   listJobs,
+  upsertRepository,
   type DatabaseHandle,
 } from '@directivebench/database';
 import {
   cancelJobAction,
   enqueueBenchmarkRunAction,
   registerRepositoryAction,
+  scanRepositoryAction,
 } from '../lib/actions';
 import { DatabaseNotInitializedError, requireDatabase } from '../lib/db';
 import { createTempDataDir, initialiseDatabase, resetCachedDatabase } from './support/data-dir';
@@ -337,5 +341,83 @@ describe('registerRepositoryAction', () => {
     await expect(registerRepositoryAction(form({ path: '/srv/skills' }))).rejects.toBeInstanceOf(
       DatabaseNotInitializedError,
     );
+  });
+
+  it('passes a confirmed canonical location to the runner (FR-104-18)', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: '~', confirmedLocation: '/home/me ' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+    expect((await getJob(handle.db, jobId))?.payload).toEqual({
+      path: '~',
+      confirmedLocation: '/home/me ',
+    });
+  });
+
+  it('drops an invalid confirmed location, so the runner asks again', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: '/srv', confirmedLocation: 'relative' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+    expect((await getJob(handle.db, jobId))?.payload).toEqual({ path: '/srv' });
+  });
+});
+
+describe('scanRepositoryAction', () => {
+  async function localRepository(): Promise<string> {
+    const outcome = await registerLocalRepository(
+      handle,
+      { provider: 'local-directory', name: 'skills', location: '/srv/skills', defaultBranch: null },
+      { homeDirectory: '/home/me', confirmedLocation: null },
+    );
+    if (outcome.status !== 'registered') throw new Error('not registered');
+    return outcome.repository.id;
+  }
+
+  it('enqueues one scan and shows it on the Repositories page', async () => {
+    const repositoryId = await localRepository();
+    const url = await redirectOf(scanRepositoryAction(form({ repositoryId })));
+    const jobId = new URL(url, 'http://localhost').searchParams.get('scan') as string;
+    expect(url).toBe(`/repositories?scan=${jobId}`);
+    expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
+    expect(await getRepositoryScan(handle.db, jobId)).toMatchObject({
+      status: 'pending',
+      repositoryId,
+    });
+    // A second click returns the scan that is already pending.
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId })))).toBe(url);
+  });
+
+  it('returns to the page with an error for a missing, unknown or non-local repository', async () => {
+    expect(await redirectOf(scanRepositoryAction(form({})))).toBe(
+      '/repositories?scanError=invalid',
+    );
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId: 'repo_missing' })))).toBe(
+      '/repositories?scanError=not-found',
+    );
+    await upsertRepository(handle.db, {
+      provider: 'bundled-examples',
+      name: 'Bundled',
+      location: '/opt/examples',
+    });
+    const bundled = handle.sqlite
+      .prepare("select id from repositories where provider = 'bundled-examples'")
+      .get() as { id: string };
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId: bundled.id })))).toBe(
+      '/repositories?scanError=unsupported',
+    );
+    expect(
+      Number((handle.sqlite.prepare('select count(*) as n from jobs').get() as { n: number }).n),
+    ).toBe(0);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('still fails loudly on an unexpected database error', async () => {
+    const repositoryId = await localRepository();
+    handle.sqlite.exec(
+      "CREATE TRIGGER fail_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    await expect(scanRepositoryAction(form({ repositoryId }))).rejects.toThrow();
+    expect(next.redirect).not.toHaveBeenCalled();
   });
 });

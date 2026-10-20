@@ -5,21 +5,23 @@ import {
   countJobsByStatus,
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
+  enqueueRepositoryScanJob,
   finishJob,
   getBenchmarkRunDetail,
   getJob,
   getRepositoryRegistration,
+  getRepositoryScan,
   heartbeatJob,
   interruptJobs,
   isCancellationRequested,
   listJobs,
   NotFoundError,
   recoverStaleJobs,
-  registerLocalRepository,
   requestJobCancellation,
   schema,
+  UnsupportedRepositoryError,
 } from '../src/index';
-import { seedRun, seedTargets, type SeededTargets } from './support/fixtures';
+import { registerLocal, seedRun, seedTargets, type SeededTargets } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -128,7 +130,47 @@ describe('enqueueRepositoryRegistrationJob', () => {
   });
 });
 
+describe('enqueueRepositoryRegistrationJob with a confirmed location', () => {
+  it('stores the confirmed canonical location verbatim and rejects an invalid one', async () => {
+    const handle = getHandle();
+    const job = await enqueueRepositoryRegistrationJob(handle.db, {
+      path: '~',
+      confirmedLocation: '/home/tester',
+    });
+    expect(job.payload).toEqual({ path: '~', confirmedLocation: '/home/tester' });
+    await expect(
+      enqueueRepositoryRegistrationJob(handle.db, { path: '/srv', confirmedLocation: 'srv' }),
+    ).rejects.toThrow(/not an absolute path/);
+    expect(await handle.db.$count(schema.jobs)).toBe(1);
+  });
+});
+
 describe('getRepositoryRegistration', () => {
+  it('describes a filesystem-root rejection and a confirmation request', async () => {
+    const handle = getHandle();
+    const root = await enqueueRepositoryRegistrationJob(handle.db, { path: '/' });
+    const rejection = { ok: false, code: 'filesystem-root', message: 'Not the root.' };
+    await finishJob(handle.db, root.id, 'completed', undefined, rejection);
+    expect(await getRepositoryRegistration(handle.db, root.id)).toMatchObject({
+      result: rejection,
+      repository: null,
+    });
+
+    const broad = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv' });
+    const confirmation = {
+      ok: false,
+      code: 'confirmation-required',
+      location: '/srv',
+      home: null,
+      overlaps: [{ repositoryId: 'repo_a', name: 'a', location: '/srv/a', relation: 'contains' }],
+    };
+    await finishJob(handle.db, broad.id, 'completed', undefined, confirmation);
+    expect(await getRepositoryRegistration(handle.db, broad.id)).toMatchObject({
+      result: confirmation,
+      repository: null,
+    });
+  });
+
   it('returns null for unknown ids, other job types and rows that fail validation', async () => {
     const handle = getHandle();
     const benchmark = await enqueueBenchmarkJob(handle.db, payloadOf(await seedTargets(handle)));
@@ -168,7 +210,7 @@ describe('getRepositoryRegistration', () => {
       repository: null,
     });
 
-    const { repository } = await registerLocalRepository(handle.db, {
+    const { repository } = await registerLocal(handle, {
       provider: 'local-git',
       name: 'skills',
       location: '/srv/skills',
@@ -235,6 +277,178 @@ describe('acquireNextJob', () => {
   });
 });
 
+describe('acquireNextJob by type', () => {
+  it('claims only the requested job types, oldest first within them', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const handle = getHandle();
+    const payload = payloadOf(await seedTargets(handle));
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const benchmark = await enqueueBenchmarkJob(handle.db, payload);
+    vi.setSystemTime(new Date('2026-04-01T00:00:01.000Z'));
+    const first = await enqueueRepositoryRegistrationJob(handle.db, { path: '/a' });
+    vi.setSystemTime(new Date('2026-04-01T00:00:02.000Z'));
+    const second = await enqueueRepositoryRegistrationJob(handle.db, { path: '/b' });
+
+    const short = { types: ['repository-registration'] as const };
+    expect((await acquireNextJob(handle.db, 'r', short))?.id).toBe(first.id);
+    expect((await acquireNextJob(handle.db, 'r', short))?.id).toBe(second.id);
+    expect(await acquireNextJob(handle.db, 'r', short)).toBeNull();
+    const long = { types: ['benchmark-run', 'repository-scan'] as const };
+    expect((await acquireNextJob(handle.db, 'r', long))?.id).toBe(benchmark.id);
+  });
+});
+
+describe('enqueueRepositoryScanJob', () => {
+  it('queues one scan per local repository and returns the pending or running one', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    const { repository: other } = await registerLocal(handle, {
+      provider: 'local-git',
+      location: '/srv/rules',
+    });
+
+    const first = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+    expect(first).toMatchObject({
+      created: true,
+      job: {
+        type: 'repository-scan',
+        status: 'pending',
+        payload: { repositoryId: repository.id },
+        createdAt: '2026-04-01T00:00:00.000Z',
+      },
+    });
+    const otherScan = await enqueueRepositoryScanJob(handle, { repositoryId: other.id });
+    expect(otherScan.created).toBe(true);
+    const [again, concurrent] = await Promise.all([
+      enqueueRepositoryScanJob(handle, { repositoryId: repository.id }),
+      enqueueRepositoryScanJob(handle, { repositoryId: repository.id }),
+    ]);
+    expect(again).toEqual({ job: first.job, created: false });
+    expect(concurrent).toEqual({ job: first.job, created: false });
+
+    await acquireNextJob(handle.db, 'r');
+    expect((await enqueueRepositoryScanJob(handle, { repositoryId: repository.id })).created).toBe(
+      false,
+    );
+    await finishJob(handle.db, first.job.id, 'completed');
+    const next = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+    expect(next.created).toBe(true);
+    expect(next.job.id).not.toBe(first.job.id);
+  });
+
+  it('ignores scan rows whose payload no longer validates', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    await handle.db.insert(schema.jobs).values({
+      id: 'job_bad',
+      type: 'repository-scan',
+      status: 'pending',
+      payload: { repositoryId: '' },
+      createdAt: '2026-04-01T00:00:00Z',
+    });
+    expect((await enqueueRepositoryScanJob(handle, { repositoryId: repository.id })).created).toBe(
+      true,
+    );
+  });
+
+  it('rejects unknown and non-local repositories and invalid payloads', async () => {
+    const handle = getHandle();
+    const { artifactId } = await seedTargets(handle, {
+      artifact: {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/examples' },
+      },
+    });
+    expect(artifactId).toMatch(/^art_/);
+    const bundled = await handle.db.select().from(schema.repositories).get();
+    await expect(
+      enqueueRepositoryScanJob(handle, { repositoryId: 'repo_missing' }),
+    ).rejects.toThrow(NotFoundError);
+    await expect(
+      enqueueRepositoryScanJob(handle, { repositoryId: bundled?.id ?? '' }),
+    ).rejects.toThrow(UnsupportedRepositoryError);
+    await expect(
+      enqueueRepositoryScanJob(handle, { repositoryId: 'r', path: '/etc' } as {
+        repositoryId: string;
+      }),
+    ).rejects.toThrow(/Unrecognized key/);
+    expect(await handle.db.$count(schema.jobs)).toBe(0);
+  });
+
+  it('fails loudly when the database silently drops the insert', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    handle.sqlite.exec(
+      'CREATE TRIGGER drop_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(IGNORE); END',
+    );
+    await expect(enqueueRepositoryScanJob(handle, { repositoryId: repository.id })).rejects.toThrow(
+      'Failed to enqueue job',
+    );
+  });
+});
+
+describe('getRepositoryScan', () => {
+  const success = {
+    ok: true,
+    scannedFiles: 3,
+    discovered: 1,
+    createdArtifacts: 1,
+    createdVersions: 1,
+    warningCount: 0,
+    errorCount: 1,
+    errors: [{ path: 'AGENTS.md', code: 'symlink', message: 'AGENTS.md is a symbolic link' }],
+    durationMs: 12,
+  };
+
+  it('returns null for unknown ids, other job types and rows that fail validation', async () => {
+    const handle = getHandle();
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv' });
+    const base = {
+      type: 'repository-scan' as const,
+      status: 'completed' as const,
+      createdAt: '2026-04-01T00:00:00Z',
+    };
+    await handle.db.insert(schema.jobs).values([
+      { ...base, id: 'job_bad_payload', payload: { repositoryId: '' } },
+      { ...base, id: 'job_bad_result', payload: { repositoryId: 'r' }, result: { ok: 'yes' } },
+    ]);
+    expect(await getRepositoryScan(handle.db, 'job_missing')).toBeNull();
+    expect(await getRepositoryScan(handle.db, registration.id)).toBeNull();
+    expect(await getRepositoryScan(handle.db, 'job_bad_payload')).toBeNull();
+    expect(await getRepositoryScan(handle.db, 'job_bad_result')).toBeNull();
+  });
+
+  it('describes a pending scan, its result and a repository that is gone', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+    expect(await getRepositoryScan(handle.db, job.id)).toEqual({
+      jobId: job.id,
+      status: 'pending',
+      repositoryId: repository.id,
+      error: null,
+      result: null,
+      repository,
+    });
+    await finishJob(handle.db, job.id, 'completed', undefined, success);
+    // A result stored before skipped user-level folders were reported reads as "none skipped".
+    expect(await getRepositoryScan(handle.db, job.id)).toMatchObject({
+      status: 'completed',
+      result: { ...success, skippedUserLevelFolders: [] },
+    });
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify({ ...success, skippedUserLevelFolders: ['.claude'] }), job.id);
+    expect((await getRepositoryScan(handle.db, job.id))?.result).toEqual({
+      ...success,
+      skippedUserLevelFolders: ['.claude'],
+    });
+    handle.sqlite.exec('delete from repositories');
+    expect(await getRepositoryScan(handle.db, job.id)).toMatchObject({ repository: null });
+  });
+});
+
 describe('heartbeatJob', () => {
   it('updates the heartbeat of running jobs only', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -255,6 +469,19 @@ describe('heartbeatJob', () => {
 });
 
 describe('finishJob', () => {
+  it('never overwrites a job that already reached a terminal state (FR-114-14)', async () => {
+    const handle = getHandle();
+    const job = await enqueueBenchmarkJob(handle.db, payloadOf(await seedTargets(handle)));
+    await acquireNextJob(handle.db, 'r');
+    await interruptJobs(handle.db, [job.id], 'Runner shut down before the job stopped');
+    await finishJob(handle.db, job.id, 'completed', undefined, { late: true });
+    expect(await getJob(handle.db, job.id)).toMatchObject({
+      status: 'interrupted',
+      result: null,
+      error: 'Runner shut down before the job stopped',
+    });
+  });
+
   it('records the final status, error and finish time', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));

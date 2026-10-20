@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, parse, relative, sep } from 'node:path';
 import { z } from 'zod';
 
 /** Longest path accepted for registration (PATH_MAX on Linux). */
@@ -39,3 +39,44 @@ export const repositoryPathInputSchema = z
   .refine((path) => isHomeRelative(path) || isAbsolute(path), {
     message: 'Enter an absolute path, for example /home/you/project or ~/project.',
   });
+
+/**
+ * A canonical absolute location as the runner stored or reported it (no trimming, so a directory
+ * name that ends in a space survives the round trip). Used for the location a user confirmed
+ * after a broad or overlapping registration notice (SPEC-104 FR-104-18).
+ */
+export const repositoryLocationSchema = z
+  .string()
+  .min(1)
+  .max(MAX_REPOSITORY_PATH_LENGTH)
+  .refine((path) => !path.includes('\0'), { message: 'The location contains a NUL character.' })
+  .refine((path) => isAbsolute(path), { message: 'The location is not an absolute path.' });
+
+/**
+ * True for a filesystem root: `/`, or a drive or UNC share root on Windows. Registering one is
+ * rejected (SPEC-104 FR-104-18), because a scan would read the whole disk.
+ */
+export function isFilesystemRoot(path: string): boolean {
+  return parse(path).root === path;
+}
+
+/** How a canonical absolute path relates to another one (SPEC-104 FR-104-18). */
+export type PathRelation = 'same' | 'inside' | 'contains' | 'unrelated';
+
+/** True when `child` is strictly below `parent` (both canonical absolute paths). */
+function isStrictlyInside(child: string, parent: string): boolean {
+  const rel = relative(parent, child);
+  // Paths on another Windows drive come back absolute; `..foo` is a name, not a parent step.
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/**
+ * Compares two canonical absolute paths textually (both come from `realpath`): `inside` when
+ * `path` is strictly below `other`, `contains` when `other` is strictly below `path`.
+ */
+export function pathRelation(path: string, other: string): PathRelation {
+  if (path === other) return 'same';
+  if (isStrictlyInside(path, other)) return 'inside';
+  if (isStrictlyInside(other, path)) return 'contains';
+  return 'unrelated';
+}

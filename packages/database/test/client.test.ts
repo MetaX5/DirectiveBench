@@ -239,6 +239,169 @@ describe('withTransaction', () => {
   });
 });
 
+describe('withTransaction isolation on a shared connection', () => {
+  const getHandle = useTestDatabase();
+
+  it('makes a statement issued outside a running transaction wait instead of joining it', async () => {
+    const handle = getHandle();
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const failing = withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow('inside'));
+      order.push('inside');
+      await gate;
+      throw new Error('rolled back');
+    });
+    // Let the transaction start, then write from outside it while it is still open.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(handle.sqlite.isTransaction).toBe(true);
+    const outside = handle.db
+      .insert(categories)
+      .values(categoryRow('outside'))
+      .then(() => order.push('outside'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(order).toEqual(['inside']);
+    release();
+
+    await expect(failing).rejects.toThrow('rolled back');
+    await outside;
+    expect(order).toEqual(['inside', 'outside']);
+    const rows = await handle.db.select({ slug: categories.slug }).from(categories);
+    expect(rows.map((row) => row.slug)).toEqual(['outside']);
+  });
+
+  /** Yields `count` microtasks: the granularity at which the Drizzle proxy interleaves. */
+  async function microtasks(count: number): Promise<void> {
+    for (let step = 0; step < count; step += 1) await Promise.resolve();
+  }
+
+  async function storedSlugs(handle: DatabaseHandle): Promise<string[]> {
+    const rows = await handle.db
+      .select({ slug: categories.slug })
+      .from(categories)
+      .orderBy(categories.slug);
+    return rows.map((row) => row.slug);
+  }
+
+  /**
+   * Starts a Drizzle query now. Query builders are lazy thenables that run again on every `then`,
+   * so the test holds the one promise this returns.
+   */
+  function run(query: PromiseLike<unknown>): Promise<unknown> {
+    // `then` is called synchronously: `Promise.resolve(query)` would defer it by one microtask.
+    return new Promise((resolve, reject) => {
+      query.then(resolve, reject);
+    });
+  }
+
+  /** A transaction that writes `slug` and then rolls back. */
+  function rolledBack(handle: DatabaseHandle, slug: string): Promise<void> {
+    return withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow(slug));
+      throw new Error('rolled back');
+    });
+  }
+
+  // Regression (review of PR #44): the proxy awaited its "is a foreign transaction open?" check
+  // and only then prepared the statement. A `withTransaction` that began in that microtask
+  // swallowed the outside statement, which was then rolled back with it. Every offset is tried,
+  // because only some of them hit the gap: with the old proxy, "transaction-first, offset 0" (a
+  // statement issued in the same synchronous step that queued the transaction) lost its row.
+  it('never lets an outside statement join a transaction that begins right next to it', async () => {
+    const handle = getHandle();
+    for (let offset = 0; offset <= 30; offset += 1) {
+      for (const order of ['outside-first', 'transaction-first'] as const) {
+        handle.sqlite.exec('delete from categories');
+        const outsideSlug = `outside-${order}-${offset}`;
+        let transaction: Promise<void>;
+        let outside: Promise<unknown>;
+        if (order === 'outside-first') {
+          outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
+          await microtasks(offset);
+          transaction = rolledBack(handle, `inside-${offset}`);
+        } else {
+          transaction = rolledBack(handle, `inside-${offset}`);
+          await microtasks(offset);
+          outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
+        }
+        await expect(transaction).rejects.toThrow('rolled back');
+        await outside;
+        expect(await storedSlugs(handle), `${order}, offset ${offset}`).toEqual([outsideSlug]);
+      }
+    }
+  });
+
+  it('keeps a waiting statement out of the transaction queued behind the one it waited for', async () => {
+    const handle = getHandle();
+    for (let offset = 0; offset <= 30; offset += 1) {
+      handle.sqlite.exec('delete from categories');
+      let release = (): void => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const first = withTransaction(handle, async (db) => {
+        await db.insert(categories).values(categoryRow('first'));
+        await gate;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      const outside = run(handle.db.insert(categories).values(categoryRow('outside')));
+      await microtasks(offset);
+      const second = rolledBack(handle, 'second');
+      release();
+      await first;
+      await expect(second).rejects.toThrow('rolled back');
+      await outside;
+      expect(await storedSlugs(handle), `offset ${offset}`).toEqual(['first', 'outside']);
+    }
+  });
+
+  it('treats a callback continuation that outlives its transaction as outside code', async () => {
+    const handle = getHandle();
+    let leaked: Promise<unknown> = Promise.resolve();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await withTransaction(handle, async () => {
+      // Not awaited: it runs after this transaction committed, while the next one is open.
+      leaked = gate.then(() => handle.db.insert(categories).values(categoryRow('leaked')));
+    });
+    const next = withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow('next'));
+      release();
+      await new Promise((resolve) => setImmediate(resolve));
+      throw new Error('rolled back');
+    });
+    await expect(next).rejects.toThrow('rolled back');
+    await leaked;
+    expect(await storedSlugs(handle)).toEqual(['leaked']);
+  });
+
+  it('rejects a nested withTransaction instead of deadlocking', async () => {
+    const handle = getHandle();
+    const result = await withTransaction(handle, async (db) => {
+      await db.insert(categories).values(categoryRow('outer'));
+      await expect(withTransaction(handle, async () => 'inner')).rejects.toThrow(
+        'withTransaction cannot be nested',
+      );
+      return 'outer done';
+    });
+    expect(result).toBe('outer done');
+    expect(await storedSlugs(handle)).toEqual(['outer']);
+  });
+
+  it('does not wait for a transaction opened outside withTransaction', async () => {
+    const handle = getHandle();
+    handle.sqlite.exec('BEGIN');
+    await handle.db.insert(categories).values(categoryRow('raw'));
+    handle.sqlite.exec('ROLLBACK');
+    expect(await handle.db.$count(categories)).toBe(0);
+  });
+});
+
 describe('migration 0001_add_job_result', () => {
   /** A migrations folder holding only the first `count` entries of the real journal. */
   function partialMigrations(dir: string, count: number): string {

@@ -2,7 +2,17 @@ import { hashManifest, sha256 } from '@directivebench/core';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  acquireNextJob,
+  applyRepositoryScan,
+  ArtifactStoreError,
   assignBenchmarkSuite,
+  enqueueRepositoryScanJob,
+  JobNoLongerRunningError,
+  markRepositoryScanFailed,
+  NotFoundError,
+  requestJobCancellation,
+  type DatabaseHandle,
+  type ScannedArtifactInput,
   assignCategoriesBySlug,
   finishBenchmarkRun,
   getArtifactBundle,
@@ -13,11 +23,18 @@ import {
   schema,
   seedPredefinedCategories,
   upsertRepository,
+  withTransaction,
 } from '../src/index';
-import { artifactInput, seedRun, seedTargets } from './support/fixtures';
+import { artifactInput, registerLocal, seedRun, seedTargets } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
+/** A scan's abort signal that is never aborted. */
+const signal = new AbortController().signal;
+/** Statements one new artifact costs besides its slug: identity, insert, version and occurrence. */
+const STATEMENTS_PER_NEW_ARTIFACT = 8;
+/** Storing 3,000 artifacts takes ~1 s locally; a loaded CI runner can be several times slower. */
+const MANY_ARTIFACTS_TIMEOUT_MS = 30_000;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -188,13 +205,13 @@ describe('importArtifactVersion', () => {
     await importArtifactVersion(
       handle,
       artifactInput('v1', {
-        repository: { provider: 'local-git', name: 'fixtures', location: '/srv/mirror' },
+        repository: { provider: 'local-directory', name: 'fixtures', location: '/srv/mirror' },
       }),
     );
     await importArtifactVersion(
       handle,
       artifactInput('v1', {
-        repository: { provider: 'github', name: 'upstream', location: 'https://x/y.git' },
+        repository: { provider: 'local-directory', name: 'upstream', location: '/srv/upstream' },
       }),
     );
 
@@ -211,6 +228,62 @@ describe('importArtifactVersion', () => {
 
     await importArtifactVersion(handle, artifactInput('v1'));
     expect((await listArtifacts(handle.db))[0]?.sources).toEqual(['fixtures']);
+  });
+
+  it('matches slugs only among artifacts of the same provider', async () => {
+    const handle = getHandle();
+    const bundled = { provider: 'bundled-examples' as const, name: 'Bundled', location: '/a' };
+    const first = await importArtifactVersion(handle, artifactInput('v1'));
+    const other = await importArtifactVersion(handle, artifactInput('v1', { repository: bundled }));
+    // A later install moves the examples: the same provider still finds the artifact by slug.
+    const moved = await importArtifactVersion(
+      handle,
+      artifactInput('v2', { repository: { ...bundled, location: '/b' } }),
+    );
+    expect(other.artifactId).not.toBe(first.artifactId);
+    expect(moved).toMatchObject({ artifactId: other.artifactId, version: 2 });
+    const slugs = await handle.db
+      .select({ slug: schema.artifacts.slug })
+      .from(schema.artifacts)
+      .orderBy(schema.artifacts.slug);
+    expect(slugs.map((row) => row.slug)).toEqual(['validate', 'validate-2']);
+  });
+
+  it('allocates suffixes for slugs that contain LIKE wildcards or a backslash', async () => {
+    const handle = getHandle();
+    const local = { provider: 'local-directory' as const, name: 'local', location: '/l' };
+    const bundled = { provider: 'bundled-examples' as const, name: 'Bundled', location: '/b' };
+    const importSlug = (repository: typeof local | typeof bundled, slug: string, name = slug) =>
+      importArtifactVersion(handle, artifactInput(name, { repository, slug, name, path: name }));
+    for (const slug of ['a_b', 'axb-2', 'a%b', 'a%b-2', 'azb-3', 'a\\b', 'a', 'a-b', 'a.b']) {
+      await importSlug(local, slug);
+    }
+    // Another provider never matches by slug, and the names differ, so each is a new artifact.
+    const created = [];
+    for (const [slug, name] of [
+      ['a_b', 'one'],
+      ['a_b', 'two'],
+      ['a%b', 'three'],
+      ['a\\b', 'four'],
+      ['axb', 'five'],
+      ['a', 'six'],
+      ['a', 'seven'],
+    ] as const) {
+      created.push((await importSlug(bundled, slug, name)).artifactId);
+    }
+    const rows = await handle.db
+      .select({ id: schema.artifacts.id, slug: schema.artifacts.slug })
+      .from(schema.artifacts);
+    const slugOf = new Map(rows.map((row) => [row.id, row.slug]));
+    expect(created.map((id) => slugOf.get(id))).toEqual([
+      'a_b-2',
+      'a_b-3',
+      'a%b-3',
+      'a\\b-2',
+      'axb',
+      'a-2',
+      'a-3',
+    ]);
   });
 });
 
@@ -415,5 +488,431 @@ describe('getLatestArtifactVersionId', () => {
     expect(await getLatestArtifactVersionId(handle.db, v1.artifactId)).toBe(v1.versionId);
     const v2 = await importArtifactVersion(handle, artifactInput('v2'));
     expect(await getLatestArtifactVersionId(handle.db, v1.artifactId)).toBe(v2.versionId);
+  });
+});
+
+function scanned(path: string, content: string, name = 'AGENTS.md'): ScannedArtifactInput {
+  return {
+    path,
+    name,
+    type: 'instruction',
+    description: null,
+    format: 'agents-md',
+    primaryFile: 'AGENTS.md',
+    files: [{ path: 'AGENTS.md', content }],
+    parsedMetadata: { warnings: [] },
+  };
+}
+
+/** Registers a repository and returns it with a running scan job, as the runner would hold it. */
+async function runningScan(handle: DatabaseHandle, location: string) {
+  const { repository } = await registerLocal(handle, { location });
+  const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+  await acquireNextJob(handle.db, 'runner');
+  return { repository, jobId: job.id };
+}
+
+async function slugsByPath(handle: DatabaseHandle): Promise<string[][]> {
+  const rows = await handle.db
+    .select({
+      repository: schema.repositories.name,
+      path: schema.artifactOccurrences.path,
+      slug: schema.artifacts.slug,
+    })
+    .from(schema.artifactOccurrences)
+    .innerJoin(schema.artifacts, eq(schema.artifactOccurrences.artifactId, schema.artifacts.id))
+    .innerJoin(
+      schema.repositories,
+      eq(schema.artifactOccurrences.repositoryId, schema.repositories.id),
+    )
+    .orderBy(schema.repositories.name, schema.artifactOccurrences.path);
+  return rows.map((row) => [row.repository, row.path, row.slug]);
+}
+
+describe('applyRepositoryScan', () => {
+  it('stores discovered artifacts with recomputed hashes and records a successful scan', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const input = scanned('AGENTS.md', '# Rules\n');
+    // A caller-supplied hash and size are ignored (SPEC-103 FR-103-04).
+    input.files = [{ path: 'AGENTS.md', content: '# Rules\n', sha256: 'f'.repeat(64), size: 1 }];
+    const summary = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      signal,
+      artifacts: [input, scanned('packages/api/AGENTS.md', '# API\n', 'packages/api/AGENTS.md')],
+    });
+    expect(summary).toEqual({ createdArtifacts: 2, createdVersions: 2 });
+
+    const versions = await handle.db.select().from(schema.artifactVersions);
+    const root = versions.find((version) => version.sourcePath === 'AGENTS.md');
+    const bytes = Buffer.from('# Rules\n');
+    expect(root).toMatchObject({
+      sourceRepositoryId: repository.id,
+      sourceCommitSha: null,
+      files: [
+        { path: 'AGENTS.md', sha256: sha256(bytes), size: bytes.length, content: '# Rules\n' },
+      ],
+      contentHash: hashManifest([{ path: 'AGENTS.md', sha256: sha256(bytes) }]),
+    });
+    expect(await slugsByPath(handle)).toEqual([
+      ['repo', 'AGENTS.md', 'agents-md'],
+      ['repo', 'packages/api/AGENTS.md', 'packages-api-agents-md'],
+    ]);
+    const occurrences = await handle.db.select().from(schema.artifactOccurrences);
+    expect(occurrences.every((o) => o.commitSha === null && o.status === 'active')).toBe(true);
+    const stored = await handle.db
+      .select()
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored).toMatchObject({
+      lastSyncAt: '2026-04-01T00:00:00.000Z',
+      syncStatus: 'ok',
+      syncError: null,
+      lastCommitSha: null,
+    });
+  });
+
+  it('keeps the artifact of an occurrence and versions only changed content', async () => {
+    const handle = getHandle();
+    const first = await runningScan(handle, '/srv/skills');
+    const apply = (content: string, jobId: string) =>
+      applyRepositoryScan(handle, {
+        repositoryId: first.repository.id,
+        jobId,
+        signal,
+        artifacts: [scanned('AGENTS.md', content)],
+      });
+    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 1, createdVersions: 1 });
+    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 0 });
+    expect(await apply('v2', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 1 });
+    const versions = await handle.db
+      .select({ version: schema.artifactVersions.version })
+      .from(schema.artifactVersions);
+    expect(versions.map((v) => v.version).sort()).toEqual([1, 2]);
+    expect(await handle.db.$count(schema.artifacts)).toBe(1);
+  });
+
+  it('leaves an occurrence the scan did not deliver exactly as it was (a discovery error)', async () => {
+    // A skill with an unreadable directory, or one below an unreadable `.agents/skills`, is not
+    // in `artifacts`: no new version, not marked missing, not deleted, not even touched.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const apply = (artifacts: ScannedArtifactInput[]) =>
+      applyRepositoryScan(handle, { repositoryId: repository.id, jobId, artifacts, signal });
+    await apply([scanned('AGENTS.md', 'v1'), scanned('packages/api/AGENTS.md', 'v1', 'api')]);
+    const before = await handle.db.select().from(schema.artifactOccurrences);
+    const versionsBefore = await handle.db.select().from(schema.artifactVersions);
+    const artifactsBefore = await handle.db.select().from(schema.artifacts);
+
+    vi.setSystemTime(new Date('2026-04-02T00:00:00.000Z'));
+    expect(await apply([scanned('AGENTS.md', 'v2')])).toEqual({
+      createdArtifacts: 0,
+      createdVersions: 1,
+    });
+    const after = await handle.db.select().from(schema.artifactOccurrences);
+    const untouched = before.find((o) => o.path === 'packages/api/AGENTS.md');
+    expect(after.find((o) => o.path === 'packages/api/AGENTS.md')).toEqual(untouched);
+    expect(untouched).toMatchObject({ status: 'active', lastSeenAt: '2026-04-01T00:00:00.000Z' });
+    const apiArtifact = artifactsBefore.find((a) => a.id === untouched?.artifactId);
+    expect(await handle.db.select().from(schema.artifacts)).toContainEqual(apiArtifact);
+    const versionsAfter = await handle.db.select().from(schema.artifactVersions);
+    expect(versionsAfter.filter((v) => v.artifactId === untouched?.artifactId)).toEqual(
+      versionsBefore.filter((v) => v.artifactId === untouched?.artifactId),
+    );
+    // The delivered artifact moved on, so the scan itself did run.
+    expect(after.find((o) => o.path === 'AGENTS.md')?.lastSeenAt).toBe('2026-04-02T00:00:00.000Z');
+  });
+
+  it('never merges same-named artifacts by slug, in either order with bundled examples', async () => {
+    const handle = getHandle();
+    // Bundled example first, then a repository skill with the same name.
+    await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/a' },
+        slug: 'agents-md',
+        name: 'AGENTS.md',
+        type: 'instruction',
+      }),
+    );
+    const a = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: a.repository.id,
+      jobId: a.jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'same'), scanned('docs/x/AGENTS.md', 'same')],
+    });
+    const b = await runningScan(handle, '/srv/b');
+    await applyRepositoryScan(handle, {
+      repositoryId: b.repository.id,
+      jobId: b.jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'same')],
+    });
+    // A later bundled import (moved install) still finds its own artifact, not a scanned one.
+    const moved = await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/b' },
+        slug: 'agents-md',
+        name: 'AGENTS.md',
+        type: 'instruction',
+      }),
+    );
+    expect(moved.createdVersion).toBe(false);
+
+    expect(await slugsByPath(handle)).toEqual([
+      ['Bundled', 'skills/validate', 'agents-md'],
+      ['Bundled', 'skills/validate', 'agents-md'],
+      ['repo', 'AGENTS.md', 'agents-md-2'],
+      ['repo', 'AGENTS.md', 'agents-md-4'],
+      ['repo', 'docs/x/AGENTS.md', 'agents-md-3'],
+    ]);
+  });
+
+  it('assigns a scanned skill a free slug when a bundled skill already uses it, and vice versa', async () => {
+    const handle = getHandle();
+    const scan = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: scan.repository.id,
+      jobId: scan.jobId,
+      signal,
+      artifacts: [{ ...scanned('skills/validate', 'mine', 'validate'), type: 'skill' }],
+    });
+    // Scan first, bundled example second: the bundled import must not attach to the scanned skill.
+    const bundled = await importArtifactVersion(
+      handle,
+      artifactInput('bundled', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/a' },
+      }),
+    );
+    expect(bundled.version).toBe(1);
+    expect(await slugsByPath(handle)).toEqual([
+      ['Bundled', 'skills/validate', 'validate-2'],
+      ['repo', 'skills/validate', 'validate'],
+    ]);
+  });
+
+  // Regression (final Codex review of PR #44): every new artifact probed `base`, `base-2`, … with
+  // one query per candidate, so N same-named artifacts cost about N²/2 queries while the scan held
+  // `BEGIN IMMEDIATE`. Discovery names a nested AGENTS.md by its path, but a monorepo whose
+  // packages each carry a skill with the same frontmatter `name` gives them all one name.
+  it(
+    'allocates sequential slugs to thousands of same-named artifacts with one slug query',
+    async () => {
+      const handle = getHandle();
+      const { repository, jobId } = await runningScan(handle, '/srv/monorepo');
+      const count = 3000;
+      const paths = Array.from({ length: count }, (_, i) => `packages/p${i}/.agents/skills/review`);
+      const prepare = vi.spyOn(handle.sqlite, 'prepare');
+      const summary = await applyRepositoryScan(handle, {
+        repositoryId: repository.id,
+        jobId,
+        signal,
+        artifacts: paths.map((path) => ({ ...scanned(path, path, 'review'), type: 'skill' })),
+      });
+      const statements = prepare.mock.calls.map(([query]) => query);
+      prepare.mockRestore();
+      expect(summary).toEqual({ createdArtifacts: count, createdVersions: count });
+      const slugs = new Map((await slugsByPath(handle)).map(([, path, slug]) => [path, slug]));
+      expect(paths.map((path) => slugs.get(path))).toEqual(
+        paths.map((_, i) => (i === 0 ? 'review' : `review-${i + 1}`)),
+      );
+      // One read of the occupied slugs for the one base; the old loop issued about 4.5 million.
+      expect(statements.filter((query) => query.includes('"artifacts"."slug"'))).toHaveLength(1);
+      expect(statements.length).toBeLessThan(count * STATEMENTS_PER_NEW_ARTIFACT);
+    },
+    MANY_ARTIFACTS_TIMEOUT_MS,
+  );
+
+  it('skips slugs taken by earlier scans, gaps included, and slugs other bases took in this scan', async () => {
+    const handle = getHandle();
+    const first = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: first.repository.id,
+      jobId: first.jobId,
+      signal,
+      artifacts: [
+        scanned('AGENTS.md', 'x'),
+        scanned('a/AGENTS.md', 'x'),
+        scanned('b/AGENTS.md', 'x', 'agents md 4'),
+      ],
+    });
+    const second = await runningScan(handle, '/srv/b');
+    await applyRepositoryScan(handle, {
+      repositoryId: second.repository.id,
+      jobId: second.jobId,
+      signal,
+      artifacts: [
+        scanned('1/AGENTS.md', 'x'),
+        // Base `agents-md-6`, read after `agents-md` was: the next `agents-md`s must skip it.
+        scanned('2/AGENTS.md', 'x', 'agents-md-6'),
+        scanned('3/AGENTS.md', 'x'),
+        scanned('4/AGENTS.md', 'x'),
+        // Base `agents-md-3`, read after `agents-md` took that slug in this scan: it gets `-2`.
+        scanned('5/AGENTS.md', 'x', 'agents-md-3'),
+        scanned('6/AGENTS.md', 'x'),
+      ],
+    });
+    expect(await slugsByPath(handle)).toEqual([
+      ['repo', '1/AGENTS.md', 'agents-md-3'],
+      ['repo', '2/AGENTS.md', 'agents-md-6'],
+      ['repo', '3/AGENTS.md', 'agents-md-5'],
+      ['repo', '4/AGENTS.md', 'agents-md-7'],
+      ['repo', '5/AGENTS.md', 'agents-md-3-2'],
+      ['repo', '6/AGENTS.md', 'agents-md-8'],
+      ['repo', 'AGENTS.md', 'agents-md'],
+      ['repo', 'a/AGENTS.md', 'agents-md-2'],
+      ['repo', 'b/AGENTS.md', 'agents-md-4'],
+    ]);
+  });
+
+  it('writes nothing when the job was cancelled or finished meanwhile, or the repository is gone', async () => {
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const application = {
+      repositoryId: repository.id,
+      jobId,
+      artifacts: [scanned('AGENTS.md', 'x')],
+      signal,
+    };
+    await requestJobCancellation(handle.db, jobId);
+    await expect(applyRepositoryScan(handle, application)).rejects.toThrow(JobNoLongerRunningError);
+    await expect(
+      applyRepositoryScan(handle, { ...application, jobId: 'job_missing' }),
+    ).rejects.toThrow(JobNoLongerRunningError);
+
+    const other = await runningScan(handle, '/srv/other');
+    handle.sqlite.exec(`delete from repositories where id = '${other.repository.id}'`);
+    await expect(
+      applyRepositoryScan(handle, {
+        repositoryId: other.repository.id,
+        jobId: other.jobId,
+        signal,
+        artifacts: [scanned('AGENTS.md', 'x')],
+      }),
+    ).rejects.toThrow(NotFoundError);
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('rolls back and reports the path when an artifact-level cause (its metadata) fails the write', async () => {
+    // Core never hands over such metadata any more (parseFrontmatter rejects it); this guards
+    // whatever else could fail while one artifact is written.
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const broken = { ...scanned('docs/AGENTS.md', 'x'), parsedMetadata: { frontmatter: circular } };
+    const failure = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'ok'), broken],
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ArtifactStoreError);
+    expect(failure).toMatchObject({
+      path: 'docs/AGENTS.md',
+      message: 'Storing the scan results failed',
+      cause: expect.any(TypeError),
+    });
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('reports a connection-level failure as an ArtifactStoreError at the path it stopped at', async () => {
+    // A full database fails whichever artifact is written next: the error carries where, and the
+    // SQLite cause says why (review of PR #44: the path must not be presented as the culprit).
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    const { page_count: pages } = handle.sqlite.prepare('pragma page_count').get() as {
+      page_count: number;
+    };
+    handle.sqlite.exec(`pragma max_page_count = ${pages}`);
+    const failure = await applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      signal,
+      artifacts: [scanned('AGENTS.md', 'x'.repeat(256 * 1024))],
+    }).catch((error: unknown) => error);
+    handle.sqlite.exec('pragma max_page_count = 1073741823');
+    expect(failure).toBeInstanceOf(ArtifactStoreError);
+    expect(failure).toMatchObject({
+      path: 'AGENTS.md',
+      message: 'Storing the scan results failed',
+    });
+    const cause = (failure as ArtifactStoreError).cause as Error & { cause?: unknown };
+    expect(cause.cause).toMatchObject({ errstr: 'database or disk is full' });
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+
+  it('writes nothing when its signal is aborted while it waits behind another transaction', async () => {
+    // Runner shutdown aborts the signal but records nothing in the job row, so the transaction
+    // must check the signal itself: the scan checked it before queueing, the abort came after.
+    // The held transaction mirrors that wait; the runner test in repository-scan.test.ts proves
+    // the wait itself, by shutting down once the apply transaction is queued.
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = withTransaction(handle, () => gate);
+    const controller = new AbortController();
+    const applied = applyRepositoryScan(handle, {
+      repositoryId: repository.id,
+      jobId,
+      artifacts: [scanned('AGENTS.md', 'x')],
+      signal: controller.signal,
+    });
+    controller.abort('shutdown');
+    release();
+    await holding;
+    await expect(applied).rejects.toThrow(
+      new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`),
+    );
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+    const stored = await handle.db
+      .select({ syncStatus: schema.repositories.syncStatus })
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored?.syncStatus).not.toBe('ok');
+  });
+
+  it('rejects content that is not well-formed Unicode before writing anything', async () => {
+    const handle = getHandle();
+    const { repository, jobId } = await runningScan(handle, '/srv/skills');
+    await expect(
+      applyRepositoryScan(handle, {
+        repositoryId: repository.id,
+        jobId,
+        signal,
+        artifacts: [scanned('AGENTS.md', 'bad \ud800')],
+      }),
+    ).rejects.toThrow(/not well-formed Unicode/);
+    expect(await handle.db.$count(schema.artifacts)).toBe(0);
+  });
+});
+
+describe('markRepositoryScanFailed', () => {
+  it('records the error without touching artifacts or the last successful scan time', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    await markRepositoryScanFailed(handle.db, repository.id, 'No directory exists at this path.');
+    const stored = await handle.db
+      .select()
+      .from(schema.repositories)
+      .where(eq(schema.repositories.id, repository.id))
+      .get();
+    expect(stored).toMatchObject({
+      syncStatus: 'error',
+      syncError: 'No directory exists at this path.',
+      lastSyncAt: null,
+    });
   });
 });

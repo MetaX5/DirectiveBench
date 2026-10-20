@@ -25,10 +25,34 @@ import {
   isCancellationRequested,
   recoverStaleJobs,
   repositoryRegistrationPayloadSchema,
+  repositoryScanPayloadSchema,
   type DatabaseHandle,
   type JobRecord,
+  type JobType,
 } from '@directivebench/database';
 import { RegistrationCancelledError, registerLocalPath } from './repository-registration';
+import { ScanCancelledError, scanLocalRepository } from './repository-scan';
+
+/**
+ * The runner's lanes (SPEC-114, SPEC-104 OQ-104-06): `runner.concurrency` slots for long jobs —
+ * benchmark runs and repository scans, whose duration grows with the work — plus one slot for
+ * short jobs, so a registration never waits behind a running benchmark or scan.
+ */
+type Lane = 'long' | 'short';
+const LANE_JOB_TYPES: Record<Lane, readonly JobType[]> = {
+  long: ['benchmark-run', 'repository-scan'],
+  short: ['repository-registration'],
+};
+/** Slots of the short lane, in addition to `concurrency`. */
+export const SHORT_JOB_SLOTS = 1;
+
+/**
+ * How long `stop()` waits, once its deadline has passed, to mark the jobs that did not stop as
+ * `interrupted`. The write can wait behind a transaction a job still holds on the shared
+ * connection; past this grace `stop()` returns without it, and the first runner start after
+ * their heartbeat went stale recovers the jobs left `running` (`recoverStaleJobs`, SPEC-114).
+ */
+export const SHUTDOWN_INTERRUPT_GRACE_MS = 1000;
 
 /** Structured context attached to runner log events (job id, event name, …). */
 export type RunnerLogFields = Record<string, string | number | boolean | null>;
@@ -66,8 +90,9 @@ export interface JobExecutionResult {
 const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefined };
 
 /**
- * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs and repository
- * registrations (SPEC-104 §9). It runs inside the CLI process; the web UI only enqueues jobs.
+ * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs, repository
+ * registrations (SPEC-104 §9) and repository scans (SPEC-105, local repositories). It runs
+ * inside the CLI process; the web UI only enqueues jobs.
  * Remote runners will implement the same lifecycle over an authenticated outbound connection
  * (see .ai/specs/2026-10-14-runner-management.md).
  */
@@ -76,11 +101,14 @@ export class LocalRunner {
   private readonly options: Required<Omit<LocalRunnerOptions, 'logger'>> & { logger: RunnerLogger };
   private readonly active = new Map<
     string,
-    { controller: AbortController; done: Promise<JobExecutionResult> }
+    { lane: Lane; controller: AbortController; done: Promise<JobExecutionResult> }
   >();
+  /** Result lists of `runUntilIdle` calls in progress; every finished job is appended. */
+  private readonly finished = new Set<JobExecutionResult[]>();
   private pollTimer: NodeJS.Timeout | null = null;
   private stopping = false;
-  private polling = false;
+  /** The poll in progress, so `stop()` can wait for a job it is acquiring right now. */
+  private polling: Promise<void> | null = null;
 
   constructor(options: LocalRunnerOptions) {
     this.options = {
@@ -122,63 +150,151 @@ export class LocalRunner {
     tick();
   }
 
-  /** Claims jobs until the concurrency limit is reached or the queue is empty. */
+  /**
+   * Claims jobs until both lanes are full or have nothing pending: up to `concurrency` long jobs
+   * and up to {@link SHORT_JOB_SLOTS} short ones, each lane in FIFO order.
+   */
   async poll(): Promise<void> {
     if (this.polling) return;
-    this.polling = true;
-    try {
-      while (!this.stopping && this.active.size < this.options.concurrency) {
-        const job = await acquireNextJob(this.options.handle.db, this.runnerId);
-        if (!job) break;
-        this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
-        const controller = new AbortController();
-        const done = this.execute(job, controller).finally(() => this.active.delete(job.id));
-        this.active.set(job.id, { controller, done });
+    this.polling = (async () => {
+      try {
+        await this.fill('long', this.options.concurrency);
+        await this.fill('short', SHORT_JOB_SLOTS);
+      } catch (error) {
+        this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
+          event: 'poll-failed',
+        });
+      } finally {
+        this.polling = null;
       }
-    } catch (error) {
-      this.options.logger.error(`Runner poll failed: ${(error as Error).message}`, {
-        event: 'poll-failed',
+    })();
+    await this.polling;
+  }
+
+  private laneSize(lane: Lane): number {
+    return [...this.active.values()].filter((job) => job.lane === lane).length;
+  }
+
+  private async fill(lane: Lane, slots: number): Promise<void> {
+    while (!this.stopping && this.laneSize(lane) < slots) {
+      const job = await acquireNextJob(this.options.handle.db, this.runnerId, {
+        types: LANE_JOB_TYPES[lane],
       });
-    } finally {
-      this.polling = false;
+      if (!job) return;
+      this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
+      const controller = new AbortController();
+      // Claimed after `stop()` gave up waiting for this poll: interrupt it instead of running it.
+      if (this.stopping) controller.abort('shutdown');
+      const done = this.execute(job, controller)
+        .then((result) => {
+          for (const results of this.finished) results.push(result);
+          return result;
+        })
+        .finally(() => this.active.delete(job.id));
+      this.active.set(job.id, { lane, controller, done });
     }
   }
 
   /** Processes the queue until no job is pending or running. Used by `directivebench demo` and tests. */
   async runUntilIdle(): Promise<JobExecutionResult[]> {
+    // Collected as jobs finish, so a job that completes while `poll` is still filling the other
+    // lane — and is gone from `active` by the time `poll` returns — is not lost.
     const results: JobExecutionResult[] = [];
-    for (;;) {
-      await this.poll();
-      if (this.active.size === 0) return results;
-      results.push(await Promise.race([...this.active.values()].map((a) => a.done)));
+    this.finished.add(results);
+    try {
+      for (;;) {
+        await this.poll();
+        if (this.active.size === 0) return results;
+        await Promise.race([...this.active.values()].map((a) => a.done));
+      }
+    } finally {
+      this.finished.delete(results);
     }
   }
 
   /**
-   * Graceful shutdown: stops polling, aborts running jobs and waits up to `shutdownTimeoutMs`
-   * for them. Aborted jobs are recorded as `interrupted` (not user-cancelled); jobs that did not
-   * stop in time are marked `interrupted` directly.
+   * Graceful shutdown: stops polling, waits for a poll in flight to finish claiming, aborts
+   * running jobs and waits for them — all within `shutdownTimeoutMs`. Aborted jobs are recorded
+   * as `interrupted` (not user-cancelled); jobs that did not stop in time are marked
+   * `interrupted` directly, waiting at most {@link SHUTDOWN_INTERRUPT_GRACE_MS} more for that
+   * write, and a job claimed after the deadline is aborted as soon as it is.
    */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
+    });
+    // A job claimed by a poll that is still in flight would otherwise start after the abort below
+    // and run unsupervised. `fill` checks `stopping` before each claim, so this ends promptly
+    // unless the claim waits behind a transaction.
+    const claimTimedOut = await Promise.race([
+      Promise.resolve(this.polling).then(() => false),
+      deadline,
+    ]);
     const running = [...this.active.entries()];
     for (const [, { controller }] of running) controller.abort('shutdown');
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = await Promise.race([
-      Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
-      }),
-    ]);
+    const timedOut =
+      claimTimedOut ||
+      (await Promise.race([
+        Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
+        deadline,
+      ]));
     clearTimeout(timer);
-    if (timedOut) {
-      const ids = await interruptJobs(
-        this.options.handle.db,
-        [...this.active.keys()],
-        'Runner shut down before the job stopped',
+    if (timedOut) await this.interruptRemaining();
+  }
+
+  /**
+   * Marks the jobs still active after the shutdown deadline as `interrupted`, waiting at most
+   * {@link SHUTDOWN_INTERRUPT_GRACE_MS}: the write can wait behind a transaction one of those
+   * jobs holds. A write that misses the grace is not cancelled. For an in-process caller that
+   * keeps the database open, it lands once that transaction ends. Under `serve`, which closes the
+   * database once `stop()` has returned and the web child has exited, it fails, and the failure
+   * is logged as information, not as an error, because shutdown has already reported the jobs as
+   * left `running` (if the process exits first, it never runs at all). A runner start after their
+   * heartbeat went stale (> 30 s) recovers them as `interrupted` (`recoverStaleJobs`).
+   */
+  private async interruptRemaining(): Promise<void> {
+    const { handle, logger } = this.options;
+    const jobIds = [...this.active.keys()];
+    let graceExpired = false;
+    const marking = interruptJobs(handle.db, jobIds, 'Runner shut down before the job stopped')
+      // Handled here, not left to reject unobserved after `stop()` has returned.
+      .catch((error: unknown) => {
+        // Drizzle wraps the SQLite error in "Failed query: … params: …"; its cause says why.
+        const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        if (graceExpired) {
+          logger.info(
+            `The late write marking jobs as interrupted after shutdown did not land (${reason}); a later runner start recovers them`,
+            { event: 'shutdown-interrupt-abandoned', jobIds: jobIds.join(',') },
+          );
+        } else {
+          logger.error(`Shutdown could not mark jobs as interrupted: ${reason}`, {
+            event: 'shutdown-interrupt-failed',
+            jobIds: jobIds.join(','),
+          });
+        }
+        return null;
+      });
+    let timer: NodeJS.Timeout | undefined;
+    const grace = new Promise<'grace-expired'>((resolve) => {
+      timer = setTimeout(() => {
+        // Set here, not after the race resumes, so a failure settling after it is never an error.
+        graceExpired = true;
+        resolve('grace-expired');
+      }, SHUTDOWN_INTERRUPT_GRACE_MS);
+    });
+    const ids = await Promise.race([marking, grace]);
+    clearTimeout(timer);
+    if (ids === 'grace-expired') {
+      logger.error(
+        `Shutdown timed out; ${jobIds.length} job(s) stay running until a later runner start recovers them as interrupted`,
+        { event: 'shutdown-interrupt-skipped', jobIds: jobIds.join(',') },
       );
-      this.options.logger.error(`Shutdown timed out; marked ${ids.length} job(s) as interrupted`, {
+    } else if (ids !== null) {
+      logger.error(`Shutdown timed out; marked ${ids.length} job(s) as interrupted`, {
         event: 'shutdown-timeout',
         jobIds: ids.join(','),
       });
@@ -234,12 +350,28 @@ export class LocalRunner {
           const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
           return await finishAs('failed', `The stored registration request is invalid: ${reasons}`);
         }
-        const result = await registerLocalPath(db, payload.data.path, {
-          homeDir: homedir(),
-          env: process.env,
-          signal: controller.signal,
-        });
+        const result = await registerLocalPath(
+          handle,
+          { path: payload.data.path, confirmedLocation: payload.data.confirmedLocation ?? null },
+          { homeDir: homedir(), env: process.env, signal: controller.signal },
+        );
         return await finishAs('completed', null, result);
+      }
+      if (job.type === 'repository-scan') {
+        const payload = repositoryScanPayloadSchema.safeParse(job.payload);
+        if (!payload.success) {
+          const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
+          return await finishAs('failed', `The stored scan request is invalid: ${reasons}`);
+        }
+        const result = await scanLocalRepository(
+          handle,
+          { jobId: job.id, repositoryId: payload.data.repositoryId },
+          { signal: controller.signal, homeDir: homedir(), env: process.env },
+        );
+        // A scan that could not run is a failed job; its typed outcome stays in `jobs.result`.
+        return result.ok
+          ? await finishAs('completed', null, result)
+          : await finishAs('failed', result.message, result);
       }
       const payload = benchmarkJobPayloadSchema.parse(job.payload);
       const suiteVersion = await getSuiteVersion(db, payload.suiteVersionId);
@@ -328,7 +460,7 @@ export class LocalRunner {
         );
       }
     } catch (error) {
-      if (error instanceof RegistrationCancelledError) {
+      if (error instanceof RegistrationCancelledError || error instanceof ScanCancelledError) {
         return await finishAs(
           controller.signal.reason === 'shutdown' ? 'interrupted' : 'cancelled',
           null,

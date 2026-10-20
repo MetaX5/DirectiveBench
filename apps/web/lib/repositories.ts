@@ -1,5 +1,12 @@
 import { repositoryPathInputSchema } from '@directivebench/core';
-import type { RepositoryRecord, RepositoryRegistration } from '@directivebench/database';
+import {
+  SCANNABLE_PROVIDERS,
+  type RepositoryRecord,
+  type RepositoryRegistration,
+  type RepositoryRegistrationResult,
+  type RepositoryScan,
+} from '@directivebench/database';
+import { formatDate, formatDuration } from './utils';
 
 export type RepositoryProvider = RepositoryRecord['provider'];
 
@@ -46,7 +53,47 @@ export function pathFieldError(path: string): string | null {
 export type RegistrationNotice =
   | { kind: 'active'; path: string; message: string }
   | { kind: 'done'; path: string; message: string }
-  | { kind: 'fieldError'; path: string; message: string };
+  | { kind: 'fieldError'; path: string; message: string }
+  | {
+      kind: 'confirm';
+      path: string;
+      /** The canonical location the runner asks the user to confirm (sent back on confirm). */
+      location: string;
+      message: string;
+      /** One sentence per reason, each saying what registering would cause. */
+      reasons: string[];
+    };
+
+type ConfirmationRequest = Extract<RepositoryRegistrationResult, { code: 'confirmation-required' }>;
+
+/**
+ * The FR-104-18 explanation: why this location needs a confirmation — the size of a scan and the
+ * same files counted as occurrences of two repositories. User-level agent folders are never part
+ * of it: a scan always skips them (product decision D05).
+ */
+export function confirmationReasons(request: ConfirmationRequest): string[] {
+  const reasons: string[] = [];
+  const userLevel =
+    'User-level agent folders such as ~/.claude, ~/.codex, ~/.cursor and ~/.agents are always skipped.';
+  if (request.home === 'home') {
+    reasons.push(
+      `This is your home directory. A scan reads every file below it (except .git and node_modules), which can take long, and includes the skills of every project in it. ${userLevel}`,
+    );
+  } else if (request.home === 'contains-home') {
+    reasons.push(
+      `This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. ${userLevel}`,
+    );
+  }
+  for (const overlap of request.overlaps) {
+    const subject = `${overlap.name} (${overlap.location})`;
+    reasons.push(
+      overlap.relation === 'inside'
+        ? `It is inside the registered repository ${subject}. Its files are already scanned there; registering it too counts each of its artifacts twice, once per repository.`
+        : `It contains the registered repository ${subject}. A scan reads that repository's files again and counts each of its artifacts twice, once per repository.`,
+    );
+  }
+  return reasons;
+}
 
 export function describeRegistration(registration: RepositoryRegistration): RegistrationNotice {
   const { path, status, result } = registration;
@@ -79,6 +126,15 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
   if (!result) {
     return { kind: 'fieldError', path, message: 'The runner finished without a result.' };
   }
+  if (!result.ok && result.code === 'confirmation-required') {
+    return {
+      kind: 'confirm',
+      path,
+      location: result.location,
+      message: `Register ${result.location} anyway?`,
+      reasons: confirmationReasons(result),
+    };
+  }
   if (!result.ok) return { kind: 'fieldError', path, message: result.message };
   const repository = registration.repository;
   if (!repository) {
@@ -90,4 +146,101 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
     path,
     message: result.created ? `Registered ${subject}.` : `${subject} is already registered.`,
   };
+}
+
+/** Whether the Repositories page offers "Scan" for a repository (local providers only so far). */
+export function canScan(repository: Pick<RepositoryRecord, 'provider'>): boolean {
+  return (SCANNABLE_PROVIDERS as readonly string[]).includes(repository.provider);
+}
+
+/** The "Last scan" cell (FR-104-16): when it last succeeded, or that it failed. */
+export function lastScanLabel(
+  repository: Pick<RepositoryRecord, 'syncStatus' | 'lastSyncAt' | 'syncError'>,
+): string {
+  if (repository.syncStatus === 'error')
+    return `Failed: ${repository.syncError ?? 'unknown error'}`;
+  return repository.lastSyncAt ? formatDate(repository.lastSyncAt) : 'Never';
+}
+
+/** What the Repositories page says about a scan job; `active` keeps the page refreshing. */
+export interface ScanNotice {
+  kind: 'active' | 'done' | 'error';
+  message: string;
+  /** Discovery errors to list (path, code, message); empty unless the scan completed. */
+  errors: { path: string; code: string; message: string }[];
+  /** How many errors the scan found in total (the list is capped). */
+  errorCount: number;
+  /** One informational line, e.g. the user-level folders the scan skipped; not an error. */
+  info: string | null;
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+export function describeScan(scan: RepositoryScan): ScanNotice {
+  const name = scan.repository?.name ?? 'the repository';
+  const notice = (kind: ScanNotice['kind'], message: string): ScanNotice => ({
+    kind,
+    message,
+    errors: [],
+    errorCount: 0,
+    info: null,
+  });
+  switch (scan.status) {
+    case 'pending':
+      return notice('active', `Waiting for the runner to scan ${name}.`);
+    case 'running':
+      return notice('active', `Scanning ${name} (read-only, working tree)…`);
+    case 'failed':
+      // A scan that could not run keeps its typed outcome, whose message explains it.
+      if (scan.result && !scan.result.ok) return notice('error', scan.result.message);
+      return notice('error', `The scan failed: ${scan.error ?? 'unknown error'}`);
+    case 'cancelled':
+      // Cancellation is honoured only before the apply transaction commits (FR-105-17).
+      return notice('error', 'The scan was cancelled. Nothing was changed.');
+    case 'interrupted':
+      // A shutdown timeout or a crash can land after the apply committed, so this cannot promise
+      // that nothing changed — only that the apply is all or nothing.
+      return notice(
+        'error',
+        "The runner stopped before it recorded the scan's outcome. A scan stores its changes completely or not at all; scan again to make sure the registry is up to date.",
+      );
+    case 'completed':
+      break;
+  }
+  const result = scan.result;
+  if (!result) return notice('error', 'The runner finished without a result.');
+  if (!result.ok) return notice('error', result.message);
+  return {
+    kind: 'done',
+    message:
+      `Scanned ${name}: ${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
+      `${plural(result.discovered, 'artifact')} found (${result.createdArtifacts} new, ` +
+      `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.`,
+    errors: result.errors,
+    errorCount: result.errorCount,
+    info: skippedFoldersInfo(result.skippedUserLevelFolders),
+  };
+}
+
+/** The line about user-level agent folders a scan skipped (D05), or null when it skipped none. */
+function skippedFoldersInfo(folders: readonly string[]): string | null {
+  if (folders.length === 0) return null;
+  if (folders.includes('.')) {
+    return 'This location is a user-level agent folder; those are never scanned, so nothing was read.';
+  }
+  return `Skipped user-level agent folders, which are never scanned: ${folders.join(', ')}.`;
+}
+
+/** Why the Scan button could not enqueue a scan (`?scanError=` from the action). */
+const SCAN_REQUEST_ERRORS = new Map<string, string>([
+  ['invalid', 'The scan request was invalid. Reload the page and click Scan again.'],
+  ['not-found', 'That repository no longer exists. It may have been removed; reload the list.'],
+  ['unsupported', 'That repository cannot be scanned yet: only local repositories can be scanned.'],
+]);
+
+/** The page-level error for `?scanError=`, or null for no or an unknown value. */
+export function scanRequestError(code: string | undefined): string | null {
+  return code === undefined ? null : (SCAN_REQUEST_ERRORS.get(code) ?? null);
 }

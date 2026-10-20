@@ -5,6 +5,7 @@ import {
   assignCategoriesBySlug,
   finishBenchmarkRun,
   getDashboardStats,
+  getRepository,
   importArtifactVersion,
   listCategories,
   listRepositories,
@@ -12,7 +13,7 @@ import {
   schema,
   seedPredefinedCategories,
 } from '../src/index';
-import { artifactInput, seedRun, seedTargets } from './support/fixtures';
+import { artifactInput, registerLocal, seedRun, seedTargets, TEST_HOME } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -86,11 +87,9 @@ describe('listRepositories', () => {
       artifactInput('c', { repository, path: 'three', slug: 'three', name: 'three' }),
     );
     handle.sqlite.exec("update artifact_occurrences set status = 'removed' where path = 'three'");
-    const { repository: empty } = await registerLocalRepository(handle.db, {
-      provider: 'local-directory',
+    const { repository: empty } = await registerLocal(handle, {
       name: 'empty',
       location: '/srv/empty',
-      defaultBranch: null,
     });
 
     const repos = await listRepositories(handle.db);
@@ -104,17 +103,21 @@ describe('listRepositories', () => {
   it('orders repositories with the same name by location', async () => {
     const handle = getHandle();
     for (const location of ['/b/skills', '/a/skills']) {
-      await registerLocalRepository(handle.db, {
-        provider: 'local-directory',
-        name: 'skills',
-        location,
-        defaultBranch: null,
-      });
+      await registerLocal(handle, { name: 'skills', location });
     }
     expect((await listRepositories(handle.db)).map((r) => r.location)).toEqual([
       '/a/skills',
       '/b/skills',
     ]);
+  });
+});
+
+describe('getRepository', () => {
+  it('returns a repository by id, or null', async () => {
+    const handle = getHandle();
+    const { repository } = await registerLocal(handle, { location: '/srv/skills' });
+    expect(await getRepository(handle.db, repository.id)).toEqual(repository);
+    expect(await getRepository(handle.db, 'repo_missing')).toBeNull();
   });
 });
 
@@ -125,10 +128,11 @@ describe('registerLocalRepository', () => {
     location: '/srv/skills',
     defaultBranch: 'main',
   };
+  const scope = { homeDirectory: TEST_HOME, confirmedLocation: null };
 
   it('creates a repository that has never been synchronised', async () => {
     const handle = getHandle();
-    const { repository, created } = await registerLocalRepository(handle.db, input);
+    const { repository, created } = await registerLocal(handle, input);
     expect(created).toBe(true);
     expect(repository).toMatchObject({
       ...input,
@@ -141,22 +145,21 @@ describe('registerLocalRepository', () => {
 
   it('returns the existing repository unchanged for the same provider and location', async () => {
     const handle = getHandle();
-    const first = await registerLocalRepository(handle.db, input);
+    const first = await registerLocal(handle, input);
     const again = await Promise.all([
-      registerLocalRepository(handle.db, { ...input, name: 'renamed', defaultBranch: 'dev' }),
-      registerLocalRepository(handle.db, input),
+      registerLocalRepository(handle, { ...input, name: 'renamed', defaultBranch: 'dev' }, scope),
+      registerLocalRepository(handle, input, scope),
     ]);
-    expect(again).toEqual([
-      { repository: first.repository, created: false },
-      { repository: first.repository, created: false },
-    ]);
+    const unchanged = { status: 'registered', repository: first.repository, created: false };
+    expect(again).toEqual([unchanged, unchanged]);
     expect(await handle.db.$count(schema.repositories)).toBe(1);
   });
 
   it('keeps one row per provider: the same path may exist as local-git and local-directory', async () => {
     const handle = getHandle();
-    await registerLocalRepository(handle.db, input);
-    const plain = await registerLocalRepository(handle.db, {
+    await registerLocal(handle, input);
+    // OQ-104-05 is deferred: the same location under the other provider is not an overlap.
+    const plain = await registerLocal(handle, {
       ...input,
       provider: 'local-directory',
       defaultBranch: null,
@@ -165,14 +168,90 @@ describe('registerLocalRepository', () => {
     expect(await handle.db.$count(schema.repositories)).toBe(2);
   });
 
-  it('fails loudly when the insert is dropped without a conflicting row', async () => {
+  it('asks to confirm the home directory and its ancestors, not paths inside it', async () => {
+    const handle = getHandle();
+    const at = (location: string) => registerLocalRepository(handle, { ...input, location }, scope);
+    expect(await at(TEST_HOME)).toEqual({
+      status: 'confirmation-required',
+      home: 'home',
+      overlaps: [],
+    });
+    expect(await at('/home')).toEqual({
+      status: 'confirmation-required',
+      home: 'contains-home',
+      overlaps: [],
+    });
+    expect(await at(`${TEST_HOME}/code/skills`)).toMatchObject({ status: 'registered' });
+    expect(await handle.db.$count(schema.repositories)).toBe(1);
+  });
+
+  it('asks to confirm a location that contains or lies inside a registered local repository', async () => {
+    const handle = getHandle();
+    const { repository: skills } = await registerLocal(handle, input);
+    const { repository: rules } = await registerLocal(handle, {
+      name: 'rules',
+      location: '/srv/rules',
+    });
+    // Internal and hosted repositories are not local paths the user registered.
+    await importArtifactVersion(
+      handle,
+      artifactInput('x', {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/srv/examples' },
+      }),
+    );
+
+    const outer = await registerLocalRepository(handle, { ...input, location: '/srv' }, scope);
+    expect(outer).toEqual({
+      status: 'confirmation-required',
+      home: null,
+      overlaps: [
+        { repositoryId: rules.id, name: 'rules', location: '/srv/rules', relation: 'contains' },
+        { repositoryId: skills.id, name: 'skills', location: '/srv/skills', relation: 'contains' },
+      ],
+    });
+    const inner = await registerLocalRepository(
+      handle,
+      { ...input, provider: 'local-directory', location: '/srv/skills/sub' },
+      scope,
+    );
+    expect(inner).toEqual({
+      status: 'confirmation-required',
+      home: null,
+      overlaps: [
+        { repositoryId: skills.id, name: 'skills', location: '/srv/skills', relation: 'inside' },
+      ],
+    });
+    expect(await handle.db.$count(schema.repositories)).toBe(3);
+  });
+
+  it('registers a broad or overlapping location only when exactly that location was confirmed', async () => {
+    const handle = getHandle();
+    await registerLocal(handle, input);
+    const outer = { ...input, provider: 'local-directory' as const, location: '/srv' };
+    expect(
+      await registerLocalRepository(handle, outer, { ...scope, confirmedLocation: '/srv/other' }),
+    ).toMatchObject({ status: 'confirmation-required' });
+    const confirmed = await registerLocalRepository(handle, outer, {
+      ...scope,
+      confirmedLocation: '/srv',
+    });
+    expect(confirmed).toMatchObject({ status: 'registered', created: true });
+    const home = await registerLocalRepository(
+      handle,
+      { ...outer, location: TEST_HOME },
+      { ...scope, confirmedLocation: TEST_HOME },
+    );
+    expect(home).toMatchObject({ status: 'registered', created: true });
+  });
+
+  it('fails loudly when the insert is dropped', async () => {
     const handle = getHandle();
     // SQLite-specific: a trigger that ignores the insert makes RETURNING yield no row.
     handle.sqlite.exec(
       'CREATE TRIGGER drop_repositories BEFORE INSERT ON repositories BEGIN SELECT RAISE(IGNORE); END',
     );
-    await expect(registerLocalRepository(handle.db, input)).rejects.toThrow(
-      'Repository /srv/skills was neither inserted nor found',
+    await expect(registerLocalRepository(handle, input, scope)).rejects.toThrow(
+      'Repository /srv/skills could not be inserted',
     );
   });
 });

@@ -1,7 +1,8 @@
-import { and, desc, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, max, or, sql } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
-import { createId, hashManifest, nowIso, sha256 } from '@directivebench/core';
+import { createId, hashManifest, nowIso, sha256, slugify } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
+import { JobNoLongerRunningError, NotFoundError } from './jobs';
 import {
   artifactBenchmarkAssignments,
   artifactCategories,
@@ -11,6 +12,7 @@ import {
   benchmarkRuns,
   benchmarkSuites,
   categories,
+  jobs,
   repositories,
   type StoredArtifactFile,
 } from '../schema';
@@ -78,18 +80,31 @@ export async function upsertRepository(db: Database, ref: RepositoryRef): Promis
 }
 
 /**
- * Records an artifact found in a source. Creates the logical artifact on first sight, adds an
- * immutable version only when the content hash is new, and points the occurrence at it.
- * Each file's `sha256` and `size` and the manifest content hash are always computed here from the
- * stored content (SPEC-103 FR-103-03, FR-103-04, §12); callers cannot supply them. Content is
- * UTF-8 text (SPEC-102 FR-102-17), so hashing its UTF-8 encoding hashes the source bytes; content
- * that is not well-formed Unicode is rejected before anything is written.
- * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
+ * How a version finds its logical artifact (SPEC-101 §8.3).
+ * - `slug` — the bootstrap rule for bundled examples, whose location changes between installs:
+ *   an artifact that already occurs in a repository of the same provider and has the same slug
+ *   (or, when its slug got a suffix, the same name and type).
+ * - `location` — repository content: the artifact of the occurrence at the same repository and
+ *   path (rule 1), never a slug match, so same-named artifacts stay separate (rules 2–3 are
+ *   issue #20).
+ * A new artifact takes the first free slug, suffixed `-2`, `-3`… when taken (rule 4, SPEC-105
+ * FR-105-16 c), so a scanned skill never attaches to the bundled demo skill and vice versa.
  */
-export async function importArtifactVersion(
-  handle: DatabaseHandle,
-  input: ImportArtifactInput,
-): Promise<ImportArtifactResult> {
+type ArtifactIdentity = 'slug' | 'location';
+
+/** The fields of a version write that do not depend on where the artifact is stored. */
+type VersionContent = Omit<ImportArtifactInput, 'repository' | 'slug' | 'commitSha'>;
+
+/**
+ * Each file's `sha256` and `size` and the manifest content hash, always computed from the stored
+ * content (SPEC-103 FR-103-03, FR-103-04, §12); callers cannot supply them. Content is UTF-8 text
+ * (SPEC-102 FR-102-17), so hashing its UTF-8 encoding hashes the source bytes; content that is not
+ * well-formed Unicode is rejected before anything is written.
+ */
+function recomputeFiles(input: Pick<VersionContent, 'files'>): {
+  files: StoredArtifactFile[];
+  contentHash: string;
+} {
   const files: StoredArtifactFile[] = input.files.map(({ path, content }) => {
     // Encoding replaces a lone surrogate with U+FFFD, so two different paths or contents would
     // share one hash (and one version). Fail closed instead.
@@ -99,113 +114,373 @@ export async function importArtifactVersion(
     const bytes = Buffer.from(content, 'utf8');
     return { path, sha256: sha256(bytes), size: bytes.length, content };
   });
-  const contentHash = hashManifest(files);
-  return withTransaction(handle, async (db) => {
-    const now = nowIso();
-    const repositoryId = await upsertRepository(db, input.repository);
+  return { files, contentHash: hashManifest(files) };
+}
 
-    let artifact = await db
-      .select({ id: artifacts.id })
-      .from(artifacts)
-      .where(eq(artifacts.slug, input.slug))
-      .get();
-    if (!artifact) {
-      artifact = { id: createId('art') };
-      await db.insert(artifacts).values({
-        id: artifact.id,
-        slug: input.slug,
-        name: input.name,
-        type: input.type,
-        description: input.description,
-        createdAt: now,
-        updatedAt: now,
-      });
-    } else {
-      // Source-derived fields follow the source; user-managed fields are left untouched.
-      await db
-        .update(artifacts)
-        .set({ name: input.name, description: input.description, updatedAt: now })
-        .where(eq(artifacts.id, artifact.id));
+/**
+ * Allocates rule-4 slugs — the first free of `base`, `base-2`, `base-3`, … — for the new artifacts
+ * of one transaction. The slugs a base can collide with (`base` and every `base-…`) are read once
+ * per base, and later candidates are checked in memory with a per-base cursor, so N same-named
+ * artifacts (a monorepo's nested AGENTS.md files) cost one query instead of about N²/2 (final
+ * Codex review of PR #44). The memory is only valid inside the transaction it was created for:
+ * `BEGIN IMMEDIATE` keeps other writers out, and every artifact inserted meanwhile takes its slug
+ * from this allocator, which records it in the set all bases share.
+ */
+type SlugAllocator = (base: string) => Promise<string>;
+
+function slugAllocator(db: Database): SlugAllocator {
+  const taken = new Set<string>();
+  /** Per base read so far, the next suffix to try; every lower one is taken. */
+  const nextSuffix = new Map<string, number>();
+  return async (base) => {
+    let suffix = nextSuffix.get(base);
+    if (suffix === undefined) {
+      // `base-` up to, not including, `base.`: '.' follows '-', so under the column's BINARY
+      // collation the range holds exactly the slugs that start with `base-`, with no LIKE pattern
+      // to escape, and it is a range scan of the unique slug index.
+      const rows = await db
+        .select({ slug: artifacts.slug })
+        .from(artifacts)
+        .where(
+          or(
+            eq(artifacts.slug, base),
+            and(gte(artifacts.slug, `${base}-`), lt(artifacts.slug, `${base}.`)),
+          ),
+        );
+      for (const row of rows) taken.add(row.slug);
+      suffix = 1;
     }
-
-    let version = await db
-      .select({ id: artifactVersions.id, version: artifactVersions.version })
-      .from(artifactVersions)
-      .where(
-        and(
-          eq(artifactVersions.artifactId, artifact.id),
-          eq(artifactVersions.contentHash, contentHash),
-        ),
-      )
-      .get();
-    let createdVersion = false;
-    if (!version) {
-      const current = await db
-        .select({ value: max(artifactVersions.version) })
-        .from(artifactVersions)
-        .where(eq(artifactVersions.artifactId, artifact.id))
-        .get();
-      version = { id: createId('artv'), version: (current?.value ?? 0) + 1 };
-      await db.insert(artifactVersions).values({
-        id: version.id,
-        artifactId: artifact.id,
-        version: version.version,
-        contentHash,
-        format: input.format,
-        primaryFile: input.primaryFile,
-        files,
-        parsedMetadata: input.parsedMetadata,
-        sourceRepositoryId: repositoryId,
-        sourcePath: input.path,
-        sourceCommitSha: input.commitSha ?? null,
-        createdAt: now,
-      });
-      createdVersion = true;
+    let candidate = suffix === 1 ? base : `${base}-${suffix}`;
+    while (taken.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
     }
+    taken.add(candidate);
+    nextSuffix.set(base, suffix + 1);
+    return candidate;
+  };
+}
 
-    const occurrence = await db
-      .select({ id: artifactOccurrences.id })
+interface VersionTarget {
+  repositoryId: string;
+  provider: RepositoryProvider;
+  identity: ArtifactIdentity;
+  slug: string;
+  commitSha: string | null;
+}
+
+/** Finds the logical artifact of a version write, without creating it. */
+async function findArtifact(
+  db: Database,
+  target: VersionTarget,
+  { path, name, type }: Pick<VersionContent, 'path' | 'name' | 'type'>,
+): Promise<{ id: string } | undefined> {
+  if (target.identity === 'location') {
+    return db
+      .select({ id: artifactOccurrences.artifactId })
       .from(artifactOccurrences)
       .where(
         and(
-          eq(artifactOccurrences.repositoryId, repositoryId),
-          eq(artifactOccurrences.path, input.path),
+          eq(artifactOccurrences.repositoryId, target.repositoryId),
+          eq(artifactOccurrences.path, path),
         ),
       )
       .get();
-    if (occurrence) {
-      await db
-        .update(artifactOccurrences)
-        .set({
-          artifactId: artifact.id,
-          latestVersionId: version.id,
-          commitSha: input.commitSha ?? null,
-          status: 'active',
-          lastSeenAt: now,
-          updatedAt: now,
-        })
-        .where(eq(artifactOccurrences.id, occurrence.id));
-    } else {
-      await db.insert(artifactOccurrences).values({
-        id: createId('occ'),
-        artifactId: artifact.id,
-        repositoryId,
-        path: input.path,
-        latestVersionId: version.id,
-        commitSha: input.commitSha ?? null,
-        lastSeenAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+  }
+  return db
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .innerJoin(artifactOccurrences, eq(artifactOccurrences.artifactId, artifacts.id))
+    .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
+    .where(
+      and(
+        eq(repositories.provider, target.provider),
+        // The slug, or — when that slug was taken and the artifact got a suffix — name and type.
+        or(
+          eq(artifacts.slug, target.slug),
+          and(eq(artifacts.name, name), eq(artifacts.type, type)),
+        ),
+      ),
+    )
+    .orderBy(artifacts.createdAt, artifacts.id)
+    .get();
+}
 
-    return {
+/**
+ * Writes one observed artifact inside the caller's transaction: creates the logical artifact on
+ * first sight, adds an immutable version only when the content hash is new for that artifact,
+ * and points the occurrence at it. User-managed metadata (notes, tags, categories, benchmark
+ * assignments) is never touched.
+ */
+async function writeArtifactVersion(
+  db: Database,
+  allocateSlug: SlugAllocator,
+  target: VersionTarget,
+  input: VersionContent,
+  recomputed: { files: StoredArtifactFile[]; contentHash: string },
+): Promise<ImportArtifactResult & { createdArtifact: boolean }> {
+  const now = nowIso();
+  const { repositoryId, commitSha } = target;
+  const { files, contentHash } = recomputed;
+
+  let artifact = await findArtifact(db, target, input);
+  const createdArtifact = !artifact;
+  if (!artifact) {
+    artifact = { id: createId('art') };
+    await db.insert(artifacts).values({
+      id: artifact.id,
+      slug: await allocateSlug(target.slug),
+      name: input.name,
+      type: input.type,
+      description: input.description,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } else {
+    // Source-derived fields follow the source; user-managed fields are left untouched.
+    await db
+      .update(artifacts)
+      .set({ name: input.name, description: input.description, updatedAt: now })
+      .where(eq(artifacts.id, artifact.id));
+  }
+
+  let version = await db
+    .select({ id: artifactVersions.id, version: artifactVersions.version })
+    .from(artifactVersions)
+    .where(
+      and(
+        eq(artifactVersions.artifactId, artifact.id),
+        eq(artifactVersions.contentHash, contentHash),
+      ),
+    )
+    .get();
+  let createdVersion = false;
+  if (!version) {
+    const current = await db
+      .select({ value: max(artifactVersions.version) })
+      .from(artifactVersions)
+      .where(eq(artifactVersions.artifactId, artifact.id))
+      .get();
+    version = { id: createId('artv'), version: (current?.value ?? 0) + 1 };
+    await db.insert(artifactVersions).values({
+      id: version.id,
       artifactId: artifact.id,
-      versionId: version.id,
       version: version.version,
-      createdVersion,
-    };
+      contentHash,
+      format: input.format,
+      primaryFile: input.primaryFile,
+      files,
+      parsedMetadata: input.parsedMetadata,
+      sourceRepositoryId: repositoryId,
+      sourcePath: input.path,
+      sourceCommitSha: commitSha,
+      createdAt: now,
+    });
+    createdVersion = true;
+  }
+
+  const occurrence = await db
+    .select({ id: artifactOccurrences.id })
+    .from(artifactOccurrences)
+    .where(
+      and(
+        eq(artifactOccurrences.repositoryId, repositoryId),
+        eq(artifactOccurrences.path, input.path),
+      ),
+    )
+    .get();
+  if (occurrence) {
+    await db
+      .update(artifactOccurrences)
+      .set({
+        artifactId: artifact.id,
+        latestVersionId: version.id,
+        commitSha,
+        status: 'active',
+        lastSeenAt: now,
+        updatedAt: now,
+      })
+      .where(eq(artifactOccurrences.id, occurrence.id));
+  } else {
+    await db.insert(artifactOccurrences).values({
+      id: createId('occ'),
+      artifactId: artifact.id,
+      repositoryId,
+      path: input.path,
+      latestVersionId: version.id,
+      commitSha,
+      lastSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return {
+    artifactId: artifact.id,
+    versionId: version.id,
+    version: version.version,
+    createdVersion,
+    createdArtifact,
+  };
+}
+
+/**
+ * Records an artifact found in a source (bundled examples). Creates the logical artifact on first
+ * sight (matched by slug), adds an immutable version only when the content hash is new, and
+ * points the occurrence at it. Hashes are recomputed from the content (see `recomputeFiles`).
+ * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
+ */
+export async function importArtifactVersion(
+  handle: DatabaseHandle,
+  input: ImportArtifactInput,
+): Promise<ImportArtifactResult> {
+  const recomputed = recomputeFiles(input);
+  return withTransaction(handle, async (db) => {
+    const repositoryId = await upsertRepository(db, input.repository);
+    const { createdArtifact: _created, ...result } = await writeArtifactVersion(
+      db,
+      slugAllocator(db),
+      {
+        repositoryId,
+        provider: input.repository.provider,
+        identity: 'slug',
+        slug: input.slug,
+        commitSha: input.commitSha ?? null,
+      },
+      input,
+      recomputed,
+    );
+    return result;
   });
+}
+
+/** One artifact a repository scan discovered (SPEC-102 `DiscoveredArtifact`, as stored). */
+export type ScannedArtifactInput = VersionContent;
+
+/**
+ * Storing the scan results failed while one artifact was being written (the whole scan
+ * transaction is rolled back). `path` is that artifact's repository-relative occurrence path: it
+ * says where the write stopped, not why. The cause can be the artifact itself (metadata that
+ * cannot be serialised) or the connection (`SQLITE_FULL`, an I/O error, a closed handle); the
+ * original error is the `cause`. The message never carries the cause's text, which can hold query
+ * parameters, i.e. file contents.
+ */
+export class ArtifactStoreError extends Error {
+  override name = 'ArtifactStoreError';
+  constructor(
+    readonly path: string,
+    options: { cause: unknown },
+  ) {
+    super('Storing the scan results failed', options);
+  }
+}
+
+export interface RepositoryScanSummary {
+  createdArtifacts: number;
+  createdVersions: number;
+}
+
+export interface RepositoryScanApplication {
+  repositoryId: string;
+  /** The `repository-scan` job doing the work; nothing is written unless it is still running. */
+  jobId: string;
+  artifacts: readonly ScannedArtifactInput[];
+  /**
+   * The job's abort signal (user cancellation or runner shutdown). It is checked inside the
+   * transaction, before anything is written: the transaction may have waited behind another one
+   * on the shared connection, and a shutdown records nothing in the `jobs` row to re-check.
+   */
+  signal: AbortSignal;
+}
+
+/**
+ * Stores the artifacts a scan of a registered repository discovered, in one transaction
+ * (SPEC-105 FR-105-09 subset): every version goes through the same writer as
+ * `importArtifactVersion` (hashes recomputed from content, dedup by content hash) with location
+ * identity, and the repository records a successful scan (`last_sync_at`, `sync_status = 'ok'`,
+ * `sync_error = null`). A scan reads the working tree, so no commit is recorded. Occurrences that
+ * were not found again are left as they are (removed files are issue #21). The job is re-checked
+ * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
+ * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
+ * meanwhile is a `NotFoundError`. A failure while one artifact is written rolls everything back
+ * and is an `ArtifactStoreError` carrying the path where it happened.
+ */
+export async function applyRepositoryScan(
+  handle: DatabaseHandle,
+  application: RepositoryScanApplication,
+): Promise<RepositoryScanSummary> {
+  const { repositoryId, jobId } = application;
+  const prepared = application.artifacts.map((input) => ({
+    input,
+    recomputed: recomputeFiles(input),
+  }));
+  return withTransaction(handle, async (db) => {
+    if (application.signal.aborted) {
+      throw new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`);
+    }
+    const job = await db
+      .select({ status: jobs.status, cancelRequestedAt: jobs.cancelRequestedAt })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .get();
+    if (job?.status !== 'running' || job.cancelRequestedAt !== null) {
+      throw new JobNoLongerRunningError(`Job ${jobId} is no longer running`);
+    }
+    const repository = await db
+      .select({ provider: repositories.provider })
+      .from(repositories)
+      .where(eq(repositories.id, repositoryId))
+      .get();
+    if (!repository) throw new NotFoundError(`Repository ${repositoryId} not found`);
+    const summary: RepositoryScanSummary = { createdArtifacts: 0, createdVersions: 0 };
+    const allocateSlug = slugAllocator(db);
+    for (const { input, recomputed } of prepared) {
+      const result = await writeArtifactVersion(
+        db,
+        allocateSlug,
+        {
+          repositoryId,
+          provider: repository.provider,
+          identity: 'location',
+          slug: slugify(input.name),
+          commitSha: null,
+        },
+        input,
+        recomputed,
+      ).catch((error: unknown) => {
+        throw new ArtifactStoreError(input.path, { cause: error });
+      });
+      summary.createdArtifacts += Number(result.createdArtifact);
+      summary.createdVersions += Number(result.createdVersion);
+    }
+    const now = nowIso();
+    await db
+      .update(repositories)
+      .set({
+        lastCommitSha: null,
+        lastSyncAt: now,
+        syncStatus: 'ok',
+        syncError: null,
+        updatedAt: now,
+      })
+      .where(eq(repositories.id, repositoryId));
+    return summary;
+  });
+}
+
+/**
+ * Records a scan that could not run or finish (SPEC-105 FR-105-15): the repository's
+ * `sync_status` becomes `error` with the message; its artifacts and occurrences are unchanged.
+ */
+export async function markRepositoryScanFailed(
+  db: Database,
+  repositoryId: string,
+  message: string,
+): Promise<void> {
+  await db
+    .update(repositories)
+    .set({ syncStatus: 'error', syncError: message, updatedAt: nowIso() })
+    .where(eq(repositories.id, repositoryId));
 }
 
 /** Assigns existing, non-archived categories by slug. Unknown slugs are returned, not created. */

@@ -3,7 +3,9 @@ import {
   createBenchmarkRun,
   importArtifactVersion,
   importSuiteVersion,
+  registerLocalRepository,
   type CreateBenchmarkRunInput,
+  type LocalRepositoryRegistration,
   type DatabaseHandle,
   type ImportArtifactInput,
   type ImportSuiteInput,
@@ -17,7 +19,8 @@ export function artifactInput(
     repository: { provider: 'local-directory', name: 'fixtures', location: '/tmp/fixtures' },
     path: 'skills/validate',
     slug: 'validate',
-    name: 'validate',
+    // Bundled-example identity also matches by name, so a distinct slug implies a distinct name.
+    name: overrides.slug ?? 'validate',
     type: 'skill',
     description: 'Validate input',
     format: 'skill-md',
@@ -93,4 +96,25 @@ export function seedRun(
   overrides: Partial<CreateBenchmarkRunInput> = {},
 ): Promise<string> {
   return createBenchmarkRun(handle.db, runInput(targets, overrides));
+}
+
+/** The home directory registration tests pass as the confirmation scope (FR-104-18). */
+export const TEST_HOME = '/home/tester';
+
+/**
+ * Registers a local repository that needs no confirmation (or whose location was confirmed) and
+ * returns the registered outcome; throws when the registration asks for a confirmation.
+ */
+export async function registerLocal(
+  handle: DatabaseHandle,
+  input: Partial<LocalRepositoryRegistration> & Pick<LocalRepositoryRegistration, 'location'>,
+  confirmedLocation: string | null = null,
+) {
+  const outcome = await registerLocalRepository(
+    handle,
+    { provider: 'local-directory', name: 'repo', defaultBranch: null, ...input },
+    { homeDirectory: TEST_HOME, confirmedLocation },
+  );
+  if (outcome.status !== 'registered') throw new Error(`${input.location} needs a confirmation`);
+  return outcome;
 }
