@@ -145,7 +145,8 @@ works as intended is an Assumption until it passes the transport tests in §11.
    inside a git work tree). git therefore never discovers a repository: a call on the cache names it
    with `GIT_DIR`, and every other call (`version`, `ls-remote`, `clone`) runs in the empty `HOME`
    with `GIT_CEILING_DIRECTORIES` set to its parent. The only repository config git reads is the
-   cache's own, written by DirectiveBench's `clone`.
+   cache's own, written by DirectiveBench's `clone`. git splits `GIT_CEILING_DIRECTORIES` on the
+   path list delimiter, so a data directory whose path contains `:` (`;` on Windows) is refused.
 5. **No redirects**: `http.followRedirects=false` (default is `initial`, [G10]). A redirect fails
    validation with a message that tells the user to register the final URL.
 6. **Schemes**: `protocol.allow=never`, `protocol.https.allow=always`. Also `protocol.ssh.allow=always`

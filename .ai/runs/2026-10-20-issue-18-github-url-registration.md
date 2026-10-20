@@ -205,6 +205,15 @@ against github.com (tested locally only).
   (github.com URL, promisor); no `gitlab`, `ghp_` or proxy value in `logs/` or the cache config.
 - Not verified: Windows (`GIT_CEILING_DIRECTORIES`/`GIT_DIR` with drive-letter paths) and macOS;
   git versions other than 2.53.
+- Independent re-review at `3d678f8` (security focus, `om-code-review`, real-git probes and source
+  mutations): REQUEST CHANGES, 1 major, 1 nit. Fixed:
+  - Major: `GIT_CEILING_DIRECTORIES` is split on the path delimiter, so a data directory path with
+    `:` (`;` on Windows) inside a hostile work tree let `ls-remote` read the enclosing config again
+    (reproduced by the reviewer). `prepare()` now refuses such a cache path before running git
+    (`git-failed`, message without the path); test with `a:b` in the path for registration and scan.
+  - Nit: the regression test now also proves `GIT_DIR` on its own: with the ceiling removed, the
+    hardened `config --list` in a broken cache shows nothing of the enclosing repository (without
+    `GIT_DIR` it lists the enclosing `.git/config`).
 - Lesson: [2026-10-20-git-config-isolation-needs-no-discovery.md](../lessons/2026-10-20-git-config-isolation-needs-no-discovery.md).
 
 ## Lessons recorded

@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   DISCOVERY_LIMITS,
@@ -55,11 +55,20 @@ export interface HostedRepositoryOptions {
 
 /**
  * Locates git, checks its version and prepares the private cache layout (0700): the `repos`
- * directory and an empty directory used as git's `HOME`.
+ * directory and an empty directory used as git's `HOME`. A cache path containing the path list
+ * delimiter is refused: git splits `GIT_CEILING_DIRECTORIES` on it, so the ceiling that stops
+ * repository discovery would not hold (fail closed).
  */
 async function prepare(
   options: HostedRepositoryOptions,
 ): Promise<{ context: HostedGitContext; reposDir: string } | HostedGitFailure> {
+  if (resolve(options.cacheDir).includes(delimiter)) {
+    return {
+      ok: false,
+      code: 'git-failed',
+      message: `GitHub repositories need a data directory whose path contains no "${delimiter}": git would read that path as a list. Use a data directory without it.`,
+    };
+  }
   const git = await findGitExecutable(options.env);
   if (!git) return { ok: false, code: 'git-not-installed', message: 'git was not found on PATH.' };
   const home = join(options.cacheDir, 'git-home');

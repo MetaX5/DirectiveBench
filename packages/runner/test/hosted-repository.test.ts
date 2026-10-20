@@ -460,6 +460,37 @@ describe('scanHostedRepository', () => {
       );
       expect([...seen].sort()).toEqual([...origins].sort());
     }
+    // GIT_DIR alone, without the ceiling: in a cache that is no repository git does not walk up
+    // to the enclosing one.
+    const broken = join(cache, 'repos', 'broken.git');
+    writeFiles(broken, { garbage: 'not a repository' });
+    const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', broken);
+    delete env.GIT_CEILING_DIRECTORIES;
+    const unbounded = execFileSync(
+      'git',
+      hostedGitArgs('file', ['config', '--show-origin', '--list']),
+      { cwd: broken, env },
+    ).toString();
+    expect(unbounded).not.toContain('.git/config');
+    expect(unbounded).not.toContain('insteadof');
+  });
+
+  posixOnly('refuses a data directory whose path contains the path list delimiter', async () => {
+    const remote = teamSkills();
+    const cache = join(remotes, 'a:b', 'cache');
+    const registration = await registerHostedUrl(
+      handle,
+      remote.location,
+      options({ cacheDir: cache }),
+    );
+    const scanned = await scan(await registered(remote), { cacheDir: cache });
+    for (const result of [registration, scanned]) {
+      expect(result).toMatchObject({ ok: false, code: 'git-failed' });
+      const { message } = result as { message: string };
+      expect(message).toContain('contains no ":"');
+      expect(message).not.toContain(remotes);
+    }
+    expect(existsSync(cache)).toBe(false);
   });
 
   it('reports symlinks at candidate paths, skips submodules and never fetches either', async () => {

@@ -25,7 +25,9 @@ in the enclosing `.git/config` is a quick tripwire to see which commands read it
 Config isolation needs two things: no system/global config *and* no repository discovery. A git
 call must either name its repository explicitly (`GIT_DIR`/`--git-dir`) or run where discovery stops
 immediately (`GIT_CEILING_DIRECTORIES` = the parent of its working directory; the working directory
-itself is still checked, so it must be a directory you own and keep empty).
+itself is still checked, so it must be a directory you own and keep empty). `GIT_CEILING_DIRECTORIES`
+is a list split on the path delimiter (`:`, `;` on Windows): a path containing it silently becomes
+several entries and discovery walks up again, so refuse such a path (fail closed).
 
 ## How to apply
 
