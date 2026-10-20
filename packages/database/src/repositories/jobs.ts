@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   createId,
+  hostedRepositoryLocationSchema,
   nowIso,
   repositoryLocationSchema,
   repositoryPathInputSchema,
@@ -29,20 +30,24 @@ export const benchmarkJobPayloadSchema = z
 export type BenchmarkJobPayload = z.infer<typeof benchmarkJobPayloadSchema>;
 
 /**
- * Input of a `repository-registration` job: the path exactly as the user entered it (trimmed) and,
- * after a broad or overlapping-path notice, the canonical location the user confirmed
- * (SPEC-104 FR-104-18). The runner skips the notice only when the path still resolves to that
- * location.
+ * Input of a `repository-registration` job. A local path: exactly as the user entered it
+ * (trimmed) and, after a broad or overlapping-path notice, the canonical location the user
+ * confirmed (SPEC-104 FR-104-18); the runner skips the notice only when the path still resolves to
+ * that location. A hosted repository: its normalised, credential-free URL (FR-104-02, FR-104-05) —
+ * never the text the user typed, so a payload cannot hold credentials.
  */
-export const repositoryRegistrationPayloadSchema = z
-  .object({
-    path: repositoryPathInputSchema,
-    confirmedLocation: repositoryLocationSchema.optional(),
-  })
-  .strict();
+export const repositoryRegistrationPayloadSchema = z.union([
+  z
+    .object({
+      path: repositoryPathInputSchema,
+      confirmedLocation: repositoryLocationSchema.optional(),
+    })
+    .strict(),
+  z.object({ url: hostedRepositoryLocationSchema }).strict(),
+]);
 export type RepositoryRegistrationPayload = z.infer<typeof repositoryRegistrationPayloadSchema>;
 
-/** Why the runner rejected a path (SPEC-104 §8 `RepositoryErrorCode`, local-path subset). */
+/** Why the runner rejected a path or URL (SPEC-104 §8 `RepositoryErrorCode`, implemented subset). */
 export const REPOSITORY_REGISTRATION_ERROR_CODES = [
   'path-not-found',
   'not-a-directory',
@@ -52,6 +57,12 @@ export const REPOSITORY_REGISTRATION_ERROR_CODES = [
   'git-failed',
   'git-not-installed',
   'timeout',
+  'invalid-url',
+  'git-too-old',
+  'auth-required',
+  'unreachable',
+  'branch-not-found',
+  'cache-limit-exceeded',
 ] as const;
 export type RepositoryRegistrationErrorCode = (typeof REPOSITORY_REGISTRATION_ERROR_CODES)[number];
 
@@ -94,7 +105,7 @@ export const repositoryRegistrationResultSchema = z.union([
 ]);
 export type RepositoryRegistrationResult = z.infer<typeof repositoryRegistrationResultSchema>;
 
-/** Input of a `repository-scan` job (SPEC-105 FR-105-02, local providers only). */
+/** Input of a `repository-scan` job (SPEC-105 FR-105-02). */
 export const repositoryScanPayloadSchema = z.object({ repositoryId: z.string().min(1) }).strict();
 export type RepositoryScanPayload = z.infer<typeof repositoryScanPayloadSchema>;
 
@@ -108,6 +119,15 @@ export const REPOSITORY_SCAN_ERROR_CODES = [
   'not-a-directory',
   'permission-denied',
   'scan-failed',
+  'git-not-installed',
+  'git-too-old',
+  'auth-required',
+  'unreachable',
+  'timeout',
+  'branch-not-found',
+  'cache-limit-exceeded',
+  'invalid-url',
+  'git-failed',
 ] as const;
 export type RepositoryScanErrorCode = (typeof REPOSITORY_SCAN_ERROR_CODES)[number];
 
@@ -146,6 +166,15 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
        * before it existed.
        */
       skippedUserLevelFolders: z.array(z.string()).max(MAX_SKIPPED_USER_LEVEL_FOLDERS).default([]),
+      /**
+       * The commit a hosted repository was read at (SPEC-105 FR-105-06); null for local scans,
+       * which read the working tree. Absent in results stored before it existed.
+       */
+      commitSha: z
+        .string()
+        .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/)
+        .nullable()
+        .default(null),
       durationMs: count,
     })
     .strict(),
@@ -159,8 +188,14 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
 ]);
 export type RepositoryScanResult = z.infer<typeof repositoryScanResultSchema>;
 
-/** Local providers a scan can read (SPEC-104 FR-104-01); hosted ones arrive with #18. */
-export const SCANNABLE_PROVIDERS = ['local-git', 'local-directory'] as const;
+/** Providers registered by local path (SPEC-104 FR-104-01, FR-104-03). */
+export const LOCAL_PROVIDERS = ['local-git', 'local-directory'] as const;
+
+/** Providers registered by URL; only public GitHub repositories so far (D06). */
+export const HOSTED_PROVIDERS = ['github'] as const;
+
+/** Providers a scan can read (SPEC-104 FR-104-01): local ones and public GitHub (#18). */
+export const SCANNABLE_PROVIDERS = [...LOCAL_PROVIDERS, ...HOSTED_PROVIDERS] as const;
 
 export type JobRecord = typeof jobs.$inferSelect;
 
@@ -208,8 +243,9 @@ export async function enqueueBenchmarkJob(
 }
 
 /**
- * Enqueues the registration of a local path. The web process only enqueues: the runner resolves
- * the path, inspects it read-only and records the outcome in `jobs.result` (SPEC-104 §9).
+ * Enqueues the registration of a local path or a hosted URL. The web process only enqueues: the
+ * runner resolves the path or asks the remote, read-only, and records the outcome in
+ * `jobs.result` (SPEC-104 §9).
  */
 export async function enqueueRepositoryRegistrationJob(
   db: Database,
@@ -490,8 +526,10 @@ export async function countJobsByStatus(db: Database): Promise<Record<JobStatus,
 export interface RepositoryRegistration {
   jobId: string;
   status: JobStatus;
-  /** The path as entered. */
-  path: string;
+  /** The path as entered, or the normalised URL of a hosted repository. */
+  input: string;
+  /** Whether `input` is a local path or a hosted URL. */
+  source: 'path' | 'url';
   /** The runner's message when the job failed outside path validation (e.g. invalid payload). */
   error: string | null;
   /** The runner's outcome; null until the job completes. */
@@ -528,7 +566,9 @@ export async function getRepositoryRegistration(
   return {
     jobId: job.id,
     status: job.status,
-    path: payload.data.path,
+    ...('url' in payload.data
+      ? { input: payload.data.url, source: 'url' as const }
+      : { input: payload.data.path, source: 'path' as const }),
     error: job.error,
     result,
     repository,

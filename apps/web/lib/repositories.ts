@@ -1,4 +1,10 @@
-import { repositoryPathInputSchema } from '@directivebench/core';
+import {
+  CREDENTIALS_IN_URL_MESSAGE,
+  looksLikeRepositoryUrl,
+  parseRepositoryUrl,
+  repositoryPathInputSchema,
+  type RepositoryUrlErrorCode,
+} from '@directivebench/core';
 import {
   SCANNABLE_PROVIDERS,
   type RepositoryRecord,
@@ -40,10 +46,62 @@ export function branchLabel(
   return repository.selectedBranch ?? repository.defaultBranch ?? 'not detected';
 }
 
-/** The field error for a path the action sent back (`?path=`), or null when it is valid. */
-export function pathFieldError(path: string): string | null {
-  const parsed = repositoryPathInputSchema.safeParse(path);
+/**
+ * The field error for a path or URL the action sent back (`?path=`), or null when it is valid.
+ * It is computed again from the input, so no free text from the page URL is rendered as an error.
+ */
+export function pathFieldError(input: string): string | null {
+  if (looksLikeRepositoryUrl(input)) {
+    const url = parseRepositoryUrl(input);
+    return url.ok ? null : url.message;
+  }
+  const parsed = repositoryPathInputSchema.safeParse(input);
   return parsed.success ? null : parsed.error.issues.map((issue) => issue.message).join(' ');
+}
+
+/**
+ * Whether rejected registration input may carry credentials, so it must never be echoed into a
+ * redirect URL or pre-filled into the field again (SPEC-104 FR-104-05). Every way to put a
+ * secret into a URL needs one of these characters — user info (`@`), a query (`?`), a fragment
+ * (`#`) — or its percent-encoding, whether or not the input is a well-formed URL
+ * (`https:/github.com/a/b?access_token=…`, `http//user:token@github.com/…`). A `%25` (double
+ * encoding) and the fullwidth lookalikes `＠`, `？`, `＃` count too. The rule depends on the
+ * characters only, not on how the action classified the input, so no branch can leak.
+ */
+export function mayCarryCredentials(input: string): boolean {
+  return /[@?#\uFF20\uFF1F\uFF03]|%(?:40|3f|23|25)/i.test(input);
+}
+
+/**
+ * Whether the input starts like a protocol-relative URL (`//host/…`, `\\host\…`). Such input
+ * is a valid absolute path, so it would otherwise be registered — and stored — as typed.
+ */
+export function looksLikeProtocolRelativeUrl(input: string): boolean {
+  return /^[\\/]{2}/.test(input.trim());
+}
+
+/**
+ * Why the action sent the input back without it (`?urlError=`): a URL rejection reason, or
+ * `not-echoed` for input that is neither a valid path nor recognised as a URL but may hold
+ * credentials.
+ */
+export type RejectedInputCode = RepositoryUrlErrorCode | 'not-echoed';
+
+/** Fixed messages for input the action sent back without the input (`?urlError=`). */
+const URL_ERRORS: Record<RejectedInputCode, string> = {
+  'credentials-in-url': CREDENTIALS_IN_URL_MESSAGE,
+  'unsupported-provider':
+    'Only public GitHub repositories can be registered by URL so far. Enter https://github.com/<owner>/<repo>.',
+  'invalid-url': 'Enter a GitHub repository URL such as https://github.com/<owner>/<repo>.',
+  'not-echoed':
+    'This is not a valid local path or GitHub URL. It is not shown again because it contains @, ? or # (or an encoded form of them), which can carry credentials. Enter an absolute path such as /home/you/project or ~/project, or https://github.com/<owner>/<repo>.',
+};
+
+/** The field error for `?urlError=`, or null for no or an unknown value. */
+export function urlFieldError(code: string | undefined): string | null {
+  return code !== undefined && Object.hasOwn(URL_ERRORS, code)
+    ? URL_ERRORS[code as RejectedInputCode]
+    : null;
 }
 
 /**
@@ -96,7 +154,7 @@ export function confirmationReasons(request: ConfirmationRequest): string[] {
 }
 
 export function describeRegistration(registration: RepositoryRegistration): RegistrationNotice {
-  const { path, status, result } = registration;
+  const { input: path, status, result } = registration;
   switch (status) {
     case 'pending':
       return {
@@ -105,7 +163,14 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
         message: `Waiting for the runner to check ${path}. It runs inside directivebench serve.`,
       };
     case 'running':
-      return { kind: 'active', path, message: `Checking ${path} (read-only)…` };
+      return {
+        kind: 'active',
+        path,
+        message:
+          registration.source === 'url'
+            ? `Asking GitHub about ${path} (read-only, without credentials; nothing is downloaded yet)…`
+            : `Checking ${path} (read-only)…`,
+      };
     case 'failed':
       return {
         kind: 'fieldError',
@@ -118,7 +183,7 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
       return {
         kind: 'fieldError',
         path,
-        message: 'The runner stopped before the check finished. Register the path again.',
+        message: 'The runner stopped before the check finished. Register it again.',
       };
     case 'completed':
       break;
@@ -148,7 +213,7 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
   };
 }
 
-/** Whether the Repositories page offers "Scan" for a repository (local providers only so far). */
+/** Whether the Repositories page offers "Scan" for a repository (local and GitHub so far). */
 export function canScan(repository: Pick<RepositoryRecord, 'provider'>): boolean {
   return (SCANNABLE_PROVIDERS as readonly string[]).includes(repository.provider);
 }
@@ -191,7 +256,12 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
     case 'pending':
       return notice('active', `Waiting for the runner to scan ${name}.`);
     case 'running':
-      return notice('active', `Scanning ${name} (read-only, working tree)…`);
+      return notice(
+        'active',
+        scan.repository?.provider === 'github'
+          ? `Scanning ${name}: downloading only the candidate files of its latest commit (read-only)…`
+          : `Scanning ${name} (read-only, working tree)…`,
+      );
     case 'failed':
       // A scan that could not run keeps its typed outcome, whose message explains it.
       if (scan.result && !scan.result.ok) return notice('error', scan.result.message);
@@ -215,7 +285,8 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
   return {
     kind: 'done',
     message:
-      `Scanned ${name}: ${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
+      `Scanned ${name}${result.commitSha ? ` at commit ${result.commitSha.slice(0, 12)}` : ''}: ` +
+      `${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
       `${plural(result.discovered, 'artifact')} found (${result.createdArtifacts} new, ` +
       `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.`,
     errors: result.errors,
@@ -237,7 +308,10 @@ function skippedFoldersInfo(folders: readonly string[]): string | null {
 const SCAN_REQUEST_ERRORS = new Map<string, string>([
   ['invalid', 'The scan request was invalid. Reload the page and click Scan again.'],
   ['not-found', 'That repository no longer exists. It may have been removed; reload the list.'],
-  ['unsupported', 'That repository cannot be scanned yet: only local repositories can be scanned.'],
+  [
+    'unsupported',
+    'That repository cannot be scanned yet: only local and GitHub repositories can be scanned.',
+  ],
 ]);
 
 /** The page-level error for `?scanError=`, or null for no or an unknown value. */

@@ -134,6 +134,7 @@ function createRunner(
   const runner = new LocalRunner({
     handle,
     fixtureStore,
+    cacheDir: join(dataDir, 'cache'),
     adapters: new Map<string, AgentAdapter>([['mock', new MockAgentAdapter()]]),
     workspaceRoot: join(dataDir, 'workspaces'),
     shutdownTimeoutMs: 1000,

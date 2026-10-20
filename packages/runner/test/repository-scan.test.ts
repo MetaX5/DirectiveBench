@@ -183,6 +183,7 @@ function createRunner(overrides: Partial<ConstructorParameters<typeof LocalRunne
   return new LocalRunner({
     handle,
     fixtureStore: join(dataDir, 'fixtures'),
+    cacheDir: join(dataDir, 'cache'),
     adapters: new Map(),
     workspaceRoot: join(dataDir, 'workspaces'),
     ...overrides,

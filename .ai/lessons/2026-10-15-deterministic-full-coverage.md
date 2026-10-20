@@ -30,3 +30,8 @@ ordering on random IDs into a flaky test.
 - Control time with `vi.useFakeTimers({ toFake: ['Date'] })` and `vi.setSystemTime` when tests
   depend on timestamp order; never rely on the order of random IDs.
 - Run a new test file several times (`--repeat` or a loop) before relying on it.
+- Do not rely on timing for coverage either (added 2026-10-20, #18): a real `git clone` killed by
+  the cache-size watch covered the "watch fired" branch only when a poll landed during the clone;
+  under the parallel `pnpm test` load the clone sometimes finished first and runner coverage fell
+  below 100%. Cover such branches with a deterministic fake (a fake git that writes past the limit
+  and then keeps running, `packages/runner/test/hosted-git.test.ts`).

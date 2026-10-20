@@ -21,8 +21,10 @@ import {
   getRepository,
   markRepositoryScanFailed,
   type DatabaseHandle,
+  type RepositoryScanApplication,
   type RepositoryScanErrorCode,
   type RepositoryScanResult,
+  type RepositoryScanSummary,
   type ScannedArtifactInput,
 } from '@directivebench/database';
 
@@ -169,7 +171,7 @@ function locationChanged(): ScanFailure {
 }
 
 /** The stored form of a discovered artifact: what `importArtifactVersion`'s writer receives. */
-function toScannedArtifact(artifact: DiscoveredArtifact): ScannedArtifactInput {
+export function toScannedArtifact(artifact: DiscoveredArtifact): ScannedArtifactInput {
   return {
     path: artifact.occurrencePath,
     name: artifact.parsed.name,
@@ -255,19 +257,46 @@ export async function scanLocalRepository(
     if (error instanceof DiscoveryRootChangedError) return fail(locationChanged());
     return fail(discoveryFailure(error, repository.location));
   }
-  // Cancellation is honoured until the apply transaction starts (FR-105-17). The transaction
-  // checks the signal again: it may wait behind another one, and an abort meanwhile (shutdown)
-  // leaves no trace in the job row that it could re-check otherwise.
-  if (options.signal.aborted) throw new ScanCancelledError('Scan was cancelled');
+  const stored = await storeScanResults(handle, {
+    repositoryId: repository.id,
+    jobId: job.jobId,
+    artifacts: discovery.artifacts.map(toScannedArtifact),
+    commitSha: null,
+    signal: options.signal,
+  });
+  if (!stored.ok) return stored;
+  const { summary } = stored;
+  return {
+    ok: true,
+    scannedFiles: discovery.scannedFiles,
+    discovered: discovery.artifacts.length,
+    createdArtifacts: summary.createdArtifacts,
+    createdVersions: summary.createdVersions,
+    warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
+    errorCount: discovery.errors.length,
+    errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
+    skippedUserLevelFolders: discovery.skippedDirectories.slice(0, MAX_SKIPPED_USER_LEVEL_FOLDERS),
+    commitSha: null,
+    durationMs: Math.round(performance.now() - started),
+  };
+}
 
-  let summary;
+/**
+ * Stores what a scan discovered (`applyRepositoryScan`, one transaction) — the shared last step
+ * of local and hosted scans. Cancellation is honoured until the apply transaction starts
+ * (FR-105-17); the transaction checks the signal again, because it may wait behind another one
+ * and an abort meanwhile (shutdown) leaves no trace in the job row. A failure records
+ * `sync_status = 'error'` with a message that names an error code and, when one artifact was
+ * being written, its repository-relative path — never the error text, which can hold file
+ * contents.
+ */
+export async function storeScanResults(
+  handle: DatabaseHandle,
+  application: RepositoryScanApplication,
+): Promise<{ ok: true; summary: RepositoryScanSummary } | ScanFailure> {
+  if (application.signal.aborted) throw new ScanCancelledError('Scan was cancelled');
   try {
-    summary = await applyRepositoryScan(handle, {
-      repositoryId: repository.id,
-      jobId: job.jobId,
-      artifacts: discovery.artifacts.map(toScannedArtifact),
-      signal: options.signal,
-    });
+    return { ok: true, summary: await applyRepositoryScan(handle, application) };
   } catch (error) {
     // An aborted signal, a cancellation request or a job that is no longer running: nothing was
     // written; the runner records `cancelled` or `interrupted` by the abort reason.
@@ -288,18 +317,8 @@ export async function scanLocalRepository(
       error instanceof ArtifactStoreError
         ? `The scan failed while storing the results at ${error.path} (${code}).`
         : `The scan failed: the results could not be stored (${code}).`;
-    return fail(failure('scan-failed', redactSecrets(message)));
+    const result = failure('scan-failed', redactSecrets(message));
+    await markRepositoryScanFailed(handle.db, application.repositoryId, result.message);
+    return result;
   }
-  return {
-    ok: true,
-    scannedFiles: discovery.scannedFiles,
-    discovered: discovery.artifacts.length,
-    createdArtifacts: summary.createdArtifacts,
-    createdVersions: summary.createdVersions,
-    warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
-    errorCount: discovery.errors.length,
-    errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
-    skippedUserLevelFolders: discovery.skippedDirectories.slice(0, MAX_SKIPPED_USER_LEVEL_FOLDERS),
-    durationMs: Math.round(performance.now() - started),
-  };
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CREDENTIALS_IN_URL_MESSAGE } from '@directivebench/core';
 import type {
   RepositoryRecord,
   RepositoryRegistration,
@@ -10,9 +11,12 @@ import {
   describeRegistration,
   describeScan,
   lastScanLabel,
+  looksLikeProtocolRelativeUrl,
+  mayCarryCredentials,
   pathFieldError,
   providerLabel,
   scanRequestError,
+  urlFieldError,
 } from '../lib/repositories';
 
 const repository: RepositoryRecord = {
@@ -35,7 +39,8 @@ function registration(overrides: Partial<RepositoryRegistration>): RepositoryReg
   return {
     jobId: 'job_1',
     status: 'completed',
-    path: '~/skills',
+    input: '~/skills',
+    source: 'path',
     error: null,
     result: null,
     repository: null,
@@ -74,6 +79,57 @@ describe('pathFieldError', () => {
     );
     expect(pathFieldError('')).toBe('Enter the path of a local directory.');
   });
+
+  it('re-validates a URL sent back by the action', () => {
+    expect(pathFieldError('https://github.com/acme/skills')).toBeNull();
+    expect(pathFieldError('https://gitlab.com/acme/skills')).toContain(
+      'Only public repositories on github.com',
+    );
+  });
+});
+
+describe('mayCarryCredentials', () => {
+  it('flags user info, queries and fragments, also percent-encoded, in any shape', () => {
+    for (const input of [
+      'https://u:t@github.com/a/b',
+      'http//u:t@github.com/a/b',
+      'https:/github.com/a/b?access_token=t',
+      'github.com/a/b#t',
+      'https:/github.com/a/b%3Ftoken',
+      'https:/github.com/a/b%3ftoken',
+      'u%40github.com/a',
+      '/a/b%23c',
+      'https:/github.com/a/b%253Ftoken',
+      'https://u:t\uFF20github.com/a/b',
+      '/a\uFF1Fb',
+      '/a\uFF03b',
+    ]) {
+      expect(mayCarryCredentials(input)).toBe(true);
+    }
+    for (const input of ['/srv/skills', '~/skills', 'https:/github.com/a/b', 'code/skills', '']) {
+      expect(mayCarryCredentials(input)).toBe(false);
+    }
+  });
+});
+
+describe('looksLikeProtocolRelativeUrl', () => {
+  it('recognises a leading // or \\\\ only', () => {
+    expect(looksLikeProtocolRelativeUrl(' //github.com/a/b')).toBe(true);
+    expect(looksLikeProtocolRelativeUrl('\\\\server\\share')).toBe(true);
+    expect(looksLikeProtocolRelativeUrl('/srv//skills')).toBe(false);
+    expect(looksLikeProtocolRelativeUrl('~/skills')).toBe(false);
+  });
+});
+
+describe('urlFieldError', () => {
+  it('names the reason for a URL sent back without its input', () => {
+    expect(urlFieldError('credentials-in-url')).toBe(CREDENTIALS_IN_URL_MESSAGE);
+    expect(urlFieldError('unsupported-provider')).toContain('Only public GitHub repositories');
+    expect(urlFieldError('invalid-url')).toContain('https://github.com/<owner>/<repo>');
+    expect(urlFieldError('not-echoed')).toContain('It is not shown again because');
+    expect(urlFieldError(undefined)).toBeNull();
+    expect(urlFieldError('toString')).toBeNull();
+  });
 });
 
 describe('describeRegistration', () => {
@@ -87,6 +143,14 @@ describe('describeRegistration', () => {
       kind: 'active',
       path: '~/skills',
       message: 'Checking ~/skills (read-only)…',
+    });
+    const url = 'https://github.com/acme/skills';
+    expect(
+      describeRegistration(registration({ status: 'running', input: url, source: 'url' })),
+    ).toEqual({
+      kind: 'active',
+      path: url,
+      message: `Asking GitHub about ${url} (read-only, without credentials; nothing is downloaded yet)…`,
     });
   });
 
@@ -121,7 +185,7 @@ describe('describeRegistration', () => {
       [registration({ status: 'cancelled' }), 'The registration was cancelled.'],
       [
         registration({ status: 'interrupted' }),
-        'The runner stopped before the check finished. Register the path again.',
+        'The runner stopped before the check finished. Register it again.',
       ],
       [registration({}), 'The runner finished without a result.'],
       [
@@ -188,11 +252,12 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
 });
 
 describe('canScan and lastScanLabel', () => {
-  it('offers scanning for local repositories only', () => {
+  it('offers scanning for local and GitHub repositories only', () => {
     expect(canScan(repository)).toBe(true);
     expect(canScan({ provider: 'local-directory' })).toBe(true);
+    expect(canScan({ provider: 'github' })).toBe(true);
     expect(canScan({ provider: 'bundled-examples' })).toBe(false);
-    expect(canScan({ provider: 'github' })).toBe(false);
+    expect(canScan({ provider: 'gitlab' })).toBe(false);
   });
 
   it('shows never, the last successful scan or the failure', () => {
@@ -232,6 +297,35 @@ describe('describeScan', () => {
       message: 'Scanning the repository (read-only, working tree)…',
       ...empty,
     });
+    expect(
+      describeScan(
+        scan({
+          status: 'running',
+          repository: { ...repository, provider: 'github', name: 'acme/skills' },
+        }),
+      ).message,
+    ).toBe(
+      'Scanning acme/skills: downloading only the candidate files of its latest commit (read-only)…',
+    );
+  });
+
+  it('names the commit a hosted scan read', () => {
+    const result = {
+      ok: true as const,
+      scannedFiles: 2,
+      discovered: 1,
+      createdArtifacts: 1,
+      createdVersions: 1,
+      warningCount: 0,
+      errorCount: 0,
+      errors: [],
+      skippedUserLevelFolders: [],
+      commitSha: '0123456789abcdef0123456789abcdef01234567',
+      durationMs: 10,
+    };
+    expect(describeScan(scan({ result })).message).toBe(
+      'Scanned skills at commit 0123456789ab: 2 files in 10 ms, 1 artifact found (1 new, 1 new version), 0 errors.',
+    );
   });
 
   it('summarises a completed scan with its discovery errors', () => {
@@ -249,6 +343,7 @@ describe('describeScan', () => {
             errorCount: 101,
             errors,
             skippedUserLevelFolders: [],
+            commitSha: null,
             durationMs: 1234,
           },
         }),
@@ -277,6 +372,7 @@ describe('describeScan', () => {
             errorCount: 0,
             errors: [],
             skippedUserLevelFolders,
+            commitSha: null,
             durationMs: 1,
           },
         }),
@@ -343,7 +439,7 @@ describe('scanRequestError', () => {
       'That repository no longer exists. It may have been removed; reload the list.',
     );
     expect(scanRequestError('unsupported')).toBe(
-      'That repository cannot be scanned yet: only local repositories can be scanned.',
+      'That repository cannot be scanned yet: only local and GitHub repositories can be scanned.',
     );
     expect(scanRequestError(undefined)).toBeNull();
     expect(scanRequestError('toString')).toBeNull();

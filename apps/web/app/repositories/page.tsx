@@ -30,15 +30,18 @@ import {
   describeRegistration,
   describeScan,
   lastScanLabel,
+  mayCarryCredentials,
   pathFieldError,
   providerLabel,
   scanRequestError,
+  urlFieldError,
   type RegistrationNotice,
 } from '@/lib/repositories';
 
 export const metadata: Metadata = { title: 'Repositories' };
 
-const PLANNED = 'Planned — not implemented: hosted URLs, marking deleted artifacts as missing';
+const PLANNED =
+  'Planned — not implemented: private repositories, GitLab, marking deleted artifacts as missing';
 
 export default async function RepositoriesPage({
   searchParams,
@@ -46,6 +49,7 @@ export default async function RepositoriesPage({
   searchParams: Promise<{
     registration?: string;
     path?: string;
+    urlError?: string;
     scan?: string;
     scanError?: string;
   }>;
@@ -65,8 +69,18 @@ export default async function RepositoriesPage({
   let notice: RegistrationNotice | null = registration ? describeRegistration(registration) : null;
   const invalidPath = !notice && params.path !== undefined ? pathFieldError(params.path) : null;
   if (invalidPath !== null) {
-    notice = { kind: 'fieldError', path: params.path ?? '', message: invalidPath };
+    // The action never echoes input that may carry credentials; a hand-made or old `?path=` with
+    // `@`, `?` or `#` is not put back into the field either (FR-104-05).
+    const path = params.path ?? '';
+    notice = {
+      kind: 'fieldError',
+      path: mayCarryCredentials(path) ? '' : path,
+      message: invalidPath,
+    };
   }
+  // A rejected URL that may hold credentials comes back without the input, only with the reason.
+  const invalidUrl = !notice ? urlFieldError(params.urlError) : null;
+  if (invalidUrl !== null) notice = { kind: 'fieldError', path: '', message: invalidUrl };
   const scan = params.scan ? await getRepositoryScan(handle.db, params.scan) : null;
   const scanNotice = scan ? describeScan(scan) : null;
   const scanError = scanRequestError(params.scanError);
@@ -87,24 +101,26 @@ export default async function RepositoriesPage({
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Register a local repository</CardTitle>
+            <CardTitle>Register a repository</CardTitle>
             <CardDescription>
-              A Git work tree is registered at its top-level directory with its current branch; any
-              other directory as a plain folder. Read-only: DirectiveBench runs only read-only git
-              commands with hooks disabled and never writes to the repository. The filesystem root
-              cannot be registered; your home directory and paths that overlap a registered
-              repository ask for a confirmation first.
+              Enter a local path or the URL of a public GitHub repository. A Git work tree is
+              registered at its top-level directory with its current branch; any other directory as
+              a plain folder. Read-only: DirectiveBench runs only read-only git commands with hooks
+              disabled and never writes to the repository. The filesystem root cannot be registered;
+              your home directory and paths that overlap a registered repository ask for a
+              confirmation first. A GitHub URL is registered without credentials — a URL that
+              contains any is rejected — with the repository&apos;s default branch.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <form action={registerRepositoryAction} className="flex flex-wrap items-end gap-2">
               <label className="flex min-w-64 flex-1 flex-col gap-1 text-xs text-muted-foreground">
-                Path
+                Path or GitHub URL
                 <input
                   name="path"
                   required
                   defaultValue={fieldError?.path ?? ''}
-                  placeholder="/home/you/code/my-skills or ~/code/my-skills"
+                  placeholder="~/code/my-skills or https://github.com/owner/repo"
                   aria-invalid={fieldError ? true : undefined}
                   aria-describedby={fieldError ? 'path-error' : undefined}
                   disabled={checking}
@@ -224,19 +240,21 @@ export default async function RepositoriesPage({
 
         {repositories.length === 0 ? (
           <EmptyState title="No repositories yet">
-            Register the path of a local Git repository or folder above.
+            Register the path of a local Git repository or folder, or a public GitHub URL, above.
           </EmptyState>
         ) : (
           <Card>
             <CardHeader>
               <CardTitle>Registered repositories</CardTitle>
               <CardDescription data-testid="scan-explanation">
-                Scan finds the skills, instructions and rules in a local repository. It reads the
-                files on disk — the working tree, including uncommitted and untracked files, also
-                for Git repositories — skips .git, node_modules and user-level agent folders such as
-                ~/.claude, never follows symbolic links and never runs anything from the repository.
-                Rescanning keeps one artifact per path and adds a version only when its content
-                changed.
+                Scan finds the skills, instructions and rules in a repository. For a local
+                repository it reads the files on disk — the working tree, including uncommitted and
+                untracked files, also for Git repositories — and skips user-level agent folders such
+                as ~/.claude. For a GitHub repository it downloads only the candidate files of the
+                default branch&apos;s latest commit into a private cache, without a checkout, and
+                records that commit. Either way it skips .git and node_modules, never follows
+                symbolic links and never runs anything from the repository. Rescanning keeps one
+                artifact per path and adds a version only when its content changed.
               </CardDescription>
             </CardHeader>
             <CardContent>

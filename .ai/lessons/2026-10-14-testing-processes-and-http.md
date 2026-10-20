@@ -41,3 +41,6 @@ To wait until a long-running command is ready, await a real signal (an event, a 
 listener registration via `newListener`, as `FakeProcess.running` in
 `apps/cli/test/serve.test.ts` does) instead of polling `vi.waitFor` with its default timeout.
 If polling is unavoidable, pass a named, generous `timeout`.
+A fake executable written in Node must not call `process.exit()` right after
+`process.stdout.write()` when stdout is a pipe: the exit drops what is still buffered (a 2 MB
+answer arrived truncated, #18). Exit in the write callback instead.

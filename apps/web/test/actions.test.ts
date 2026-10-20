@@ -293,9 +293,98 @@ describe('registerRepositoryAction', () => {
     expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
     expect(await getRepositoryRegistration(handle.db, jobId)).toMatchObject({
       status: 'pending',
-      path: '~/code/skills/',
+      input: '~/code/skills/',
+      source: 'path',
       result: null,
     });
+  });
+
+  it('enqueues only the normalised location of a GitHub URL', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: ' https://github.com/Acme/Skills.git ' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+    expect((await getJob(handle.db, jobId))?.payload).toEqual({
+      url: 'https://github.com/acme/skills',
+    });
+    expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
+  });
+
+  it('rejects a URL with credentials without storing, echoing or redirecting with it', async () => {
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz0123';
+    for (const input of [
+      `https://user:${secret}@github.com/acme/skills`,
+      `https://${secret}@github.com/acme/skills`,
+      `https://x:${secret} y@github.com/acme/skills`,
+    ]) {
+      const url = await redirectOf(registerRepositoryAction(form({ path: input })));
+      expect(url).toBe('/repositories?urlError=credentials-in-url');
+      expect(url).not.toContain(secret);
+    }
+    // A token can hide in a query or fragment too (review of PR #51).
+    for (const input of [
+      `https://github.com/acme/skills?access_token=${secret}`,
+      `https://github.com/acme/skills#${secret}`,
+    ]) {
+      expect(await redirectOf(registerRepositoryAction(form({ path: input })))).toBe(
+        '/repositories?urlError=invalid-url',
+      );
+    }
+    // An SSH address carries a user too: it is refused without being echoed.
+    expect(
+      await redirectOf(registerRepositoryAction(form({ path: 'git@github.com:a/b.git' }))),
+    ).toBe('/repositories?urlError=unsupported-provider');
+    expect(jobCount()).toBe(0);
+  });
+
+  it('never echoes a malformed URL that may carry a token, whichever branch rejects it', async () => {
+    // Codex review round 2 of PR #51: these are not recognised as URLs, fell through to path
+    // validation and were echoed in `?path=`.
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz0123';
+    const cases: [string, string][] = [
+      [`https:/github.com/acme/repo?access_token=${secret}`, 'not-echoed'],
+      [`https:github.com/acme/repo?access_token=${secret}`, 'not-echoed'],
+      [`http//user:${secret}@github.com/acme/repo`, 'not-echoed'],
+      [`HTTPS:\\\\github.com\\acme\\repo?token=${secret}`, 'not-echoed'],
+      [`github.com/acme/repo?token=${secret}`, 'not-echoed'],
+      [`github.com/acme/repo#${secret}`, 'not-echoed'],
+      [`https:/github.com/acme/repo%3Faccess_token%3D${secret}`, 'not-echoed'],
+      [`code/skills@${secret}`, 'not-echoed'],
+      [`x-access-token:${secret}@github.com:acme/repo.git`, 'unsupported-provider'],
+      [`https://github.com/acme/repo%3Ftoken%3D${secret}`, 'invalid-url'],
+      // Valid absolute paths that read as protocol-relative URLs (independent review).
+      [` //github.com/acme/repo?access_token=${secret}`, 'invalid-url'],
+      [`\\\\user:${secret}@github.com\\acme\\repo`, 'invalid-url'],
+      // Double encoding and fullwidth lookalikes are not echoed either.
+      [`https:/github.com/acme/repo%253Ftoken%253D${secret}`, 'not-echoed'],
+      [`https://u:${secret}\uFF20github.com/acme/repo`, 'invalid-url'],
+    ];
+    for (const [input, code] of cases) {
+      const url = await redirectOf(registerRepositoryAction(form({ path: input })));
+      expect(url).toBe(`/repositories?urlError=${code}`);
+      expect(url).not.toContain(secret.slice(4, 12));
+    }
+    expect(jobCount()).toBe(0);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('still registers a valid local path with @, ? or #, or a leading //', async () => {
+    for (const path of ['/srv/team@skills', '~/notes/a@b?c#d', '//srv/share/skills']) {
+      const url = await redirectOf(registerRepositoryAction(form({ path })));
+      const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+      expect(url).toBe(`/repositories?registration=${jobId}`);
+      expect((await getJob(handle.db, jobId))?.payload).toEqual({ path });
+    }
+  });
+
+  it('returns an unsupported URL without credentials to the form', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: ` https://gitlab.com/acme/${'x'.repeat(3000)} ` })),
+    );
+    const params = new URL(url, 'http://localhost').searchParams;
+    expect([...params.keys()]).toEqual(['path']);
+    expect(params.get('path')).toBe(`https://gitlab.com/acme/${'x'.repeat(3000)}`.slice(0, 2049));
+    expect(jobCount()).toBe(0);
   });
 
   it('returns to the form with the entered path and a field error for invalid input', async () => {

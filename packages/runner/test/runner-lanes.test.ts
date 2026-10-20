@@ -70,6 +70,17 @@ vi.mock('../src/repository-registration', async (importOriginal) => ({
   ),
 }));
 
+/**
+ * Resolves once the `index`-th held scan has started. It yields to the event loop between checks
+ * and fails after a bounded number of turns instead of waiting on a timer.
+ */
+async function scanStarted(index: number): Promise<void> {
+  for (let turn = 0; turn < 10_000 && held.scans.length <= index; turn++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (held.scans.length <= index) throw new Error(`Scan ${index} never started`);
+}
+
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 
 let handle: DatabaseHandle;
@@ -92,6 +103,7 @@ function createRunner(overrides: Partial<ConstructorParameters<typeof LocalRunne
   return new LocalRunner({
     handle,
     fixtureStore: join(dataDir, 'fixtures'),
+    cacheDir: join(dataDir, 'cache'),
     adapters: new Map(),
     workspaceRoot: join(dataDir, 'workspaces'),
     concurrency: 1,
@@ -228,9 +240,12 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     release();
     await holding;
     await polling;
-    // Claimed after the deadline: aborted at once, so it never runs unsupervised.
+    // Claimed after the deadline: aborted at once, so it never runs unsupervised. The runner
+    // reads the repository's provider before it starts the scan, so wait for the scan to start.
+    const idle = runner.runUntilIdle();
+    await scanStarted(0);
     expect(held.scans[0]?.signal.aborted).toBe(true);
-    const [late] = await runner.runUntilIdle();
+    const [late] = await idle;
     expect(late).toMatchObject({ jobId: scan, status: 'interrupted' });
     expect(await status(scan)).toBe('interrupted');
   });

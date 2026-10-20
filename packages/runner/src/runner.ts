@@ -18,7 +18,9 @@ import {
   finishBenchmarkRun,
   finishJob,
   getArtifactBundle,
+  getRepository,
   getSuiteVersion,
+  HOSTED_PROVIDERS,
   heartbeatJob,
   insertAgentRun,
   interruptJobs,
@@ -30,6 +32,12 @@ import {
   type JobRecord,
   type JobType,
 } from '@directivebench/database';
+import { GitCancelledError, HTTPS_TRANSPORT, type HostedGitTransport } from './hosted-git';
+import {
+  registerHostedUrl,
+  scanHostedRepository,
+  type HostedRepositoryOptions,
+} from './hosted-repository';
 import { RegistrationCancelledError, registerLocalPath } from './repository-registration';
 import { ScanCancelledError, scanLocalRepository } from './repository-scan';
 
@@ -66,6 +74,18 @@ export interface LocalRunnerOptions {
   handle: DatabaseHandle;
   /** `<dataDir>/fixtures` */
   fixtureStore: string;
+  /** `<dataDir>/cache`: the private cache of hosted repositories (SPEC-105 FR-105-05). */
+  cacheDir: string;
+  /**
+   * How hosted git reaches repositories. Default {@link HTTPS_TRANSPORT}; only tests pass another
+   * one (a local bare repository standing in for GitHub). Not configurable outside code.
+   */
+  hostedGitTransport?: HostedGitTransport;
+  /** Overrides of the hosted fetch limits and timeouts, for tests. */
+  hostedGitLimits?: Pick<
+    HostedRepositoryOptions,
+    'timeouts' | 'cacheLimitBytes' | 'cacheSizePollIntervalMs'
+  >;
   adapters: Map<string, AgentAdapter>;
   concurrency?: number;
   keepWorkspaces?: boolean;
@@ -120,6 +140,8 @@ export class LocalRunner {
       staleAfterMs: 30_000,
       shutdownTimeoutMs: 10_000,
       logger: silentLogger,
+      hostedGitTransport: HTTPS_TRANSPORT,
+      hostedGitLimits: {},
       ...options,
     };
   }
@@ -350,11 +372,21 @@ export class LocalRunner {
           const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
           return await finishAs('failed', `The stored registration request is invalid: ${reasons}`);
         }
-        const result = await registerLocalPath(
-          handle,
-          { path: payload.data.path, confirmedLocation: payload.data.confirmedLocation ?? null },
-          { homeDir: homedir(), env: process.env, signal: controller.signal },
-        );
+        const result =
+          'url' in payload.data
+            ? await registerHostedUrl(
+                handle,
+                payload.data.url,
+                this.hostedOptions(controller.signal),
+              )
+            : await registerLocalPath(
+                handle,
+                {
+                  path: payload.data.path,
+                  confirmedLocation: payload.data.confirmedLocation ?? null,
+                },
+                { homeDir: homedir(), env: process.env, signal: controller.signal },
+              );
         return await finishAs('completed', null, result);
       }
       if (job.type === 'repository-scan') {
@@ -363,11 +395,21 @@ export class LocalRunner {
           const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
           return await finishAs('failed', `The stored scan request is invalid: ${reasons}`);
         }
-        const result = await scanLocalRepository(
-          handle,
-          { jobId: job.id, repositoryId: payload.data.repositoryId },
-          { signal: controller.signal, homeDir: homedir(), env: process.env },
-        );
+        const repository = await getRepository(db, payload.data.repositoryId);
+        const hosted =
+          repository !== null &&
+          (HOSTED_PROVIDERS as readonly string[]).includes(repository.provider);
+        const result = hosted
+          ? await scanHostedRepository(
+              handle,
+              { jobId: job.id, repository },
+              this.hostedOptions(controller.signal),
+            )
+          : await scanLocalRepository(
+              handle,
+              { jobId: job.id, repositoryId: payload.data.repositoryId },
+              { signal: controller.signal, homeDir: homedir(), env: process.env },
+            );
         // A scan that could not run is a failed job; its typed outcome stays in `jobs.result`.
         return result.ok
           ? await finishAs('completed', null, result)
@@ -460,7 +502,11 @@ export class LocalRunner {
         );
       }
     } catch (error) {
-      if (error instanceof RegistrationCancelledError || error instanceof ScanCancelledError) {
+      if (
+        error instanceof RegistrationCancelledError ||
+        error instanceof ScanCancelledError ||
+        error instanceof GitCancelledError
+      ) {
         return await finishAs(
           controller.signal.reason === 'shutdown' ? 'interrupted' : 'cancelled',
           null,
@@ -470,6 +516,17 @@ export class LocalRunner {
     } finally {
       clearInterval(heartbeat);
     }
+  }
+
+  /** What hosted registrations and scans need: the cache, the transport and the job's signal. */
+  private hostedOptions(signal: AbortSignal): HostedRepositoryOptions {
+    return {
+      ...this.options.hostedGitLimits,
+      env: process.env,
+      signal,
+      cacheDir: this.options.cacheDir,
+      transport: this.options.hostedGitTransport,
+    };
   }
 
   private async persistAgentRun(benchmarkRunId: string, record: AgentRunRecord): Promise<void> {

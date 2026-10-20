@@ -10,10 +10,11 @@ version regress? Does a rule activate only where it should? Can the result be re
 > **Project status: early (v0.1, not published to npm), building the artifact registry.** The
 > foundation and one end-to-end vertical slice work: a local SQLite registry, a benchmark engine
 > with RED/GREEN comparison, a job runner, a web UI and a CLI. You can register local
-> repositories and scan them for skills, instructions and rules. Benchmarks currently run only
-> with a **deterministic mock agent**, which demonstrates the pipeline and is **not an AI
-> evaluation**. Hosted repository synchronisation and real agent integrations are specified but
-> not implemented.
+> repositories and public GitHub repositories (by URL, without credentials) and scan them for
+> skills, instructions and rules. Benchmarks currently run only with a **deterministic mock
+> agent**, which demonstrates the pipeline and is **not an AI evaluation**. Private and GitLab
+> repositories, change tracking across syncs and real agent integrations are specified but not
+> implemented.
 
 ## Capabilities
 
@@ -22,6 +23,7 @@ version regress? Does a rule activate only where it should? Can the result be re
 | Local web UI (dashboard, repositories, artifacts, benchmarks, executions, results, run details, dark/light theme) | ✅ Implemented |
 | Local repository registration by path (Git work tree or plain directory, inspected read-only by the runner; `/` rejected, home directory and overlapping paths confirmed) | ✅ Implemented |
 | Scan of a registered local repository (working tree, read-only, nothing executed) | ✅ Implemented; marking deleted artifacts and cross-repository identity planned |
+| Public GitHub repository by URL (no credentials; the scan downloads only candidate files into a private bare cache and records the commit; needs git ≥ 2.44) | ✅ Implemented; private repositories, branch picker and change tracking planned |
 | SQLite registry with immutable artifact and benchmark-suite versions | ✅ Implemented |
 | Artifact parsers: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/rules`, Copilot instructions, Cursor `.mdc`, GitLab Duo rules | ✅ Implemented |
 | Benchmark definition format v1 (YAML/JSON, Zod-validated) | ✅ Implemented |
@@ -30,7 +32,7 @@ version regress? Does a rule activate only where it should? Can the result be re
 | Deterministic mock agent | ✅ Implemented (clearly labelled) |
 | Agent CLI detection (Claude Code, Codex, Cursor Agent) | ✅ Detection only |
 | Real agent execution (Claude Code, Codex, Cursor) | 📝 Specified, not implemented |
-| GitHub / GitLab (incl. self-managed) / local Git synchronisation | 📝 Specified, not implemented |
+| Private GitHub, GitLab (incl. self-managed) and commit-based local Git synchronisation | 📝 Specified, not implemented |
 | Model providers (Anthropic, OpenAI, DeepSeek, Z.AI GLM, Kimi, custom) | 📝 Specified, not implemented |
 | Benchmark Builder UI, category management UI, Docker sandbox, LLM-as-judge | 📝 Specified, not implemented |
 | Self-hosted multi-user server and remote runners | 📝 Architecture documented only |

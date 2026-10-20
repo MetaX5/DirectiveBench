@@ -130,11 +130,16 @@ export class DiscoveryLimitError extends Error {
   }
 }
 
-interface TreeEntry {
+/** A regular file or symlink of a repository tree: on disk, or listed from a git commit. */
+export interface RepositoryTreeEntry {
   /** POSIX path relative to the scanned root. */
   path: string;
   kind: 'file' | 'symlink';
 }
+type TreeEntry = RepositoryTreeEntry;
+
+/** Reads one file for an artifact; throws an {@link ArtifactError} for that artifact only. */
+type ReadFile = (path: string, maxBytes: number) => Promise<Buffer>;
 
 /** A directory the walk could not list, or that changed during the scan. */
 interface UnreadableDirectory {
@@ -333,6 +338,11 @@ async function readBounded(abs: string, relPath: string, maxBytes: number): Prom
     if (error instanceof ArtifactError) throw error;
     throw new ArtifactError('read-failed', `Cannot read ${relPath} (${errorCode(error)})`);
   }
+  return withinLimit(result, relPath, maxBytes);
+}
+
+/** The bytes, or a `too-large` error for a file whose size alone was reported. */
+function withinLimit(result: Buffer | number, relPath: string, maxBytes: number): Buffer {
   if (typeof result === 'number') {
     throw new ArtifactError(
       'too-large',
@@ -355,11 +365,11 @@ function toFile(path: string, bytes: Buffer): ArtifactFile {
 }
 
 async function readPrimary(
-  root: string,
+  read: ReadFile,
   primaryPath: string,
   limits: DiscoveryLimits,
 ): Promise<Buffer> {
-  const bytes = await readBounded(join(root, primaryPath), primaryPath, limits.maxPrimaryFileBytes);
+  const bytes = await read(primaryPath, limits.maxPrimaryFileBytes);
   if (isBinary(bytes)) {
     throw new ArtifactError('binary-primary', `${primaryPath} is not a UTF-8 text file`);
   }
@@ -377,7 +387,7 @@ function checkScanBytes(retained: number, adding: number, limits: DiscoveryLimit
 }
 
 async function discoverSkill(
-  root: string,
+  read: ReadFile,
   primaryPath: string,
   skillDir: string,
   contents: SkillContents,
@@ -405,7 +415,7 @@ async function discoverSkill(
     );
   }
   const prefix = skillDir ? `${skillDir}/` : '';
-  const primaryBytes = await readPrimary(root, primaryPath, limits);
+  const primaryBytes = await readPrimary(read, primaryPath, limits);
   const parsed = parseArtifactFile(primaryPath, primaryBytes.toString('utf8'));
   const warnings = [...parsed.warnings];
   if (skillDir === '') {
@@ -424,7 +434,7 @@ async function discoverSkill(
     const bytes =
       entry.path === primaryPath
         ? primaryBytes
-        : await readBounded(join(root, entry.path), entry.path, limits.maxSupportingFileBytes);
+        : await read(entry.path, limits.maxSupportingFileBytes);
     if (isBinary(bytes)) {
       skipped.push({ path, reason: 'binary' });
       warnings.push(`Skipped binary file ${path}`);
@@ -453,12 +463,12 @@ async function discoverSkill(
 }
 
 async function discoverSingleFile(
-  root: string,
+  read: ReadFile,
   primaryPath: string,
   limits: DiscoveryLimits,
   retained: number,
 ): Promise<DiscoveredArtifact> {
-  const bytes = await readPrimary(root, primaryPath, limits);
+  const bytes = await readPrimary(read, primaryPath, limits);
   checkScanBytes(retained, bytes.length, limits);
   const parsed = parseArtifactFile(primaryPath, bytes.toString('utf8'));
   const primaryFile = posix.basename(primaryPath);
@@ -513,13 +523,45 @@ export async function discoverArtifacts(
     return { artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: ['.'] };
   }
 
-  const { entries, unreadable, skipped } = await walk(realRoot, options.signal, skipDirectories);
-  const candidates: {
+  const listing = await walk(realRoot, options.signal, skipDirectories);
+  return discoverListing(
+    listing,
+    (path, maxBytes) => readBounded(join(realRoot, path), path, maxBytes),
+    limits,
+    options.signal,
+  );
+}
+
+interface TreeListing {
+  /** Sorted by path. */
+  entries: TreeEntry[];
+  unreadable: UnreadableDirectory[];
+  skipped: string[];
+}
+
+interface CandidatePlan {
+  candidates: {
     entry: TreeEntry;
     classification: ArtifactClassification;
     /** Skills: what this is the deepest enclosing skill of (FR-102-12). */
     contents: SkillContents;
-  }[] = [];
+  }[];
+  /** Unreadable directories outside every skill. */
+  errors: DiscoveryError[];
+}
+
+/**
+ * Classifies the tree (SPEC-102 FR-102-01, FR-102-12): the candidate artifacts and, for each
+ * skill, the entries and unreadable directories it is the deepest skill of. More than
+ * `maxCandidatesPerScan` candidates aborts with a {@link DiscoveryLimitError} before anything is
+ * read.
+ */
+function planCandidates(
+  entries: readonly TreeEntry[],
+  unreadable: readonly UnreadableDirectory[],
+  limits: DiscoveryLimits,
+): CandidatePlan {
+  const candidates: CandidatePlan['candidates'] = [];
   for (const entry of entries) {
     const classification = classifyArtifactPath(entry.path);
     if (classification) {
@@ -546,21 +588,31 @@ export async function discoverArtifacts(
     if (owner) owner.unreadable.push(dir);
     else errors.push({ path: dir.path, code: 'read-failed', message: dir.message });
   }
+  return { candidates, errors };
+}
 
+async function discoverListing(
+  listing: TreeListing,
+  read: ReadFile,
+  limits: DiscoveryLimits,
+  signal: AbortSignal | undefined,
+): Promise<DiscoveryResult> {
+  const { entries, unreadable, skipped } = listing;
+  const { candidates, errors } = planCandidates(entries, unreadable, limits);
   const artifacts: DiscoveredArtifact[] = [];
   /** Bytes of file content and frontmatter JSON held by `artifacts` (FR-102-16 `maxScanBytes`). */
   let retained = 0;
   for (const { entry, classification, contents } of candidates) {
-    options.signal?.throwIfAborted();
+    signal?.throwIfAborted();
     try {
       if (entry.kind === 'symlink') {
         throw new ArtifactError('symlink', `${entry.path} is a symbolic link and is not followed`);
       }
       const artifact =
         classification.rootDir === null
-          ? await discoverSingleFile(realRoot, entry.path, limits, retained)
+          ? await discoverSingleFile(read, entry.path, limits, retained)
           : await discoverSkill(
-              realRoot,
+              read,
               entry.path,
               classification.rootDir,
               contents,
@@ -587,4 +639,86 @@ export async function discoverArtifacts(
     scannedFiles: entries.filter((entry) => entry.kind === 'file').length,
     skippedDirectories: skipped,
   };
+}
+
+/** A path as a git tree lists it: relative, `/`-separated, without empty, `.` or `..` segments. */
+function isNormalisedTreePath(path: string): boolean {
+  return path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+/**
+ * The entries of a listed tree (a git commit) as the walk would see them: entries below a
+ * `.git/` or `node_modules/` directory dropped (FR-102-15), sorted by path. A path that is not
+ * normalised is rejected, so a crafted tree cannot smuggle `..` into an occurrence path.
+ */
+function treeListing(entries: readonly RepositoryTreeEntry[]): TreeListing {
+  const kept: TreeEntry[] = [];
+  for (const entry of entries) {
+    if (!isNormalisedTreePath(entry.path)) {
+      throw new Error(`The repository tree lists a path that is not normalised: ${entry.path}`);
+    }
+    const directories = entry.path.split('/').slice(0, -1);
+    if (!directories.some((name) => SKIPPED_DIRECTORY_NAMES.includes(name))) {
+      kept.push({ path: entry.path, kind: entry.kind });
+    }
+  }
+  return {
+    entries: kept.sort((a, b) => byCodeUnit(a.path, b.path)),
+    unreadable: [],
+    skipped: [],
+  };
+}
+
+/**
+ * The regular files whose content discovery of this tree reads (SPEC-105 §9.1 step 3): the
+ * primary file of every candidate artifact and, for each skill, the regular files it owns
+ * (FR-102-12, nested skills excluded). Symlinks are never read, and a skill with more than
+ * `maxFilesPerArtifact` files is an error without reading any of them. More than
+ * `maxCandidatesPerScan` candidates aborts with a {@link DiscoveryLimitError}, before anything is
+ * downloaded. Sorted, without duplicates.
+ */
+export function selectCandidateFiles(
+  entries: readonly RepositoryTreeEntry[],
+  options: { limits?: Partial<DiscoveryLimits> } = {},
+): string[] {
+  const limits: DiscoveryLimits = { ...DISCOVERY_LIMITS, ...options.limits };
+  const { candidates } = planCandidates(treeListing(entries).entries, [], limits);
+  const paths = new Set<string>();
+  for (const { entry, classification, contents } of candidates) {
+    if (entry.kind === 'symlink') continue;
+    if (classification.rootDir === null) {
+      paths.add(entry.path);
+      continue;
+    }
+    const files = contents.owned.filter((owned) => owned.kind === 'file');
+    if (files.length > limits.maxFilesPerArtifact) continue;
+    for (const file of files) paths.add(file.path);
+  }
+  return [...paths].sort(byCodeUnit);
+}
+
+/**
+ * Discovers the artifacts of a listed tree — a git commit of a hosted repository — with exactly
+ * the rules of {@link discoverArtifacts} (formats, skill directories, skipped directories,
+ * symlinks, binary files, limits), reading file contents from `contents` instead of the disk.
+ * `contents` maps each path {@link selectCandidateFiles} returned to its bytes as committed, or to
+ * its size alone when it was too large to load; a file larger than the limit that applies to it is
+ * a `too-large` error either way. A selected file missing from `contents`, or one given only by a
+ * size within its limit, fails the whole discovery: its content was never read.
+ */
+export async function discoverArtifactsInTree(
+  entries: readonly RepositoryTreeEntry[],
+  contents: ReadonlyMap<string, Buffer | number>,
+  options: { limits?: Partial<DiscoveryLimits>; signal?: AbortSignal } = {},
+): Promise<DiscoveryResult> {
+  const limits: DiscoveryLimits = { ...DISCOVERY_LIMITS, ...options.limits };
+  const read: ReadFile = async (path, maxBytes) => {
+    const content = contents.get(path);
+    if (content === undefined || (typeof content === 'number' && content <= maxBytes)) {
+      throw new Error(`The content of ${path} was not provided`);
+    }
+    const size = typeof content === 'number' ? content : content.length;
+    return withinLimit(size > maxBytes ? size : (content as Buffer), path, maxBytes);
+  };
+  return discoverListing(treeListing(entries), read, limits, options.signal);
 }

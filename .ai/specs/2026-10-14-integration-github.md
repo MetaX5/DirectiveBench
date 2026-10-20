@@ -3,7 +3,7 @@ id: SPEC-201
 title: GitHub repository integration
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-20
 category: integration
 related: [SPEC-003, SPEC-007, SPEC-012, SPEC-102, SPEC-104, SPEC-105, SPEC-115, SPEC-202, ADR-0008, ADR-0009]
 ---
@@ -140,6 +140,13 @@ works as intended is an Assumption until it passes the transport tests in §11.
    empty file. User hooks, filters, credential helpers and URL rewrites (`insteadOf`) therefore cannot
    run or redirect traffic. Exception: credential source `git-default` keeps the user's global config,
    since its purpose is to use the user's helpers. This is shown in the UI.
+   Ignoring system and global config does not stop git from discovering a repository that encloses
+   its working directory and loading that repository's `.git/config` (for example a data directory
+   inside a git work tree). git therefore never discovers a repository: a call on the cache names it
+   with `GIT_DIR`, and every other call (`version`, `ls-remote`, `clone`) runs in the empty `HOME`
+   with `GIT_CEILING_DIRECTORIES` set to its parent. The only repository config git reads is the
+   cache's own, written by DirectiveBench's `clone`. git splits `GIT_CEILING_DIRECTORIES` on the
+   path list delimiter, so a data directory whose path contains `:` (`;` on Windows) is refused.
 5. **No redirects**: `http.followRedirects=false` (default is `initial`, [G10]). A redirect fails
    validation with a message that tells the user to register the final URL.
 6. **Schemes**: `protocol.allow=never`, `protocol.https.allow=always`. Also `protocol.ssh.allow=always`
@@ -275,14 +282,32 @@ GET costing 1 point ([G2]).
 
 ## 13. Current implementation status
 
-- **Implemented in bootstrap:** nothing for GitHub. The `repositories` table exists (SPEC-104 §8), but
-  registration, validation and sync are not implemented.
+- **Implemented — public repositories without credentials (issue #18; verified on 2026-10-20 by the
+  `packages/runner` hosted tests against local bare repositories, no network, and a manual run against
+  github.com):** registration by `https://github.com/<owner>/<repo>[.git]` with the default branch
+  from `ls-remote` (SPEC-104 Phase 3) and the scan's partial fetch of candidate blobs (SPEC-105 §20).
+  Transport rules of §5.1 in force: 1 (argv, timeouts, process-group kill, bounded and redacted
+  error output), 2 (`GIT_TERMINAL_PROMPT=0`, `credential.interactive=false`), 4 (system and global
+  config ignored, `HOME` an empty DirectiveBench directory, no repository discovery — `GIT_DIR` for
+  cache steps, `GIT_CEILING_DIRECTORIES` for the others, tested with a data directory inside a git
+  work tree whose config rewrites URLs, adds headers and disables TLS verification; there is no
+  `git-default` exception yet, since no credentials are used), 5 (`http.followRedirects=false`; a 3xx is `invalid-url` "register
+  its new URL"), 6 (`protocol.allow=never`, `protocol.https.allow=always`), 7 (`core.hooksPath=/dev/null`
+  — not an empty directory — `core.fsmonitor=false`, `GIT_LFS_SKIP_SMUDGE=1`, no submodules), 8 (bare,
+  shallow, single-branch, blob-less partial clone without tags or templates). Observed: without
+  credentials github.com answers a missing or private repository with git's "unable to get password
+  from user" (with `credential.interactive=false`) or "could not read Username … terminal prompts
+  disabled"; both map to `auth-required` "not found or not public". github.com serves blob-by-ID
+  fetches into the shallow partial clone (ADR-0012 assumption confirmed). AC-6 holds for public
+  repositories; AC-1 lacks the branch list.
 - **Partially implemented:** `redactSecrets` in `@directivebench/core` covers GitHub token shapes
   (`gh[pousr]_…`, `github_pat_…`; `packages/core/src/redact.ts`, verified by the `core` redaction
   test) ([SPEC-007 §3.1](2026-10-14-security-and-privacy.md)). It is not wired to any git
   integration.
-- **Not implemented:** `packages/git-providers`, git transport rules, REST enrichment, credential
-  storage, GitHub App, GHES.
+- **Not implemented:** `packages/git-providers` (hosted git lives in `packages/runner` for now),
+  credential injection (§5.1 rule 3), branch listing, REST enrichment, credential storage, GitHub
+  App, GHES, the opt-in live tests of §11 (the transport tests use `file://`, not a loopback HTTP
+  server).
 
 ## 14. Sources
 

@@ -3,7 +3,7 @@ id: SPEC-104
 title: Repository Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-19
+updated: 2026-10-20
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-105, SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-114, SPEC-115, SPEC-201, SPEC-202, ADR-0008, ADR-0009]
 ---
@@ -57,7 +57,7 @@ Artifacts live in many repositories, some private, some on self-managed GitLab, 
 | FR-104-09 | Secrets resolved from `keychain`/`env` SHALL be passed to `git` only through the child process environment (e.g. `GIT_CONFIG_*` http extra header or a one-shot `GIT_ASKPASS` helper reading from env), never via argv or URL, and SHALL be registered for redaction ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). Exact mechanism — Assumption — requires validation per provider ([SPEC-201](2026-10-14-integration-github.md), [SPEC-202](2026-10-14-integration-gitlab.md)). |
 | FR-104-10 | **Connection validation** SHALL run on create, on credential/branch change and on demand ("Test connection"). Checks: hosted — `git ls-remote` succeeds within 30 s and the selected branch exists; `local-git` — path exists, is a git work tree, selected branch exists, `git` binary available; `local-directory` — path exists, is a directory, is readable. Result: `ok` or a typed error (§13). |
 | FR-104-11 | Validation and all other repository operations SHALL be read-only: no `git push`, `commit`, `checkout`, `reset`, `stash`, `config` writes, no index/worktree modification of local repositories, no file writes inside local directories. Hosted repositories are cloned only into the DirectiveBench cache ([SPEC-105](2026-10-14-repository-synchronization.md)). |
-| FR-104-12 | Git invocations SHALL disable features that execute repository-controlled code or prompt interactively: `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` (or platform equivalent), `-c protocol.ext.allow=never`, no LFS smudge (`GIT_LFS_SKIP_SMUDGE=1`), no optional locks (`GIT_OPTIONAL_LOCKS=0`, so no index refresh is written), no submodule recursion, and an environment allowlist (no inherited `GIT_*` variable such as `GIT_DIR` or `GIT_CONFIG_PARAMETERS`). Local paths are passed as the working directory, never as an argument. Because the executable name would otherwise be resolved against that working directory (relative `PATH` entries on POSIX, the current directory first on Windows), git is located beforehand on the absolute `PATH` entries and spawned by absolute path, and relative entries are removed from the child's `PATH`. `HOME`/`XDG_CONFIG_HOME` are forwarded so the user's global git config (`safe.directory`) applies; the `-c` values above override it. Only read-only plumbing commands (`ls-remote`, `rev-parse`, `ls-tree`, `cat-file`, `clone --depth --filter=blob:none`/`fetch` into cache) are used. Hosted fetches additionally use the hardened invocation of [SPEC-105](2026-10-14-repository-synchronization.md) §9.1 (HTTPS only, no credential helper, environment allowlist, no lazy fetch). |
+| FR-104-12 | Git invocations SHALL disable features that execute repository-controlled code or prompt interactively: `GIT_TERMINAL_PROMPT=0`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null` (or platform equivalent), `-c protocol.ext.allow=never`, no LFS smudge (`GIT_LFS_SKIP_SMUDGE=1`), no optional locks (`GIT_OPTIONAL_LOCKS=0`, so no index refresh is written), no submodule recursion, and an environment allowlist (no inherited `GIT_*` variable such as `GIT_DIR` or `GIT_CONFIG_PARAMETERS`). Local paths are passed as the working directory, never as an argument. Because the executable name would otherwise be resolved against that working directory (relative `PATH` entries on POSIX, the current directory first on Windows), git is located beforehand on the absolute `PATH` entries and spawned by absolute path, and relative entries are removed from the child's `PATH`. `HOME`/`XDG_CONFIG_HOME` are forwarded so the user's global git config (`safe.directory`) applies; the `-c` values above override it. Only read-only plumbing commands (`version`, `ls-remote`, `rev-parse`, `ls-tree`, `cat-file`, `clone --bare --depth 1 --filter=blob:none --template=`/`fetch` into cache) are used. Hosted fetches additionally use the hardened invocation of [SPEC-105](2026-10-14-repository-synchronization.md) §9.1 (HTTPS only, no credential helper, environment allowlist, no lazy fetch). |
 | FR-104-13 | **Discovery settings** per repository (planned column `discovery`, JSON): `exclude` globs (added to defaults `.git/**`, `node_modules/**`), optional `include` roots (limit scanning to sub-paths, e.g. `skills/`). Used by [SPEC-102](2026-10-14-artifact-discovery.md). |
 | FR-104-14 | **Edit**: name, selected branch, credential reference, discovery settings, instance URL. Changing provider or location is not allowed (create a new repository instead). |
 | FR-104-15 | **Disable** (planned column `disabled_at`): excluded from "sync all", data kept. **Remove**: deletes the repository row; its occurrences are deleted by cascade but artifacts, versions (provenance `source_repository_id` set to null), categories, notes and evaluation results remain. Removal requires confirmation showing the number of affected artifacts; artifacts left without any occurrence are shown as "orphaned" (lifecycle `removed`). Cached clones are deleted. |
@@ -103,8 +103,8 @@ type RepositoryErrorCode =
   | 'invalid-url' | 'credentials-in-url' | 'unsupported-provider'
   | 'invalid-path' | 'path-not-found' | 'not-a-directory' | 'not-a-git-repository' | 'permission-denied'
   | 'git-directory' | 'git-failed' | 'filesystem-root' | 'confirmation-required'
-  | 'git-not-installed' | 'unreachable' | 'auth-required' | 'auth-failed'
-  | 'branch-not-found' | 'timeout' | 'credential-missing';
+  | 'git-not-installed' | 'git-too-old' | 'unreachable' | 'auth-required' | 'auth-failed'
+  | 'branch-not-found' | 'timeout' | 'credential-missing' | 'cache-limit-exceeded';
 ```
 
 A future `packages/git-providers` package (not created in bootstrap) will hold provider-specific logic behind:
@@ -145,7 +145,7 @@ sequenceDiagram
   R->>DB: job completed, result { ok, repositoryId, created } | { ok: false, code, message }
 ```
 
-Hosted repositories (URL registration, `git ls-remote`) are not part of this flow yet; whether their validation also runs as a runner job is OQ-104-01.
+**URL registration (public GitHub, issue #18) — proposed answer to OQ-104-01: the same runner job.** The registration field accepts a path or a URL. For a URL the Server Action parses it with the shared `parseRepositoryUrl` (`core`) and enqueues `{ url: <normalised location> }` — never the typed text, so a job payload cannot hold credentials (FR-104-05; the payload schema accepts only a location that is its own normal form). A URL with credentials is rejected in the action before anything is stored, and the redirect back carries only the reason (`?urlError=credentials-in-url`), not the input; any rejected input — URL or path, including a malformed URL that is not recognised as one and fails path validation (`https:/github.com/a/b?access_token=…`) — that contains `@`, `?`, `#` or their percent-encodings is sent back without itself, only with a reason code (`?urlError=`, fixed message; `not-echoed` for input that is neither a valid path nor a recognised URL), and the page does not pre-fill such a `?path=` into the field. A valid local path is registered as entered, these characters included — except one that starts like a protocol-relative URL (`//host/…`, `\\host\…`) and contains them, which is refused as `invalid-url` rather than stored. The runner checks git ≥ 2.44 (NFR-104-03), runs `git ls-remote --symref -- <url> HEAD` with the hardened hosted invocation of [SPEC-105](2026-10-14-repository-synchronization.md) §9.1 (no credential helper, prompt or askpass; nothing is downloaded) and stores provider `github` with the detected default branch through `registerHostedRepository` (one `INSERT … ON CONFLICT DO UPDATE … RETURNING`: registering the URL again returns the existing repository with only its default branch refreshed, the way out for a repository that was empty or whose default branch was renamed). A repository that needs credentials or does not exist is `auth-required` ("not found or not public") and stores nothing.
 
 **Broad and overlapping locations (FR-104-18).** Only the runner knows the canonical location, so the check runs there, in the same transaction as the insert, and the web only carries the user's answer back:
 
@@ -213,7 +213,10 @@ See [SPEC-007](2026-10-14-security-and-privacy.md) and [ADR-0008](../decisions/0
 
 | Code | User message (example) | Hint |
 |------|------------------------|------|
-| `credentials-in-url` | "The URL contains credentials." | "Remove them and use a keychain entry or environment variable." |
+| `credentials-in-url` | "The URL contains credentials (a user name, password or token)." | Public GitHub (#18): "Remove them and enter https://github.com/<owner>/<repo>: DirectiveBench reads public GitHub repositories without credentials and never stores them." Later, with credentials: "use a keychain entry or environment variable." |
+| `invalid-url` / `unsupported-provider` | "This URL does not name a repository." / "Only public repositories on github.com can be registered by URL so far." (SSH, `http://`, other hosts) | "Enter a GitHub repository URL such as https://github.com/<owner>/<repo>." A redirect (renamed repository) is `invalid-url`: "Register its new URL." |
+| `auth-required` without a credential (public GitHub, #18) | "The repository was not found or is not public. DirectiveBench reads public GitHub repositories without credentials; private repositories are not supported yet." | — |
+| `git-too-old` | "GitHub repositories need git 2.44 or newer (it can disable implicit downloads)." | Hosted repositories only: older git would download silently on a read of a missing object. |
 | `git-not-installed` | "git was not found on PATH." | "Install git and re-run `directivebench doctor`." |
 | `auth-required` / `auth-failed` | "The repository requires authentication / credentials were rejected." | "Configure a credential reference or log in with your git credential helper." |
 | `credential-missing` | "Environment variable GITLAB_TOKEN is not set." | — |
@@ -251,10 +254,10 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 16. Acceptance criteria
 
-- [ ] Adding a GitHub HTTPS URL stores provider `github`, normalised location, detected default branch.
+- [x] Adding a GitHub HTTPS URL stores provider `github`, normalised location, detected default branch (public repositories, #18).
 - [ ] Adding a self-managed GitLab URL stores provider `gitlab` and `instance_url`.
 - [x] Adding a local git path stores `local-git` with the top-level directory; a plain folder stores `local-directory`.
-- [ ] A URL with embedded credentials is rejected and does not appear in any log.
+- [x] A URL with embedded credentials is rejected and does not appear in any log (#18: not in the job table, the repository table, the redirect URL, the page or the runner and web logs).
 - [ ] No API accepts a secret value; only `CredentialRef` objects.
 - [ ] Validation errors are returned with the codes in §8 and human hints.
 - [x] The malicious-hook fixture never executes during validation (local path registration; hosted validation does not exist yet).
@@ -266,7 +269,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 18. Open questions
 
-- OQ-104-01: Should validation of hosted repositories run in the web process or as a short job in the runner (consistency with "web never executes")? **Resolved for local paths (2026-10-19):** a runner job (§9), because the web process never runs processes (SPEC-003 §2.1). Hosted validation: proposed to follow the same job flow; decide with URL registration (#18).
+- OQ-104-01: Should validation of hosted repositories run in the web process or as a short job in the runner (consistency with "web never executes")? **Resolved for local paths (2026-10-19):** a runner job (§9), because the web process never runs processes (SPEC-003 §2.1). **Hosted validation — ⚠️ Decision needed (proposal implemented in #18, 2026-10-20):** the same `repository-registration` runner job, in the short-job lane (OQ-104-06); the web only parses the URL and enqueues its normalised location. Alternative: `ls-remote` from the web process — rejected because the web never runs processes (SPEC-003 §2.1, SPEC-014 §3.3) and would need git hardening there too. Reversible: the payload is `{ url }` and the runner function is self-contained.
 - OQ-104-02: Should `local-git` optionally scan the working tree (uncommitted changes) instead of the selected branch's commit? **Decided by the maintainer (2026-10-19, issue #16):** the M1 scan reads the working tree for both local providers and records no commit; reading the committed tree from the object store arrives with local git awareness in M2 ([SPEC-013](2026-10-14-implementation-roadmap.md)). The branch stored at registration is informative only and is not attributed to scan results.
 - OQ-104-03: Use provider REST APIs (GitHub/GitLab) for metadata (description, visibility, default branch) in addition to git? Requires token scopes analysis.
 - OQ-104-04: Credential mechanism for HTTPS tokens with git (extra header vs askpass) — requires validation.
@@ -303,9 +306,18 @@ Scope: FR-104-18; FR-104-16 last scan time and status; FR-104-17 (scan writes th
 3. Runner rejects the filesystem root, passes the canonical home directory and the confirmation; short-job lane (`runner`).
 4. Confirmation panel, Scan button, scan status and Last scan column (`web`), Playwright coverage.
 
+### Phase 3 — Public GitHub repository by URL (E01-S04, issue #18)
+
+Scope: FR-104-01 (`github`), FR-104-02 (public `https://github.com/<owner>/<repo>[.git]` only), FR-104-04 (hosted locations), FR-104-05, FR-104-06 (`<owner>/<repo>`), FR-104-07 (hosted default branch), FR-104-10 (`ls-remote` at registration), FR-104-12 (hosted invocation); the scan is SPEC-105 FR-105-05/06 and §9.1. Out of scope: private repositories, credentials, GitLab, SSH, branch picker, scheduled sync, rescan change detection (#19).
+
+1. `parseRepositoryUrl`, `hostedRepositoryLocationSchema`, `looksLikeRepositoryUrl` (`core`); tree-based discovery `selectCandidateFiles` / `discoverArtifactsInTree` sharing the walker's rules (`core`).
+2. Registration payload `{ url }`, `registerHostedRepository`, scan results with `commitSha`, hosted error codes (`database`).
+3. Hardened hosted git and the partial fetch of candidate blobs; registration and scan of `github` repositories (`runner`).
+4. The registration field accepts a path or a URL; URL errors; Scan for GitHub repositories (`web`), Playwright coverage without network.
+
 ### Later phases
 
-URL registration for public GitHub (E01-S04, #18) and the remaining FRs follow their backlog stories.
+The remaining FRs follow their backlog stories.
 
 ## 20. Implementation status
 
@@ -324,4 +336,9 @@ URL registration for public GitHub (E01-S04, #18) and the remaining FRs follow t
   - A Scan click for a repository that was removed meanwhile, is unknown, is not local or sends an invalid id returns to the page with a page-level error instead of an error page (`apps/web/test/actions.test.ts`, Playwright "scanning a repository removed meanwhile returns to the page with an error").
   - FR-104-16/17: the list shows the last successful scan time or the scan error; scans write `last_sync_at`, `sync_status`, `sync_error` (and `last_commit_sha = null`, working tree).
 - **Partially implemented:** NFR-104-01 — each git call times out after 2 s (plus a 0.5 s kill grace) and registration runs two calls; registrations no longer wait behind benchmarks or scans (own slot), but a second registration waits for the first, and a pending or running registration cannot be cancelled from the UI. FR-104-16 — the list shows name, provider, location, branch, artifact count (active occurrences) and the last scan; credential source is not shown yet. Repositories registered at `/` or the home directory before #16 stay registered; scanning `/` is refused (`filesystem-root`), a home directory registered before #16 is scanned without a new confirmation. FR-104-10 — local checks run at registration only; no on-demand "Test connection" or re-validation, and an existing repository's branch is not refreshed on re-registration. §8 error codes — the local-path subset above.
-- **Not implemented:** URL registration (github/gitlab, FR-104-02, FR-104-05), explicit `local-directory` registration of a work tree, credential references (`credential_ref` column, `CredentialRef`/`SecretRef` shape), discovery settings, edit/disable/remove, branch listing and picker, case-insensitive duplicate detection and Windows path normalisation (§14), `/repositories/[id]`, `packages/git-providers`.
+- **Implemented — Phase 3, public GitHub repository by URL (issue #18; verified on 2026-10-20 by `packages/core/test/{hosted-repository,discovery-tree}.test.ts`, `packages/database/test/{jobs,catalog}.test.ts`, `packages/runner/test/{git-process,hosted-git,hosted-repository,hosted-repository-limits}.test.ts` against local bare repositories over `file://` (no network), `apps/web/test/{actions,repositories}.test.ts`, the Playwright tests "GitHub repositories by URL" in `apps/web/e2e/repositories.spec.ts`, and a manual run of the built CLI against github.com):**
+  - FR-104-02/04/06: `https://github.com/<owner>/<repo>`, with an optional `.git` and trailing `/`, any letter case; stored as `https://github.com/<owner>/<repo>` in lower case (GitHub names are case-insensitive), name `<owner>/<repo>` as typed. SSH, `http://`, `file://`, other hosts, ports, queries, fragments and deeper paths (`/tree/main`) are rejected with a hint.
+  - FR-104-05: credentials (any `user@` in the authority, also when the URL does not parse) are rejected in the Server Action; nothing is enqueued, the redirect carries only `urlError=credentials-in-url`, and the payload schema refuses any non-normalised location, so the runner cannot receive one either. Any rejected input with `@`, `?`, `#` (or `%40`/`%3F`/`%23`) is returned without itself whichever branch rejects it (`returnToForm`, Codex review round 2 of PR #51), and the page never pre-fills such a value; a valid path that starts with `//` or `\\` and contains them is refused as `invalid-url` instead of being stored.
+  - FR-104-07/10 (hosted): the runner (git ≥ 2.44 checked, else `git-too-old`) runs only `git ls-remote --symref -- <url> HEAD` (30 s timeout) with the hardened invocation of SPEC-105 §9.1 and stores the default branch (null for an empty repository or a branch name outside the safe subset; registering the URL again refreshes it on the existing row — review of PR #51); a missing or private repository is `auth-required` "not found or not public", with no prompt, and stores nothing; network failures and HTTP 403 (rate limits) are `unreachable`, a redirect `invalid-url`. A hosted registration takes the single short-lane slot for up to about 35 s (5 s `git version` + 30 s `ls-remote`), so a local registration can wait behind it (NFR-104-01).
+  - FR-104-12 (hosted): see SPEC-105 §20. OQ-104-01: hosted validation runs as the same runner job (proposal, ⚠️ decision needed).
+- **Not implemented:** GitLab URLs and SSH URLs (FR-104-02), private repositories and credentials (FR-104-08/09), explicit `local-directory` registration of a work tree, credential references (`credential_ref` column, `CredentialRef`/`SecretRef` shape), discovery settings, edit/disable/remove (including deleting a hosted cache, FR-104-15), branch listing and picker, case-insensitive duplicate detection of local paths and Windows path normalisation (§14), `/repositories/[id]`, `packages/git-providers` (hosted git lives in `packages/runner/src/hosted-git.ts` for now; ⚠️ decision needed in PR #18's description), `directivebench doctor` reporting the git version (NFR-104-03).
