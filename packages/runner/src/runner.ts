@@ -250,9 +250,10 @@ export class LocalRunner {
    * {@link SHUTDOWN_INTERRUPT_GRACE_MS}: the write can wait behind a transaction one of those
    * jobs holds. A write that misses the grace is not cancelled. For an in-process caller that
    * keeps the database open, it lands once that transaction ends. Under `serve`, which closes the
-   * database right after `stop()`, it fails; that is logged as information, not as an error,
-   * because shutdown has already reported the jobs as left `running`, and a runner start after
-   * their heartbeat went stale (> 30 s) recovers them as `interrupted` (`recoverStaleJobs`).
+   * database once `stop()` has returned and the web child has exited, it fails, and the failure
+   * is logged as information, not as an error, because shutdown has already reported the jobs as
+   * left `running` (if the process exits first, it never runs at all). A runner start after their
+   * heartbeat went stale (> 30 s) recovers them as `interrupted` (`recoverStaleJobs`).
    */
   private async interruptRemaining(): Promise<void> {
     const { handle, logger } = this.options;
@@ -279,12 +280,15 @@ export class LocalRunner {
       });
     let timer: NodeJS.Timeout | undefined;
     const grace = new Promise<'grace-expired'>((resolve) => {
-      timer = setTimeout(() => resolve('grace-expired'), SHUTDOWN_INTERRUPT_GRACE_MS);
+      timer = setTimeout(() => {
+        // Set here, not after the race resumes, so a failure settling after it is never an error.
+        graceExpired = true;
+        resolve('grace-expired');
+      }, SHUTDOWN_INTERRUPT_GRACE_MS);
     });
     const ids = await Promise.race([marking, grace]);
     clearTimeout(timer);
     if (ids === 'grace-expired') {
-      graceExpired = true;
       logger.error(
         `Shutdown timed out; ${jobIds.length} job(s) stay running until a later runner start recovers them as interrupted`,
         { event: 'shutdown-interrupt-skipped', jobIds: jobIds.join(',') },

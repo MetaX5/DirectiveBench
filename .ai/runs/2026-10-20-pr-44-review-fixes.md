@@ -136,6 +136,13 @@ what the findings need:
   1 MB test took 1.8 s on CI at `2b6cd5e`, so it parses one source fewer (acceptance below the
   limit is the boundary test's job) and, like the 1 MB runner scan test, has a named
   `LARGE_SOURCE_TIMEOUT_MS` (20 s).
+- The independent review of `e6c0736` approved with 1 minor and 4 nits. The nits are fixed in
+  the last commit: the size warning now says where the limit was reached (`… bytes of JSON (the
+  limit was reached under the key "b")`), because the keys before it count too (the real run
+  above shows the earlier wording); `graceExpired` is set in the timer callback; the
+  `interruptRemaining` comment matches `serve`'s order; a repeated test line is removed and the
+  module mock sits after the imports. The minor (the `yaml` parse is quadratic in the number of
+  keys, which predates this PR) is filed as #49.
 - Deviation from the finding's literal request: the frontmatter JSON also counts towards
   `maxScanBytes` (see Decisions). SPEC-102 FR-102-16 is updated to say so.
 - No change to the maintainer's decisions or to earlier rounds' fixes beyond these findings.
@@ -149,6 +156,8 @@ what the findings need:
 
 ## Follow-ups
 
-- None filed. The 30 s recovery window after a skipped interrupt write stays as documented in
+- #49: bound the frontmatter parse time with a cap on the raw block before `yaml.parse` (the
+  parse is quadratic in the number of keys; a 1 MiB block can block the runner for ~90 s).
+- The 30 s recovery window after a skipped interrupt write stays as documented in
   SPEC-114 §14.
 - Independent review of the final head: see the PR.

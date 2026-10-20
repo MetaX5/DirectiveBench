@@ -142,7 +142,7 @@ describe('parseFrontmatter', () => {
       expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
         frontmatter: {},
         body: 'body',
-        error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+        error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON (the limit was reached under the key "b")`,
       });
     },
     LARGE_SOURCE_TIMEOUT_MS,
@@ -169,7 +169,7 @@ describe('parseFrontmatter', () => {
     expect(sized(MAX_FRONTMATTER_JSON_BYTES - base + 1)).toEqual({
       frontmatter: {},
       body: '',
-      error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "last"`,
+      error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON (the limit was reached under the key "last")`,
     });
   });
 

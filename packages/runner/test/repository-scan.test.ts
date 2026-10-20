@@ -643,7 +643,7 @@ describe('repository-scan jobs', () => {
       expect(skill?.parsedMetadata).toMatchObject({
         frontmatter: {},
         warnings: expect.arrayContaining([
-          `Invalid frontmatter: frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON under the key "b"`,
+          `Invalid frontmatter: frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON (the limit was reached under the key "b")`,
         ]) as unknown,
       });
       const stored = handle.sqlite

@@ -16,15 +16,15 @@ import {
   type DatabaseHandle,
 } from '@directivebench/database';
 import { LocalRunner, SHORT_JOB_SLOTS, SHUTDOWN_INTERRUPT_GRACE_MS } from '../src/index';
+import type * as registrationModule from '../src/repository-registration';
+import type * as scanModule from '../src/repository-scan';
+import { ScanCancelledError } from '../src/repository-scan';
 
 // The real `interruptJobs`, replaceable per test to reject with something that is not an Error.
 vi.mock('@directivebench/database', async (importOriginal) => {
   const actual = await importOriginal<typeof database>();
   return { ...actual, interruptJobs: vi.fn(actual.interruptJobs) };
 });
-import type * as registrationModule from '../src/repository-registration';
-import type * as scanModule from '../src/repository-scan';
-import { ScanCancelledError } from '../src/repository-scan';
 
 /** Scans and registrations that finish only when the test releases them. */
 const held = vi.hoisted(() => ({
@@ -320,7 +320,6 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     for (const entry of held.registrations) entry.release();
     await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
     await vi.waitFor(async () => expect(await status(second.id)).toBe('completed'));
-    await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
   });
 
   // Review of PR #44 at 2d668f3: under `serve` the database is closed right after `stop()`, so a

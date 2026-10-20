@@ -100,13 +100,20 @@ function jsonIncompatibility(value: unknown, walk: JsonWalk): string | null {
   return null;
 }
 
-/** ` under the key "<key>"` for the top-level key a problem lies under, cut to a safe length. */
-function underKey(path: readonly string[]): string {
+/**
+ * Where a problem lies, by the top-level key on its path (cut to a safe length): the key holding
+ * the offending value, or — for the size limit, which the keys before it count towards too — the
+ * key at which the limit was reached.
+ */
+function whereInFrontmatter(problem: string, path: readonly string[]): string {
   const [key] = path;
   if (key === undefined) return '';
-  const shown =
-    key.length > MAX_REPORTED_KEY_LENGTH ? `${key.slice(0, MAX_REPORTED_KEY_LENGTH)}…` : key;
-  return ` under the key ${JSON.stringify(shown)}`;
+  const shown = JSON.stringify(
+    key.length > MAX_REPORTED_KEY_LENGTH ? `${key.slice(0, MAX_REPORTED_KEY_LENGTH)}…` : key,
+  );
+  return problem === TOO_LARGE
+    ? ` (the limit was reached under the key ${shown})`
+    : ` under the key ${shown}`;
 }
 
 /**
@@ -140,7 +147,7 @@ export function parseFrontmatter(content: string): FrontmatterResult {
       return {
         frontmatter: {},
         body,
-        error: `frontmatter cannot be stored as JSON: ${problem}${underKey(walk.path)}`,
+        error: `frontmatter cannot be stored as JSON: ${problem}${whereInFrontmatter(problem, walk.path)}`,
       };
     }
     return { frontmatter: value as Record<string, unknown>, body };
