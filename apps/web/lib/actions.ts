@@ -71,15 +71,15 @@ const registerRepositorySchema = z.object({ path: repositoryPathInputSchema });
 /**
  * Registers a public GitHub repository by URL (SPEC-104 FR-104-02, FR-104-05): only its
  * normalised, credential-free location is enqueued, and the runner asks the remote for the
- * default branch. A rejected URL goes back to the form; one containing `@` — which may carry
- * credentials — goes back without the input, only with the reason, so it never lands in the
- * browser history, a log or the job table.
+ * default branch. A rejected URL goes back to the form; one containing `@`, `?` or `#` — which
+ * may carry credentials or a token — goes back without the input, only with the reason, so it
+ * never lands in the browser history, a log or the job table.
  */
 async function registerUrl(value: string): Promise<never> {
   const parsed = parseRepositoryUrl(value);
   if (!parsed.ok) {
     const params = new URLSearchParams(
-      value.includes('@')
+      /[@?#]/.test(value)
         ? { urlError: parsed.code }
         : { path: value.trim().slice(0, MAX_REPOSITORY_URL_LENGTH + 1) },
     );

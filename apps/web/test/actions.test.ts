@@ -321,6 +321,15 @@ describe('registerRepositoryAction', () => {
       expect(url).toBe('/repositories?urlError=credentials-in-url');
       expect(url).not.toContain(secret);
     }
+    // A token can hide in a query or fragment too (review of PR #51).
+    for (const input of [
+      `https://github.com/acme/skills?access_token=${secret}`,
+      `https://github.com/acme/skills#${secret}`,
+    ]) {
+      expect(await redirectOf(registerRepositoryAction(form({ path: input })))).toBe(
+        '/repositories?urlError=invalid-url',
+      );
+    }
     // An SSH address carries a user too: it is refused without being echoed.
     expect(
       await redirectOf(registerRepositoryAction(form({ path: 'git@github.com:a/b.git' }))),
