@@ -4,6 +4,9 @@ import { executionBlockers } from '@directivebench/benchmark-engine/definition';
 import { validateDefinition } from '@directivebench/benchmark-engine/load';
 import {
   MAX_REPOSITORY_PATH_LENGTH,
+  MAX_REPOSITORY_URL_LENGTH,
+  looksLikeRepositoryUrl,
+  parseRepositoryUrl,
   repositoryLocationSchema,
   repositoryPathInputSchema,
 } from '@directivebench/core';
@@ -66,13 +69,39 @@ export async function cancelJobAction(formData: FormData): Promise<void> {
 const registerRepositorySchema = z.object({ path: repositoryPathInputSchema });
 
 /**
- * Registers a local repository by path (SPEC-104 §9). The web process only validates the field
- * and enqueues a `repository-registration` job; the runner in the CLI process resolves the path,
- * runs git read-only and decides whether the canonical location needs a confirmation
- * (FR-104-18). Invalid input returns to the form with a field-level error.
+ * Registers a public GitHub repository by URL (SPEC-104 FR-104-02, FR-104-05): only its
+ * normalised, credential-free location is enqueued, and the runner asks the remote for the
+ * default branch. A rejected URL goes back to the form; one containing `@` — which may carry
+ * credentials — goes back without the input, only with the reason, so it never lands in the
+ * browser history, a log or the job table.
+ */
+async function registerUrl(value: string): Promise<never> {
+  const parsed = parseRepositoryUrl(value);
+  if (!parsed.ok) {
+    const params = new URLSearchParams(
+      value.includes('@')
+        ? { urlError: parsed.code }
+        : { path: value.trim().slice(0, MAX_REPOSITORY_URL_LENGTH + 1) },
+    );
+    redirect(`/repositories?${params.toString()}`);
+  }
+  const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {
+    url: parsed.location,
+  });
+  revalidatePath('/repositories');
+  redirect(`/repositories?registration=${encodeURIComponent(job.id)}`);
+}
+
+/**
+ * Registers a repository by local path or public GitHub URL (SPEC-104 §9). The web process only
+ * validates the field and enqueues a `repository-registration` job; the runner in the CLI
+ * process resolves the path (or asks GitHub), runs git read-only and, for paths, decides whether
+ * the canonical location needs a confirmation (FR-104-18). Invalid input returns to the form with
+ * a field-level error.
  */
 export async function registerRepositoryAction(formData: FormData): Promise<void> {
   const raw = formData.get('path');
+  if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw);
   const input = registerRepositorySchema.safeParse({ path: raw });
   if (!input.success) {
     // Only the entered path travels back; the page re-validates it to show the field error, so

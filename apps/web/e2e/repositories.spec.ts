@@ -288,3 +288,120 @@ test.describe('repositories', () => {
     );
   });
 });
+
+// Public GitHub repositories by URL (issue #18). The suite never reaches the network: it tests
+// the web-side validation, and shows runner outcomes it seeds into the database itself. The
+// runner's git side is covered against a local bare repository in packages/runner.
+test.describe('GitHub repositories by URL', () => {
+  const token = 'ghp_e2eTokenAbcdefghijklmnopqrstu';
+
+  test('a URL with credentials is rejected with an explanation and appears nowhere', async ({
+    page,
+  }) => {
+    const jobsBefore = await withDatabase((db) => count(db, 'select count(*) as n from jobs'));
+    await register(page, `https://e2e-user:${token}@github.com/acme/private-skills`);
+
+    await expect(page.getByTestId('path-error')).toHaveText(
+      'The URL contains credentials (a user name, password or token). Remove them and enter https://github.com/<owner>/<repo>: DirectiveBench reads public GitHub repositories without credentials and never stores them.',
+    );
+    expect(page.url()).not.toContain(token);
+    expect(page.url()).not.toContain('e2e-user');
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveValue('');
+    expect(await page.content()).not.toContain(token);
+    await withDatabase((db) => {
+      expect(count(db, 'select count(*) as n from jobs')).toBe(jobsBefore);
+      expect(
+        count(db, "select count(*) as n from jobs where payload like '%' || ? || '%'", token),
+      ).toBe(0);
+      expect(
+        count(db, "select count(*) as n from repositories where location like '%e2e-user%'"),
+      ).toBe(0);
+    });
+  });
+
+  test('an unsupported URL returns to the form with the reason', async ({ page }) => {
+    await register(page, 'https://gitlab.com/acme/skills');
+
+    await expect(page.getByTestId('path-error')).toContainText(
+      'Only public repositories on github.com can be registered by URL so far.',
+    );
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveValue(
+      'https://gitlab.com/acme/skills',
+    );
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  test('a registered GitHub repository is listed with its branch and can be scanned', async ({
+    page,
+  }) => {
+    const location = 'https://github.com/acme/e2e-skills';
+    const repositoryId = 'repo_e2e_github';
+    const jobId = 'job_e2e_github_registration';
+    const now = new Date().toISOString();
+    await withDatabase((db) => {
+      db.prepare(
+        `insert into repositories (id, provider, name, location, default_branch, sync_status, created_at, updated_at)
+         values (?, 'github', 'acme/e2e-skills', ?, 'main', 'never', ?, ?)`,
+      ).run(repositoryId, location, now, now);
+      db.prepare(
+        `insert into jobs (id, type, status, payload, result, attempts, created_at, finished_at)
+         values (?, 'repository-registration', 'completed', ?, ?, 1, ?, ?)`,
+      ).run(
+        jobId,
+        JSON.stringify({ url: location }),
+        JSON.stringify({ ok: true, repositoryId, created: true }),
+        now,
+        now,
+      );
+    });
+
+    await page.goto(`/repositories?registration=${jobId}`);
+    await expect(page.getByTestId('registration-status')).toHaveText(
+      `Registered acme/e2e-skills (GitHub, ${location}).`,
+    );
+    const row = repositoryRow(page, location);
+    await expect(row.getByRole('cell')).toHaveText([
+      'acme/e2e-skills',
+      'GitHub',
+      location,
+      'main',
+      '0',
+      'Never',
+      'Scan',
+    ]);
+    // Not clicked: a scan would reach github.com, and the suite stays offline.
+    await expect(row.getByRole('button', { name: 'Scan acme/e2e-skills' })).toBeEnabled();
+  });
+
+  test('a repository that is not public shows "not found or not public" and keeps the URL', async ({
+    page,
+  }) => {
+    const jobId = 'job_e2e_github_not_found';
+    const now = new Date().toISOString();
+    await withDatabase((db) => {
+      db.prepare(
+        `insert into jobs (id, type, status, payload, result, attempts, created_at, finished_at)
+         values (?, 'repository-registration', 'completed', ?, ?, 1, ?, ?)`,
+      ).run(
+        jobId,
+        JSON.stringify({ url: 'https://github.com/acme/private-skills' }),
+        JSON.stringify({
+          ok: false,
+          code: 'auth-required',
+          message:
+            'The repository was not found or is not public. DirectiveBench reads public GitHub repositories without credentials; private repositories are not supported yet.',
+        }),
+        now,
+        now,
+      );
+    });
+
+    await page.goto(`/repositories?registration=${jobId}`);
+    await expect(page.getByTestId('path-error')).toContainText(
+      'The repository was not found or is not public.',
+    );
+    await expect(page.getByLabel('Path or GitHub URL')).toHaveValue(
+      'https://github.com/acme/private-skills',
+    );
+  });
+});

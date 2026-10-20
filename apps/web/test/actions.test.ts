@@ -293,9 +293,49 @@ describe('registerRepositoryAction', () => {
     expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
     expect(await getRepositoryRegistration(handle.db, jobId)).toMatchObject({
       status: 'pending',
-      path: '~/code/skills/',
+      input: '~/code/skills/',
+      source: 'path',
       result: null,
     });
+  });
+
+  it('enqueues only the normalised location of a GitHub URL', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: ' https://github.com/Acme/Skills.git ' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
+    expect((await getJob(handle.db, jobId))?.payload).toEqual({
+      url: 'https://github.com/acme/skills',
+    });
+    expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
+  });
+
+  it('rejects a URL with credentials without storing, echoing or redirecting with it', async () => {
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz0123';
+    for (const input of [
+      `https://user:${secret}@github.com/acme/skills`,
+      `https://${secret}@github.com/acme/skills`,
+      `https://x:${secret} y@github.com/acme/skills`,
+    ]) {
+      const url = await redirectOf(registerRepositoryAction(form({ path: input })));
+      expect(url).toBe('/repositories?urlError=credentials-in-url');
+      expect(url).not.toContain(secret);
+    }
+    // An SSH address carries a user too: it is refused without being echoed.
+    expect(
+      await redirectOf(registerRepositoryAction(form({ path: 'git@github.com:a/b.git' }))),
+    ).toBe('/repositories?urlError=unsupported-provider');
+    expect(jobCount()).toBe(0);
+  });
+
+  it('returns an unsupported URL without credentials to the form', async () => {
+    const url = await redirectOf(
+      registerRepositoryAction(form({ path: ` https://gitlab.com/acme/${'x'.repeat(3000)} ` })),
+    );
+    const params = new URL(url, 'http://localhost').searchParams;
+    expect([...params.keys()]).toEqual(['path']);
+    expect(params.get('path')).toBe(`https://gitlab.com/acme/${'x'.repeat(3000)}`.slice(0, 2049));
+    expect(jobCount()).toBe(0);
   });
 
   it('returns to the form with the entered path and a field error for invalid input', async () => {
