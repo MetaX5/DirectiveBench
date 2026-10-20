@@ -1,4 +1,10 @@
-import { listArtifacts } from '@directivebench/database';
+import { ARTIFACT_TYPES } from '@directivebench/core';
+import {
+  hasArtifacts,
+  listArtifacts,
+  listCategories,
+  listRepositories,
+} from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
@@ -19,17 +25,25 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
+import {
+  MAX_SEARCH_LENGTH,
+  invalidParamsNotice,
+  parseArtifactListParams,
+  repositoriesLabel,
+  repositoryOptions,
+  type SearchParams,
+} from '@/lib/artifacts';
 import { getDatabase } from '@/lib/db';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifacts' };
 
-const TYPES = ['skill', 'instruction', 'rule'] as const;
+const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm text-foreground';
 
 export default async function ArtifactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; type?: string; category?: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const handle = getDatabase();
   if (!handle)
@@ -39,24 +53,19 @@ export default async function ArtifactsPage({
         <NotInitialized />
       </>
     );
-  const params = await searchParams;
-  const all = await listArtifacts(handle.db);
-  const q = params.q?.trim().toLowerCase() ?? '';
-  const artifacts = all.filter(
-    (a) =>
-      (!q || a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q)) &&
-      (!params.type || a.type === params.type) &&
-      (!params.category || a.categories.some((c) => c.slug === params.category)),
-  );
-  const categories = [
-    ...new Map(all.flatMap((a) => a.categories).map((c) => [c.slug, c])).values(),
-  ];
+  const { value: filter, invalid } = parseArtifactListParams(await searchParams);
+  const filtered = Object.keys(filter).length > 0;
+  const artifacts = await listArtifacts(handle.db, filter);
+  const registryEmpty = artifacts.length === 0 && (!filtered || !(await hasArtifacts(handle.db)));
+  const repositories = repositoryOptions(await listRepositories(handle.db));
+  const categories = (await listCategories(handle.db)).filter((c) => c.archivedAt === null);
+  const notice = invalidParamsNotice(invalid);
 
   return (
     <>
       <PageHeader
         title="Artifacts"
-        description="Skills, instructions and rules in the local registry."
+        description="Skills, instructions and rules from every registered repository."
       />
       <Card>
         <CardContent>
@@ -65,20 +74,32 @@ export default async function ArtifactsPage({
               Search
               <input
                 name="q"
-                defaultValue={params.q ?? ''}
+                defaultValue={filter.q ?? ''}
+                maxLength={MAX_SEARCH_LENGTH}
                 placeholder="Name or description"
                 className="h-8 w-56 rounded-md border bg-background px-2 text-sm text-foreground"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              Type
+              Repository
               <select
-                name="type"
-                defaultValue={params.type ?? ''}
-                className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
+                name="repository"
+                defaultValue={filter.repository ?? ''}
+                className={selectClass}
               >
                 <option value="">All</option>
-                {TYPES.map((t) => (
+                {repositories.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Type
+              <select name="type" defaultValue={filter.type ?? ''} className={selectClass}>
+                <option value="">All</option>
+                {ARTIFACT_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -87,11 +108,7 @@ export default async function ArtifactsPage({
             </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Category
-              <select
-                name="category"
-                defaultValue={params.category ?? ''}
-                className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
-              >
+              <select name="category" defaultValue={filter.category ?? ''} className={selectClass}>
                 <option value="">All</option>
                 {categories.map((c) => (
                   <option key={c.slug} value={c.slug}>
@@ -103,17 +120,34 @@ export default async function ArtifactsPage({
             <button type="submit" className="h-8 rounded-md border px-3 text-sm hover:bg-accent">
               Filter
             </button>
+            {filtered || invalid.length ? (
+              <Link href="/artifacts" className="h-8 px-2 text-sm leading-8 underline">
+                Clear filters
+              </Link>
+            ) : null}
           </form>
+          {notice ? (
+            <p
+              role="status"
+              data-testid="filter-notice"
+              className="mb-4 text-sm text-muted-foreground"
+            >
+              {notice}
+            </p>
+          ) : null}
 
           {artifacts.length === 0 ? (
             <EmptyState
-              title={all.length === 0 ? 'No artifacts yet' : 'No artifacts match the filters'}
+              title={registryEmpty ? 'No artifacts yet' : 'No artifacts match the filters'}
             >
-              {all.length === 0 ? (
+              {registryEmpty ? (
                 <>
-                  Repository import is planned. Run{' '}
-                  <code className="font-mono">npx directivebench demo</code> to load the bundled
-                  example skill.
+                  Register and scan a repository on the{' '}
+                  <Link href="/repositories" className="underline">
+                    Repositories
+                  </Link>{' '}
+                  page, or run <code className="font-mono">npx directivebench demo</code> to load
+                  the bundled example skill.
                 </>
               ) : null}
             </EmptyState>
@@ -125,7 +159,8 @@ export default async function ArtifactsPage({
                   <TH>Type</TH>
                   <TH>Description</TH>
                   <TH>Categories</TH>
-                  <TH>Source</TH>
+                  <TH>Repository</TH>
+                  <TH className="text-right">Occurrences</TH>
                   <TH>Compatibility</TH>
                   <TH className="text-right">Latest score</TH>
                   <TH className="text-right">vs. baseline</TH>
@@ -137,7 +172,7 @@ export default async function ArtifactsPage({
                 {artifacts.map((a) => {
                   const e = a.latestEvaluation;
                   return (
-                    <TR key={a.id}>
+                    <TR key={a.id} data-artifact-id={a.id}>
                       <TD className="font-medium">
                         <Link href={`/artifacts/${a.id}`} className="hover:underline">
                           {a.name}
@@ -164,9 +199,13 @@ export default async function ArtifactsPage({
                           ))}
                         </div>
                       </TD>
-                      <TD className="text-xs text-muted-foreground">
-                        {a.sources.join(', ') || '—'}
+                      <TD
+                        className="text-xs text-muted-foreground"
+                        title={a.repositories.map((r) => r.name).join(', ')}
+                      >
+                        {repositoriesLabel(a.repositories)}
                       </TD>
+                      <TD className="text-right tabular-nums">{a.occurrenceCount}</TD>
                       <TD
                         className="text-xs text-muted-foreground"
                         title="Agent compatibility validation is planned"

@@ -33,3 +33,10 @@ bound a batch: many small items can each expand to the cap.
 - Count the expanded output in the batch-wide budget too (`maxScanBytes` counts frontmatter JSON).
 - Test the boundary exactly (at the limit accepted, one byte more rejected) and the hostile case at
   full scale against the old code.
+
+## Also seen in
+
+- PR #50 (issue #17): the Markdown preview capped its *input* at 200 000 characters, but padding
+  every table row to the header's width turned a 104 KB file into 50 million cells (4.3 s to
+  parse, gigabytes of HTML). The fix keeps each row's own cells, so the output is never larger
+  than the input; `apps/web/test/markdown.test.ts` checks the cell count of that input.
