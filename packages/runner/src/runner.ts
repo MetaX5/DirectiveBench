@@ -248,19 +248,33 @@ export class LocalRunner {
   /**
    * Marks the jobs still active after the shutdown deadline as `interrupted`, waiting at most
    * {@link SHUTDOWN_INTERRUPT_GRACE_MS}: the write can wait behind a transaction one of those
-   * jobs holds. A write that misses the grace still runs if that transaction ends while the
-   * process lives; otherwise the jobs stay `running` until a runner start recovers them.
+   * jobs holds. A write that misses the grace is not cancelled. For an in-process caller that
+   * keeps the database open, it lands once that transaction ends. Under `serve`, which closes the
+   * database right after `stop()`, it fails; that is logged as information, not as an error,
+   * because shutdown has already reported the jobs as left `running`, and a runner start after
+   * their heartbeat went stale (> 30 s) recovers them as `interrupted` (`recoverStaleJobs`).
    */
   private async interruptRemaining(): Promise<void> {
     const { handle, logger } = this.options;
     const jobIds = [...this.active.keys()];
+    let graceExpired = false;
     const marking = interruptJobs(handle.db, jobIds, 'Runner shut down before the job stopped')
       // Handled here, not left to reject unobserved after `stop()` has returned.
       .catch((error: unknown) => {
-        logger.error(`Shutdown could not mark jobs as interrupted: ${(error as Error).message}`, {
-          event: 'shutdown-interrupt-failed',
-          jobIds: jobIds.join(','),
-        });
+        // Drizzle wraps the SQLite error in "Failed query: … params: …"; its cause says why.
+        const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        if (graceExpired) {
+          logger.info(
+            `The late write marking jobs as interrupted after shutdown did not land (${reason}); a later runner start recovers them`,
+            { event: 'shutdown-interrupt-abandoned', jobIds: jobIds.join(',') },
+          );
+        } else {
+          logger.error(`Shutdown could not mark jobs as interrupted: ${reason}`, {
+            event: 'shutdown-interrupt-failed',
+            jobIds: jobIds.join(','),
+          });
+        }
         return null;
       });
     let timer: NodeJS.Timeout | undefined;
@@ -270,6 +284,7 @@ export class LocalRunner {
     const ids = await Promise.race([marking, grace]);
     clearTimeout(timer);
     if (ids === 'grace-expired') {
+      graceExpired = true;
       logger.error(
         `Shutdown timed out; ${jobIds.length} job(s) stay running until a later runner start recovers them as interrupted`,
         { event: 'shutdown-interrupt-skipped', jobIds: jobIds.join(',') },

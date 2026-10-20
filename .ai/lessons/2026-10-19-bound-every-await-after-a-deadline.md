@@ -26,7 +26,9 @@ runner start marks jobs left `running` as `interrupted`).
 
 - Race the cleanup against a named timer (`SHUTDOWN_INTERRUPT_GRACE_MS`), clear the timer, and
   attach a `.catch` to the raced promise so a late rejection after `stop()` returned is logged,
-  not unhandled.
+  not unhandled. Do not assume the skipped work "still lands": the caller may close the resource
+  right after (`serve` closes the database), so log that late failure as information once the
+  skip has been reported, not as a second error (updated 2026-10-20, review of PR #44).
 - Log the skipped case with its own event (`shutdown-interrupt-skipped`) and the affected ids.
 - Regression test: hold a transaction past the deadline and race `stop()` against
   deadline + grace + slack; on the old code the race reports "still waiting".

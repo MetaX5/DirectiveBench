@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as database from '@directivebench/database';
 import {
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
@@ -15,6 +16,12 @@ import {
   type DatabaseHandle,
 } from '@directivebench/database';
 import { LocalRunner, SHORT_JOB_SLOTS, SHUTDOWN_INTERRUPT_GRACE_MS } from '../src/index';
+
+// The real `interruptJobs`, replaceable per test to reject with something that is not an Error.
+vi.mock('@directivebench/database', async (importOriginal) => {
+  const actual = await importOriginal<typeof database>();
+  return { ...actual, interruptJobs: vi.fn(actual.interruptJobs) };
+});
 import type * as registrationModule from '../src/repository-registration';
 import type * as scanModule from '../src/repository-scan';
 import { ScanCancelledError } from '../src/repository-scan';
@@ -279,12 +286,77 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     await runner.stop();
     handle.sqlite.exec('alter table jobs_hidden rename to jobs');
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringMatching(/^Shutdown could not mark jobs as interrupted: /),
+      'Shutdown could not mark jobs as interrupted: no such table: jobs',
       { event: 'shutdown-interrupt-failed', jobIds: registration.id },
     );
     const events = logger.error.mock.calls.map(([, fields]) => (fields as { event: string }).event);
     expect(events).not.toContain('shutdown-interrupt-skipped');
     expect(events).not.toContain('shutdown-timeout');
+    held.registrations[0]?.release();
+    await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
+  });
+
+  it('reports an interrupt write that rejects with a non-Error value or an Error without a cause', async () => {
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/a' });
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const runner = createRunner({ shutdownTimeoutMs: 20, logger });
+    await runner.poll();
+    vi.mocked(database.interruptJobs).mockRejectedValueOnce('connection gone');
+    await runner.stop();
+    expect(logger.error).toHaveBeenCalledWith(
+      'Shutdown could not mark jobs as interrupted: connection gone',
+      { event: 'shutdown-interrupt-failed', jobIds: registration.id },
+    );
+    // An Error without a cause is reported by its own message.
+    const second = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/b' });
+    const next = createRunner({ shutdownTimeoutMs: 20, logger });
+    await next.poll();
+    vi.mocked(database.interruptJobs).mockRejectedValueOnce(new Error('database is not open'));
+    await next.stop();
+    expect(logger.error).toHaveBeenCalledWith(
+      'Shutdown could not mark jobs as interrupted: database is not open',
+      { event: 'shutdown-interrupt-failed', jobIds: second.id },
+    );
+    for (const entry of held.registrations) entry.release();
+    await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
+    await vi.waitFor(async () => expect(await status(second.id)).toBe('completed'));
+    await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
+  });
+
+  // Review of PR #44 at 2d668f3: under `serve` the database is closed right after `stop()`, so a
+  // write that missed the grace fails later. Shutdown has already reported the jobs as left
+  // running, so that failure is information, not a second error after shutdown completed.
+  it('logs a late interrupt write that fails after stop() returned as information', async () => {
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/a' });
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const runner = createRunner({ shutdownTimeoutMs: 20, logger });
+    await runner.poll();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = withTransaction(handle, async () => gate);
+    await new Promise((resolve) => setImmediate(resolve));
+    await runner.stop();
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), {
+      event: 'shutdown-interrupt-skipped',
+      jobIds: registration.id,
+    });
+    // The queued write will fail once it runs: its table is gone (renamed inside the open
+    // transaction on the raw connection, and restored below so the job can finish).
+    handle.sqlite.exec('alter table jobs rename to jobs_hidden');
+    release();
+    await holding;
+    await vi.waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        'The late write marking jobs as interrupted after shutdown did not land (no such table: jobs); a later runner start recovers them',
+        { event: 'shutdown-interrupt-abandoned', jobIds: registration.id },
+      ),
+    );
+    const events = logger.error.mock.calls.map(([, fields]) => (fields as { event: string }).event);
+    expect(events).not.toContain('shutdown-interrupt-failed');
+    handle.sqlite.exec('alter table jobs_hidden rename to jobs');
+    expect(await status(registration.id)).toBe('running');
     held.registrations[0]?.release();
     await vi.waitFor(async () => expect(await status(registration.id)).toBe('completed'));
   });
