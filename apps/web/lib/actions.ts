@@ -24,7 +24,11 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireDatabase } from './db';
-import { mayCarryCredentials, type RejectedInputCode } from './repositories';
+import {
+  looksLikeProtocolRelativeUrl,
+  mayCarryCredentials,
+  type RejectedInputCode,
+} from './repositories';
 
 const enqueueSchema = z.object({
   suiteVersionId: z.string().min(1),
@@ -109,6 +113,12 @@ async function registerUrl(value: string): Promise<never> {
 export async function registerRepositoryAction(formData: FormData): Promise<void> {
   const raw = formData.get('path');
   if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw);
+  // `//github.com/a/b?access_token=…` is a valid absolute path but reads as a protocol-relative
+  // URL: with characters that can carry credentials it is refused instead of being stored as
+  // typed. Without them (`//srv/share`, a UNC path) it is still registered as a path.
+  if (typeof raw === 'string' && looksLikeProtocolRelativeUrl(raw) && mayCarryCredentials(raw)) {
+    returnToForm(raw, 'invalid-url', MAX_REPOSITORY_URL_LENGTH);
+  }
   const input = registerRepositorySchema.safeParse({ path: raw });
   if (!input.success) {
     // A missing field or a file upload is not echoed at all.

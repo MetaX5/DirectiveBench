@@ -64,11 +64,20 @@ export function pathFieldError(input: string): string | null {
  * redirect URL or pre-filled into the field again (SPEC-104 FR-104-05). Every way to put a
  * secret into a URL needs one of these characters — user info (`@`), a query (`?`), a fragment
  * (`#`) — or its percent-encoding, whether or not the input is a well-formed URL
- * (`https:/github.com/a/b?access_token=…`, `http//user:token@github.com/…`). The rule depends on
- * the characters only, not on how the action classified the input, so no branch can leak.
+ * (`https:/github.com/a/b?access_token=…`, `http//user:token@github.com/…`). A `%25` (double
+ * encoding) and the fullwidth lookalikes `＠`, `？`, `＃` count too. The rule depends on the
+ * characters only, not on how the action classified the input, so no branch can leak.
  */
 export function mayCarryCredentials(input: string): boolean {
-  return /[@?#]|%(?:40|3f|23)/i.test(input);
+  return /[@?#\uFF20\uFF1F\uFF03]|%(?:40|3f|23|25)/i.test(input);
+}
+
+/**
+ * Whether the input starts like a protocol-relative URL (`//host/…`, `\\host\…`). Such input
+ * is a valid absolute path, so it would otherwise be registered — and stored — as typed.
+ */
+export function looksLikeProtocolRelativeUrl(input: string): boolean {
+  return /^[\\/]{2}/.test(input.trim());
 }
 
 /**
@@ -85,7 +94,7 @@ const URL_ERRORS: Record<RejectedInputCode, string> = {
     'Only public GitHub repositories can be registered by URL so far. Enter https://github.com/<owner>/<repo>.',
   'invalid-url': 'Enter a GitHub repository URL such as https://github.com/<owner>/<repo>.',
   'not-echoed':
-    'This is not a valid local path or GitHub URL. It is not shown again because it contains @, ? or #, which can carry credentials. Enter an absolute path such as /home/you/project or ~/project, or https://github.com/<owner>/<repo>.',
+    'This is not a valid local path or GitHub URL. It is not shown again because it contains @, ? or # (or an encoded form of them), which can carry credentials. Enter an absolute path such as /home/you/project or ~/project, or https://github.com/<owner>/<repo>.',
 };
 
 /** The field error for `?urlError=`, or null for no or an unknown value. */

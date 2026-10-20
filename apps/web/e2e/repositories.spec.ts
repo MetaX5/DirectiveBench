@@ -325,7 +325,7 @@ test.describe('GitHub repositories by URL', () => {
     await register(page, `https:/github.com/acme/skills?access_token=${token}`);
 
     await expect(page.getByTestId('path-error')).toContainText(
-      'It is not shown again because it contains @, ? or #, which can carry credentials.',
+      'It is not shown again because it contains @, ? or # (or an encoded form of them), which can carry credentials.',
     );
     expect(page.url()).toContain('urlError=not-echoed');
     expect(page.url()).not.toContain(token);

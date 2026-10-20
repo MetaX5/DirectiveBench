@@ -254,6 +254,21 @@ against github.com (tested locally only).
   fixed message and an empty field; the token was in none of the 93 browser requests, not in the
   page, `logs/web.log`, the database (no jobs) or any file of the data directory.
 - Lesson: [2026-10-20-guard-secrets-at-the-sink.md](../lessons/2026-10-20-guard-secrets-at-the-sink.md).
+- Independent re-review at `e7357d5` (security focus, `om-code-review`): APPROVE, 1 minor, 3 nits.
+  Fixed:
+  - Minor: `//github.com/acme/repo?access_token=…` is a valid absolute path (`path.isAbsolute`),
+    so it was enqueued as `{ path }` with the token in `jobs.payload` and shown on the page. The
+    action now refuses input that starts like a protocol-relative URL (`//` or `\\`,
+    `looksLikeProtocolRelativeUrl`) **and** may carry credentials, as `invalid-url`, without
+    echoing it. `//srv/share/skills` (no such characters) still registers as a path (test).
+  - Nits: `mayCarryCredentials` also flags `%25` (double encoding) and the fullwidth `＠`, `？`,
+    `＃`; the `not-echoed` message says "(or an encoded form of them)".
+  - Not changed: an invalid path with these characters gets the generic `not-echoed` message
+    (documented trade-off above); `~/x?token=…` remains a path (nobody enters it as a URL).
+  - Gate again: format, lint, typecheck, test (web 144, all 100%), build, verify:pack, e2e 36 —
+    pass. Built CLI: `//github.com/acme/repo?access_token=<tok>` → `?urlError=invalid-url`, and
+    a double-encoded variant → `not-echoed`; empty field, token in no request, page, log or file of
+    the data directory, no job.
 
 ## Lessons recorded
 

@@ -11,6 +11,7 @@ import {
   describeRegistration,
   describeScan,
   lastScanLabel,
+  looksLikeProtocolRelativeUrl,
   mayCarryCredentials,
   pathFieldError,
   providerLabel,
@@ -98,12 +99,25 @@ describe('mayCarryCredentials', () => {
       'https:/github.com/a/b%3ftoken',
       'u%40github.com/a',
       '/a/b%23c',
+      'https:/github.com/a/b%253Ftoken',
+      'https://u:t\uFF20github.com/a/b',
+      '/a\uFF1Fb',
+      '/a\uFF03b',
     ]) {
       expect(mayCarryCredentials(input)).toBe(true);
     }
     for (const input of ['/srv/skills', '~/skills', 'https:/github.com/a/b', 'code/skills', '']) {
       expect(mayCarryCredentials(input)).toBe(false);
     }
+  });
+});
+
+describe('looksLikeProtocolRelativeUrl', () => {
+  it('recognises a leading // or \\\\ only', () => {
+    expect(looksLikeProtocolRelativeUrl(' //github.com/a/b')).toBe(true);
+    expect(looksLikeProtocolRelativeUrl('\\\\server\\share')).toBe(true);
+    expect(looksLikeProtocolRelativeUrl('/srv//skills')).toBe(false);
+    expect(looksLikeProtocolRelativeUrl('~/skills')).toBe(false);
   });
 });
 

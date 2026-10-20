@@ -352,6 +352,12 @@ describe('registerRepositoryAction', () => {
       [`code/skills@${secret}`, 'not-echoed'],
       [`x-access-token:${secret}@github.com:acme/repo.git`, 'unsupported-provider'],
       [`https://github.com/acme/repo%3Ftoken%3D${secret}`, 'invalid-url'],
+      // Valid absolute paths that read as protocol-relative URLs (independent review).
+      [` //github.com/acme/repo?access_token=${secret}`, 'invalid-url'],
+      [`\\\\user:${secret}@github.com\\acme\\repo`, 'invalid-url'],
+      // Double encoding and fullwidth lookalikes are not echoed either.
+      [`https:/github.com/acme/repo%253Ftoken%253D${secret}`, 'not-echoed'],
+      [`https://u:${secret}\uFF20github.com/acme/repo`, 'invalid-url'],
     ];
     for (const [input, code] of cases) {
       const url = await redirectOf(registerRepositoryAction(form({ path: input })));
@@ -362,8 +368,8 @@ describe('registerRepositoryAction', () => {
     expect(next.revalidatePath).not.toHaveBeenCalled();
   });
 
-  it('still registers a valid local path that contains @, ? or #', async () => {
-    for (const path of ['/srv/team@skills', '~/notes/a@b?c#d']) {
+  it('still registers a valid local path with @, ? or #, or a leading //', async () => {
+    for (const path of ['/srv/team@skills', '~/notes/a@b?c#d', '//srv/share/skills']) {
       const url = await redirectOf(registerRepositoryAction(form({ path })));
       const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
       expect(url).toBe(`/repositories?registration=${jobId}`);
