@@ -160,6 +160,7 @@ export async function serve(
   const runner: LocalRunner = new LocalRunner({
     handle,
     fixtureStore: layout.fixtures,
+    cacheDir: layout.cache,
     adapters: createExecutableAdapters(),
     concurrency: config.runner.concurrency,
     keepWorkspaces: config.runner.keepWorkspaces,

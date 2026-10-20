@@ -36,6 +36,7 @@ function createRunner() {
   return new LocalRunner({
     handle,
     fixtureStore: join(dataDir, 'fixtures'),
+    cacheDir: join(dataDir, 'cache'),
     adapters: createExecutableAdapters(),
     workspaceRoot: join(dataDir, 'workspaces'),
   });
@@ -155,6 +156,7 @@ describe('runner lifecycle details', () => {
     const runner = new LocalRunner({
       handle,
       fixtureStore: join(dataDir, 'fixtures'),
+      cacheDir: join(dataDir, 'cache'),
       adapters: new Map([['mock', stubborn]]),
       workspaceRoot: join(dataDir, 'workspaces'),
       shutdownTimeoutMs: 200,

@@ -225,6 +225,7 @@ export async function demoCommand(flags: { dataDir?: string }): Promise<number> 
     const runner = new LocalRunner({
       handle,
       fixtureStore: layout.fixtures,
+      cacheDir: layout.cache,
       adapters: createExecutableAdapters(),
       keepWorkspaces: config.runner.keepWorkspaces,
     });
