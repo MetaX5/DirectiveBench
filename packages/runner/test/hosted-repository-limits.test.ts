@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -129,9 +129,11 @@ describe('scanHostedRepository limits and late failures', () => {
   });
 
   it('fails when the blobs cannot be read from the cache', async () => {
-    const { run } = await prepare();
+    const { run, repository } = await prepare();
     hooks.readFails = true;
     expect(await run()).toMatchObject({ ok: false, code: 'git-failed' });
+    // A failed read deletes the cache.
+    expect(existsSync(join(dataDir, 'cache', 'repos', `${repository.id}.git`))).toBe(false);
   });
 
   it('reports a discovery that fails, and honours a cancellation during discovery', async () => {

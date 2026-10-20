@@ -527,6 +527,8 @@ describe('scanHostedRepository', () => {
     remote.commit({});
     const repository = await registered(remote);
     expect(await scan(repository)).toMatchObject({ ok: false, code: 'git-failed' });
+    // A failed listing deletes the cache.
+    expect(existsSync(cacheOf(repository.id))).toBe(false);
   });
 
   it('runs end to end in the LocalRunner: registration and scan jobs', async () => {

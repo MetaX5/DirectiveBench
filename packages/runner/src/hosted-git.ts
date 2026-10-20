@@ -286,7 +286,12 @@ async function runStep(
   });
   if (result.cancelled) throw new GitCancelledError('git was stopped: the job was cancelled');
   // Messages built from git's errors never name the absolute cache location (FR-105-15).
-  return { ...result, stderr: result.stderr.split(dirname(context.home)).join('<cache>') };
+  const hide = (text: string) => text.split(dirname(context.home)).join('<cache>');
+  return {
+    ...result,
+    stderr: hide(result.stderr),
+    error: result.error === null ? null : hide(result.error),
+  };
 }
 
 /** The typed failure for a git run that did not finish normally, or null when it exited. */

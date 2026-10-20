@@ -26,7 +26,7 @@ import { fakeGit, fakeGitCalls, type FakeAnswer } from './support/hosted-fixture
 // `lstat` stays real but can be made to fail once: git removes temporary files while it runs.
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fsPromises>();
-  return { ...actual, lstat: vi.fn(actual.lstat) };
+  return { ...actual, lstat: vi.fn(actual.lstat), readdir: vi.fn(actual.readdir) };
 });
 
 const posixOnly = it.skipIf(process.platform === 'win32');
@@ -333,6 +333,32 @@ describePosix('hosted git steps with a fake git', () => {
     });
     expect(result).toMatchObject({ ok: false, code: 'cache-limit-exceeded' });
     expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('keeps the cache location out of a failed size check', async () => {
+    const cacheDir = join(dir, 'repos', 'repo_x.git');
+    mkdirSync(join(dir, 'repos'));
+    const { context } = fakeContext(
+      { clone: { creates: { HEAD: 1 }, sleepMs: 30_000 } },
+      { cacheSizePollIntervalMs: 5 },
+    );
+    vi.mocked(fsPromises.readdir).mockRejectedValueOnce(
+      Object.assign(new Error(`EACCES: permission denied, scandir '${cacheDir}'`), {
+        code: 'EACCES',
+      }),
+    );
+    const result = await fetchSnapshot(context, {
+      location: LOCATION,
+      branch: 'main',
+      cacheDir,
+      parentDir: join(dir, 'repos'),
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: 'git-failed',
+      message:
+        "git clone failed: The running check failed: EACCES: permission denied, scandir '<cache>/repos/repo_x.git'",
+    });
   });
 
   it('fails closed on tree entries it does not understand', async () => {

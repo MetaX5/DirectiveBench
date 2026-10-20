@@ -176,8 +176,12 @@ describe('runGitProcess', () => {
         },
       }),
     );
+    // A late failure must not signal a process group that may already belong to another process.
+    const kill = vi.spyOn(process, 'kill');
     fail(new Error('late'));
     await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(kill).not.toHaveBeenCalled();
     expect(result).toMatchObject({ watchTriggered: false, error: null });
   });
 
