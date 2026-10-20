@@ -3,7 +3,7 @@ title: Fix the third Codex review findings on PR #44
 date: 2026-10-19
 agent: Claude Code / claude-opus-5-5
 trigger: coordinator request. The maintainer asked for every Codex adversarial review to be followed by fixes for the valid findings; the third Codex review (gpt-6.1-sol) at 8ee0368 returned two medium findings, both checked as valid by the coordinator
-status: in-progress
+status: completed
 branch: feat/issue-16-scan-local-repository
 specs: [SPEC-102, SPEC-105, SPEC-114]
 ---
@@ -50,11 +50,16 @@ triage comment, and an independent review of the final head.
   BigInt, but silently rewrites `.inf`, `Set`, `Map`, `Date` and `Buffer`.
 - **Fail closed for values `yaml` does not produce with these options** (bigint, undefined,
   non-plain objects): covered by mocking the parser, as the existing non-Error test does.
-- **`MAX_FRONTMATTER_ALIAS_COUNT = 100`** — the `yaml` default, already bounding alias bombs
-  (verified: a 10^6 expansion throws "Excessive alias count"), now pinned. No depth limit: the
+- **`MAX_FRONTMATTER_ALIAS_COUNT = 100`** — the `yaml` default, rejecting exponential alias bombs
+  (verified: a 10^6 expansion throws "Excessive alias count"), now pinned. *Corrected after the
+  review at `2d668f3`: it does not bound size — 99 aliases of a 1 MB string pass it. Fixed in
+  [the next run](2026-10-20-pr-44-review-fixes.md) with `MAX_FRONTMATTER_JSON_BYTES`.* No depth limit: the
   parser itself fails with a `YAMLParseError` at roughly 800 levels of nesting.
 - **Grace of 1 s, as a constant, not an option** (no speculative options). The skipped write is
-  not cancelled: it still lands if the transaction ends while the process lives. Otherwise
+  not cancelled: it lands if the transaction ends while the database stays open, which holds for
+  in-process callers only. *Corrected after the review at `2d668f3`: under `serve` the database is
+  closed once `stop()` returns, so the write fails (now logged as information,
+  `shutdown-interrupt-abandoned`; see [the next run](2026-10-20-pr-44-review-fixes.md)).* Otherwise
   `recoverStaleJobs` marks the jobs `interrupted` at the first runner start after their heartbeat
   is older than 30 s; a restart within 30 s leaves them `running` until a later start — the same
   limitation as after a crash, now documented in SPEC-114 §14.
@@ -128,4 +133,8 @@ triage comment, and an independent review of the final head.
   until a later start (recovery runs only at runner start; same limitation as after a crash,
   SPEC-114 §14). Not filed: SPEC-114 already lists the data-dir lock as an open item, which would
   let a new runner recover its predecessor's jobs immediately.
-- Independent review of the final head: see the PR.
+- Independent review of `8ee0368..2d668f3` (2026-10-19): **request changes** — 1 major (the alias
+  limit does not cap size), 3 minors (the late write does not land under `serve`; the store error
+  blames the artifact for connection failures; one non-JSON value discards the whole frontmatter,
+  undocumented) and 2 nits. All handled in
+  [2026-10-20-pr-44-review-fixes.md](2026-10-20-pr-44-review-fixes.md).
