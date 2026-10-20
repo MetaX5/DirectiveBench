@@ -31,6 +31,10 @@ import { useTestDatabase } from './support/test-database';
 const getHandle = useTestDatabase();
 /** A scan's abort signal that is never aborted. */
 const signal = new AbortController().signal;
+/** Statements one new artifact costs besides its slug: identity, insert, version and occurrence. */
+const STATEMENTS_PER_NEW_ARTIFACT = 8;
+/** Storing 3,000 artifacts takes ~1 s locally; a loaded CI runner can be several times slower. */
+const MANY_ARTIFACTS_TIMEOUT_MS = 30_000;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -243,6 +247,43 @@ describe('importArtifactVersion', () => {
       .from(schema.artifacts)
       .orderBy(schema.artifacts.slug);
     expect(slugs.map((row) => row.slug)).toEqual(['validate', 'validate-2']);
+  });
+
+  it('allocates suffixes for slugs that contain LIKE wildcards or a backslash', async () => {
+    const handle = getHandle();
+    const local = { provider: 'local-directory' as const, name: 'local', location: '/l' };
+    const bundled = { provider: 'bundled-examples' as const, name: 'Bundled', location: '/b' };
+    const importSlug = (repository: typeof local | typeof bundled, slug: string, name = slug) =>
+      importArtifactVersion(handle, artifactInput(name, { repository, slug, name, path: name }));
+    for (const slug of ['a_b', 'axb-2', 'a%b', 'a%b-2', 'azb-3', 'a\\b', 'a', 'a-b', 'a.b']) {
+      await importSlug(local, slug);
+    }
+    // Another provider never matches by slug, and the names differ, so each is a new artifact.
+    const created = [];
+    for (const [slug, name] of [
+      ['a_b', 'one'],
+      ['a_b', 'two'],
+      ['a%b', 'three'],
+      ['a\\b', 'four'],
+      ['axb', 'five'],
+      ['a', 'six'],
+      ['a', 'seven'],
+    ] as const) {
+      created.push((await importSlug(bundled, slug, name)).artifactId);
+    }
+    const rows = await handle.db
+      .select({ id: schema.artifacts.id, slug: schema.artifacts.slug })
+      .from(schema.artifacts);
+    const slugOf = new Map(rows.map((row) => [row.id, row.slug]));
+    expect(created.map((id) => slugOf.get(id))).toEqual([
+      'a_b-2',
+      'a_b-3',
+      'a%b-3',
+      'a\\b-2',
+      'axb',
+      'a-2',
+      'a-3',
+    ]);
   });
 });
 
@@ -655,6 +696,80 @@ describe('applyRepositoryScan', () => {
     expect(await slugsByPath(handle)).toEqual([
       ['Bundled', 'skills/validate', 'validate-2'],
       ['repo', 'skills/validate', 'validate'],
+    ]);
+  });
+
+  // Regression (final Codex review of PR #44): every new artifact probed `base`, `base-2`, … with
+  // one query per candidate, so N same-named artifacts cost about N²/2 queries while the scan held
+  // `BEGIN IMMEDIATE`. Discovery names a nested AGENTS.md by its path, but a monorepo whose
+  // packages each carry a skill with the same frontmatter `name` gives them all one name.
+  it(
+    'allocates sequential slugs to thousands of same-named artifacts with one slug query',
+    async () => {
+      const handle = getHandle();
+      const { repository, jobId } = await runningScan(handle, '/srv/monorepo');
+      const count = 3000;
+      const paths = Array.from({ length: count }, (_, i) => `packages/p${i}/.agents/skills/review`);
+      const prepare = vi.spyOn(handle.sqlite, 'prepare');
+      const summary = await applyRepositoryScan(handle, {
+        repositoryId: repository.id,
+        jobId,
+        signal,
+        artifacts: paths.map((path) => ({ ...scanned(path, path, 'review'), type: 'skill' })),
+      });
+      const statements = prepare.mock.calls.map(([query]) => query);
+      prepare.mockRestore();
+      expect(summary).toEqual({ createdArtifacts: count, createdVersions: count });
+      const slugs = new Map((await slugsByPath(handle)).map(([, path, slug]) => [path, slug]));
+      expect(paths.map((path) => slugs.get(path))).toEqual(
+        paths.map((_, i) => (i === 0 ? 'review' : `review-${i + 1}`)),
+      );
+      // One read of the occupied slugs for the one base; the old loop issued about 4.5 million.
+      expect(statements.filter((query) => query.includes('"artifacts"."slug"'))).toHaveLength(1);
+      expect(statements.length).toBeLessThan(count * STATEMENTS_PER_NEW_ARTIFACT);
+    },
+    MANY_ARTIFACTS_TIMEOUT_MS,
+  );
+
+  it('skips slugs taken by earlier scans, gaps included, and slugs other bases took in this scan', async () => {
+    const handle = getHandle();
+    const first = await runningScan(handle, '/srv/a');
+    await applyRepositoryScan(handle, {
+      repositoryId: first.repository.id,
+      jobId: first.jobId,
+      signal,
+      artifacts: [
+        scanned('AGENTS.md', 'x'),
+        scanned('a/AGENTS.md', 'x'),
+        scanned('b/AGENTS.md', 'x', 'agents md 4'),
+      ],
+    });
+    const second = await runningScan(handle, '/srv/b');
+    await applyRepositoryScan(handle, {
+      repositoryId: second.repository.id,
+      jobId: second.jobId,
+      signal,
+      artifacts: [
+        scanned('1/AGENTS.md', 'x'),
+        // Base `agents-md-6`, read after `agents-md` was: the next `agents-md`s must skip it.
+        scanned('2/AGENTS.md', 'x', 'agents-md-6'),
+        scanned('3/AGENTS.md', 'x'),
+        scanned('4/AGENTS.md', 'x'),
+        // Base `agents-md-3`, read after `agents-md` took that slug in this scan: it gets `-2`.
+        scanned('5/AGENTS.md', 'x', 'agents-md-3'),
+        scanned('6/AGENTS.md', 'x'),
+      ],
+    });
+    expect(await slugsByPath(handle)).toEqual([
+      ['repo', '1/AGENTS.md', 'agents-md-3'],
+      ['repo', '2/AGENTS.md', 'agents-md-6'],
+      ['repo', '3/AGENTS.md', 'agents-md-5'],
+      ['repo', '4/AGENTS.md', 'agents-md-7'],
+      ['repo', '5/AGENTS.md', 'agents-md-3-2'],
+      ['repo', '6/AGENTS.md', 'agents-md-8'],
+      ['repo', 'AGENTS.md', 'agents-md'],
+      ['repo', 'a/AGENTS.md', 'agents-md-2'],
+      ['repo', 'b/AGENTS.md', 'agents-md-4'],
     ]);
   });
 

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, max, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt, max, or, sql } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
 import { createId, hashManifest, nowIso, sha256, slugify } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
@@ -117,17 +117,48 @@ function recomputeFiles(input: Pick<VersionContent, 'files'>): {
   return { files, contentHash: hashManifest(files) };
 }
 
-/** The first free slug of `base`, `base-2`, `base-3`, … (rule 4). */
-async function freeSlug(db: Database, base: string): Promise<string> {
-  for (let suffix = 1; ; suffix += 1) {
-    const candidate = suffix === 1 ? base : `${base}-${suffix}`;
-    const taken = await db
-      .select({ id: artifacts.id })
-      .from(artifacts)
-      .where(eq(artifacts.slug, candidate))
-      .get();
-    if (!taken) return candidate;
-  }
+/**
+ * Allocates rule-4 slugs — the first free of `base`, `base-2`, `base-3`, … — for the new artifacts
+ * of one transaction. The slugs a base can collide with (`base` and every `base-…`) are read once
+ * per base, and later candidates are checked in memory with a per-base cursor, so N same-named
+ * artifacts (a monorepo's nested AGENTS.md files) cost one query instead of about N²/2 (final
+ * Codex review of PR #44). The memory is only valid inside the transaction it was created for:
+ * `BEGIN IMMEDIATE` keeps other writers out, and every artifact inserted meanwhile takes its slug
+ * from this allocator, which records it in the set all bases share.
+ */
+type SlugAllocator = (base: string) => Promise<string>;
+
+function slugAllocator(db: Database): SlugAllocator {
+  const taken = new Set<string>();
+  /** Per base read so far, the next suffix to try; every lower one is taken. */
+  const nextSuffix = new Map<string, number>();
+  return async (base) => {
+    let suffix = nextSuffix.get(base);
+    if (suffix === undefined) {
+      // `base-` up to, not including, `base.`: '.' follows '-', so under the column's BINARY
+      // collation the range holds exactly the slugs that start with `base-`, with no LIKE pattern
+      // to escape, and it is a range scan of the unique slug index.
+      const rows = await db
+        .select({ slug: artifacts.slug })
+        .from(artifacts)
+        .where(
+          or(
+            eq(artifacts.slug, base),
+            and(gte(artifacts.slug, `${base}-`), lt(artifacts.slug, `${base}.`)),
+          ),
+        );
+      for (const row of rows) taken.add(row.slug);
+      suffix = 1;
+    }
+    let candidate = suffix === 1 ? base : `${base}-${suffix}`;
+    while (taken.has(candidate)) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
+    }
+    taken.add(candidate);
+    nextSuffix.set(base, suffix + 1);
+    return candidate;
+  };
 }
 
 interface VersionTarget {
@@ -183,6 +214,7 @@ async function findArtifact(
  */
 async function writeArtifactVersion(
   db: Database,
+  allocateSlug: SlugAllocator,
   target: VersionTarget,
   input: VersionContent,
   recomputed: { files: StoredArtifactFile[]; contentHash: string },
@@ -197,7 +229,7 @@ async function writeArtifactVersion(
     artifact = { id: createId('art') };
     await db.insert(artifacts).values({
       id: artifact.id,
-      slug: await freeSlug(db, target.slug),
+      slug: await allocateSlug(target.slug),
       name: input.name,
       type: input.type,
       description: input.description,
@@ -307,6 +339,7 @@ export async function importArtifactVersion(
     const repositoryId = await upsertRepository(db, input.repository);
     const { createdArtifact: _created, ...result } = await writeArtifactVersion(
       db,
+      slugAllocator(db),
       {
         repositoryId,
         provider: input.repository.provider,
@@ -400,9 +433,11 @@ export async function applyRepositoryScan(
       .get();
     if (!repository) throw new NotFoundError(`Repository ${repositoryId} not found`);
     const summary: RepositoryScanSummary = { createdArtifacts: 0, createdVersions: 0 };
+    const allocateSlug = slugAllocator(db);
     for (const { input, recomputed } of prepared) {
       const result = await writeArtifactVersion(
         db,
+        allocateSlug,
         {
           repositoryId,
           provider: repository.provider,
