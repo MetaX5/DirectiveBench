@@ -211,7 +211,11 @@ export async function registerHostedRepository(
     })
     .onConflictDoUpdate({
       target: [repositories.provider, repositories.location],
-      set: { defaultBranch: input.defaultBranch, updatedAt: now },
+      // A remote that momentarily reports no default branch keeps the known one.
+      set: {
+        defaultBranch: sql`coalesce(excluded.default_branch, ${repositories.defaultBranch})`,
+        updatedAt: now,
+      },
     })
     .returning();
   if (!row) throw new Error(`Repository ${input.location} could not be inserted`);

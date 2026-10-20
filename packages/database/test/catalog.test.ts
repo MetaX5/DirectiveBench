@@ -291,6 +291,9 @@ describe('registerHostedRepository', () => {
       defaultBranch: 'dev',
     });
     expect(await handle.db.$count(schema.repositories)).toBe(1);
+    // A remote that answers without a default branch does not erase the known one.
+    const again = await registerHostedRepository(handle.db, { ...input, defaultBranch: null });
+    expect(again).toMatchObject({ created: false, repository: { defaultBranch: 'dev' } });
   });
 
   it('fails loudly when the insert is dropped', async () => {
