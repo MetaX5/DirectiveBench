@@ -15,13 +15,15 @@ export interface FrontmatterResult {
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 /**
- * The most UTF-8 bytes a frontmatter block (between the `---` lines) may take; a longer block is
- * invalid frontmatter and is never parsed. `yaml`'s duplicate-key check is quadratic in the keys
- * of one mapping and the parse is synchronous, so the 1 MiB primary-file limit let one file block
- * the runner for tens of seconds — past the 30 s stale-job threshold, with cancellation and SIGINT
- * unobserved. Measured for a flat mapping of `kN: 1` keys: 64 KiB (~7 400 keys) parses in about
- * 0.2 s, 128 KiB in 1 s and 256 KiB in 3 s. Real frontmatter is a few hundred bytes, so 64 KiB
- * leaves over 100× headroom while bounding the block on the event loop to a fraction of a second.
+ * The most UTF-8 bytes a frontmatter block (between the `---` lines, CR bytes included) may take;
+ * a longer block is invalid frontmatter and is never parsed. `yaml`'s duplicate-key check is
+ * quadratic in the keys of one mapping and the parse is synchronous, so the 1 MiB primary-file
+ * limit let one file block the runner for tens of seconds — past the 30 s stale-job threshold,
+ * with cancellation and SIGINT unobserved. Measured for a flat mapping of `kN: 1` keys: 64 KiB
+ * (~7 400 keys) parses in about 0.2 s, 128 KiB in 1 s and 256 KiB in 3 s; the densest shape found
+ * under 64 KiB, a flow mapping of ~13 600 one-letter null keys (`{qa, qb, …}`), takes about 0.65 s.
+ * Real frontmatter is a few hundred bytes, so 64 KiB leaves over 100× headroom while bounding one
+ * block on the event loop to under a second, far below the stale-job threshold.
  * Duplicate-key checking stays on: turning it off would change which duplicate keys are accepted.
  */
 export const MAX_FRONTMATTER_SOURCE_BYTES = 64 * 1024;

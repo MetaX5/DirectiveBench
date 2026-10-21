@@ -11,7 +11,7 @@ source: .ai/runs/2026-10-21-issue-49-frontmatter-source-cap.md
 
 `parseFrontmatter` handed the whole frontmatter block — up to the 1 MiB primary-file limit — to
 `yaml`'s `parse`. Its duplicate-key check is quadratic in the keys of one mapping: 64 KiB of
-`kN: 1` keys parsed in 0.2 s, 128 KiB in 1 s, 256 KiB in 3 s, so a 1 MiB block takes tens of seconds (~45 s extrapolated; the issue estimated ~90 s). The
+`kN: 1` keys parsed in 0.2 s (a denser flow mapping of null keys in 0.65 s), 128 KiB in 1 s, 256 KiB in 3 s, so a 1 MiB block takes tens of seconds (~45 s extrapolated; the issue estimated ~90 s). The
 parse is synchronous, so the runner's event loop stopped: no heartbeats (30 s stale threshold), no
 cancellation, no SIGINT (issue #49). The existing limits did not help: the file-size limit was
 sized for content, not for parse cost, and `MAX_FRONTMATTER_JSON_BYTES` runs after the parse.

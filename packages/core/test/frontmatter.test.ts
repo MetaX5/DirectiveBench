@@ -200,7 +200,7 @@ describe('parseFrontmatter', () => {
   // Regression (#49): `yaml`'s duplicate-key check is quadratic in the keys of one mapping and the
   // parse is synchronous, so a 1 MiB block of ~110 000 keys blocked the event loop for tens of seconds.
   it(
-    'rejects a 1 MiB block with many keys quickly, without parsing it',
+    'rejects a 1 MiB block with many keys without parsing it',
     async () => {
       const lines: string[] = [];
       for (let size = 0; size < 1024 * 1024; size += lines[lines.length - 1]!.length + 1) {
@@ -211,13 +211,13 @@ describe('parseFrontmatter', () => {
       const parseSpy = vi.fn(parse);
       vi.doMock('yaml', () => ({ parse: parseSpy }));
       const { parseFrontmatter: parseWithSpy } = await import('../src/frontmatter');
-      const started = performance.now();
       expect(parseWithSpy(`---\n${lines.join('\n')}\n---\n# Body\n`)).toEqual({
         frontmatter: {},
         body: '# Body\n',
         error: `frontmatter is longer than ${MAX_FRONTMATTER_SOURCE_BYTES} bytes`,
       });
-      expect(performance.now() - started).toBeLessThan(1_000);
+      // The parser is never reached, so the time no longer depends on the keys; no wall-clock
+      // bound, which a loaded CI runner could break (see the timing-tests lesson).
       expect(parseSpy).not.toHaveBeenCalled();
     },
     LARGE_SOURCE_TIMEOUT_MS,

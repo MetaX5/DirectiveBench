@@ -29,7 +29,7 @@ frontmatter (FR-102-05); keep `uniqueKeys` on; keep `MAX_FRONTMATTER_JSON_BYTES`
 - **Cap value 64 KiB** (`MAX_FRONTMATTER_SOURCE_BYTES`), the low end of the issue's 64–256 KiB
   range. Measured `yaml.parse` on a flat mapping of `kN: 1` keys (macOS laptop, Node 24):
   16 KiB 31 ms, 32 KiB 71 ms, 64 KiB 207 ms, 128 KiB 999 ms, 256 KiB 2980 ms (with
-  `uniqueKeys: false`: 12/18/61/58/128 ms). 64 KiB keeps one block to ~0.2 s on the event loop;
+  `uniqueKeys: false`: 12/18/61/58/128 ms). 64 KiB keeps a flat block to ~0.2 s on the event loop (the densest shape found by the review, a flow mapping of ~13 600 null keys, ~0.65 s);
   256 KiB would still allow 3 s per file. Real frontmatter is a few hundred bytes.
 - **Counted in UTF-8 bytes** (`Buffer.byteLength`), like the other byte limits.
 - **Warning text** `frontmatter is longer than 65536 bytes`, shown as
@@ -78,6 +78,22 @@ frontmatter (FR-102-05); keep `uniqueKeys` on; keep `MAX_FRONTMATTER_JSON_BYTES`
   rewritten in the house layout (as in #68, #71–#73), `skip-qa` was replaced by `needs-qa`, and the
   rule was added to `AGENTS.md` §4 and recorded as a lesson.
 
+## Review
+
+Independent `om-code-review` reviewer (separate agent) at `53c591f`: **APPROVE**, 0 blockers, 0
+majors, 2 minors, 3 nits. All addressed:
+
+- Minor: the cap was justified by the typical shape (0.2 s); the densest shape it measured under
+  64 KiB (a flow mapping of ~13 600 null keys) takes ~0.65 s. The code, SPEC-102 §12, this log and
+  the lesson now cite it; 64 KiB stays, as it bounds one block to under a second.
+- Minor: the 1 MiB test's `< 1 s` wall-clock bound is removed; the spy proves `parse` is not
+  called, and a fixed bound is flaky on a loaded runner.
+- Nit: §12 and the code comment say the cap counts CR bytes of a CRLF file.
+- Nit: the `AGENTS.md` PR-layout rule is outside #49's scope; it is in this PR because AGENTS.md §16
+  requires a human correction to land with the work it corrected, and the PR description says so.
+- Nit: `packages/benchmark-engine/src/load.ts:71` parses benchmark YAML with no source cap and no
+  pinned `maxAliasCount`; its input is the bundled example only (trusted), so it is a follow-up.
+
 ## Lessons recorded
 
 - [2026-10-21-cap-input-before-a-superlinear-sync-parse.md](../lessons/2026-10-21-cap-input-before-a-superlinear-sync-parse.md)
@@ -85,7 +101,10 @@ frontmatter (FR-102-05); keep `uniqueKeys` on; keep `MAX_FRONTMATTER_JSON_BYTES`
 
 ## Follow-ups
 
-- Worst case per scan is still ~0.2 s × up to 10 000 candidates (`maxCandidatesPerScan`); between
+- Cap the benchmark-definition YAML parse (`packages/benchmark-engine/src/load.ts:71`) before
+  benchmark suites can come from scanned repositories.
+
+- Worst case per scan is still ~0.65 s × up to 10 000 candidates (`maxCandidatesPerScan`); between
   files discovery awaits I/O, so heartbeats and cancellation are observed. A scan-wide parse-time
   bound was not added (out of scope for #49).
 - The macOS `EILSEQ` failure in `hosted-repository.test.ts` makes `pnpm test` red on macOS
