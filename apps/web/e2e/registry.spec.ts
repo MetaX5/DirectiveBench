@@ -102,6 +102,8 @@ test.describe.serial('artifact registry', () => {
     await expect(skill.getByRole('cell').nth(1)).toHaveText('skill');
     await expect(skill.getByRole('cell').nth(4)).toHaveText('registry-team');
     await expect(skill.getByRole('cell').nth(5)).toHaveText('1');
+    // Never evaluated: no score and no mock label (FR-101-14 labels only mock results).
+    await expect(skill.getByTestId('latest-score')).toHaveText('—');
     // Same-named instructions from two repositories stay two artifacts (SPEC-101 §8.3).
     for (const repository of ['registry-team', 'registry-client']) {
       const row = artifactRow(page, 'AGENTS.md', repository);

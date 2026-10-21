@@ -9,6 +9,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   EmptyState,
+  MockBadge,
   NotInitialized,
   PageHeader,
   StatusBadge,
@@ -212,7 +213,12 @@ export default async function ArtifactsPage({
                       >
                         Not validated
                       </TD>
-                      <TD className="text-right tabular-nums">{formatScore(e?.candidateScore)}</TD>
+                      <TD className="text-right tabular-nums" data-testid="latest-score">
+                        <div className="flex flex-col items-end gap-1">
+                          <span>{formatScore(e?.candidateScore)}</span>
+                          {e?.agentAdapterId === 'mock' ? <MockBadge /> : null}
+                        </div>
+                      </TD>
                       <TD className="text-right tabular-nums">{formatDelta(e?.delta)}</TD>
                       <TD className="text-xs text-muted-foreground">
                         {e ? formatDate(e.finishedAt ?? e.startedAt) : '—'}

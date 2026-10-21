@@ -36,6 +36,10 @@ test.describe('artifacts', () => {
     await expect(row).toContainText('Security');
     await expect(row).toContainText('Code Quality');
     await expect(row.locator('[data-status]')).toHaveAttribute('data-status', 'passed');
+    // The latest score comes from the mock agent, so it carries the mock label (FR-101-14).
+    const score = row.getByTestId('latest-score');
+    await expect(score).toContainText('100%');
+    await expect(score.getByText(MOCK_LABEL)).toBeVisible();
     await row.getByRole('link', { name: DEMO_ARTIFACT }).click();
 
     await expect(page).toHaveURL(/\/artifacts\/[\w-]+$/);
