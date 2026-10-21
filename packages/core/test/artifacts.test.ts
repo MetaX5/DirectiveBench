@@ -167,6 +167,26 @@ describe('parseArtifactFile', () => {
     expect(parseArtifactFile('AGENTS.md', body).references).toEqual(['docs/a.md', 'docs/b.md']);
   });
 
+  it('extracts references whose target contains brackets and ignores broken nesting', () => {
+    const body = '[page](app/[id]/page.tsx) [a[b](docs/c.md) [a](b](c) [![img](img.png)](link.md)';
+    expect(parseArtifactFile('AGENTS.md', body).references).toEqual([
+      'app/[id]/page.tsx',
+      'docs/c.md',
+      'img.png',
+    ]);
+  });
+
+  it.each([
+    ['a run of [', '['.repeat(1024 * 1024)],
+    ['a run of [](', '[](!'.repeat(256 * 1024)],
+  ])('extracts references in linear time from %s without a closing parenthesis', (_, body) => {
+    // The previous pattern took minutes on 1 MiB (the primary file limit) of such text; this one
+    // takes milliseconds, so the bound leaves room for a slow CI runner.
+    const started = performance.now();
+    expect(parseArtifactFile('AGENTS.md', body).references).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(10_000);
+  });
+
   it('rejects unknown paths', () => {
     expect(() => parseArtifactFile('README.md', 'x')).toThrow(/Not a recognised/);
   });
