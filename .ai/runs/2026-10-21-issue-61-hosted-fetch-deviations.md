@@ -180,12 +180,19 @@ measured (below).
   `timeouts.readTotal = 0` → `timeout` before the first batch, no read. Red first: both fail with
   the `b7fe0cc` `hosted-repository.ts`.
 - **Verification:** `pnpm format:check`, `pnpm lint`, `pnpm typecheck` pass; `pnpm test` 7/7,
-  100% everywhere (runner 221 tests); `pnpm build`, `pnpm verify:pack` pass; `pnpm test:e2e` 37
+  100% everywhere (runner 222 tests after the review round below); `pnpm build`, `pnpm verify:pack` pass; `pnpm test:e2e` 37
   passed. Real built CLI (`serve`, fresh data dir, UI driven by Playwright, github.com reachable):
   `anthropics/skills` registered and scanned at `dbd4588f9e10`, 20 artifacts,
   `sync_status = ok`.
 - Specs: SPEC-105 §9.1 (step 5 bounds, why not before download, why not local), §12, §13 (content
   limits row), §20.
+- **Independent security review at `7c642f8`** (`om-code-review`, own worktree; lint, typecheck,
+  test passed): APPROVE, 0 blockers, 0 majors, 3 minors, 1 nit. Fixed: the per-batch cap
+  `min(read, left)` is now proven (the batching test records every batch's time limit, all within
+  a 30 s `readTotal` and the last below it); the deadline test asserts the cache is deleted; a
+  total exactly at the read limit scans (pins `>`). Specified, not changed: a spent deadline
+  deletes the cache like any failed read, so a slow-to-read repository is downloaded again on the
+  next scan (bounded by the clone size limit) — SPEC-105 §9.1.
 
 ## Lessons recorded
 

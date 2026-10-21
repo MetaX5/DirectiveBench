@@ -24,6 +24,8 @@ const hooks = vi.hoisted(() => ({
   readFails: false,
   /** The blob IDs of every `readBlobs` call, in order. */
   reads: [] as string[][],
+  /** The time limit of every `readBlobs` call, in order. */
+  readTimeouts: [] as number[],
 }));
 vi.mock('@directivebench/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>();
@@ -54,6 +56,7 @@ vi.mock('../src/hosted-git', async (importOriginal) => {
     ...actual,
     readBlobs: (...args: Parameters<typeof actual.readBlobs>) => {
       hooks.reads.push([...args[2].keys()]);
+      hooks.readTimeouts.push(args[3]);
       return hooks.readFails
         ? Promise.resolve({
             ok: false,
@@ -84,6 +87,7 @@ afterEach(() => {
   hooks.tooManyCandidates = false;
   hooks.readFails = false;
   hooks.reads = [];
+  hooks.readTimeouts = [];
   handle.close();
   rmSync(dataDir, { recursive: true, force: true });
   rmSync(remotes, { recursive: true, force: true });
@@ -166,8 +170,13 @@ describe('scanHostedRepository limits and late failures', () => {
     const { run } = await prepare(undefined, {
       files: { 'skill/assets/logo.png': LOGO, 'skill/notes.md': 'notes\n' },
       readBatchBytes: 40,
+      readTotalMs: 30_000,
     });
     expect(await run()).toMatchObject({ ok: true, discovered: 2 });
+    // Every batch gets what is left of the one deadline, never a fresh 60 s `read`.
+    expect(hooks.readTimeouts).toHaveLength(3);
+    for (const timeout of hooks.readTimeouts) expect(timeout).toBeLessThanOrEqual(30_000);
+    expect(hooks.readTimeouts[2]).toBeLessThan(30_000);
     // Four blobs: the 4 KiB logo alone (above the batch size), the others up to 40 bytes together.
     expect(hooks.reads.map((oids) => oids.length).sort()).toEqual([1, 1, 2]);
     expect(hooks.reads.flat()).toHaveLength(4);
@@ -209,6 +218,14 @@ describe('scanHostedRepository limits and late failures', () => {
     });
     expect(hooks.reads).toEqual([]);
     expect(await getRepository(handle.db, repository.id)).toMatchObject({ syncStatus: 'error' });
+    // Like a read that times out, a spent deadline deletes the cache (SPEC-105 §13).
+    expect(existsSync(join(dataDir, 'cache', 'repos', `${repository.id}.git`))).toBe(false);
+  });
+
+  it('reads candidates whose total is exactly the read limit', async () => {
+    // AGENTS.md (8 bytes) and SKILL.md (31 bytes).
+    const { run } = await prepare(undefined, { readTotalBytes: 39 });
+    expect(await run()).toMatchObject({ ok: true, discovered: 2 });
   });
 
   it('aborts before any download when there are too many candidates', async () => {
