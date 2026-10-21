@@ -116,7 +116,10 @@ function firstHeading(body: string): string | null {
 
 function extractReferences(body: string): string[] {
   const refs = new Set<string>();
-  for (const match of body.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+  // The link text cannot contain `[` and the target cannot contain `](`, so every candidate link
+  // ends where the next one starts: otherwise a run of `[` or `[](` without a closing `)` is
+  // rescanned from each of them, which is quadratic in its length.
+  for (const match of body.matchAll(/\[[^[\]]*\]\(((?:[^)\s\]]|\](?!\())+)\)/g)) {
     const target = match[1];
     if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) continue;
     refs.add(target.replace(/#.*/, ''));
