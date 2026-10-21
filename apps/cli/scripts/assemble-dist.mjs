@@ -48,7 +48,11 @@ cpSync(join(repoRoot, 'packages', 'database', 'migrations'), join(dist, 'migrati
   recursive: true,
 });
 rmSync(join(dist, 'examples'), { recursive: true, force: true });
-cpSync(join(repoRoot, 'examples'), join(dist, 'examples'), { recursive: true });
+// Running the examples' tests locally leaves a vitest cache in examples/node_modules.
+cpSync(join(repoRoot, 'examples'), join(dist, 'examples'), {
+  recursive: true,
+  filter: (source) => !relative(repoRoot, source).split(/[\\/]/).includes('node_modules'),
+});
 cpSync(join(repoRoot, 'LICENSE'), join(cliDir, 'LICENSE'));
 
 console.log(`Assembled ${basename(dist)}/ (web, migrations, examples) and LICENSE`);

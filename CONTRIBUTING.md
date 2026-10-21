@@ -3,6 +3,8 @@
 Thank you for your interest in DirectiveBench. The project is in an early bootstrap phase, so
 the specifications in [`.ai/specs/`](.ai/specs/README.md) matter as much as the code.
 
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Workflow
 
 1. Read [`AGENTS.md`](AGENTS.md) — it describes the workflow for humans and AI agents alike:

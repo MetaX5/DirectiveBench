@@ -58,6 +58,7 @@ for (const required of [
 check(!files.some((f) => /(^|\/)\.env/.test(f)), 'contains no .env files');
 check(!files.some((f) => f.includes('/.next/cache/')), 'contains no Next.js build cache');
 check(!files.some((f) => f.endsWith('.map')), 'contains no source maps');
+check(!files.some((f) => f.includes('/node_modules/')), 'contains no node_modules');
 const manifest = JSON.parse(run('tar', ['-xOzf', tarball, 'package/package.json']));
 check(manifest.license === 'MIT', 'package.json license is MIT');
 check(
