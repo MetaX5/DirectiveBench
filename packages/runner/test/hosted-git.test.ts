@@ -8,6 +8,7 @@ import {
   HTTPS_TRANSPORT,
   NOT_FOUND_OR_NOT_PUBLIC,
   buildHostedGitEnv,
+  cacheFailure,
   checkGitVersion,
   classifyRemoteFailure,
   detectDefaultBranch,
@@ -208,6 +209,11 @@ describe('directorySize and ensurePrivateDirectory', () => {
       Object.assign(new Error('gone'), { code: 'ENOENT' }),
     );
     expect(await directorySize(join(dir, 'sub'))).toBe(0);
+    // Any other error cannot vouch for the size: it is thrown (fail closed).
+    vi.mocked(fsPromises.lstat).mockRejectedValueOnce(
+      Object.assign(new Error('denied'), { code: 'EACCES' }),
+    );
+    await expect(directorySize(join(dir, 'sub'))).rejects.toMatchObject({ code: 'EACCES' });
   });
 
   posixOnly('creates or tightens a directory to user-only permissions', async () => {
@@ -268,9 +274,10 @@ describePosix('hosted git steps with a fake git', () => {
       code: 'timeout',
       message: 'git version did not finish within the time limit.',
     });
-    expect(await checkGitVersion({ ...context, git: join(dir, 'missing-git') })).toMatchObject({
+    expect(await checkGitVersion({ ...context, git: join(dir, 'missing-git') })).toEqual({
+      ok: false,
       code: 'git-failed',
-      message: expect.stringMatching(/^git version failed: .*ENOENT/),
+      message: 'git version failed: git could not be started (ENOENT).',
     });
   });
 
@@ -339,29 +346,49 @@ describePosix('hosted git steps with a fake git', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
-  it('keeps the cache location out of a failed size check', async () => {
+  it('throws a size check that fails during a download, after stopping git', async () => {
     const cacheDir = join(dir, 'repos', 'repo_x.git');
     mkdirSync(join(dir, 'repos'));
     const { context } = fakeContext(
       { clone: { creates: { HEAD: 1 }, sleepMs: 30_000 } },
       { cacheSizePollIntervalMs: 5 },
     );
-    vi.mocked(fsPromises.readdir).mockRejectedValueOnce(
-      Object.assign(new Error(`EACCES: permission denied, scandir '${cacheDir}'`), {
-        code: 'EACCES',
-      }),
-    );
-    const result = await fetchSnapshot(context, {
-      location: LOCATION,
-      branch: 'main',
-      cacheDir,
+    const denied = Object.assign(new Error(`EACCES: permission denied, scandir '${cacheDir}'`), {
+      code: 'EACCES',
     });
-    expect(result).toEqual({
-      ok: false,
-      code: 'git-failed',
-      message:
-        "git clone failed: The running check failed: EACCES: permission denied, scandir '<cache>/repos/repo_x.git'",
+    vi.mocked(fsPromises.readdir).mockRejectedValueOnce(denied);
+    const started = Date.now();
+    // Thrown, so the scan reports it as a cache failure (cacheFailure) instead of git's error.
+    await expect(
+      fetchSnapshot(context, { location: LOCATION, branch: 'main', cacheDir }),
+    ).rejects.toBe(denied);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('fails closed when the cache cannot be checked or deleted', async () => {
+    const cacheDir = join(dir, 'repos', 'repo_x.git');
+    const target = { location: LOCATION, branch: 'main', cacheDir };
+    const denied = Object.assign(new Error(`EACCES: permission denied, lstat '${cacheDir}'`), {
+      code: 'EACCES',
     });
+    const { git, context } = fakeContext({ clone: { creates: { HEAD: 1 } } });
+    // An lstat that fails for another reason than absence is not "absent: clone".
+    vi.mocked(fsPromises.lstat).mockRejectedValueOnce(denied);
+    await expect(fetchSnapshot(context, target)).rejects.toBe(denied);
+    expect(fakeGitCalls(git)).toEqual([]);
+  });
+
+  it('names a fixed cause and only the error code for a cache that cannot be used', () => {
+    const message = (code: string) =>
+      `DirectiveBench could not use its cache of hosted repositories in the data directory (${code}). Check that the data directory is writable and the disk has free space.`;
+    expect(
+      cacheFailure(
+        Object.assign(new Error("ENOSPC: no space left, write '/data/x'"), { code: 'ENOSPC' }),
+      ),
+    ).toEqual({ ok: false, code: 'git-failed', message: message('ENOSPC') });
+    for (const error of [new Error('/data/cache'), null, 'text', { code: 'not a code /data' }]) {
+      expect(cacheFailure(error).message).toBe(message('unknown error'));
+    }
   });
 
   it('fails closed on tree entries it does not understand', async () => {

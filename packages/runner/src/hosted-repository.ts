@@ -22,6 +22,8 @@ import {
   CACHE_SIZE_POLL_INTERVAL_MS,
   HOSTED_CACHE_LIMIT_BYTES,
   HOSTED_GIT_TIMEOUTS,
+  GitCancelledError,
+  cacheFailure,
   checkGitVersion,
   detectDefaultBranch,
   ensurePrivateDirectory,
@@ -34,6 +36,7 @@ import {
   type HostedGitFailure,
   type HostedGitTimeouts,
   type HostedGitTransport,
+  type SnapshotEntry,
 } from './hosted-git';
 import { findGitExecutable } from './repository-registration';
 import { ScanCancelledError, storeScanResults, toScannedArtifact } from './repository-scan';
@@ -88,6 +91,37 @@ async function prepare(
   return tooOld ?? { context, reposDir };
 }
 
+/** The fixed message of an error without an errno code in the git and cache steps (fail closed). */
+const UNEXPECTED_HOSTED_FAILURE =
+  'The GitHub step failed unexpectedly; nothing was stored. Try again, and report the problem if it persists.';
+
+/**
+ * Runs the git and cache steps of a hosted job and turns an error they throw — DirectiveBench's
+ * own cache below `<dataDir>/cache` that cannot be created, measured, read or removed — into
+ * {@link cacheFailure}, a fixed message with the error code (fail closed, SPEC-105 §13); an error
+ * without an errno code gets {@link UNEXPECTED_HOSTED_FAILURE} instead. A
+ * cancelled or shut-down job stays a cancellation: git's {@link GitCancelledError} is rethrown,
+ * and so is any error once the job's signal has fired.
+ */
+async function onCacheError<T>(
+  signal: AbortSignal,
+  steps: () => Promise<T>,
+): Promise<T | HostedGitFailure> {
+  try {
+    return await steps();
+  } catch (error) {
+    if (error instanceof GitCancelledError) throw error;
+    if (signal.aborted) throw new GitCancelledError('git was stopped: the job was cancelled');
+    // A file-system error carries an errno code (`EACCES`); Node's own `ERR_*` codes (an invalid
+    // argument, …) and errors without a code are not the cache's fault.
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (typeof code === 'string' && !code.startsWith('ERR_')) {
+      return cacheFailure(error);
+    }
+    return { ok: false, code: 'git-failed', message: UNEXPECTED_HOSTED_FAILURE };
+  }
+}
+
 /**
  * Executes the `repository-registration` job of a URL (SPEC-104 FR-104-02, FR-104-07): asks the
  * remote for its default branch with `ls-remote` — nothing is downloaded, no credential is used
@@ -102,9 +136,11 @@ export async function registerHostedUrl(
 ): Promise<Exclude<RepositoryRegistrationResult, { code: 'confirmation-required' }>> {
   const parsed = parseRepositoryUrl(url);
   if (!parsed.ok) return { ok: false, code: 'invalid-url', message: parsed.message };
-  const prepared = await prepare(options);
-  if (!('context' in prepared)) return prepared;
-  const detected = await detectDefaultBranch(prepared.context, parsed.location);
+  const detected = await onCacheError(options.signal, async () => {
+    const prepared = await prepare(options);
+    if (!('context' in prepared)) return prepared;
+    return detectDefaultBranch(prepared.context, parsed.location);
+  });
   if (!detected.ok) return detected;
   const { repository, created } = await registerHostedRepository(handle.db, {
     provider: parsed.provider,
@@ -121,13 +157,87 @@ type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
 const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
+ * Steps 1–5 of SPEC-105 §9.1 for one repository: prepares the cache, fetches the snapshot, lists
+ * and selects the candidate files, downloads exactly their blobs and reads those within the
+ * per-file limit. A failure is returned, not recorded: the caller records it once. Errors of the
+ * cache itself are thrown (see {@link onCacheError}).
+ */
+async function fetchCandidates(
+  options: HostedRepositoryOptions,
+  repository: { id: string; location: string; branch: string },
+): Promise<
+  | {
+      ok: true;
+      commitSha: string;
+      entries: SnapshotEntry[];
+      contents: Map<string, Buffer | number>;
+    }
+  | ScanFailure
+> {
+  const prepared = await prepare(options);
+  if (!('context' in prepared)) return prepared;
+  const { context } = prepared;
+  const cacheDir = join(prepared.reposDir, `${repository.id}.git`);
+  const target = { location: repository.location, branch: repository.branch, cacheDir };
+
+  const snapshot = await fetchSnapshot(context, target);
+  if (!snapshot.ok) return snapshot;
+  // A git step that fails on the cache (listing, blob download, read) deletes it: it may be over
+  // the size limit or inconsistent, and the next scan starts from a fresh clone (SPEC-105 §13).
+  const drop = async (result: ScanFailure): Promise<ScanFailure> => {
+    await rm(cacheDir, { recursive: true, force: true });
+    return result;
+  };
+  const listing = await listSnapshot(context, cacheDir, snapshot.commitSha);
+  if (!listing.ok) return drop(listing);
+
+  let selected: string[];
+  try {
+    selected = selectCandidateFiles(listing.entries);
+  } catch (error) {
+    // Too many candidates (FR-102-16) or a crafted path: nothing is downloaded.
+    const reason =
+      error instanceof DiscoveryLimitError ? error.message : 'The repository tree is invalid.';
+    return { ok: false, code: 'scan-failed', message: reason };
+  }
+  const oidOf = new Map(listing.entries.map((entry) => [entry.path, entry.oid]));
+  const oids = [...new Set(selected.map((path) => String(oidOf.get(path))))].sort();
+  const blobs = await fetchBlobs(context, target, oids);
+  if (!blobs.ok) return drop(blobs);
+
+  // Blobs above the largest per-file limit are never loaded: discovery only needs their size.
+  const perFileLimit = Math.max(
+    DISCOVERY_LIMITS.maxPrimaryFileBytes,
+    DISCOVERY_LIMITS.maxSupportingFileBytes,
+  );
+  const loadable = new Map([...blobs.sizes].filter(([, size]) => size <= perFileLimit));
+  const loadBytes = [...loadable.values()].reduce((sum, size) => sum + size, 0);
+  if (loadBytes > DISCOVERY_LIMITS.maxScanBytes) {
+    return {
+      ok: false,
+      code: 'scan-failed',
+      message: `Discovery aborted: the candidate files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
+    };
+  }
+  const read = await readBlobs(context, cacheDir, loadable);
+  if (!read.ok) return drop(read);
+  const contents = new Map<string, Buffer | number>();
+  for (const path of selected) {
+    const oid = String(oidOf.get(path));
+    contents.set(path, read.contents.get(oid) ?? Number(blobs.sizes.get(oid)));
+  }
+  return { ok: true, commitSha: snapshot.commitSha, entries: listing.entries, contents };
+}
+
+/**
  * Executes the `repository-scan` job of a hosted repository (SPEC-105 FR-105-05/06, §9.1): fetches
  * the commit and trees of the branch into the bare, blob-less, shallow cache
  * `<cacheDir>/repos/<repositoryId>.git`, lists the commit, selects the candidate files with the
  * discovery rules (SPEC-102), downloads exactly their blobs, reads them from the cache and stores
  * what discovery finds with the commit recorded on every occurrence. No working tree or sparse
  * checkout exists, and nothing from the repository runs. Every failure records `sync_status =
- * 'error'` with a message free of credentials and absolute paths.
+ * 'error'` with a message free of credentials and absolute paths — a cache below `<dataDir>/cache`
+ * that cannot be used included (issue #57); a cancellation records nothing.
  */
 export async function scanHostedRepository(
   handle: DatabaseHandle,
@@ -157,62 +267,15 @@ export async function scanHostedRepository(
         'No default branch was detected for this repository (it may be empty). Register its URL again once it has commits: that detects the default branch again.',
     });
   }
-  const prepared = await prepare(options);
-  if (!('context' in prepared)) return fail(prepared);
-  const { context } = prepared;
-  const cacheDir = join(prepared.reposDir, `${repository.id}.git`);
-  const target = { location: repository.location, branch, cacheDir };
-
-  const snapshot = await fetchSnapshot(context, target);
-  if (!snapshot.ok) return fail(snapshot);
-  // A git step that fails on the cache (listing, blob download, read) deletes it: it may be over
-  // the size limit or inconsistent, and the next scan starts from a fresh clone (SPEC-105 §13).
-  const drop = async (result: ScanFailure): Promise<ScanFailure> => {
-    await rm(cacheDir, { recursive: true, force: true });
-    return fail(result);
-  };
-  const listing = await listSnapshot(context, cacheDir, snapshot.commitSha);
-  if (!listing.ok) return drop(listing);
-
-  let selected: string[];
-  try {
-    selected = selectCandidateFiles(listing.entries);
-  } catch (error) {
-    // Too many candidates (FR-102-16) or a crafted path: nothing is downloaded.
-    const reason =
-      error instanceof DiscoveryLimitError ? error.message : 'The repository tree is invalid.';
-    return fail({ ok: false, code: 'scan-failed', message: reason });
-  }
-  const oidOf = new Map(listing.entries.map((entry) => [entry.path, entry.oid]));
-  const oids = [...new Set(selected.map((path) => String(oidOf.get(path))))].sort();
-  const blobs = await fetchBlobs(context, target, oids);
-  if (!blobs.ok) return drop(blobs);
-
-  // Blobs above the largest per-file limit are never loaded: discovery only needs their size.
-  const perFileLimit = Math.max(
-    DISCOVERY_LIMITS.maxPrimaryFileBytes,
-    DISCOVERY_LIMITS.maxSupportingFileBytes,
+  const fetched = await onCacheError(options.signal, () =>
+    fetchCandidates(options, { location: repository.location, branch, id: repository.id }),
   );
-  const loadable = new Map([...blobs.sizes].filter(([, size]) => size <= perFileLimit));
-  const loadBytes = [...loadable.values()].reduce((sum, size) => sum + size, 0);
-  if (loadBytes > DISCOVERY_LIMITS.maxScanBytes) {
-    return fail({
-      ok: false,
-      code: 'scan-failed',
-      message: `Discovery aborted: the candidate files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
-    });
-  }
-  const read = await readBlobs(context, cacheDir, loadable);
-  if (!read.ok) return drop(read);
-  const contents = new Map<string, Buffer | number>();
-  for (const path of selected) {
-    const oid = String(oidOf.get(path));
-    contents.set(path, read.contents.get(oid) ?? Number(blobs.sizes.get(oid)));
-  }
+  if (!fetched.ok) return fail(fetched);
+  const { commitSha, entries, contents } = fetched;
 
   let discovery;
   try {
-    discovery = await discoverArtifactsInTree(listing.entries, contents, {
+    discovery = await discoverArtifactsInTree(entries, contents, {
       signal: options.signal,
     });
   } catch (error) {
@@ -229,7 +292,7 @@ export async function scanHostedRepository(
     jobId: job.jobId,
     repositoryId: repository.id,
     artifacts: discovery.artifacts.map(toScannedArtifact),
-    commitSha: snapshot.commitSha,
+    commitSha,
     signal: options.signal,
   });
   if (!stored.ok) return stored;
@@ -243,7 +306,7 @@ export async function scanHostedRepository(
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
     skippedUserLevelFolders: [],
-    commitSha: snapshot.commitSha,
+    commitSha,
     durationMs: Math.round(performance.now() - started),
   };
 }

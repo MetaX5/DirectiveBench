@@ -56,7 +56,7 @@ describe('runGitProcess', () => {
       options({ stdin: Buffer.alloc(16 * 1024 * 1024) }),
     );
     expect(result.exitCode).toBe(0);
-    expect(result.error).toMatch(/^git's input could not be written: /);
+    expect(result.error).toMatch(/^git's input could not be written \(E[A-Z]+\)\.$/);
   });
 
   it('does not start git for an aborted signal', async () => {
@@ -72,7 +72,8 @@ describe('runGitProcess', () => {
 
   it('reports a git that cannot be started, also when cancelled before it failed', async () => {
     const result = await runGitProcess('/nonexistent/git', [], options());
-    expect(result.error).toMatch(/ENOENT/);
+    // The code only: Node's message names git's absolute path ("spawn /nonexistent/git ENOENT").
+    expect(result.error).toBe('git could not be started (ENOENT).');
     const controller = new AbortController();
     const pending = runGitProcess('/nonexistent/git', [], options({ signal: controller.signal }));
     controller.abort();
@@ -80,6 +81,11 @@ describe('runGitProcess', () => {
       cancelled: true,
       error: expect.stringMatching(/ENOENT/),
     });
+  });
+
+  posixOnly('reports a working directory that is gone without naming any path', async () => {
+    const result = await runGitProcess(SH, ['-c', 'true'], options({ cwd: '/nonexistent/cache' }));
+    expect(result.error).toBe('git could not be started (ENOENT).');
   });
 
   posixOnly('kills git on timeout, with SIGKILL when it ignores SIGTERM', async () => {
@@ -131,14 +137,17 @@ describe('runGitProcess', () => {
         watch: {
           intervalMs: 5,
           exceeded: async () => {
-            throw new Error('EACCES');
+            throw Object.assign(new Error("EACCES: permission denied, scandir '/data/cache'"), {
+              code: 'EACCES',
+            });
           },
         },
       }),
     );
+    // The error's code, never its message (it names absolute paths).
     expect(result).toMatchObject({
       watchTriggered: true,
-      error: 'The running check failed: EACCES',
+      error: 'The running check failed (EACCES).',
     });
   });
 
