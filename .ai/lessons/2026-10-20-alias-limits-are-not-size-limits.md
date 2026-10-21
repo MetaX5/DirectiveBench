@@ -38,5 +38,8 @@ bound a batch: many small items can each expand to the cap.
 
 - PR #50 (issue #17): the Markdown preview capped its *input* at 200 000 characters, but padding
   every table row to the header's width turned a 104 KB file into 50 million cells (4.3 s to
-  parse, gigabytes of HTML). The fix keeps each row's own cells, so the output is never larger
-  than the input; `apps/web/test/markdown.test.ts` checks the cell count of that input.
+  parse, gigabytes of HTML). The fix keeps each row's own cells, and (issue #56) a short row gets
+  one trailing cell with a `colspan` for the columns it lacks, so it keeps the header's width
+  while the cell count stays linear in the input (at most two per row line). "Never larger than
+  the input" was the wrong bound to state: a `colspan` cell adds HTML bytes, not cells;
+  `apps/web/test/markdown.test.ts` checks the cell count and parse time of that input.
