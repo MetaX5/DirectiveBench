@@ -127,6 +127,11 @@ These rules are not optional. A task is not done until the applicable steps are 
 - Use the GitHub CLI (`gh`) for pull requests and issues: `gh pr create`, `gh pr view`,
   `gh issue create`. PR descriptions summarise the change, list verification commands with
   results, and link the specs, ADRs and run log involved.
+- PR descriptions use the house layout of the existing PRs — `## Summary`, `## ⚠️ Decision needed`
+  (when open), `## Verification` (a command/result table, red-first proof, real-app run, what was
+  not verified), `## Review` (after review rounds), `## Links`, `## Follow-ups`,
+  `## Decisions touched`, then `Closes #N` — even when an `om-*` skill supplies its own template
+  (see [`.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md`](.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md)).
 - Commit the run log, spec updates and lessons together with the code they describe.
 
 ## 5. Repository map
