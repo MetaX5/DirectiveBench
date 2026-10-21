@@ -41,6 +41,14 @@ Tests must not need credentials or paid API calls; use the deterministic mock ag
 - Imported content and benchmark scripts are untrusted.
 - Add dependencies only when clearly needed.
 
+## Releasing (maintainers)
+
+1. In a pull request, set `version` in `apps/cli/package.json` (and add the changelog entry).
+2. After it merges, create a GitHub release with the tag `v<version>` on `main`; mark it as a
+   pre-release to publish under the npm dist-tag `next`.
+3. The `Release` workflow checks the tag, builds, runs `pnpm verify:pack` and publishes to npm
+   with provenance. Never publish by hand (SPEC-010 §12).
+
 ## License
 
 By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).

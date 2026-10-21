@@ -3,7 +3,7 @@ id: SPEC-010
 title: Local Installation
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-21
 category: foundation
 related: [SPEC-004, SPEC-006, SPEC-007, SPEC-009, SPEC-115, ADR-0001, ADR-0002, ADR-0004, ADR-0008]
 ---
@@ -110,7 +110,21 @@ After the package is installed (or present in the npm cache), DirectiveBench wor
 - Some VPN or endpoint-security tools block loopback ports; use `--port` to pick an allowed port.
 - Future outbound integrations (git hosts, model providers) should honour `HTTPS_PROXY`/`NO_PROXY`. Assumption — requires validation per integration.
 
-## 12. Implementation status
+## 12. Publishing releases
+
+- The `directivebench` package is published to npm from CI only, by `.github/workflows/release.yml`
+  when a GitHub release is published. The first version (0.1.0) was published by hand because
+  npm configures a trusted publisher only for an existing package.
+- The workflow authenticates with npm trusted publishing (OIDC, `id-token: write`); no npm token is
+  stored in the repository. Every published version carries npm provenance, linking it to the
+  commit and workflow run that built it.
+- Before publishing, the workflow refuses a release whose tag is not `v<version>` of
+  `apps/cli/package.json` and runs `pnpm build` and `pnpm verify:pack`, so only a package that
+  passed the packaging smoke test is published.
+- A release marked as a pre-release is published under the npm dist-tag `next`, any other under
+  `latest`.
+
+## 13. Implementation status
 
 - **Implemented (verified by `pnpm verify:pack` on 2026-10-14 — packed tarball installed with npm into an empty project, Node 24.21, Linux):** running the installed `directivebench` binary (`--help`, `--version`, `demo`, `serve`); `init` and `doctor` commands (data-dir writability and remediation hints verified by `apps/cli/test/cli.test.ts` on 2026-10-15); `runner.log` written by `serve`; Node version check (exit 3); data directory resolution with `--data-dir`/`DIRECTIVEBENCH_DATA_DIR` overrides and OS defaults (`packages/core/test/config.test.ts`); data directory created with mode `0700`; `config.json` strict validation and atomic `0600` writes (`config.test.ts`); migrations and category seeding on `init`/`serve`/`demo`; workspace cleanup after runs unless `runner.keepWorkspaces`.
 - **Partially implemented:** the macOS data-dir path is covered by a unit test only and the Windows path by none (neither platform has been run); `npx directivebench` from the npm registry is untested because nothing is published yet.

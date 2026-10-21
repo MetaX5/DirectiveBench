@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Publishes the CLI to npm with provenance through trusted publishing (SPEC-010 §12).
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Check that the tag matches the package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(node -p "require('./apps/cli/package.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Release tag $TAG does not match apps/cli/package.json version $version"
+            exit 1
+          fi
+      - run: pnpm build
+      - name: Packaging verification (pack, install, help/version, demo, serve)
+        run: pnpm verify:pack
+      - name: Publish
+        working-directory: apps/cli
+        env:
+          DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
+        run: npm publish --provenance --access public --tag "$DIST_TAG"
