@@ -127,6 +127,25 @@ measured (below).
   missing or private repository, so the server now does too; the 404 wording is a follow-up.
 - The spec draft said a CA bundle "replaces" git's default; the real run disproved it (above).
 
+## Review rounds
+
+- Independent security review at `ef1db45` (`om-code-review`, own worktree; lint, typecheck,
+  test passed): REQUEST CHANGES, 1 major, 3 minors, 2 nits. TLS handling found sound (no
+  verification bypass, no CA from git config, fail-closed resolution, loopback-only tests).
+  - Major, fixed: a text blob kept from step 5 was a `subarray` of the batch's whole stdout
+    buffer, so dropping binary blobs freed nothing while any text of the batch was held (a
+    repository of compressible 5 MiB binaries plus one small `.md` per batch could hold
+    gigabytes). Text blobs are now copied into their own buffer; regression assertion: every
+    buffer handed to discovery owns exactly its bytes (fails with the view, passes with the copy).
+  - Minor, specified: step 5 has no total byte cap of its own (bounded by the candidate limits,
+    the per-batch read timeout, local cache only) — SPEC-105 §9.1.
+  - Minor, specified: a bad `GIT_SSL_CAINFO` also refuses a scan that would only read the cache
+    (the check runs before any step; fail closed) — SPEC-105 §20.
+  - Minor, fixed: the TLS test notes that `SSL_CERT_FILE`/`SSL_CERT_DIR` matter only on OpenSSL
+    builds; the env unit test is the guard.
+  - Nits, not changed: `<CA bundle>` replacement is a plain substring (only a local path, no
+    secret); `100600` is not in the raw-tree test (the reviewer confirmed it lists as `100644`).
+
 ## Lessons recorded
 
 - [2026-10-21-git-canonicalises-tree-modes.md](../lessons/2026-10-21-git-canonicalises-tree-modes.md)

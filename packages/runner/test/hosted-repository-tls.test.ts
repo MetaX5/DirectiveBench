@@ -92,6 +92,9 @@ function register(env: NodeJS.ProcessEnv) {
 }
 
 describeTls('hosted git and custom CA certificates', () => {
+  // Whether `SSL_CERT_FILE`/`SSL_CERT_DIR` could matter depends on git's TLS backend (OpenSSL
+  // builds only); the guard that no such variable reaches git is the environment test in
+  // `hosted-git.test.ts`.
   it('verifies TLS: an unknown CA fails, whatever other TLS variables the environment holds', async () => {
     const result = await register({
       GIT_SSL_NO_VERIFY: '1',

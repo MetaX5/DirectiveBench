@@ -19,7 +19,7 @@ import { FixtureRemote, fileTransport } from './support/hosted-fixtures';
 // The per-scan byte limit, lowered so a small fixture exceeds it, and a hook into discovery.
 const hooks = vi.hoisted(() => ({
   maxScanBytes: undefined as number | undefined,
-  beforeDiscovery: null as (() => void) | null,
+  beforeDiscovery: null as ((contents: ReadonlyMap<string, unknown>) => void) | null,
   tooManyCandidates: false,
   readFails: false,
   /** The blob IDs of every `readBlobs` call, in order. */
@@ -42,7 +42,7 @@ vi.mock('@directivebench/core', async (importOriginal) => {
       return actual.selectCandidateFiles(...args);
     },
     discoverArtifactsInTree: (...args: Parameters<typeof actual.discoverArtifactsInTree>) => {
-      hooks.beforeDiscovery?.();
+      hooks.beforeDiscovery?.(args[1]);
       return actual.discoverArtifactsInTree(...args);
     },
   };
@@ -137,7 +137,15 @@ describe('scanHostedRepository limits and late failures', () => {
     // Text: 8 + 31 bytes, within 64; the 4 KiB binary asset alone is far above it.
     const { run } = await prepare(undefined, { files: { 'skill/assets/logo.png': LOGO } });
     hooks.maxScanBytes = 64;
+    let held: number[] = [];
+    hooks.beforeDiscovery = (contents) => {
+      held = [...contents.values()]
+        .filter((content): content is Buffer => Buffer.isBuffer(content))
+        .map((text) => text.buffer.byteLength - text.length);
+    };
     const result = await run();
+    // The text read in the same batch as the binary asset does not keep git's output alive.
+    expect(held).toEqual([0, 0]);
     expect(result).toMatchObject({ ok: true, discovered: 2, errorCount: 0, warningCount: 1 });
     const skill = handle.sqlite
       .prepare(`select files from artifact_versions where primary_file = 'SKILL.md'`)

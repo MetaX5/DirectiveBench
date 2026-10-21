@@ -165,8 +165,9 @@ type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
 const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Most bytes of blobs one `cat-file --batch` of step 5 reads, so only one batch of binary content
- * is held at a time (SPEC-105 §9.1). Each blob is at most the largest per-file limit (5 MiB).
+ * Most bytes of blobs one `cat-file --batch` of step 5 reads, so at most one batch of git's output
+ * is held at a time besides the text kept (SPEC-105 §9.1). Each blob is at most the largest
+ * per-file limit (5 MiB).
  */
 export const HOSTED_READ_BATCH_BYTES = 32 * 1024 * 1024;
 
@@ -213,7 +214,11 @@ async function readCandidateBlobs(
           message: `Discovery aborted: the candidate text files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
         };
       }
-      contents.set(oid, bytes);
+      // A copy of its own: a view into git's output would keep the whole batch — binary blobs
+      // included — in memory until discovery (review of PR #73).
+      const text = Buffer.alloc(bytes.length);
+      bytes.copy(text);
+      contents.set(oid, text);
     }
   }
   return { ok: true, contents };
