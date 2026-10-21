@@ -698,17 +698,31 @@ export function selectCandidateFiles(
 }
 
 /**
+ * A file of a listed tree that was read and found binary ({@link isBinary}), given by its size
+ * alone: its bytes were dropped right after reading, since discovery never keeps a binary file.
+ */
+export interface BinaryTreeFile {
+  binary: true;
+  size: number;
+}
+
+/** What discovery sees of a binary file within its limit: one NUL byte, which {@link isBinary} flags. */
+const BINARY_STAND_IN = Buffer.from([0]);
+
+/**
  * Discovers the artifacts of a listed tree — a git commit of a hosted repository — with exactly
  * the rules of {@link discoverArtifacts} (formats, skill directories, skipped directories,
  * symlinks, binary files, limits), reading file contents from `contents` instead of the disk.
- * `contents` maps each path {@link selectCandidateFiles} returned to its bytes as committed, or to
- * its size alone when it was too large to load; a file larger than the limit that applies to it is
- * a `too-large` error either way. A selected file missing from `contents`, or one given only by a
- * size within its limit, fails the whole discovery: its content was never read.
+ * `contents` maps each path {@link selectCandidateFiles} returned to its bytes as committed, to
+ * its size alone when it was too large to load, or to a {@link BinaryTreeFile} when it was read
+ * and found binary; a file larger than the limit that applies to it is a `too-large` error in
+ * every form, as on disk, where the size is checked before the content. A selected file missing
+ * from `contents`, or one given only by a size within its limit, fails the whole discovery: its
+ * content was never read.
  */
 export async function discoverArtifactsInTree(
   entries: readonly RepositoryTreeEntry[],
-  contents: ReadonlyMap<string, Buffer | number>,
+  contents: ReadonlyMap<string, Buffer | number | BinaryTreeFile>,
   options: { limits?: Partial<DiscoveryLimits>; signal?: AbortSignal } = {},
 ): Promise<DiscoveryResult> {
   const limits: DiscoveryLimits = { ...DISCOVERY_LIMITS, ...options.limits };
@@ -717,8 +731,11 @@ export async function discoverArtifactsInTree(
     if (content === undefined || (typeof content === 'number' && content <= maxBytes)) {
       throw new Error(`The content of ${path} was not provided`);
     }
-    const size = typeof content === 'number' ? content : content.length;
-    return withinLimit(size > maxBytes ? size : (content as Buffer), path, maxBytes);
+    if (typeof content === 'number') return withinLimit(content, path, maxBytes);
+    if (Buffer.isBuffer(content)) {
+      return withinLimit(content.length > maxBytes ? content.length : content, path, maxBytes);
+    }
+    return withinLimit(content.size > maxBytes ? content.size : BINARY_STAND_IN, path, maxBytes);
   };
   return discoverListing(treeListing(entries), read, limits, options.signal);
 }

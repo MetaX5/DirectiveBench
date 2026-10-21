@@ -1,9 +1,20 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as fsPromises from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CA_BUNDLE_VARIABLE,
   HOSTED_GIT_TIMEOUTS,
   HTTPS_TRANSPORT,
   NOT_FOUND_OR_NOT_PUBLIC,
@@ -20,6 +31,7 @@ import {
   isSafeBranchName,
   listSnapshot,
   readBlobs,
+  resolveCaBundle,
   type HostedGitContext,
 } from '../src/hosted-git';
 import { fakeGit, fakeGitCalls, type FakeAnswer } from './support/hosted-fixtures';
@@ -64,7 +76,7 @@ describe('buildHostedGitEnv', () => {
       GIT_CONFIG_PARAMETERS: "'credential.helper'='store'",
       GITHUB_TOKEN: 'ghp_abcdefghijklmnopqrstuvwxyz',
     };
-    const network = buildHostedGitEnv(base, '/data/cache/git-home', 'network', null);
+    const network = buildHostedGitEnv(base, '/data/cache/git-home', 'network', null, null);
     expect(network).toEqual({
       env: {
         PATH: '/usr/bin:/bin',
@@ -84,7 +96,13 @@ describe('buildHostedGitEnv', () => {
       },
       knownSecrets: ['http://user:secret@proxy:3128', 'localhost'],
     });
-    const local = buildHostedGitEnv({}, '/data/cache/git-home', 'local', '/data/cache/repos/r.git');
+    const local = buildHostedGitEnv(
+      {},
+      '/data/cache/git-home',
+      'local',
+      '/data/cache/repos/r.git',
+      null,
+    );
     expect(local.env).toMatchObject({
       PATH: '',
       GIT_NO_LAZY_FETCH: '1',
@@ -92,6 +110,82 @@ describe('buildHostedGitEnv', () => {
       GIT_CEILING_DIRECTORIES: '/data/cache',
     });
     expect(Object.keys(local.env)).not.toContain('TZ');
+  });
+});
+
+describe('CA bundle (issue #61)', () => {
+  const refused = (reason: string) => ({
+    ok: false,
+    code: 'git-failed',
+    message: `GIT_SSL_CAINFO must be the absolute path of a readable CA bundle file (${reason}). Fix or unset it to reach GitHub repositories.`,
+  });
+
+  it('forwards only the canonical path of an explicit CA bundle file, nothing else TLS-related', async () => {
+    const bundle = join(dir, 'proxy-ca.pem');
+    writeFileSync(bundle, '-----BEGIN CERTIFICATE-----\n');
+    symlinkSync(bundle, join(dir, 'link.pem'));
+    expect(CA_BUNDLE_VARIABLE).toBe('GIT_SSL_CAINFO');
+    expect(await resolveCaBundle({})).toEqual({ ok: true, caBundle: null });
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'link.pem') })).toEqual({
+      ok: true,
+      caBundle: realpathSync(bundle),
+    });
+    const base = {
+      GIT_SSL_CAINFO: join(dir, 'link.pem'),
+      GIT_SSL_CAPATH: dir,
+      GIT_SSL_NO_VERIFY: '1',
+      GIT_SSL_CERT: bundle,
+      SSL_CERT_FILE: bundle,
+      SSL_CERT_DIR: dir,
+      NODE_EXTRA_CA_CERTS: bundle,
+      CURL_CA_BUNDLE: bundle,
+    };
+    const { env } = buildHostedGitEnv(
+      base,
+      '/data/cache/git-home',
+      'network',
+      null,
+      '/ca/real.pem',
+    );
+    expect(env.GIT_SSL_CAINFO).toBe('/ca/real.pem');
+    expect(Object.keys(env).filter((name) => /SSL|CERT|CA_/.test(name))).toEqual([
+      'GIT_SSL_CAINFO',
+    ]);
+    expect(
+      Object.keys(buildHostedGitEnv(base, '/h/git-home', 'local', null, null).env),
+    ).not.toContain('GIT_SSL_CAINFO');
+  });
+
+  it('fails closed on a CA bundle setting that is not an absolute path to a regular file', async () => {
+    mkdirSync(join(dir, 'certs'));
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: '' })).toEqual(refused('not an absolute path'));
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: 'ca.pem' })).toEqual(
+      refused('not an absolute path'),
+    );
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'certs') })).toEqual(
+      refused('not a regular file'),
+    );
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'missing.pem') })).toEqual(
+      refused('ENOENT'),
+    );
+    symlinkSync(join(dir, 'missing.pem'), join(dir, 'dangling.pem'));
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'dangling.pem') })).toEqual(
+      refused('ENOENT'),
+    );
+  });
+
+  posixOnly('refuses a FIFO or an unreadable file as CA bundle', async () => {
+    execFileSync('mkfifo', [join(dir, 'fifo.pem')]);
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'fifo.pem') })).toEqual(
+      refused('not a regular file'),
+    );
+    // root reads every file, so the permission case only holds for other users.
+    if (process.getuid?.() === 0) return;
+    writeFileSync(join(dir, 'secret.pem'), 'x');
+    chmodSync(join(dir, 'secret.pem'), 0o000);
+    expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'secret.pem') })).toEqual(
+      refused('EACCES'),
+    );
   });
 });
 
@@ -238,6 +332,7 @@ function fakeContext(
     git,
     env: { PATH: process.env.PATH },
     home: join(dir, 'git-home'),
+    caBundle: null,
     transport: HTTPS_TRANSPORT,
     signal: new AbortController().signal,
     timeouts: HOSTED_GIT_TIMEOUTS,
@@ -293,6 +388,25 @@ describePosix('hosted git steps with a fake git', () => {
     expect(call?.args.slice(-5)).toEqual(['ls-remote', '--symref', '--', LOCATION, 'HEAD']);
     expect(call?.env).not.toHaveProperty('GIT_NO_LAZY_FETCH');
     expect(call?.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_GLOBAL: '/dev/null' });
+  });
+
+  it('never names the CA bundle path in a message', async () => {
+    const { context } = fakeContext(
+      {
+        'ls-remote': {
+          exit: 128,
+          stderr:
+            "fatal: unable to access 'https://github.com/acme/skills/': error setting certificate file: /etc/ca/proxy.pem\n",
+        },
+      },
+      { caBundle: '/etc/ca/proxy.pem' },
+    );
+    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
+      ok: false,
+      code: 'unreachable',
+      message:
+        "Could not reach github.com: unable to access 'https://github.com/acme/skills/': error setting certificate file: <CA bundle>. Check the network connection or proxy.",
+    });
   });
 
   it('reports output beyond what is read', async () => {
@@ -472,7 +586,9 @@ describePosix('hosted git steps with a fake git', () => {
         { 'cat-file': answer },
         { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } },
       );
-      expect(await readBlobs(context, dir, blobs)).toMatchObject({ ok: false });
+      expect(await readBlobs(context, dir, blobs, context.timeouts.read)).toMatchObject({
+        ok: false,
+      });
     }
   });
 });

@@ -5,9 +5,11 @@ import {
   DISCOVERY_LIMITS,
   DiscoveryLimitError,
   discoverArtifactsInTree,
+  isBinary,
   parseRepositoryUrl,
   redactSecrets,
   selectCandidateFiles,
+  type BinaryTreeFile,
 } from '@directivebench/core';
 import {
   MAX_REPORTED_SCAN_ERRORS,
@@ -32,6 +34,7 @@ import {
   isSafeBranchName,
   listSnapshot,
   readBlobs,
+  resolveCaBundle,
   type HostedGitContext,
   type HostedGitFailure,
   type HostedGitTimeouts,
@@ -54,12 +57,16 @@ export interface HostedRepositoryOptions {
   cacheLimitBytes?: number;
   /** Default {@link CACHE_SIZE_POLL_INTERVAL_MS}. */
   cacheSizePollIntervalMs?: number;
+  /** Default {@link HOSTED_READ_BATCH_BYTES}. */
+  readBatchBytes?: number;
+  /** Default {@link HOSTED_READ_TOTAL_BYTES}. */
+  readTotalBytes?: number;
 }
 
 /**
- * Locates git, checks its version and prepares the private cache layout (0700): the `repos`
- * directory and an empty directory used as git's `HOME`. A cache path containing the path list
- * delimiter is refused: git splits `GIT_CEILING_DIRECTORIES` on it, so the ceiling that stops
+ * Checks the CA bundle setting, locates git, checks its version and prepares the private cache
+ * layout (0700): the `repos` directory and an empty directory used as git's `HOME`. A cache path
+ * containing the path list delimiter is refused: git splits `GIT_CEILING_DIRECTORIES` on it, so the ceiling that stops
  * repository discovery would not hold (fail closed).
  */
 async function prepare(
@@ -72,6 +79,8 @@ async function prepare(
       message: `GitHub repositories need a data directory whose path contains no "${delimiter}": git would read that path as a list. Use a data directory without it.`,
     };
   }
+  const ca = await resolveCaBundle(options.env);
+  if (!ca.ok) return ca;
   const git = await findGitExecutable(options.env);
   if (!git) return { ok: false, code: 'git-not-installed', message: 'git was not found on PATH.' };
   const home = join(options.cacheDir, 'git-home');
@@ -81,6 +90,7 @@ async function prepare(
     git,
     env: options.env,
     home,
+    caBundle: ca.caBundle,
     transport: options.transport,
     signal: options.signal,
     timeouts: { ...HOSTED_GIT_TIMEOUTS, ...options.timeouts },
@@ -157,6 +167,87 @@ type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
 const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
+ * Most bytes of blobs one `cat-file --batch` of step 5 reads, so at most one batch of git's output
+ * is held at a time besides the text kept (SPEC-105 §9.1). Each blob is at most the largest
+ * per-file limit (5 MiB).
+ */
+export const HOSTED_READ_BATCH_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Most bytes of candidate blobs step 5 of one scan reads, binary blobs included (SPEC-105 §9.1).
+ * Only text counts toward `maxScanBytes`, so without this cap the work of a scan — git inflating
+ * every blob, DirectiveBench reading and sniffing it — would be bounded only by the candidate
+ * limits: a public repository of 50 000 compressible 5 MiB binaries fits in the 500 MiB cache and
+ * is about 244 GiB to read (review of PR #73). 1 GiB is four times `maxScanBytes`, so every
+ * repository whose text fits the budget can carry as much again in binary assets, and git reads
+ * it from the local cache in seconds. Checked before step 5 from the sizes step 4 reports.
+ */
+export const HOSTED_READ_TOTAL_BYTES = 1024 * 1024 * 1024;
+
+/** The fixed message of a step 5 that ran out of `timeouts.readTotal` between two batches. */
+const READ_TOTAL_TIMEOUT_MESSAGE =
+  'Reading the candidate files from the cache did not finish within the time limit.';
+
+/**
+ * Step 5 in batches of at most `batchLimit` bytes ({@link HOSTED_READ_BATCH_BYTES}): a binary
+ * blob (FR-102-17) is kept only as its size, since discovery skips it, and only the text blobs
+ * count toward `maxScanBytes` — the content the scan holds until discovery. Each text blob counts
+ * once, however many paths share it; discovery then applies the limit to what it keeps.
+ */
+async function readCandidateBlobs(
+  context: HostedGitContext,
+  cacheDir: string,
+  blobs: ReadonlyMap<string, number>,
+  batchLimit: number,
+): Promise<{ ok: true; contents: Map<string, Buffer | BinaryTreeFile> } | ScanFailure> {
+  // One deadline for all batches (`timeouts.readTotal`); each batch gets what is left of it.
+  const deadline = performance.now() + context.timeouts.readTotal;
+  const batches: Map<string, number>[] = [];
+  let batch = new Map<string, number>();
+  let batchBytes = 0;
+  for (const [oid, size] of blobs) {
+    if (batch.size > 0 && batchBytes + size > batchLimit) {
+      batches.push(batch);
+      batch = new Map();
+      batchBytes = 0;
+    }
+    batch.set(oid, size);
+    batchBytes += size;
+  }
+  batches.push(batch);
+  const contents = new Map<string, Buffer | BinaryTreeFile>();
+  let textBytes = 0;
+  for (const next of batches) {
+    const left = deadline - performance.now();
+    if (left <= 0) {
+      return { ok: false, code: 'timeout', message: READ_TOTAL_TIMEOUT_MESSAGE };
+    }
+    const read = await readBlobs(context, cacheDir, next, Math.min(context.timeouts.read, left));
+    if (!read.ok) return read;
+    for (const [oid, bytes] of read.contents) {
+      if (isBinary(bytes)) {
+        contents.set(oid, { binary: true, size: bytes.length });
+        continue;
+      }
+      textBytes += bytes.length;
+      if (textBytes > DISCOVERY_LIMITS.maxScanBytes) {
+        return {
+          ok: false,
+          code: 'scan-failed',
+          message: `Discovery aborted: the candidate text files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
+        };
+      }
+      // A copy of its own: a view into git's output would keep the whole batch — binary blobs
+      // included — in memory until discovery (review of PR #73).
+      const text = Buffer.alloc(bytes.length);
+      bytes.copy(text);
+      contents.set(oid, text);
+    }
+  }
+  return { ok: true, contents };
+}
+
+/**
  * Steps 1–5 of SPEC-105 §9.1 for one repository: prepares the cache, fetches the snapshot, lists
  * and selects the candidate files, downloads exactly their blobs and reads those within the
  * per-file limit. A failure is returned, not recorded: the caller records it once. Errors of the
@@ -170,7 +261,7 @@ async function fetchCandidates(
       ok: true;
       commitSha: string;
       entries: SnapshotEntry[];
-      contents: Map<string, Buffer | number>;
+      contents: Map<string, Buffer | number | BinaryTreeFile>;
     }
   | ScanFailure
 > {
@@ -211,17 +302,27 @@ async function fetchCandidates(
     DISCOVERY_LIMITS.maxSupportingFileBytes,
   );
   const loadable = new Map([...blobs.sizes].filter(([, size]) => size <= perFileLimit));
-  const loadBytes = [...loadable.values()].reduce((sum, size) => sum + size, 0);
-  if (loadBytes > DISCOVERY_LIMITS.maxScanBytes) {
+  // The work of step 5 is bounded before it starts, binary blobs included (fail closed). Like the
+  // other content limits it keeps the valid cache.
+  const readTotalLimit = options.readTotalBytes ?? HOSTED_READ_TOTAL_BYTES;
+  let readTotal = 0;
+  for (const size of loadable.values()) readTotal += size;
+  if (readTotal > readTotalLimit) {
     return {
       ok: false,
       code: 'scan-failed',
-      message: `Discovery aborted: the candidate files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
+      message: `Discovery aborted: the candidate files to read exceed the limit of ${readTotalLimit} bytes per scan`,
     };
   }
-  const read = await readBlobs(context, cacheDir, loadable);
-  if (!read.ok) return drop(read);
-  const contents = new Map<string, Buffer | number>();
+  const read = await readCandidateBlobs(
+    context,
+    cacheDir,
+    loadable,
+    options.readBatchBytes ?? HOSTED_READ_BATCH_BYTES,
+  );
+  // Too much text is about the content (the cache stays valid); a failed read deletes the cache.
+  if (!read.ok) return read.code === 'scan-failed' ? read : drop(read);
+  const contents = new Map<string, Buffer | number | BinaryTreeFile>();
   for (const path of selected) {
     const oid = String(oidOf.get(path));
     contents.set(path, read.contents.get(oid) ?? Number(blobs.sizes.get(oid)));
