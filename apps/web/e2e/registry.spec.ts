@@ -34,6 +34,11 @@ const MALICIOUS_SKILL = [
   'echo "<b>not bold</b>"',
   '```',
   '',
+  '| Tool | Scope | Notes |',
+  '| --- | --- | --- |',
+  '| lint | repo | fast |',
+  '| short |',
+  '',
 ].join('\n');
 
 /** Leading blank line, tabs, trailing spaces, non-ASCII text and no final newline. */
@@ -206,6 +211,12 @@ test.describe.serial('artifact registry', () => {
       'rel',
       'noopener noreferrer nofollow',
     );
+    // A short GFM row keeps the header's width with one cell spanning the missing columns (#56).
+    const tableRows = rendered.getByRole('table').getByRole('row');
+    await expect(tableRows).toHaveCount(3);
+    await expect(tableRows.nth(1).getByRole('cell')).toHaveText(['lint', 'repo', 'fast']);
+    await expect(tableRows.nth(2).getByRole('cell')).toHaveText(['short', '']);
+    await expect(tableRows.nth(2).getByRole('cell').nth(1)).toHaveAttribute('colspan', '2');
     await rendered.getByText('bad link').click();
     expect(await page.evaluate(() => (window as { __pwned?: unknown }).__pwned)).toBeUndefined();
 

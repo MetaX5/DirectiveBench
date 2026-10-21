@@ -31,7 +31,17 @@ export type Block =
   | { kind: 'quote'; children: Block[] }
   | { kind: 'list'; ordered: boolean; start: number; items: Block[][] }
   | { kind: 'rule' }
-  | { kind: 'table'; header: Inline[][]; rows: Inline[][][] };
+  | { kind: 'table'; header: Inline[][]; rows: TableRow[] };
+
+/**
+ * A table row's own cells (at most the header's count) and how many header columns it leaves
+ * empty. The renderer fills those with one cell spanning them, so a short row has the header's
+ * width while the cell count stays linear in the input (issue #56, PR #50 review).
+ */
+export interface TableRow {
+  cells: Inline[][];
+  missing: number;
+}
 
 /** Content longer than this is not rendered; the raw view still shows all of it (NFR-101-02). */
 export const MAX_RENDERED_MARKDOWN_CHARS = 200_000;
@@ -281,17 +291,21 @@ function parseBlocks(lines: string[], depth: number, topLevel: boolean): Block[]
     const delimiter = lines[i + 1];
     if (line.includes('|') && delimiter !== undefined && isTableDelimiter(delimiter)) {
       const header = tableCells(line);
-      const rows: Inline[][][] = [];
+      const rows: TableRow[] = [];
       i += 2;
       while (
         i < lines.length &&
         !isBlank(lines[i] as string) &&
         (lines[i] as string).includes('|')
       ) {
-        // A row keeps its own cells (at most the header's): padding short rows to the header's
-        // width would let a wide header and many empty rows multiply the output (PR #50 review).
+        // A row keeps its own cells (at most the header's): padding short rows with one empty cell
+        // per missing column would let a wide header and many empty rows multiply the output
+        // (PR #50 review), so the missing columns are counted and rendered as one spanning cell.
         const cells = tableCells(lines[i] as string).slice(0, header.length);
-        rows.push(cells.map((cell) => parseInline(cell)));
+        rows.push({
+          cells: cells.map((cell) => parseInline(cell)),
+          missing: header.length - cells.length,
+        });
         i += 1;
       }
       blocks.push({ kind: 'table', header: header.map((cell) => parseInline(cell)), rows });
