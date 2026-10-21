@@ -28,6 +28,7 @@ import {
   Table,
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { cn, formatDate, formatDelta, formatDuration, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmark run' };
@@ -110,7 +111,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             ) : (
               <Badge variant="info">{run.status}</Badge>
             )}
-            {run.agentAdapterId === 'mock' ? <MockBadge /> : null}
+            {isMockAgent(run.agentAdapterId) ? <MockBadge /> : null}
             <NotSandboxedBadge />
           </>
         }

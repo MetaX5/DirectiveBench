@@ -11,6 +11,7 @@ import {
 } from '@/components/common';
 import { Card, CardContent, TBody, TD, TH, THead, TR, Table } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Results' };
@@ -72,7 +73,7 @@ export default async function ResultsPage() {
                         {suite.name} <span className="text-xs">v{suite.version}</span>
                       </TD>
                       <TD>
-                        {run.agentAdapterId === 'mock' ? (
+                        {isMockAgent(run.agentAdapterId) ? (
                           <MockBadge />
                         ) : (
                           <span className="font-mono text-xs">{run.agentAdapterId}</span>
