@@ -115,7 +115,8 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
   if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw);
   // `//github.com/a/b?access_token=…` is a valid absolute path but reads as a protocol-relative
   // URL: with characters that can carry credentials it is refused instead of being stored as
-  // typed. Without them (`//srv/share`, a UNC path) it is still registered as a path.
+  // typed. Without them (`//srv/share`: a UNC path on Windows, an ordinary absolute path on POSIX)
+  // it is still registered as a path.
   if (typeof raw === 'string' && looksLikeProtocolRelativeUrl(raw) && mayCarryCredentials(raw)) {
     returnToForm(raw, 'invalid-url', MAX_REPOSITORY_URL_LENGTH);
   }
