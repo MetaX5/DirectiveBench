@@ -22,6 +22,7 @@ import {
   Table,
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
@@ -137,7 +138,9 @@ export default async function DashboardPage() {
                         </span>
                       </TD>
                       <TD className="text-muted-foreground">{suite.name}</TD>
-                      <TD>{run.agentAdapterId === 'mock' ? <MockBadge /> : run.agentAdapterId}</TD>
+                      <TD>
+                        {isMockAgent(run.agentAdapterId) ? <MockBadge /> : run.agentAdapterId}
+                      </TD>
                       <TD>
                         {run.status === 'running' ? (
                           <span className="text-xs">running…</span>

@@ -35,6 +35,7 @@ import {
   type SearchParams,
 } from '@/lib/artifacts';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifacts' };
@@ -216,7 +217,7 @@ export default async function ArtifactsPage({
                       <TD className="text-right tabular-nums" data-testid="latest-score">
                         <div className="flex flex-col items-end gap-1">
                           <span>{formatScore(e?.candidateScore)}</span>
-                          {e?.agentAdapterId === 'mock' ? <MockBadge /> : null}
+                          {isMockAgent(e?.agentAdapterId) ? <MockBadge /> : null}
                         </div>
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(e?.delta)}</TD>
