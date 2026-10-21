@@ -41,6 +41,9 @@ Make `directivebench` ready for a first manual `npm publish` of 0.1.0, and add a
 - `pnpm build && pnpm verify:pack`: passed, 290 files, "contains no node_modules" ok; before the
   fix the same working tree packed 292 files including the vitest cache.
 - Not verified: the publish itself (needs the user's `npm login`).
+- After merge, the user published `directivebench@0.1.0` (2026-10-21) and created the npm
+  organisation `directivebench`. `npx -y directivebench@0.1.0` from the registry, with an empty
+  npm cache: `--version` 0.1.0, `--help`, `demo` and `serve` (HTTP 200) work; 290 files.
 
 ## Problems and deviations
 
