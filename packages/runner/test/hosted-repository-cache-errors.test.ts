@@ -262,9 +262,16 @@ describe('hosted scan with a cache that cannot be used', () => {
 
   it('reports an error without an errno code as unexpected, not as a cache problem', async () => {
     const repository = await registered(skills());
-    vi.mocked(fsPromises.mkdir).mockRejectedValueOnce(new TypeError(`bad value ${dataDir}`));
     const message =
       'The GitHub step failed unexpectedly; nothing was stored. Try again, and report the problem if it persists.';
+    vi.mocked(fsPromises.mkdir).mockRejectedValueOnce(new TypeError(`bad value ${dataDir}`));
+    expect(await scan(repository)).toEqual({ ok: false, code: 'git-failed', message });
+    // Node's own error codes name a bug, not the cache.
+    vi.mocked(fsPromises.mkdir).mockRejectedValueOnce(
+      Object.assign(new TypeError('The "path" argument must be of type string'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }),
+    );
     expect(await scan(repository)).toEqual({ ok: false, code: 'git-failed', message });
     expect(await getRepository(handle.db, repository.id)).toMatchObject({
       syncStatus: 'error',

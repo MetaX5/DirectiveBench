@@ -129,8 +129,12 @@ every fs call threw straight to `LocalRunner.execute`, whose generic catch store
   - The two permission-based tests skip under root, which ignores directory permissions.
   - `git's input could not be written` names only the errno code; a comment explains a size
     check that fails only after git exited.
-  - Gate after the fixes: format, lint, typecheck, test (runner 209 tests, 100%), build,
-    verify:pack, test:e2e — see the PR for the final results.
+- Re-review at `54a356b2`: APPROVE, 2 optional nits, both addressed: Node's own `ERR_*` codes are
+  not treated as cache errors (test added), and the gate results are recorded here.
+- Gate after the review fixes (final head): `pnpm format:check` pass; `pnpm lint` pass;
+  `pnpm typecheck` 7/7; `pnpm test` 7/7 tasks (runner 209 tests, 100% statements, branches,
+  functions and lines); `pnpm build` 2/2; `pnpm verify:pack` passed; `pnpm test:e2e` 37 passed;
+  CI green.
 
 ## Lessons recorded
 

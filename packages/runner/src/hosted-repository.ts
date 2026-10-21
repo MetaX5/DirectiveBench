@@ -112,8 +112,10 @@ async function onCacheError<T>(
   } catch (error) {
     if (error instanceof GitCancelledError) throw error;
     if (signal.aborted) throw new GitCancelledError('git was stopped: the job was cancelled');
-    // A file-system error carries an errno code; anything else is not the cache's fault.
-    if (typeof (error as NodeJS.ErrnoException | null)?.code === 'string') {
+    // A file-system error carries an errno code (`EACCES`); Node's own `ERR_*` codes (an invalid
+    // argument, …) and errors without a code are not the cache's fault.
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (typeof code === 'string' && !code.startsWith('ERR_')) {
       return cacheFailure(error);
     }
     return { ok: false, code: 'git-failed', message: UNEXPECTED_HOSTED_FAILURE };
