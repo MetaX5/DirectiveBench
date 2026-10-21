@@ -274,7 +274,8 @@ describe('parseMarkdown blocks', () => {
       (size) => `${'*a'.repeat(size / 2)}*`,
       (size) => '[a]'.repeat(size / 3),
       (size) => '`'.repeat(size),
-      // Runs of 1…n backticks: n² / 2 characters, so n grows with the square root of the size.
+      // Runs of 1…n backticks, n² / 2 characters, so n grows with the square root of the size:
+      // a search per distinct run length made this one grow with the size to the power 1.5.
       (size) =>
         Array.from({ length: Math.round(Math.sqrt(1.6 * size)) }, (_, i) => '`'.repeat(i + 1)).join(
           ' ',
@@ -407,5 +408,16 @@ describe('parseInline', () => {
 
   it('honours backslash escapes of punctuation only', () => {
     expect(parseInline('\\*not em\\* \\[x](y) \\a \\')).toEqual([text('*not em* [x](y) \\a \\')]);
+  });
+
+  it('matches code spans by run length after an escaped backtick', () => {
+    // The escape splits a run of two: the one left opens a span no run of one closes, or one does.
+    expect(parseInline('\\``a')).toEqual([text('``a')]);
+    expect(parseInline('\\``a` ``b``')).toEqual([
+      text('`'),
+      { kind: 'code', text: 'a' },
+      text(' '),
+      { kind: 'code', text: 'b' },
+    ]);
   });
 });

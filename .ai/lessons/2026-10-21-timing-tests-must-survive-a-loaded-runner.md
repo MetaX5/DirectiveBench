@@ -28,3 +28,7 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
 - Test linear time with a ratio — the same input at two sizes, fastest of a few runs — or with a
   bound orders of magnitude between the fixed and the broken code (milliseconds vs minutes).
 - Reproduce a suspected timing flake under `yes > /dev/null` load before and after the fix.
+- Before writing a ratio test, measure every input at three sizes. The first ratio version
+  failed on CI at 10.8 against a bound of 8: the backtick-run input was not linear but grew with
+  the size to the power 1.5 (ratio ~7.6 locally), which the parser has since fixed. A ratio near
+  the bound is a finding, not noise to tune away.
