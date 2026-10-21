@@ -14,6 +14,8 @@ import { expect } from 'vitest';
  */
 
 export interface StoredVersion {
+  /** The row id: a version deleted and re-inserted with the same number would differ. */
+  id: string;
   version: number;
   contentHash: string;
 }
@@ -37,7 +39,7 @@ export function versionHistory(handle: DatabaseHandle): Record<string, ArtifactH
     )
     .all() as unknown as { path: string; artifactId: string; latest: number }[];
   const versions = handle.sqlite.prepare(
-    `select version, content_hash as contentHash from artifact_versions
+    `select id, version, content_hash as contentHash from artifact_versions
       where artifact_id = ? order by version`,
   );
   return Object.fromEntries(
@@ -75,7 +77,11 @@ export function withOneNewVersion(
       latest: next,
       versions: [
         ...changed.versions,
-        { version: next, contentHash: expect.not.stringMatching(new RegExp(`^(${known})$`)) },
+        {
+          id: expect.any(String) as string,
+          version: next,
+          contentHash: expect.not.stringMatching(new RegExp(`^(${known})$`)),
+        },
       ],
     },
   };

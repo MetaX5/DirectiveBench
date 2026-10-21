@@ -343,10 +343,11 @@ describe('repository-scan jobs', () => {
         'README.md': '# Not an artifact\n',
       });
       if (provider === 'local-git') {
-        childProcess.execFileSync('git', ['init', '-q', '-b', 'main'], {
-          cwd: repo,
-          env: FIXTURE_GIT_ENV,
-        });
+        const gitIn = (args: string[]) =>
+          childProcess.execFileSync('git', args, { cwd: repo, env: FIXTURE_GIT_ENV });
+        gitIn(['init', '-q', '-b', 'main']);
+        gitIn(['add', '-A']);
+        gitIn(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init']);
       }
       const repository = await register(repo, provider);
       expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 3 });
@@ -364,7 +365,8 @@ describe('repository-scan jobs', () => {
       expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 0 });
       expect(versionHistory(handle)).toEqual(first);
 
-      // One edited file — a supporting file of the skill — is one new version of that artifact.
+      // One edited file — a supporting file of the skill, left uncommitted: the working tree is
+      // what a local scan versions — is one new version of that artifact.
       write(repo, { '.agents/skills/review/references/checklist.md': '# Checklist, edited\n' });
       expect(await scan(repository.id)).toMatchObject({
         ok: true,

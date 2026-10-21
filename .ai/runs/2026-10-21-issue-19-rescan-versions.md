@@ -117,3 +117,13 @@ None: no non-obvious bug or constraint was hit.
   until then principle 15 is only exercised through repository functions and SQL.
 - SPEC-103 §11 leftovers: "latest" badge, a copy button for the full hash, "first seen at
   <repo>:<path>@<sha>".
+
+## Review
+
+- Independent review (`om-code-review`) of `6b0e1fd`: no blockers, no majors; 2 minors, 3 nits;
+  four mutations of `writeArtifactVersion` were each caught by the new tests. Fixed: the SPEC-013
+  M1 status sentence no longer lists #18 as unimplemented; SPEC-103 §20 names that a rescan does
+  not follow a changed `type` or a renamed `slug`; the version history helper compares row ids
+  (a deleted and re-inserted v1 would now fail); the `local-git` fixture is committed and the
+  edit is left uncommitted (the working tree is versioned). Not changed: the e2e copy of
+  `formatDate` (the e2e project does not import app code; the copy is flagged in a comment).
