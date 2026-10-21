@@ -91,10 +91,15 @@ async function prepare(
   return tooOld ?? { context, reposDir };
 }
 
+/** The fixed message of an error without an errno code in the git and cache steps (fail closed). */
+const UNEXPECTED_HOSTED_FAILURE =
+  'The GitHub step failed unexpectedly; nothing was stored. Try again, and report the problem if it persists.';
+
 /**
  * Runs the git and cache steps of a hosted job and turns an error they throw — DirectiveBench's
  * own cache below `<dataDir>/cache` that cannot be created, measured, read or removed — into
- * {@link cacheFailure}, a fixed message with the error code (fail closed, SPEC-105 §13). A
+ * {@link cacheFailure}, a fixed message with the error code (fail closed, SPEC-105 §13); an error
+ * without an errno code gets {@link UNEXPECTED_HOSTED_FAILURE} instead. A
  * cancelled or shut-down job stays a cancellation: git's {@link GitCancelledError} is rethrown,
  * and so is any error once the job's signal has fired.
  */
@@ -107,7 +112,11 @@ async function onCacheError<T>(
   } catch (error) {
     if (error instanceof GitCancelledError) throw error;
     if (signal.aborted) throw new GitCancelledError('git was stopped: the job was cancelled');
-    return cacheFailure(error);
+    // A file-system error carries an errno code; anything else is not the cache's fault.
+    if (typeof (error as NodeJS.ErrnoException | null)?.code === 'string') {
+      return cacheFailure(error);
+    }
+    return { ok: false, code: 'git-failed', message: UNEXPECTED_HOSTED_FAILURE };
   }
 }
 

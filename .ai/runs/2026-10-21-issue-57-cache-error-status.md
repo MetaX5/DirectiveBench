@@ -117,6 +117,21 @@ every fs call threw straight to `LocalRunner.execute`, whose generic catch store
   deterministically; the guard was dropped instead: a size-check failure seen by `runStep` is
   always thrown (fail closed).
 
+## Review
+
+- Independent review (om-code-review) at `19446791`: APPROVE, no blocker or major; 3 minor and
+  2 nits, addressed in the follow-up commit:
+  - An error without an errno code in the git and cache steps is no longer labelled a cache
+    problem: it fails with a fixed "The GitHub step failed unexpectedly; …" message (still
+    `sync_status = 'error'`), with a test.
+  - A cache that cannot be used is not deleted in that scan (the deletion is usually what fails);
+    SPEC-105 §13 now says so instead of an unrecorded best-effort `rm`.
+  - The two permission-based tests skip under root, which ignores directory permissions.
+  - `git's input could not be written` names only the errno code; a comment explains a size
+    check that fails only after git exited.
+  - Gate after the fixes: format, lint, typecheck, test (runner 209 tests, 100%), build,
+    verify:pack, test:e2e — see the PR for the final results.
+
 ## Lessons recorded
 
 - [2026-10-21-simulate-errors-the-code-cannot-repair.md](../lessons/2026-10-21-simulate-errors-the-code-cannot-repair.md) (new)

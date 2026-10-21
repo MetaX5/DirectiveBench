@@ -323,7 +323,9 @@ async function runStep(
   });
   if (result.cancelled) throw new GitCancelledError('git was stopped: the job was cancelled');
   // A size check that failed (and stopped git) is thrown like every other error of the cache;
-  // the scan or registration reports it (fail closed: the size was not measured).
+  // the scan or registration reports it (fail closed: the size was not measured). One that fails
+  // only after git exited may land too late to be seen here; the measurement every download
+  // makes afterwards (`directorySize`) then fails the same way.
   if (sizeCheck.failure) throw sizeCheck.failure.error;
   // Messages built from git's errors never name the absolute cache location (FR-105-15).
   const hide = (text: string) => text.split(dirname(context.home)).join('<cache>');

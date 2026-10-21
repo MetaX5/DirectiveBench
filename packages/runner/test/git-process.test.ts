@@ -56,7 +56,7 @@ describe('runGitProcess', () => {
       options({ stdin: Buffer.alloc(16 * 1024 * 1024) }),
     );
     expect(result.exitCode).toBe(0);
-    expect(result.error).toMatch(/^git's input could not be written: /);
+    expect(result.error).toMatch(/^git's input could not be written \(E[A-Z]+\)\.$/);
   });
 
   it('does not start git for an aborted signal', async () => {

@@ -54,6 +54,8 @@ vi.mock('../src/hosted-git', async (importOriginal) => {
 
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 const posixOnly = it.skipIf(process.platform === 'win32');
+// Root ignores directory permissions, so a read-only directory cannot make anything fail.
+const unprivilegedPosixOnly = it.skipIf(process.platform === 'win32' || process.getuid?.() === 0);
 
 const cacheMessage = (code: string) =>
   `DirectiveBench could not use its cache of hosted repositories in the data directory (${code}). Check that the data directory is writable and the disk has free space.`;
@@ -136,19 +138,22 @@ async function expectCacheFailure(
 }
 
 describe('hosted registration with a cache that cannot be used', () => {
-  posixOnly('rejects the URL with the fixed message when the cache cannot be created', async () => {
-    const remote = skills();
-    const parent = join(dataDir, 'read-only');
-    mkdirSync(parent, { mode: 0o500 });
-    locked.push(parent);
-    const result = await registerHostedUrl(
-      handle,
-      remote.location,
-      options({ cacheDir: join(parent, 'cache') }),
-    );
-    expect(result).toEqual({ ok: false, code: 'git-failed', message: cacheMessage('EACCES') });
-    expect(await handle.db.$count(schema.repositories)).toBe(0);
-  });
+  unprivilegedPosixOnly(
+    'rejects the URL with the fixed message when the cache cannot be created',
+    async () => {
+      const remote = skills();
+      const parent = join(dataDir, 'read-only');
+      mkdirSync(parent, { mode: 0o500 });
+      locked.push(parent);
+      const result = await registerHostedUrl(
+        handle,
+        remote.location,
+        options({ cacheDir: join(parent, 'cache') }),
+      );
+      expect(result).toEqual({ ok: false, code: 'git-failed', message: cacheMessage('EACCES') });
+      expect(await handle.db.$count(schema.repositories)).toBe(0);
+    },
+  );
 
   it('reports a failed chmod of the cache the same way', async () => {
     vi.mocked(fsPromises.chmod).mockRejectedValueOnce(errno('EPERM', cacheDir()));
@@ -234,22 +239,37 @@ describe('hosted scan with a cache that cannot be used', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
-  posixOnly('fails when a failed fetch leaves a cache that cannot be deleted', async () => {
-    const remote = skills();
-    const repository = await registered(remote);
-    expect(await scan(repository)).toMatchObject({ ok: true });
-    remote.commit({ 'AGENTS.md': '# Changed\n' });
-    // The cache cannot be written (git's fetch fails) nor emptied (its deletion fails).
-    chmodSync(cacheOf(repository.id), 0o500);
-    locked.push(cacheOf(repository.id));
-    await expectCacheFailure(await scan(repository), repository, 'EACCES');
-  });
+  unprivilegedPosixOnly(
+    'fails when a failed fetch leaves a cache that cannot be deleted',
+    async () => {
+      const remote = skills();
+      const repository = await registered(remote);
+      expect(await scan(repository)).toMatchObject({ ok: true });
+      remote.commit({ 'AGENTS.md': '# Changed\n' });
+      // The cache cannot be written (git's fetch fails) nor emptied (its deletion fails).
+      chmodSync(cacheOf(repository.id), 0o500);
+      locked.push(cacheOf(repository.id));
+      await expectCacheFailure(await scan(repository), repository, 'EACCES');
+    },
+  );
 
   it('fails when the cache of a failed step cannot be deleted', async () => {
     const repository = await registered(skills());
     hooks.listingFails = true;
     vi.mocked(fsPromises.rm).mockRejectedValueOnce(errno('EBUSY', cacheOf(repository.id)));
     await expectCacheFailure(await scan(repository), repository, 'EBUSY');
+  });
+
+  it('reports an error without an errno code as unexpected, not as a cache problem', async () => {
+    const repository = await registered(skills());
+    vi.mocked(fsPromises.mkdir).mockRejectedValueOnce(new TypeError(`bad value ${dataDir}`));
+    const message =
+      'The GitHub step failed unexpectedly; nothing was stored. Try again, and report the problem if it persists.';
+    expect(await scan(repository)).toEqual({ ok: false, code: 'git-failed', message });
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({
+      syncStatus: 'error',
+      syncError: message,
+    });
   });
 
   it('stays a cancellation, recording nothing, when the job was cancelled before the cache failed', async () => {

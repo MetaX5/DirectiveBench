@@ -167,7 +167,7 @@ export function runGitProcess(
       // git may exit before reading everything (e.g. it rejects its arguments); its exit status
       // reports that, so a broken pipe is recorded rather than thrown.
       child.stdin.on('error', (error: Error) => {
-        result.error ??= `git's input could not be written: ${error.message}`;
+        result.error ??= `git's input could not be written (${errnoCode(error)}).`;
       });
       child.stdin.end(options.stdin);
     }
