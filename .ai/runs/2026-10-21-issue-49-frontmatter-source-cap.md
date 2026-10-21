@@ -73,10 +73,15 @@ frontmatter (FR-102-05); keep `uniqueKeys` on; keep `MAX_FRONTMATTER_JSON_BYTES`
 
 - `pnpm` was not on `PATH`; used `corepack pnpm` and a scratchpad shim for scripts that call
   `pnpm` recursively.
+- **Human correction:** PR #84 was first opened with `om-open-pr`'s default body template and
+  `skip-qa`. A reviewer pointed out that it did not match the maintainer's PR layout. The body was
+  rewritten in the house layout (as in #68, #71–#73), `skip-qa` was replaced by `needs-qa`, and the
+  rule was added to `AGENTS.md` §4 and recorded as a lesson.
 
 ## Lessons recorded
 
 - [2026-10-21-cap-input-before-a-superlinear-sync-parse.md](../lessons/2026-10-21-cap-input-before-a-superlinear-sync-parse.md)
+- [2026-10-21-pr-bodies-follow-the-house-layout.md](../lessons/2026-10-21-pr-bodies-follow-the-house-layout.md)
 
 ## Follow-ups
 
