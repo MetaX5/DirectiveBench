@@ -47,6 +47,13 @@ import {
   writeFiles,
 } from './support/hosted-fixtures';
 import { buildHostedGitEnv, hostedGitArgs } from '../src/hosted-git';
+import {
+  ASSIGNED_METADATA,
+  assignUserMetadata,
+  userMetadata,
+  versionHistory,
+  withOneNewVersion,
+} from './support/rescan';
 
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 const posixOnly = it.skipIf(process.platform === 'win32');
@@ -321,6 +328,69 @@ describe('scanHostedRepository', () => {
       createdVersions: 0,
       commitSha: commit,
     });
+  });
+
+  // Issue #19 (SPEC-013 M1 AC2, SPEC-103 FR-103-06/07, SPEC-001 principle 15).
+  it('versions only changed content on a rescan of new commits and keeps what the user assigned', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    expect(await scan(repository)).toMatchObject({ ok: true, createdVersions: 4 });
+    const first = versionHistory(handle);
+    const skill = first['.agents/skills/review']?.artifactId ?? '';
+    await assignUserMetadata(handle, skill);
+
+    // A new commit that changes no artifact: 0 new versions; the occurrences record the commit.
+    const readme = remote.commit({ 'README.md': '# Edited, still not an artifact\n' });
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      createdArtifacts: 0,
+      createdVersions: 0,
+      commitSha: readme,
+    });
+    expect(versionHistory(handle)).toEqual(first);
+    const commits = () =>
+      handle.sqlite
+        .prepare('select distinct commit_sha as sha from artifact_occurrences')
+        .all()
+        .map((row) => row.sha);
+    expect(commits()).toEqual([readme]);
+
+    // One edited file — a supporting file of the skill — is one new version of that artifact,
+    // first observed at the commit that changed it.
+    const edit = remote.commit({
+      '.agents/skills/review/references/checklist.md': '# Checklist, edited\n',
+    });
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      createdArtifacts: 0,
+      createdVersions: 1,
+      commitSha: edit,
+    });
+    const second = versionHistory(handle);
+    expect(second).toEqual(withOneNewVersion(first, '.agents/skills/review'));
+    expect(
+      handle.sqlite
+        .prepare('select source_commit_sha as sha from artifact_versions where version = 2')
+        .all()
+        .map((row) => row.sha),
+    ).toEqual([edit]);
+    expect(await userMetadata(handle, skill)).toEqual(ASSIGNED_METADATA);
+
+    // A revert reuses the earlier version (FR-103-07); the edit's version is kept.
+    const revert = remote.commit({
+      '.agents/skills/review/references/checklist.md': '# Checklist\n',
+    });
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      createdVersions: 0,
+      commitSha: revert,
+    });
+    expect(versionHistory(handle)).toEqual({
+      ...second,
+      '.agents/skills/review': { ...second['.agents/skills/review'], latest: 1 },
+    });
+    expect(commits()).toEqual([revert]);
+    expect(await userMetadata(handle, skill)).toEqual(ASSIGNED_METADATA);
   });
 
   it('replaces a broken cache with a fresh clone', async () => {

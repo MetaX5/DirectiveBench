@@ -198,7 +198,7 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Table>
+        <Table data-testid="versions">
           <THead>
             <TR>
               <TH>Version</TH>
@@ -219,7 +219,12 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
                     v{v.version}
                   </Link>
                 </TD>
-                <TD className="font-mono text-xs">{v.contentHash.slice(0, 16)}…</TD>
+                <TD
+                  className="font-mono text-xs"
+                  title={`${v.contentHash} — SHA-256 over the sorted file manifest`}
+                >
+                  {v.contentHash.slice(0, 16)}…
+                </TD>
                 <TD>{v.files.length}</TD>
                 <TD className="font-mono text-xs">{v.sourcePath ?? '—'}</TD>
                 <TD className="text-xs text-muted-foreground">{formatDate(v.createdAt)}</TD>
