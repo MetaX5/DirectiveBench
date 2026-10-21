@@ -11,8 +11,32 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bxox[abpr]-[A-Za-z0-9-]{10,}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
   /(authorization:\s*bearer\s+)[^\s"']+/gi,
-  /(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g,
 ];
+
+const PRIVATE_KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
+const PRIVATE_KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/g;
+
+/**
+ * Replaces the body of every private-key block, keeping its markers. Equivalent to replacing
+ * `BEGIN[\s\S]*?END` globally, but linear: that regex rescans to the end of the text from every
+ * BEGIN marker without an END after it, which is quadratic in the number of such markers. Once a
+ * marker has no END after it, no later marker has one either, so the scan stops there.
+ */
+function redactPrivateKeys(text: string): string {
+  let result = '';
+  let from = 0;
+  for (;;) {
+    PRIVATE_KEY_BEGIN.lastIndex = from;
+    const begin = PRIVATE_KEY_BEGIN.exec(text);
+    if (!begin) break;
+    PRIVATE_KEY_END.lastIndex = PRIVATE_KEY_BEGIN.lastIndex;
+    const end = PRIVATE_KEY_END.exec(text);
+    if (!end) break;
+    result += `${text.slice(from, begin.index)}${begin[0]}${REDACTION_MARKER}${end[0]}`;
+    from = PRIVATE_KEY_END.lastIndex;
+  }
+  return result + text.slice(from);
+}
 
 /**
  * Removes secrets from text before it is persisted in traces, logs or reports.
@@ -26,16 +50,12 @@ export function redactSecrets(text: string, knownSecrets: readonly string[] = []
   for (const pattern of SECRET_PATTERNS) {
     result = result.replace(pattern, (match, ...groups: unknown[]) => {
       const prefix = groups[0];
-      if (typeof prefix === 'string' && match.startsWith(prefix) && prefix !== match) {
-        const suffix = groups[1];
-        return typeof suffix === 'string' && match.endsWith(suffix) && suffix !== match
-          ? `${prefix}${REDACTION_MARKER}${suffix}`
-          : `${prefix}${REDACTION_MARKER}`;
-      }
-      return REDACTION_MARKER;
+      return typeof prefix === 'string' && match.startsWith(prefix) && prefix !== match
+        ? `${prefix}${REDACTION_MARKER}`
+        : REDACTION_MARKER;
     });
   }
-  return result;
+  return redactPrivateKeys(result);
 }
 
 /** Environment variable names that are treated as secrets and never forwarded or logged. */

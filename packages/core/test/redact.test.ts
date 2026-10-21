@@ -34,6 +34,24 @@ describe('redactSecrets', () => {
     );
   });
 
+  it('redacts every private key block, from the first marker to the nearest end marker', () => {
+    const begin = '-----BEGIN PRIVATE KEY-----';
+    const end = '-----END PRIVATE KEY-----';
+    expect(
+      redactSecrets(`${begin}a${end} x ${begin}cut ${begin}b${end} y ${begin}unterminated`),
+    ).toBe(`${begin}[REDACTED]${end} x ${begin}[REDACTED]${end} y ${begin}unterminated`);
+  });
+
+  it('redacts in linear time when many private key markers have no end marker', () => {
+    // The previous pattern rescanned to the end from every marker: minutes on 10 MiB, the
+    // largest command output a benchmark may capture. This takes milliseconds, so the bound leaves
+    // room for a slow CI runner.
+    const text = '-----BEGIN PRIVATE KEY-----'.repeat(400_000);
+    const started = performance.now();
+    expect(redactSecrets(text)).toBe(text);
+    expect(performance.now() - started).toBeLessThan(10_000);
+  });
+
   it('ignores known secrets shorter than eight characters', () => {
     expect(redactSecrets('the value is short', ['short', ''])).toBe('the value is short');
   });
