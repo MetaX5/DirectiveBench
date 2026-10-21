@@ -34,6 +34,7 @@ Make `directivebench` ready for a first manual `npm publish` of 0.1.0, and add a
 - Found a vitest cache from `examples/node_modules` in the tarball; `assemble-dist.mjs` now skips
   `node_modules` when copying the examples and `verify-pack.mjs` checks for it.
 - `CODE_OF_CONDUCT.md`, linked from `CONTRIBUTING.md` and `README.md`.
+- `.github/CODEOWNERS`: `@cieslinho` added next to `@MetaX5` (user request; has write access).
 
 ## Verification
 
