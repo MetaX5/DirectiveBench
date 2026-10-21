@@ -149,11 +149,12 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
               <tbody>
                 {block.rows.map((row, rowIndex) => (
                   <tr key={rowIndex} className="border-b">
-                    {row.map((cell, cellIndex) => (
+                    {row.cells.map((cell, cellIndex) => (
                       <td key={cellIndex} className="px-2 py-1 align-top">
                         {renderInlines(cell)}
                       </td>
                     ))}
+                    {row.missing > 0 && <td colSpan={row.missing} />}
                   </tr>
                 ))}
               </tbody>

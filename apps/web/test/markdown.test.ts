@@ -188,12 +188,15 @@ describe('parseMarkdown blocks', () => {
     ]);
   });
 
-  it('parses GFM tables, keeping short rows short and escaped pipes literal', () => {
+  it('parses GFM tables, counting the columns a short row leaves empty and keeping escaped pipes literal', () => {
     expect(parseMarkdown('| a | b |\n| :- | -: |\n| 1 | x \\| y |\n| 2 |\nafter')).toEqual([
       {
         kind: 'table',
         header: [[text('a')], [text('b')]],
-        rows: [[[text('1')], [text('x | y')]], [[text('2')]]],
+        rows: [
+          { cells: [[text('1')], [text('x | y')]], missing: 0 },
+          { cells: [[text('2')]], missing: 1 },
+        ],
       },
       paragraph(text('after')),
     ]);
@@ -236,16 +239,28 @@ describe('parseMarkdown blocks', () => {
     expect(JSON.stringify(parseMarkdown(list.join('\n')))).toContain('- i17');
   });
 
-  it('keeps a wide table with many empty rows as small as its input (PR #50 review)', () => {
+  it('gives a wide table with many empty rows the header width with linear cells (PR #50 review, #56)', () => {
     const columns = 25_000;
-    const input = `${'|a'.repeat(columns)}\n${'|-'.repeat(columns)}\n${'|\n'.repeat(2_000)}`;
+    const emptyRows = 2_000;
+    const input = `${'|a'.repeat(columns)}\n${'|-'.repeat(columns)}\n${'|\n'.repeat(emptyRows)}`;
+    const started = performance.now();
     const [table] = parseMarkdown(input);
-    expect(table?.kind).toBe('table');
-    const cells = table?.kind === 'table' ? table.rows.reduce((n, row) => n + row.length, 0) : -1;
-    expect(cells).toBe(2_000);
+    const elapsed = performance.now() - started;
+    if (table?.kind !== 'table') throw new Error('expected a table');
+    // Every row reaches the header's width: its own cell plus one cell spanning the rest.
+    for (const row of table.rows) {
+      expect(row.cells.length + row.missing).toBe(columns);
+    }
+    // Rendered cells: the row's own cells plus at most one spanning cell, so never more than
+    // two per input line; padding instead would have made 50 million cells.
+    const rendered = table.rows.reduce((n, row) => n + row.cells.length + (row.missing ? 1 : 0), 0);
+    expect(rendered).toBe(2 * emptyRows);
+    expect(rendered).toBeLessThanOrEqual(input.length);
+    // Padding took over 4 s on this input; linear parsing takes milliseconds.
+    expect(elapsed).toBeLessThan(1_000);
     // Extra cells beyond the header are dropped.
     expect(parseMarkdown('a |\n- |\nx | y | z')).toEqual([
-      { kind: 'table', header: [[text('a')]], rows: [[[text('x')]]] },
+      { kind: 'table', header: [[text('a')]], rows: [{ cells: [[text('x')]], missing: 0 }] },
     ]);
   });
 
