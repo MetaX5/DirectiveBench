@@ -1,5 +1,9 @@
 # DirectiveBench
 
+[![npm](https://img.shields.io/npm/v/directivebench)](https://www.npmjs.com/package/directivebench)
+[![CI](https://github.com/MetaX5/DirectiveBench/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/MetaX5/DirectiveBench/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 DirectiveBench is a local-first, open-source workbench for discovering, organizing,
 synchronizing, testing and benchmarking AI agent **skills**, **instructions** and **rules**
 across repositories, coding agents and AI models.
@@ -7,9 +11,10 @@ across repositories, coding agents and AI models.
 It helps answer questions such as: *Does this skill actually improve my coding agent? Did the new
 version regress? Does a rule activate only where it should? Can the result be reproduced?*
 
-> **Project status: early (v0.1, not published to npm), building the artifact registry.** The
-> foundation and one end-to-end vertical slice work: a local SQLite registry, a benchmark engine
-> with RED/GREEN comparison, a job runner, a web UI and a CLI. You can register local
+> **Project status: early (v0.1, [on npm](https://www.npmjs.com/package/directivebench)),
+> building the artifact registry.** The foundation and one end-to-end vertical slice work: a
+> local SQLite registry, a benchmark engine with RED/GREEN comparison, a job runner, a web UI
+> and a CLI. You can register local
 > repositories and public GitHub repositories (by URL, without credentials) and scan them for
 > skills, instructions and rules. Benchmarks currently run only with a **deterministic mock
 > agent**, which demonstrates the pipeline and is **not an AI evaluation**. Private and GitLab
@@ -61,14 +66,16 @@ Data directory: `~/.local/share/directivebench` (Linux), `~/Library/Application 
 
 Requirements: Node.js **>= 22.16** (verified on Node 24).
 
-The npm package is not published yet. Intended usage once it is:
-
 ```bash
-npx directivebench
+npx directivebench            # start the local UI on http://127.0.0.1:4280 and open a browser
+npx directivebench demo       # or first try the bundled example with the mock agent
+npm install -g directivebench # optional global install; then run `directivebench`
 ```
 
-Until then, build and run it from source (below), or produce the package locally with
-`pnpm build && pnpm verify:pack`, which packs, installs and smoke-tests the tarball.
+Releases after 0.1.0 are published from CI with
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements) (see
+[CONTRIBUTING.md](CONTRIBUTING.md#releasing-maintainers)). To run the latest `main`, build it
+from source (below).
 
 ## CLI
 
