@@ -3,10 +3,11 @@
 Local-first workbench for discovering, organizing, testing and benchmarking AI agent skills,
 instructions and rules.
 
-> **Status: early bootstrap (0.x).** The local web UI, SQLite registry, benchmark engine and a
-> deterministic **mock** agent work end to end. Repository synchronisation and real agent
-> integrations (Claude Code, Codex, Cursor) are specified but **not implemented yet**.
-> This package has not been published to npm.
+> **Status: early (0.x).** The local web UI, SQLite registry and benchmark engine work end to
+> end. You can register local repositories and public GitHub repositories (by URL) and scan them
+> for skills, instructions and rules. Benchmarks run only with a deterministic **mock** agent,
+> which is **not an AI evaluation**; real agent integrations (Claude Code, Codex, Cursor), private
+> and GitLab repositories are specified but **not implemented yet**.
 
 ## Usage
 
@@ -24,4 +25,4 @@ Options: `--data-dir <path>`, `--host <host>`, `--port <port>`, `--no-open`,
 Requires Node.js >= 22.16 (uses the built-in `node:sqlite`; no native compilation).
 Data lives in an OS-specific application data directory, never inside the package.
 
-MIT licensed.
+Source, issues and documentation: <https://github.com/MetaX5/DirectiveBench>. MIT licensed.
