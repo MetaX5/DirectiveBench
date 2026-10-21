@@ -36,6 +36,7 @@ import {
   type SearchParams,
 } from '@/lib/artifacts';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { providerLabel } from '@/lib/repositories';
 import { cn, formatDate, formatDelta, formatScore } from '@/lib/utils';
 
@@ -120,7 +121,7 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
                       summary: { candidateOutcome: latestEval.candidateOutcome },
                     })}
                   />
-                  {latestEval.agentAdapterId === 'mock' ? <MockBadge /> : null}
+                  {isMockAgent(latestEval.agentAdapterId) ? <MockBadge /> : null}
                 </div>
                 <dl className="grid grid-cols-2 gap-1 text-xs">
                   <dt className="text-muted-foreground">Baseline (RED)</dt>
@@ -297,7 +298,7 @@ function EvaluationsTab({ detail }: { detail: ArtifactDetail }) {
                   </TD>
                   <TD>v{e.artifactVersion}</TD>
                   <TD className="text-xs">
-                    {e.agentAdapterId === 'mock' ? <MockBadge /> : e.agentAdapterId}
+                    {isMockAgent(e.agentAdapterId) ? <MockBadge /> : e.agentAdapterId}
                   </TD>
                   <TD>
                     <StatusBadge

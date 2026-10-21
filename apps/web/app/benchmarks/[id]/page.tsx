@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/primitives';
 import { enqueueBenchmarkRunAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmark' };
@@ -63,7 +64,7 @@ export default async function BenchmarkPage({
         actions={
           <>
             <Badge variant="outline">v{version.version}</Badge>
-            {definition?.execution.agent === 'mock' ? <MockBadge /> : null}
+            {isMockAgent(definition?.execution.agent) ? <MockBadge /> : null}
             {definition?.execution.environment.kind === 'local-process' ? (
               <NotSandboxedBadge />
             ) : null}
