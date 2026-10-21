@@ -39,6 +39,15 @@ export interface GitProcessResult {
 }
 
 /**
+ * An error's errno-style code (`ENOENT`, `EACCES`, …) to name in a message, or `unknown error`;
+ * never the error's own text, which names absolute paths.
+ */
+export function errnoCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,31}$/.test(code) ? code : 'unknown error';
+}
+
+/**
  * Runs git with an argv array and no shell, its output kept as raw bytes. Unlike `runCommand`
  * (benchmark-engine), standard output is never redacted — a redacted path or blob would be stored
  * wrong (lessons, 2026-10-19) — and it is bounded by killing git rather than truncating. Standard
@@ -124,7 +133,7 @@ export function runGitProcess(
             // A check that cannot run cannot vouch for the limit: stop git (fail closed).
             (error: unknown) => {
               if (closed) return;
-              result.error ??= `The running check failed: ${(error as Error).message}`;
+              result.error ??= `The running check failed (${errnoCode(error)}).`;
               result.watchTriggered = true;
               terminate();
             },
@@ -149,8 +158,10 @@ export function runGitProcess(
       stderr.push(chunk.subarray(0, room));
       stderrBytes += Math.min(room, chunk.length);
     });
+    // Not the message: it names git's absolute path (`spawn /usr/bin/git ENOENT`), and a working
+    // directory that is missing or not accessible is reported the same way.
     child.on('error', (error: Error) => {
-      result.error = error.message;
+      result.error = `git could not be started (${errnoCode(error)}).`;
     });
     if (options.stdin && child.stdin) {
       // git may exit before reading everything (e.g. it rejects its arguments); its exit status

@@ -1,7 +1,7 @@
 import { mkdir, chmod, lstat, readdir, rm } from 'node:fs/promises';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import type { RepositoryTreeEntry } from '@directivebench/core';
-import { runGitProcess, type GitProcessResult } from './git-process';
+import { errnoCode, runGitProcess, type GitProcessResult } from './git-process';
 import { absolutePathEntries } from './repository-registration';
 
 /**
@@ -172,6 +172,19 @@ function failure(code: HostedGitFailure['code'], message: string): HostedGitFail
   return { ok: false, code, message };
 }
 
+/**
+ * The failure of a hosted step when DirectiveBench's own cache below `<dataDir>/cache` cannot be
+ * created, measured, read or removed (permission denied, a full disk, …; SPEC-105 §13). The
+ * message is fixed and names only the error code: a file-system error's own message names
+ * absolute paths.
+ */
+export function cacheFailure(error: unknown): HostedGitFailure {
+  return failure(
+    'git-failed',
+    `DirectiveBench could not use its cache of hosted repositories in the data directory (${errnoCode(error)}). Check that the data directory is writable and the disk has free space.`,
+  );
+}
+
 /** The job was cancelled or the runner is shutting down; git was stopped. */
 export class GitCancelledError extends Error {
   override name = 'GitCancelledError';
@@ -282,6 +295,7 @@ async function runStep(
     options.gitDir,
   );
   const { watchSize } = options;
+  const sizeCheck: { failure?: { error: unknown } } = {};
   const result = await runGitProcess(context.git, hostedGitArgs(context.transport.protocol, args), {
     cwd: options.gitDir ?? context.home,
     env,
@@ -295,12 +309,22 @@ async function runStep(
       ? {
           watch: {
             intervalMs: context.cacheSizePollIntervalMs,
-            exceeded: async () => (await directorySize(watchSize)) > context.cacheLimitBytes,
+            exceeded: async () => {
+              try {
+                return (await directorySize(watchSize)) > context.cacheLimitBytes;
+              } catch (error) {
+                sizeCheck.failure = { error };
+                throw error;
+              }
+            },
           },
         }
       : {}),
   });
   if (result.cancelled) throw new GitCancelledError('git was stopped: the job was cancelled');
+  // A size check that failed (and stopped git) is thrown like every other error of the cache;
+  // the scan or registration reports it (fail closed: the size was not measured).
+  if (sizeCheck.failure) throw sizeCheck.failure.error;
   // Messages built from git's errors never name the absolute cache location (FR-105-15).
   const hide = (text: string) => text.split(dirname(context.home)).join('<cache>');
   return {
@@ -312,7 +336,7 @@ async function runStep(
 
 /** The typed failure for a git run that did not finish normally, or null when it exited. */
 function abnormal(result: GitProcessResult, step: string, context: HostedGitContext) {
-  // First: a size check that itself failed also stops git, but the limit was not proven exceeded.
+  // git could not be started or fed. (A size check that failed was thrown by `runStep`.)
   if (result.error !== null) return failure('git-failed', `${step} failed: ${result.error}`);
   if (result.watchTriggered) return cacheLimitFailure(context);
   if (result.timedOut) return failure('timeout', `${step} did not finish within the time limit.`);
@@ -331,22 +355,25 @@ function cacheLimitFailure(context: HostedGitContext): HostedGitFailure {
 
 /** Total size of the regular files below `path` (symlinks are not followed); 0 when absent. */
 export async function directorySize(path: string): Promise<number> {
-  let entries;
-  try {
-    entries = await readdir(path, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-    throw error;
-  }
+  const entries = await readdir(path, { withFileTypes: true }).catch(absentAs(null));
+  if (entries === null) return 0;
   let total = 0;
   for (const entry of entries) {
     const child = join(path, entry.name);
     if (entry.isDirectory()) total += await directorySize(child);
     // git renames and removes temporary pack files while it runs: a file gone since the listing
-    // takes no space any more.
-    else total += (await lstat(child).catch(() => ({ size: 0 }))).size;
+    // takes no space any more. Any other error cannot vouch for the size (fail closed).
+    else total += (await lstat(child).catch(absentAs({ size: 0 }))).size;
   }
   return total;
+}
+
+/** A rejection handler that turns `ENOENT` into `value` and rethrows every other error. */
+function absentAs<T>(value: T): (error: unknown) => T {
+  return (error) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return value;
+    throw error;
+  };
 }
 
 /** Creates (or tightens) a directory only the current user can enter (SPEC-105 §12, 0700). */
@@ -456,10 +483,8 @@ export async function fetchSnapshot(
   context: HostedGitContext,
   target: { location: string; branch: string; cacheDir: string },
 ): Promise<{ ok: true; commitSha: string } | HostedGitFailure> {
-  const exists = await lstat(target.cacheDir).then(
-    () => true,
-    () => false, // absent: clone
-  );
+  // Absent: clone. Any other error is a cache that cannot be checked (fail closed).
+  const exists = await lstat(target.cacheDir).then(() => true, absentAs(false));
   if (exists) {
     const fetched = await fetchInto(context, target);
     if (fetched.ok) return fetched;
