@@ -1,5 +1,6 @@
-import { mkdir, chmod, lstat, readdir, rm } from 'node:fs/promises';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { access, mkdir, chmod, lstat, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { RepositoryTreeEntry } from '@directivebench/core';
 import { errnoCode, runGitProcess, type GitProcessResult } from './git-process';
 import { absolutePathEntries } from './repository-registration';
@@ -73,6 +74,45 @@ const PROXY_VARIABLES = [
 /** What Windows needs to start processes at all (SPEC-105 §9.1). */
 const WINDOWS_VARIABLES = ['SystemRoot', 'PATHEXT', 'COMSPEC'];
 
+/**
+ * The one TLS setting forwarded to git (SPEC-105 §9.1, issue #61): git's own variable for a CA
+ * bundle file, read from the runner's environment only — never from any git config — and passed on
+ * as its canonical path ({@link resolveCaBundle}). git hands it to libcurl as the CA file instead of
+ * the default one, as it does outside DirectiveBench; some builds also keep a compiled-in CA
+ * directory (Debian's and Ubuntu's read `/etc/ssl/certs` as well), so the bundle must hold every CA
+ * needed (e.g. a TLS-intercepting proxy's) and may add to the system's.
+ * Verification stays on: `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAPATH`, `SSL_CERT_FILE`, `SSL_CERT_DIR`
+ * and `NODE_EXTRA_CA_CERTS` are never forwarded.
+ */
+export const CA_BUNDLE_VARIABLE = 'GIT_SSL_CAINFO';
+
+/**
+ * The canonical path of the CA bundle named by {@link CA_BUNDLE_VARIABLE}, or null when it is not
+ * set. Fails closed: a value that is not absolute, or does not resolve to a readable regular file
+ * (a directory, a FIFO, a missing or unreadable file), refuses every hosted step rather than
+ * letting git fall back to its default bundle. The message names the variable, never the path.
+ */
+export async function resolveCaBundle(
+  env: NodeJS.ProcessEnv,
+): Promise<{ ok: true; caBundle: string | null } | HostedGitFailure> {
+  const value = env[CA_BUNDLE_VARIABLE];
+  if (value === undefined) return { ok: true, caBundle: null };
+  const refuse = (reason: string) =>
+    failure(
+      'git-failed',
+      `${CA_BUNDLE_VARIABLE} must be the absolute path of a readable CA bundle file (${reason}). Fix or unset it to reach GitHub repositories.`,
+    );
+  if (!isAbsolute(value)) return refuse('not an absolute path');
+  try {
+    const caBundle = await realpath(value);
+    if (!(await stat(caBundle)).isFile()) return refuse('not a regular file');
+    await access(caBundle, constants.R_OK);
+    return { ok: true, caBundle };
+  } catch (error) {
+    return refuse(errnoCode(error));
+  }
+}
+
 /** Whether a step may download (`network`) or must fail on any missing object (`local`). */
 export type GitStepKind = 'network' | 'local';
 
@@ -90,12 +130,15 @@ export type GitStepKind = 'network' | 'local';
  * the only repository config read is the cache's own, which DirectiveBench created; every other
  * step runs in `HOME` with `GIT_CEILING_DIRECTORIES` set to its parent, so git looks at the empty
  * `HOME` and nowhere above it.
+ *
+ * The only TLS setting is an explicit CA bundle (`caBundle`, from {@link resolveCaBundle}).
  */
 export function buildHostedGitEnv(
   base: NodeJS.ProcessEnv,
   home: string,
   kind: GitStepKind,
   gitDir: string | null,
+  caBundle: string | null,
 ): { env: Record<string, string>; knownSecrets: string[] } {
   const env: Record<string, string> = {
     PATH: absolutePathEntries(base.PATH).join(delimiter),
@@ -111,6 +154,8 @@ export function buildHostedGitEnv(
   };
   if (gitDir !== null) env.GIT_DIR = resolve(gitDir);
   if (kind === 'local') env.GIT_NO_LAZY_FETCH = '1';
+  // The canonical path checked by `resolveCaBundle`, never the raw value of the environment.
+  if (caBundle !== null) env[CA_BUNDLE_VARIABLE] = caBundle;
   const knownSecrets: string[] = [];
   for (const name of ['TZ', ...WINDOWS_VARIABLES, ...PROXY_VARIABLES]) {
     const value = base[name];
@@ -264,6 +309,8 @@ export interface HostedGitContext {
   env: NodeJS.ProcessEnv;
   /** Empty directory used as git's `HOME`. */
   home: string;
+  /** Canonical path of the CA bundle git uses instead of its default, or null (`resolveCaBundle`). */
+  caBundle: string | null;
   transport: HostedGitTransport;
   signal: AbortSignal;
   timeouts: HostedGitTimeouts;
@@ -293,6 +340,7 @@ async function runStep(
     context.home,
     options.kind,
     options.gitDir,
+    context.caBundle,
   );
   const { watchSize } = options;
   const sizeCheck: { failure?: { error: unknown } } = {};
@@ -327,8 +375,12 @@ async function runStep(
   // only after git exited may land too late to be seen here; the measurement every download
   // makes afterwards (`directorySize`) then fails the same way.
   if (sizeCheck.failure) throw sizeCheck.failure.error;
-  // Messages built from git's errors never name the absolute cache location (FR-105-15).
-  const hide = (text: string) => text.split(dirname(context.home)).join('<cache>');
+  // Messages built from git's errors never name the absolute cache location or the CA bundle's
+  // path (git names it when it cannot use the file; FR-105-15).
+  const hide = (text: string) => {
+    const hidden = text.split(dirname(context.home)).join('<cache>');
+    return context.caBundle === null ? hidden : hidden.split(context.caBundle).join('<CA bundle>');
+  };
   return {
     ...result,
     stderr: hide(result.stderr),
@@ -609,8 +661,10 @@ export interface SnapshotEntry extends RepositoryTreeEntry {
 /**
  * Step 2: lists the whole commit (`ls-tree -r -z --full-tree`, without `--long`, which would fetch
  * blobs to report sizes). Regular files (`100644`, `100755`) and symlinks (`120000`) are kept;
- * submodules (`160000`) are skipped (FR-105-06). Paths are raw bytes and must be valid UTF-8;
- * anything unexpected fails closed.
+ * submodules (`160000`) are skipped (FR-105-06). git canonicalises every mode when it reads a tree
+ * (a legacy `100664` or `100000` lists as `100644`, an unknown one as a `160000` submodule), so a
+ * real repository lists no other mode: one that does is output DirectiveBench does not understand
+ * and fails closed (SPEC-105 §20, issue #61). Paths are raw bytes and must be valid UTF-8.
  */
 export async function listSnapshot(
   context: HostedGitContext,
