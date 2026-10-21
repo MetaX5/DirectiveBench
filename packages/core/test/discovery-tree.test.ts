@@ -6,7 +6,9 @@ import {
   DiscoveryLimitError,
   discoverArtifacts,
   discoverArtifactsInTree,
+  isBinary,
   selectCandidateFiles,
+  type BinaryTreeFile,
   type RepositoryTreeEntry,
 } from '../src/discovery';
 import { buildDiscoveryFixture, SKILL } from './discovery-fixture';
@@ -45,7 +47,8 @@ async function contentsOf(paths: readonly string[]): Promise<Map<string, Buffer 
   return contents;
 }
 
-const only = (entries: Record<string, Buffer | number>) => new Map(Object.entries(entries));
+const only = (entries: Record<string, Buffer | number | BinaryTreeFile>) =>
+  new Map(Object.entries(entries));
 
 const bytes = (text: string) => Buffer.from(text);
 
@@ -62,6 +65,59 @@ describe('discoverArtifactsInTree', () => {
     expect(selected).not.toContain('.agents/skills/validate/link.md');
     expect(selected).toContain('.agents/skills/validate/assets/logo.png');
     expect(selected).toContain('.agents/skills/validate/nested/extra.md');
+  });
+
+  it('finds the same with binary files given only as binary and their size, as the hosted scan does', async () => {
+    await buildDiscoveryFixture(root, outside);
+    const entries = await listTree(root);
+    const contents = new Map<string, Buffer | number | BinaryTreeFile>();
+    for (const [path, content] of await contentsOf(selectCandidateFiles(entries))) {
+      const bytes = content as Buffer;
+      contents.set(path, isBinary(bytes) ? { binary: true, size: bytes.length } : bytes);
+    }
+    expect([...contents.values()].filter((content) => !Buffer.isBuffer(content))).not.toEqual([]);
+    expect(await discoverArtifactsInTree(entries, contents)).toEqual(await discoverArtifacts(root));
+  });
+
+  it('checks the size of a binary file before its content, as on disk', async () => {
+    const entries: RepositoryTreeEntry[] = [
+      { path: 'AGENTS.md', kind: 'file' },
+      { path: 'CLAUDE.md', kind: 'file' },
+      { path: 'skill/SKILL.md', kind: 'file' },
+      { path: 'skill/logo.png', kind: 'file' },
+      { path: 'large/SKILL.md', kind: 'file' },
+      { path: 'large/logo.png', kind: 'file' },
+    ];
+    const result = await discoverArtifactsInTree(
+      entries,
+      only({
+        'AGENTS.md': { binary: true, size: 3 },
+        'CLAUDE.md': { binary: true, size: 10 },
+        'skill/SKILL.md': bytes(SKILL),
+        'skill/logo.png': { binary: true, size: 4 },
+        'large/SKILL.md': bytes(SKILL),
+        'large/logo.png': { binary: true, size: 6 },
+      }),
+      { limits: { maxPrimaryFileBytes: 1024, maxSupportingFileBytes: 5 } },
+    );
+    expect(result.artifacts.map((artifact) => [artifact.occurrencePath, artifact.skipped])).toEqual(
+      [['skill', [{ path: 'logo.png', reason: 'binary' }]]],
+    );
+    expect(result.errors.map((error) => [error.path, error.code, error.message])).toEqual([
+      ['AGENTS.md', 'binary-primary', 'AGENTS.md is not a UTF-8 text file'],
+      ['CLAUDE.md', 'binary-primary', 'CLAUDE.md is not a UTF-8 text file'],
+      [
+        'large/SKILL.md',
+        'too-large',
+        'large/logo.png is 6 bytes, larger than the limit of 5 bytes',
+      ],
+    ]);
+    const tooLarge = await discoverArtifactsInTree(
+      [{ path: 'AGENTS.md', kind: 'file' }],
+      only({ 'AGENTS.md': { binary: true, size: 10 } }),
+      { limits: { maxPrimaryFileBytes: 3 } },
+    );
+    expect(tooLarge.errors.map((error) => error.code)).toEqual(['too-large']);
   });
 
   it('keeps a file named like a skipped directory and drops files below one at any depth', () => {

@@ -5,9 +5,11 @@ import {
   DISCOVERY_LIMITS,
   DiscoveryLimitError,
   discoverArtifactsInTree,
+  isBinary,
   parseRepositoryUrl,
   redactSecrets,
   selectCandidateFiles,
+  type BinaryTreeFile,
 } from '@directivebench/core';
 import {
   MAX_REPORTED_SCAN_ERRORS,
@@ -32,6 +34,7 @@ import {
   isSafeBranchName,
   listSnapshot,
   readBlobs,
+  resolveCaBundle,
   type HostedGitContext,
   type HostedGitFailure,
   type HostedGitTimeouts,
@@ -54,12 +57,14 @@ export interface HostedRepositoryOptions {
   cacheLimitBytes?: number;
   /** Default {@link CACHE_SIZE_POLL_INTERVAL_MS}. */
   cacheSizePollIntervalMs?: number;
+  /** Default {@link HOSTED_READ_BATCH_BYTES}. */
+  readBatchBytes?: number;
 }
 
 /**
- * Locates git, checks its version and prepares the private cache layout (0700): the `repos`
- * directory and an empty directory used as git's `HOME`. A cache path containing the path list
- * delimiter is refused: git splits `GIT_CEILING_DIRECTORIES` on it, so the ceiling that stops
+ * Checks the CA bundle setting, locates git, checks its version and prepares the private cache
+ * layout (0700): the `repos` directory and an empty directory used as git's `HOME`. A cache path
+ * containing the path list delimiter is refused: git splits `GIT_CEILING_DIRECTORIES` on it, so the ceiling that stops
  * repository discovery would not hold (fail closed).
  */
 async function prepare(
@@ -72,6 +77,8 @@ async function prepare(
       message: `GitHub repositories need a data directory whose path contains no "${delimiter}": git would read that path as a list. Use a data directory without it.`,
     };
   }
+  const ca = await resolveCaBundle(options.env);
+  if (!ca.ok) return ca;
   const git = await findGitExecutable(options.env);
   if (!git) return { ok: false, code: 'git-not-installed', message: 'git was not found on PATH.' };
   const home = join(options.cacheDir, 'git-home');
@@ -81,6 +88,7 @@ async function prepare(
     git,
     env: options.env,
     home,
+    caBundle: ca.caBundle,
     transport: options.transport,
     signal: options.signal,
     timeouts: { ...HOSTED_GIT_TIMEOUTS, ...options.timeouts },
@@ -157,6 +165,61 @@ type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
 const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
+ * Most bytes of blobs one `cat-file --batch` of step 5 reads, so only one batch of binary content
+ * is held at a time (SPEC-105 §9.1). Each blob is at most the largest per-file limit (5 MiB).
+ */
+export const HOSTED_READ_BATCH_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Step 5 in batches of at most `batchLimit` bytes ({@link HOSTED_READ_BATCH_BYTES}): a binary
+ * blob (FR-102-17) is kept only as its size, since discovery skips it, and only the text blobs
+ * count toward `maxScanBytes` — the content the scan holds until discovery. Each text blob counts
+ * once, however many paths share it; discovery then applies the limit to what it keeps.
+ */
+async function readCandidateBlobs(
+  context: HostedGitContext,
+  cacheDir: string,
+  blobs: ReadonlyMap<string, number>,
+  batchLimit: number,
+): Promise<{ ok: true; contents: Map<string, Buffer | BinaryTreeFile> } | ScanFailure> {
+  const batches: Map<string, number>[] = [];
+  let batch = new Map<string, number>();
+  let batchBytes = 0;
+  for (const [oid, size] of blobs) {
+    if (batch.size > 0 && batchBytes + size > batchLimit) {
+      batches.push(batch);
+      batch = new Map();
+      batchBytes = 0;
+    }
+    batch.set(oid, size);
+    batchBytes += size;
+  }
+  batches.push(batch);
+  const contents = new Map<string, Buffer | BinaryTreeFile>();
+  let textBytes = 0;
+  for (const next of batches) {
+    const read = await readBlobs(context, cacheDir, next);
+    if (!read.ok) return read;
+    for (const [oid, bytes] of read.contents) {
+      if (isBinary(bytes)) {
+        contents.set(oid, { binary: true, size: bytes.length });
+        continue;
+      }
+      textBytes += bytes.length;
+      if (textBytes > DISCOVERY_LIMITS.maxScanBytes) {
+        return {
+          ok: false,
+          code: 'scan-failed',
+          message: `Discovery aborted: the candidate text files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
+        };
+      }
+      contents.set(oid, bytes);
+    }
+  }
+  return { ok: true, contents };
+}
+
+/**
  * Steps 1–5 of SPEC-105 §9.1 for one repository: prepares the cache, fetches the snapshot, lists
  * and selects the candidate files, downloads exactly their blobs and reads those within the
  * per-file limit. A failure is returned, not recorded: the caller records it once. Errors of the
@@ -170,7 +233,7 @@ async function fetchCandidates(
       ok: true;
       commitSha: string;
       entries: SnapshotEntry[];
-      contents: Map<string, Buffer | number>;
+      contents: Map<string, Buffer | number | BinaryTreeFile>;
     }
   | ScanFailure
 > {
@@ -211,17 +274,15 @@ async function fetchCandidates(
     DISCOVERY_LIMITS.maxSupportingFileBytes,
   );
   const loadable = new Map([...blobs.sizes].filter(([, size]) => size <= perFileLimit));
-  const loadBytes = [...loadable.values()].reduce((sum, size) => sum + size, 0);
-  if (loadBytes > DISCOVERY_LIMITS.maxScanBytes) {
-    return {
-      ok: false,
-      code: 'scan-failed',
-      message: `Discovery aborted: the candidate files exceed the limit of ${DISCOVERY_LIMITS.maxScanBytes} bytes per scan`,
-    };
-  }
-  const read = await readBlobs(context, cacheDir, loadable);
-  if (!read.ok) return drop(read);
-  const contents = new Map<string, Buffer | number>();
+  const read = await readCandidateBlobs(
+    context,
+    cacheDir,
+    loadable,
+    options.readBatchBytes ?? HOSTED_READ_BATCH_BYTES,
+  );
+  // Too much text is about the content (the cache stays valid); a failed read deletes the cache.
+  if (!read.ok) return read.code === 'scan-failed' ? read : drop(read);
+  const contents = new Map<string, Buffer | number | BinaryTreeFile>();
   for (const path of selected) {
     const oid = String(oidOf.get(path));
     contents.set(path, read.contents.get(oid) ?? Number(blobs.sizes.get(oid)));

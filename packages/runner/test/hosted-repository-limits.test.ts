@@ -22,6 +22,8 @@ const hooks = vi.hoisted(() => ({
   beforeDiscovery: null as (() => void) | null,
   tooManyCandidates: false,
   readFails: false,
+  /** The blob IDs of every `readBlobs` call, in order. */
+  reads: [] as string[][],
 }));
 vi.mock('@directivebench/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>();
@@ -50,14 +52,16 @@ vi.mock('../src/hosted-git', async (importOriginal) => {
   const actual = await importOriginal<typeof hostedGit>();
   return {
     ...actual,
-    readBlobs: (...args: Parameters<typeof actual.readBlobs>) =>
-      hooks.readFails
+    readBlobs: (...args: Parameters<typeof actual.readBlobs>) => {
+      hooks.reads.push([...args[2].keys()]);
+      return hooks.readFails
         ? Promise.resolve({
             ok: false,
             code: 'git-failed',
             message: 'A file could not be read from the cache.',
           })
-        : actual.readBlobs(...args),
+        : actual.readBlobs(...args);
+    },
   };
 });
 
@@ -79,21 +83,30 @@ afterEach(() => {
   hooks.beforeDiscovery = null;
   hooks.tooManyCandidates = false;
   hooks.readFails = false;
+  hooks.reads = [];
   handle.close();
   rmSync(dataDir, { recursive: true, force: true });
   rmSync(remotes, { recursive: true, force: true });
 });
 
-async function prepare(signal = new AbortController().signal) {
+/** A binary skill asset: a NUL byte up front, far larger than the text of the fixture. */
+const LOGO = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]), Buffer.alloc(4096, 7)]);
+
+async function prepare(
+  signal = new AbortController().signal,
+  extra: { files?: Record<string, string | Buffer>; readBatchBytes?: number } = {},
+) {
   const remote = new FixtureRemote(remotes, 'acme', 'skills', {
     'AGENTS.md': '# Rules\n',
     'skill/SKILL.md': '---\nname: s\ndescription: d\n---\n',
+    ...extra.files,
   });
   const options = {
     env: { PATH: process.env.PATH },
     signal,
     cacheDir: join(dataDir, 'cache'),
     transport: fileTransport(remotes),
+    ...(extra.readBatchBytes === undefined ? {} : { readBatchBytes: extra.readBatchBytes }),
   };
   const registered = await registerHostedUrl(handle, remote.location, options);
   if (!registered.ok) throw new Error(registered.message);
@@ -107,15 +120,42 @@ async function prepare(signal = new AbortController().signal) {
 }
 
 describe('scanHostedRepository limits and late failures', () => {
-  it('refuses to load candidate files beyond the per-scan byte limit', async () => {
+  it('refuses to keep candidate text beyond the per-scan byte limit, keeping the cache', async () => {
     const { run, repository } = await prepare();
     hooks.maxScanBytes = 10;
     expect(await run()).toEqual({
       ok: false,
       code: 'scan-failed',
-      message: 'Discovery aborted: the candidate files exceed the limit of 10 bytes per scan',
+      message: 'Discovery aborted: the candidate text files exceed the limit of 10 bytes per scan',
     });
     expect(await getRepository(handle.db, repository.id)).toMatchObject({ syncStatus: 'error' });
+    // The content is too large, not the cache broken: the next scan fetches into it.
+    expect(existsSync(join(dataDir, 'cache', 'repos', `${repository.id}.git`))).toBe(true);
+  });
+
+  it('does not count binary candidates toward the per-scan byte limit (issue #61)', async () => {
+    // Text: 8 + 31 bytes, within 64; the 4 KiB binary asset alone is far above it.
+    const { run } = await prepare(undefined, { files: { 'skill/assets/logo.png': LOGO } });
+    hooks.maxScanBytes = 64;
+    const result = await run();
+    expect(result).toMatchObject({ ok: true, discovered: 2, errorCount: 0, warningCount: 1 });
+    const skill = handle.sqlite
+      .prepare(`select files from artifact_versions where primary_file = 'SKILL.md'`)
+      .get() as { files: string };
+    expect(JSON.parse(skill.files).map((file: { path: string }) => file.path)).toEqual([
+      'SKILL.md',
+    ]);
+  });
+
+  it('reads the blobs in batches of the batch size, one blob at least', async () => {
+    const { run } = await prepare(undefined, {
+      files: { 'skill/assets/logo.png': LOGO, 'skill/notes.md': 'notes\n' },
+      readBatchBytes: 40,
+    });
+    expect(await run()).toMatchObject({ ok: true, discovered: 2 });
+    // Four blobs: the 4 KiB logo alone (above the batch size), the others up to 40 bytes together.
+    expect(hooks.reads.map((oids) => oids.length).sort()).toEqual([1, 1, 2]);
+    expect(hooks.reads.flat()).toHaveLength(4);
   });
 
   it('aborts before any download when there are too many candidates', async () => {
