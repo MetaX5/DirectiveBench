@@ -94,7 +94,12 @@ const LOGO = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00]), Buffer.
 
 async function prepare(
   signal = new AbortController().signal,
-  extra: { files?: Record<string, string | Buffer>; readBatchBytes?: number } = {},
+  extra: {
+    files?: Record<string, string | Buffer>;
+    readBatchBytes?: number;
+    readTotalBytes?: number;
+    readTotalMs?: number;
+  } = {},
 ) {
   const remote = new FixtureRemote(remotes, 'acme', 'skills', {
     'AGENTS.md': '# Rules\n',
@@ -107,6 +112,8 @@ async function prepare(
     cacheDir: join(dataDir, 'cache'),
     transport: fileTransport(remotes),
     ...(extra.readBatchBytes === undefined ? {} : { readBatchBytes: extra.readBatchBytes }),
+    ...(extra.readTotalBytes === undefined ? {} : { readTotalBytes: extra.readTotalBytes }),
+    ...(extra.readTotalMs === undefined ? {} : { timeouts: { readTotal: extra.readTotalMs } }),
   };
   const registered = await registerHostedUrl(handle, remote.location, options);
   if (!registered.ok) throw new Error(registered.message);
@@ -164,6 +171,44 @@ describe('scanHostedRepository limits and late failures', () => {
     // Four blobs: the 4 KiB logo alone (above the batch size), the others up to 40 bytes together.
     expect(hooks.reads.map((oids) => oids.length).sort()).toEqual([1, 1, 2]);
     expect(hooks.reads.flat()).toHaveLength(4);
+  });
+
+  it('refuses to read more candidate bytes than the read limit, binary included (review of PR #73)', async () => {
+    // Many distinct, compressible binary assets: no text budget counts them, the read limit does.
+    const assets = Object.fromEntries(
+      Array.from({ length: 20 }, (_, index) => [
+        `skill/assets/blob-${index}.bin`,
+        Buffer.concat([Buffer.from([0, index]), Buffer.alloc(4096, 0)]),
+      ]),
+    );
+    const { run, repository } = await prepare(undefined, {
+      files: assets,
+      readTotalBytes: 20 * 4096,
+    });
+    expect(await run()).toEqual({
+      ok: false,
+      code: 'scan-failed',
+      message: `Discovery aborted: the candidate files to read exceed the limit of ${20 * 4096} bytes per scan`,
+    });
+    // Refused from the sizes step 4 reports: step 5 reads nothing.
+    expect(hooks.reads).toEqual([]);
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({
+      syncStatus: 'error',
+      syncError: `Discovery aborted: the candidate files to read exceed the limit of ${20 * 4096} bytes per scan`,
+    });
+    // The content is too large, not the cache broken.
+    expect(existsSync(join(dataDir, 'cache', 'repos', `${repository.id}.git`))).toBe(true);
+  });
+
+  it('stops reading when the time limit of all the reads is spent', async () => {
+    const { run, repository } = await prepare(undefined, { readTotalMs: 0 });
+    expect(await run()).toEqual({
+      ok: false,
+      code: 'timeout',
+      message: 'Reading the candidate files from the cache did not finish within the time limit.',
+    });
+    expect(hooks.reads).toEqual([]);
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({ syncStatus: 'error' });
   });
 
   it('aborts before any download when there are too many candidates', async () => {

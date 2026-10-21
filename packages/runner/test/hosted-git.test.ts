@@ -586,7 +586,9 @@ describePosix('hosted git steps with a fake git', () => {
         { 'cat-file': answer },
         { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } },
       );
-      expect(await readBlobs(context, dir, blobs)).toMatchObject({ ok: false });
+      expect(await readBlobs(context, dir, blobs, context.timeouts.read)).toMatchObject({
+        ok: false,
+      });
     }
   });
 });

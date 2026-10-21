@@ -59,6 +59,8 @@ export interface HostedRepositoryOptions {
   cacheSizePollIntervalMs?: number;
   /** Default {@link HOSTED_READ_BATCH_BYTES}. */
   readBatchBytes?: number;
+  /** Default {@link HOSTED_READ_TOTAL_BYTES}. */
+  readTotalBytes?: number;
 }
 
 /**
@@ -172,6 +174,21 @@ const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 export const HOSTED_READ_BATCH_BYTES = 32 * 1024 * 1024;
 
 /**
+ * Most bytes of candidate blobs step 5 of one scan reads, binary blobs included (SPEC-105 §9.1).
+ * Only text counts toward `maxScanBytes`, so without this cap the work of a scan — git inflating
+ * every blob, DirectiveBench reading and sniffing it — would be bounded only by the candidate
+ * limits: a public repository of 50 000 compressible 5 MiB binaries fits in the 500 MiB cache and
+ * is about 244 GiB to read (review of PR #73). 1 GiB is four times `maxScanBytes`, so every
+ * repository whose text fits the budget can carry as much again in binary assets, and git reads
+ * it from the local cache in seconds. Checked before step 5 from the sizes step 4 reports.
+ */
+export const HOSTED_READ_TOTAL_BYTES = 1024 * 1024 * 1024;
+
+/** The fixed message of a step 5 that ran out of `timeouts.readTotal` between two batches. */
+const READ_TOTAL_TIMEOUT_MESSAGE =
+  'Reading the candidate files from the cache did not finish within the time limit.';
+
+/**
  * Step 5 in batches of at most `batchLimit` bytes ({@link HOSTED_READ_BATCH_BYTES}): a binary
  * blob (FR-102-17) is kept only as its size, since discovery skips it, and only the text blobs
  * count toward `maxScanBytes` — the content the scan holds until discovery. Each text blob counts
@@ -183,6 +200,8 @@ async function readCandidateBlobs(
   blobs: ReadonlyMap<string, number>,
   batchLimit: number,
 ): Promise<{ ok: true; contents: Map<string, Buffer | BinaryTreeFile> } | ScanFailure> {
+  // One deadline for all batches (`timeouts.readTotal`); each batch gets what is left of it.
+  const deadline = performance.now() + context.timeouts.readTotal;
   const batches: Map<string, number>[] = [];
   let batch = new Map<string, number>();
   let batchBytes = 0;
@@ -199,7 +218,11 @@ async function readCandidateBlobs(
   const contents = new Map<string, Buffer | BinaryTreeFile>();
   let textBytes = 0;
   for (const next of batches) {
-    const read = await readBlobs(context, cacheDir, next);
+    const left = deadline - performance.now();
+    if (left <= 0) {
+      return { ok: false, code: 'timeout', message: READ_TOTAL_TIMEOUT_MESSAGE };
+    }
+    const read = await readBlobs(context, cacheDir, next, Math.min(context.timeouts.read, left));
     if (!read.ok) return read;
     for (const [oid, bytes] of read.contents) {
       if (isBinary(bytes)) {
@@ -279,6 +302,18 @@ async function fetchCandidates(
     DISCOVERY_LIMITS.maxSupportingFileBytes,
   );
   const loadable = new Map([...blobs.sizes].filter(([, size]) => size <= perFileLimit));
+  // The work of step 5 is bounded before it starts, binary blobs included (fail closed). Like the
+  // other content limits it keeps the valid cache.
+  const readTotalLimit = options.readTotalBytes ?? HOSTED_READ_TOTAL_BYTES;
+  let readTotal = 0;
+  for (const size of loadable.values()) readTotal += size;
+  if (readTotal > readTotalLimit) {
+    return {
+      ok: false,
+      code: 'scan-failed',
+      message: `Discovery aborted: the candidate files to read exceed the limit of ${readTotalLimit} bytes per scan`,
+    };
+  }
   const read = await readCandidateBlobs(
     context,
     cacheDir,

@@ -138,7 +138,8 @@ measured (below).
     gigabytes). Text blobs are now copied into their own buffer; regression assertion: every
     buffer handed to discovery owns exactly its bytes (fails with the view, passes with the copy).
   - Minor, specified: step 5 has no total byte cap of its own (bounded by the candidate limits,
-    the per-batch read timeout, local cache only) — SPEC-105 §9.1.
+    the per-batch read timeout, local cache only) — SPEC-105 §9.1. Superseded: the Codex review
+    showed this unbounded; fixed below ("Codex review finding and fix").
   - Minor, specified: a bad `GIT_SSL_CAINFO` also refuses a scan that would only read the cache
     (the check runs before any step; fail closed) — SPEC-105 §20.
   - Minor, fixed: the TLS test notes that `SSL_CERT_FILE`/`SSL_CERT_DIR` matter only on OpenSSL
@@ -146,10 +147,51 @@ measured (below).
   - Nits, not changed: `<CA bundle>` replacement is a plain substring (only a local path, no
     secret); `100600` is not in the raw-tree test (the reviewer confirmed it lists as `100644`).
 
+## Codex review finding and fix
+
+- **Finding (Codex adversarial review at `b7fe0cc`, confirmed):** once binary candidates stopped
+  counting toward `maxScanBytes`, nothing bounded the total work of step 5, and each 32 MiB batch
+  had a fresh `timeouts.read`. A public repository of up to the candidate limits of distinct,
+  compressible binaries at 5 MiB each (e.g. 50 000 × 5 MiB ≈ 244 GiB to inflate and read) fits in
+  the 500 MiB cache and could hold the single long-job slot for hours. A regression of item 1; the
+  first review's "no total byte cap, specified" minor is withdrawn.
+- **Fix (`packages/runner/src/hosted-repository.ts`, `hosted-git.ts`):**
+  - `HOSTED_READ_TOTAL_BYTES` = 1 GiB (4 × `maxScanBytes`; option `readTotalBytes` for tests): the
+    sizes of all blobs step 5 would read (within the per-file limit, binary included), known from
+    step 4's `cat-file --batch-check`, are summed before step 5; above it the scan fails
+    `scan-failed` with the fixed message "Discovery aborted: the candidate files to read exceed
+    the limit of N bytes per scan", reads nothing and keeps the valid cache (a content limit).
+  - `HOSTED_GIT_TIMEOUTS.readTotal` = 5 min: one deadline across all batches; each batch gets
+    `min(read, what is left)` (`readBlobs` now takes its `timeoutMs`), and a deadline spent
+    between batches fails `timeout` with a fixed message.
+  - Retained text is still bounded by `maxScanBytes` exactly as before, so results match the
+    walker.
+- **Deviation from the brief:** the check cannot come before the blob *download*. `ls-tree` runs
+  without `--long` on purpose (in a blob-less partial clone `--long` fetches every blob to report
+  its size), so sizes exist only after step 4. The download, including git inflating each object
+  as it indexes it, stays bounded by the 500 MiB cache limit and the 5 min `fetch` timeout, as
+  before this PR. The check runs before step 5 reads anything.
+- **Local walker:** no equivalent cap needed and none added — it reads the user's own files once
+  each, without decompression, so its work is the size of what is on disk within the same
+  candidate limits; recorded in SPEC-105 §9.1.
+- **Tests (`packages/runner/test/hosted-repository-limits.test.ts`):** 20 distinct compressible
+  binary assets over a lowered read limit (local bare-remote transport, no network) → the fixed
+  message, `sync_status = error`, `sync_error` the fixed message, no `readBlobs` call, cache kept;
+  `timeouts.readTotal = 0` → `timeout` before the first batch, no read. Red first: both fail with
+  the `b7fe0cc` `hosted-repository.ts`.
+- **Verification:** `pnpm format:check`, `pnpm lint`, `pnpm typecheck` pass; `pnpm test` 7/7,
+  100% everywhere (runner 221 tests); `pnpm build`, `pnpm verify:pack` pass; `pnpm test:e2e` 37
+  passed. Real built CLI (`serve`, fresh data dir, UI driven by Playwright, github.com reachable):
+  `anthropics/skills` registered and scanned at `dbd4588f9e10`, 20 artifacts,
+  `sync_status = ok`.
+- Specs: SPEC-105 §9.1 (step 5 bounds, why not before download, why not local), §12, §13 (content
+  limits row), §20.
+
 ## Lessons recorded
 
 - [2026-10-21-git-canonicalises-tree-modes.md](../lessons/2026-10-21-git-canonicalises-tree-modes.md)
 - [2026-10-21-git-ssl-cainfo-is-not-exclusive.md](../lessons/2026-10-21-git-ssl-cainfo-is-not-exclusive.md)
+- [2026-10-21-excluding-from-a-budget-leaves-work-unbounded.md](../lessons/2026-10-21-excluding-from-a-budget-leaves-work-unbounded.md)
 
 ## Follow-ups
 

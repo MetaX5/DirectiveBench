@@ -37,6 +37,11 @@ export const HOSTED_GIT_TIMEOUTS = {
   fetch: 5 * 60_000,
   /** Reads from the cache: `rev-parse`, `ls-tree`, `cat-file`. */
   read: 60_000,
+  /**
+   * All the `cat-file --batch` reads of step 5 of one scan together (SPEC-105 §9.1): each batch
+   * also has `read`, so the work cannot grow with the number of batches.
+   */
+  readTotal: 5 * 60_000,
 } as const;
 
 export type HostedGitTimeouts = { [K in keyof typeof HOSTED_GIT_TIMEOUTS]: number };
@@ -789,13 +794,15 @@ export async function fetchBlobs(
 
 /**
  * Step 5: reads the blobs from the cache with `cat-file --batch` and lazy fetching disabled —
- * never `--filters` or `--textconv` — as the exact bytes committed. The caller passes only blobs
- * within its size limits; the output is bounded by their total.
+ * never `--filters` or `--textconv` — as the exact bytes committed, within `timeoutMs` (at most
+ * `timeouts.read`, less when the scan's `timeouts.readTotal` is nearly spent). The caller passes
+ * only blobs within its size limits; the output is bounded by their total.
  */
 export async function readBlobs(
   context: HostedGitContext,
   cacheDir: string,
   blobs: ReadonlyMap<string, number>,
+  timeoutMs: number,
 ): Promise<{ ok: true; contents: Map<string, Buffer> } | HostedGitFailure> {
   const contents = new Map<string, Buffer>();
   if (blobs.size === 0) return { ok: true, contents };
@@ -805,7 +812,7 @@ export async function readBlobs(
   const result = await runStep(context, ['cat-file', '--batch'], {
     gitDir: cacheDir,
     kind: 'local',
-    timeoutMs: context.timeouts.read,
+    timeoutMs,
     maxStdoutBytes: total + oids.length * 128,
     stdin: Buffer.from(`${oids.join('\n')}\n`),
   });
