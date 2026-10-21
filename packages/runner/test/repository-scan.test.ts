@@ -16,7 +16,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as core from '@directivebench/core';
-import { discoverArtifacts, MAX_FRONTMATTER_JSON_BYTES } from '@directivebench/core';
+import {
+  discoverArtifacts,
+  MAX_FRONTMATTER_JSON_BYTES,
+  MAX_FRONTMATTER_SOURCE_BYTES,
+} from '@directivebench/core';
 import {
   enqueueRepositoryScanJob,
   getJob,
@@ -690,7 +694,8 @@ describe('repository-scan jobs', () => {
     'stores a skill whose aliases expand past the frontmatter JSON limit without its frontmatter',
     async () => {
       const project = join(sources, 'project');
-      const long = 'x'.repeat(1024 * 1024 - 1000);
+      // Under MAX_FRONTMATTER_SOURCE_BYTES, so the block is parsed and only the JSON limit applies.
+      const long = 'x'.repeat(60_000);
       write(project, {
         '.agents/skills/wide/SKILL.md': `---\nname: wide-name\ndescription: Wide.\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]\n---\n# Wide\n`,
         'AGENTS.md': '# Project rules\n',
@@ -719,6 +724,30 @@ describe('repository-scan jobs', () => {
     },
     LARGE_SOURCE_TIMEOUT_MS,
   );
+
+  // Regression (#49): a 1 MiB block of many keys is not parsed (the parse is quadratic in them).
+  it('stores a skill whose frontmatter block is over the source cap without its frontmatter', async () => {
+    const project = join(sources, 'project');
+    const keys = Array.from({ length: 100_000 }, (_, i) => `k${i}: 1`).join('\n');
+    write(project, {
+      '.agents/skills/huge/SKILL.md': `---\nname: huge-name\n${keys}\n---\n# Huge\n`,
+      'AGENTS.md': '# Project rules\n',
+    });
+    const repository = await register(project, 'local-directory');
+
+    expect(await scan(repository.id)).toMatchObject({ ok: true, discovered: 2, errorCount: 0 });
+    const [skill] = storedOccurrences();
+    expect(skill?.path).toBe('.agents/skills/huge');
+    expect(handle.sqlite.prepare("select name from artifacts where type = 'skill'").get()).toEqual({
+      name: 'huge',
+    });
+    expect(skill?.parsedMetadata).toMatchObject({
+      frontmatter: {},
+      warnings: expect.arrayContaining([
+        `Invalid frontmatter: frontmatter is longer than ${MAX_FRONTMATTER_SOURCE_BYTES} bytes`,
+      ]) as unknown,
+    });
+  });
 
   it('stores an artifact whose frontmatter JSON cannot represent, with a warning, next to the others', async () => {
     // YAML is not JSON: a self-referring alias parses to a circular object. Stored as is, it

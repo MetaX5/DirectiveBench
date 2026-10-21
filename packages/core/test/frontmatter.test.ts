@@ -4,10 +4,11 @@ import { parse } from 'yaml';
 import {
   MAX_FRONTMATTER_ALIAS_COUNT,
   MAX_FRONTMATTER_JSON_BYTES,
+  MAX_FRONTMATTER_SOURCE_BYTES,
   parseFrontmatter,
 } from '../src/frontmatter';
 
-/** Parsing a 1 MB YAML source takes ~0.5 s locally and up to ~2 s on a loaded CI runner. */
+/** Checking ~6 MB of aliased JSON or a 1 MiB source takes up to ~2 s on a loaded CI runner. */
 const LARGE_SOURCE_TIMEOUT_MS = 20_000;
 
 describe('parseFrontmatter', () => {
@@ -128,17 +129,19 @@ describe('parseFrontmatter', () => {
 
   // Regression (review of PR #44 at 2d668f3): `maxAliasCount` weights an alias by the aliases
   // inside the node it repeats, so 99 aliases of a 1 MB string passed it and became ~100 MB of
-  // JSON in `parsedMetadata` — per file, under the 256 MiB scan limit.
+  // JSON in `parsedMetadata` — per file, under the 256 MiB scan limit. A block under
+  // MAX_FRONTMATTER_SOURCE_BYTES still expands past MAX_FRONTMATTER_JSON_BYTES this way.
   it(
-    'rejects a 1 MB string repeated by 99 aliases, which the alias limit lets through',
+    'rejects a long string repeated by 99 aliases, which the alias limit lets through',
     () => {
-      const long = 'x'.repeat(1024 * 1024 - 600);
+      const long = 'x'.repeat(60_000);
       const yaml = `name: big\na: &a "${long}"\nb: [${Array(99).fill('*a').join(', ')}]`;
-      // The alias limit alone accepts it, and its JSON would be about 100 times the file.
+      expect(Buffer.byteLength(yaml)).toBeLessThan(MAX_FRONTMATTER_SOURCE_BYTES);
+      // The alias limit alone accepts it, and its JSON would be about 100 times the block.
       const expanded = parse(yaml, { maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT }) as {
         b: string[];
       };
-      expect(expanded.b.reduce((sum, item) => sum + item.length, 0)).toBeGreaterThan(100_000_000);
+      expect(expanded.b.reduce((sum, item) => sum + item.length, 0)).toBeGreaterThan(5_000_000);
       expect(parseFrontmatter(`---\n${yaml}\n---\nbody`)).toEqual({
         frontmatter: {},
         body: 'body',
@@ -151,11 +154,11 @@ describe('parseFrontmatter', () => {
   it('counts the exact UTF-8 bytes of the JSON against MAX_FRONTMATTER_JSON_BYTES', () => {
     expect(MAX_FRONTMATTER_JSON_BYTES).toBe(4 * 1024 * 1024);
     // Every kind of value, multi-byte and escaped text, nesting and shared aliases. 99 aliases of
-    // a 41 000-character chunk bring the JSON near the limit from a small source (a 4 MiB source
-    // is slow to parse on CI); `pad` fills the rest so that the whole is exactly at the limit,
-    // then one byte over it. The last byte counted is the closing bracket of `last`.
+    // a 41 900-character chunk bring the JSON near the limit from a source under
+    // MAX_FRONTMATTER_SOURCE_BYTES; `pad` fills the rest so that the whole is exactly at the
+    // limit, then one byte over it. The last byte counted is the closing bracket of `last`.
     const rest =
-      `chunk: &c "${'c'.repeat(41_000)}"\ncopies: [${Array(99).fill('*c').join(', ')}]\n` +
+      `chunk: &c "${'c'.repeat(41_900)}"\ncopies: [${Array(99).fill('*c').join(', ')}]\n` +
       'shared: &s {ok: true, off: false, none: null, n: -1.5e+30, list: [1, "two"]}\n' +
       'again: [*s, *s, []]\nempty: {}\ntext: "zażółć 😀 \\t \\" \\\\ \\x01"\nnested: {a: {b: [{}]}}\n' +
       'last: []';
@@ -163,6 +166,9 @@ describe('parseFrontmatter', () => {
       parseFrontmatter(`---\npad: "${'p'.repeat(padding)}"\n${rest}\n---\n`);
     const base = Buffer.byteLength(JSON.stringify(sized(0).frontmatter));
     expect(MAX_FRONTMATTER_JSON_BYTES - base).toBeGreaterThan(0);
+    expect(Buffer.byteLength(rest) + MAX_FRONTMATTER_JSON_BYTES - base).toBeLessThan(
+      MAX_FRONTMATTER_SOURCE_BYTES,
+    );
     const atLimit = sized(MAX_FRONTMATTER_JSON_BYTES - base);
     expect(atLimit.error).toBeUndefined();
     expect(Buffer.byteLength(JSON.stringify(atLimit.frontmatter))).toBe(MAX_FRONTMATTER_JSON_BYTES);
@@ -172,6 +178,50 @@ describe('parseFrontmatter', () => {
       error: `frontmatter cannot be stored as JSON: it expands to more than ${MAX_FRONTMATTER_JSON_BYTES} bytes of JSON (the limit was reached under the key "last")`,
     });
   });
+
+  it('accepts a block of exactly MAX_FRONTMATTER_SOURCE_BYTES and rejects one byte more', () => {
+    expect(MAX_FRONTMATTER_SOURCE_BYTES).toBe(64 * 1024);
+    // The cap counts UTF-8 bytes, not characters: "ż" takes two.
+    const block = (bytes: number) =>
+      `note: "ż${'n'.repeat(bytes - Buffer.byteLength('note: "ż"'))}"`;
+    expect(Buffer.byteLength(block(MAX_FRONTMATTER_SOURCE_BYTES))).toBe(
+      MAX_FRONTMATTER_SOURCE_BYTES,
+    );
+    const atCap = parseFrontmatter(`---\n${block(MAX_FRONTMATTER_SOURCE_BYTES)}\n---\nbody`);
+    expect(atCap.error).toBeUndefined();
+    expect(Object.keys(atCap.frontmatter)).toEqual(['note']);
+    expect(parseFrontmatter(`---\n${block(MAX_FRONTMATTER_SOURCE_BYTES + 1)}\n---\nbody`)).toEqual({
+      frontmatter: {},
+      body: 'body',
+      error: `frontmatter is longer than ${MAX_FRONTMATTER_SOURCE_BYTES} bytes`,
+    });
+  });
+
+  // Regression (#49): `yaml`'s duplicate-key check is quadratic in the keys of one mapping and the
+  // parse is synchronous, so a 1 MiB block of ~110 000 keys blocked the event loop for tens of seconds.
+  it(
+    'rejects a 1 MiB block with many keys quickly, without parsing it',
+    async () => {
+      const lines: string[] = [];
+      for (let size = 0; size < 1024 * 1024; size += lines[lines.length - 1]!.length + 1) {
+        lines.push(`k${lines.length}: 1`);
+      }
+      expect(lines.length).toBeGreaterThan(100_000);
+      vi.resetModules();
+      const parseSpy = vi.fn(parse);
+      vi.doMock('yaml', () => ({ parse: parseSpy }));
+      const { parseFrontmatter: parseWithSpy } = await import('../src/frontmatter');
+      const started = performance.now();
+      expect(parseWithSpy(`---\n${lines.join('\n')}\n---\n# Body\n`)).toEqual({
+        frontmatter: {},
+        body: '# Body\n',
+        error: `frontmatter is longer than ${MAX_FRONTMATTER_SOURCE_BYTES} bytes`,
+      });
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(parseSpy).not.toHaveBeenCalled();
+    },
+    LARGE_SOURCE_TIMEOUT_MS,
+  );
 
   it('names a long offending key only up to a safe length, escaped', () => {
     const key = `k\t${'e'.repeat(100)}`;

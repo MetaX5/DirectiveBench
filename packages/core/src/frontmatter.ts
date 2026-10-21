@@ -5,14 +5,26 @@ export interface FrontmatterResult {
   frontmatter: Record<string, unknown>;
   body: string;
   /**
-   * Present when a frontmatter block exists but cannot be parsed as a YAML mapping, or holds a
-   * value JSON cannot represent unchanged, or expands to more than
-   * {@link MAX_FRONTMATTER_JSON_BYTES} of JSON.
+   * Present when a frontmatter block exists but is longer than
+   * {@link MAX_FRONTMATTER_SOURCE_BYTES}, cannot be parsed as a YAML mapping, holds a value JSON
+   * cannot represent unchanged, or expands to more than {@link MAX_FRONTMATTER_JSON_BYTES} of JSON.
    */
   error?: string;
 }
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/**
+ * The most UTF-8 bytes a frontmatter block (between the `---` lines) may take; a longer block is
+ * invalid frontmatter and is never parsed. `yaml`'s duplicate-key check is quadratic in the keys
+ * of one mapping and the parse is synchronous, so the 1 MiB primary-file limit let one file block
+ * the runner for tens of seconds — past the 30 s stale-job threshold, with cancellation and SIGINT
+ * unobserved. Measured for a flat mapping of `kN: 1` keys: 64 KiB (~7 400 keys) parses in about
+ * 0.2 s, 128 KiB in 1 s and 256 KiB in 3 s. Real frontmatter is a few hundred bytes, so 64 KiB
+ * leaves over 100× headroom while bounding the block on the event loop to a fraction of a second.
+ * Duplicate-key checking stays on: turning it off would change which duplicate keys are accepted.
+ */
+export const MAX_FRONTMATTER_SOURCE_BYTES = 64 * 1024;
 
 /**
  * The most alias nodes one frontmatter block may resolve (the `yaml` default, pinned here so a
@@ -117,8 +129,9 @@ function whereInFrontmatter(problem: string, path: readonly string[]): string {
 }
 
 /**
- * Splits a leading YAML frontmatter block from Markdown content. Never throws. The returned
- * frontmatter is always JSON-serialisable without loss (it is stored in JSON columns) and at most
+ * Splits a leading YAML frontmatter block from Markdown content. Never throws. A block over
+ * {@link MAX_FRONTMATTER_SOURCE_BYTES} is not parsed. The returned frontmatter is always
+ * JSON-serialisable without loss (it is stored in JSON columns) and at most
  * {@link MAX_FRONTMATTER_JSON_BYTES} as JSON; a block that is not is reported like malformed
  * YAML: `error` set (naming the top-level key the problem lies under), `frontmatter` empty — one
  * bad value discards the whole block.
@@ -128,9 +141,17 @@ export function parseFrontmatter(content: string): FrontmatterResult {
   const match = FRONTMATTER.exec(text);
   if (!match) return { frontmatter: {}, body: text };
   const body = text.slice(match[0].length);
+  // Capture group 1 is not optional, so it is always defined when the expression matches.
+  const source = match[1] as string;
+  if (Buffer.byteLength(source) > MAX_FRONTMATTER_SOURCE_BYTES) {
+    return {
+      frontmatter: {},
+      body,
+      error: `frontmatter is longer than ${MAX_FRONTMATTER_SOURCE_BYTES} bytes`,
+    };
+  }
   try {
-    // Capture group 1 is not optional, so it is always defined when the expression matches.
-    const value: unknown = parse(match[1] as string, {
+    const value: unknown = parse(source, {
       maxAliasCount: MAX_FRONTMATTER_ALIAS_COUNT,
     });
     if (value === null || value === undefined) return { frontmatter: {}, body };
