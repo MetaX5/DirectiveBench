@@ -188,10 +188,14 @@ describe('runCommand', () => {
 
   posixOnly('reports timeout and cancellation when cancelled during the grace period', async () => {
     const controller = new AbortController();
-    const pending = runCommand(
-      nodeScript("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"),
-      { ...options(), timeoutMs: 100, killGraceMs: 800, signal: controller.signal },
-    );
+    // sh ignores SIGTERM within a millisecond of starting; a Node.js script installs its handler
+    // only after its start-up, which took more than the 100 ms timeout on a loaded CI runner.
+    const pending = runCommand(['sh', '-c', "trap '' TERM; while :; do sleep 1; done"], {
+      ...options(),
+      timeoutMs: 100,
+      killGraceMs: 800,
+      signal: controller.signal,
+    });
     // Cancelling during the grace period must not skip it: SIGKILL still waits for killGraceMs.
     setTimeout(() => controller.abort(), 300);
     const result = await pending;

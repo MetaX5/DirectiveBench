@@ -265,26 +265,44 @@ describe('parseMarkdown blocks', () => {
   });
 
   it('parses pathological input in linear time', () => {
-    const size = 100_000;
-    const inputs = [
-      '['.repeat(size),
-      `${'['.repeat(size)}]`,
-      `${'*a'.repeat(size / 2)}*`,
-      '[a]'.repeat(size / 3),
-      '`'.repeat(size),
-      Array.from({ length: 400 }, (_, i) => '`'.repeat(i + 1)).join(' '),
-      '*a '.repeat(size / 3),
-      '_'.repeat(size),
-      '**'.repeat(size / 2),
-      `# ${' '.repeat(size)}x`,
-      `- a${'\n'.repeat(size)}`,
-      `${' '.repeat(size)}\u2028`,
-      '<'.repeat(size),
+    // Each input is parsed at two sizes; quadrupling a linear input quadruples the time, a
+    // quadratic one multiplies it by 16. A ratio holds on a slow CI runner, where a fixed bound
+    // on the total failed although every input was linear.
+    const shapes: ((size: number) => string)[] = [
+      (size) => '['.repeat(size),
+      (size) => `${'['.repeat(size)}]`,
+      (size) => `${'*a'.repeat(size / 2)}*`,
+      (size) => '[a]'.repeat(size / 3),
+      (size) => '`'.repeat(size),
+      // Runs of 1…n backticks: n² / 2 characters, so n grows with the square root of the size.
+      (size) =>
+        Array.from({ length: Math.round(Math.sqrt(1.6 * size)) }, (_, i) => '`'.repeat(i + 1)).join(
+          ' ',
+        ),
+      (size) => '*a '.repeat(size / 3),
+      (size) => '_'.repeat(size),
+      (size) => '**'.repeat(size / 2),
+      (size) => `# ${' '.repeat(size)}x`,
+      (size) => `- a${'\n'.repeat(size)}`,
+      (size) => `${' '.repeat(size)}\u2028`,
+      (size) => '<'.repeat(size),
     ];
-    const started = performance.now();
-    for (const input of inputs) parseMarkdown(input);
-    expect(performance.now() - started).toBeLessThan(5_000);
-  });
+    const fastest = (input: string) => {
+      let best = Infinity;
+      for (let run = 0; run < 3; run += 1) {
+        const started = performance.now();
+        parseMarkdown(input);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    for (const shape of shapes) {
+      const small = fastest(shape(25_000));
+      const large = fastest(shape(100_000));
+      // 8 leaves room for noise below the quadratic 16; 50 ms absorbs timer resolution.
+      expect(large).toBeLessThan(8 * small + 50);
+    }
+  }, 60_000);
 });
 
 describe('parseInline', () => {
