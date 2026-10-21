@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "description": "Local-first workbench for discovering, organizing, testing and benchmarking AI agent skills, instructions and rules.",
   "license": "MIT",
+  "author": "Mateusz Minkiewicz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MetaX5/DirectiveBench.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/MetaX5/DirectiveBench#readme",
+  "bugs": {
+    "url": "https://github.com/MetaX5/DirectiveBench/issues"
+  },
   "type": "module",
   "bin": {
     "directivebench": "dist/cli.js"
