@@ -32,6 +32,13 @@ import {
 } from '@directivebench/database';
 import { LocalRunner } from '../src/index';
 import { userLevelAgentFolders } from '../src/repository-scan';
+import {
+  ASSIGNED_METADATA,
+  assignUserMetadata,
+  userMetadata,
+  versionHistory,
+  withOneNewVersion,
+} from './support/rescan';
 
 // Every process-spawning function stays real but observable: a scan must call none of them.
 vi.mock('node:child_process', async (importOriginal) => {
@@ -322,6 +329,62 @@ describe('repository-scan jobs', () => {
     expect(secondRest).toEqual({ ...firstRest, createdArtifacts: 0, createdVersions: 0 });
     expect(await handle.db.$count(schema.artifactVersions)).toBe(4);
   });
+
+  // Issue #19 (SPEC-013 M1 AC2, SPEC-103 FR-103-06/07, SPEC-001 principle 15).
+  it.each(['local-git', 'local-directory'] as const)(
+    'versions only changed content on a %s rescan and keeps what the user assigned',
+    async (provider) => {
+      const repo = join(sources, `rescan-${provider}`);
+      write(repo, {
+        '.agents/skills/review/SKILL.md': '---\nname: review\n---\n# Review\n',
+        '.agents/skills/review/references/checklist.md': '# Checklist\n',
+        'AGENTS.md': '# Repository rules\n',
+        '.cursor/rules/react.mdc': '---\nglobs: "src/**/*.tsx"\n---\n# React\n',
+        'README.md': '# Not an artifact\n',
+      });
+      if (provider === 'local-git') {
+        childProcess.execFileSync('git', ['init', '-q', '-b', 'main'], {
+          cwd: repo,
+          env: FIXTURE_GIT_ENV,
+        });
+      }
+      const repository = await register(repo, provider);
+      expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 3 });
+      const first = versionHistory(handle);
+      const skill = first['.agents/skills/review']?.artifactId ?? '';
+      await assignUserMetadata(handle, skill);
+
+      // Unchanged, and changed only outside the artifacts: 0 new versions, nothing renumbered.
+      expect(await scan(repository.id)).toMatchObject({
+        ok: true,
+        createdArtifacts: 0,
+        createdVersions: 0,
+      });
+      write(repo, { 'README.md': '# Edited, still not an artifact\n' });
+      expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 0 });
+      expect(versionHistory(handle)).toEqual(first);
+
+      // One edited file — a supporting file of the skill — is one new version of that artifact.
+      write(repo, { '.agents/skills/review/references/checklist.md': '# Checklist, edited\n' });
+      expect(await scan(repository.id)).toMatchObject({
+        ok: true,
+        createdArtifacts: 0,
+        createdVersions: 1,
+      });
+      const second = versionHistory(handle);
+      expect(second).toEqual(withOneNewVersion(first, '.agents/skills/review'));
+      expect(await userMetadata(handle, skill)).toEqual(ASSIGNED_METADATA);
+
+      // A revert reuses the earlier version (FR-103-07); the edit's version is kept.
+      write(repo, { '.agents/skills/review/references/checklist.md': '# Checklist\n' });
+      expect(await scan(repository.id)).toMatchObject({ ok: true, createdVersions: 0 });
+      expect(versionHistory(handle)).toEqual({
+        ...second,
+        '.agents/skills/review': { ...second['.agents/skills/review'], latest: 1 },
+      });
+      expect(await userMetadata(handle, skill)).toEqual(ASSIGNED_METADATA);
+    },
+  );
 
   it('reads nothing outside the registered repository, including user-level skill folders', async () => {
     const home = join(sources, 'home');
