@@ -364,6 +364,32 @@ export function parseInline(text: string): Inline[] {
     found.set(needle, index);
     return index;
   };
+  /** Start positions of the maximal backtick runs per run length, collected on the first one. */
+  let runsByLength: Map<number, number[]> | undefined;
+  /** Per run length, the position in `runsByLength` the next search starts from. */
+  const nextRun = new Map<number, number>();
+  /**
+   * The start of the first backtick run of exactly `length` at or after `from`, or -1. `from`
+   * only grows, so each run is passed over once per length: one linear pass in total, where a
+   * search to the end per distinct length was quadratic in their number (runs of 1…n backticks).
+   */
+  const findClosingRun = (length: number, from: number): number => {
+    if (!runsByLength) {
+      runsByLength = new Map();
+      for (let j = text.indexOf('`'); j >= 0; j = text.indexOf('`', j)) {
+        const run = runLength(text, j, '`');
+        const starts = runsByLength.get(run) ?? [];
+        starts.push(j);
+        runsByLength.set(run, starts);
+        j += run;
+      }
+    }
+    const starts = runsByLength.get(length) ?? [];
+    let next = nextRun.get(length) ?? 0;
+    while (next < starts.length && (starts[next] as number) < from) next += 1;
+    nextRun.set(length, next);
+    return next < starts.length ? (starts[next] as number) : -1;
+  };
 
   let i = 0;
   while (i < text.length) {
@@ -377,17 +403,7 @@ export function parseInline(text: string): Inline[] {
 
     if (char === '`') {
       const length = runLength(text, i, '`');
-      // An unmatched run of one length cannot recur (it would have closed this one), so each
-      // length is searched for to the end at most once.
-      let close = -1;
-      for (let j = text.indexOf('`', i + length); j >= 0; j = text.indexOf('`', j)) {
-        const run = runLength(text, j, '`');
-        if (run === length) {
-          close = j;
-          break;
-        }
-        j += run;
-      }
+      const close = findClosingRun(length, i + length);
       if (close < 0) {
         buffer += '`'.repeat(length);
         i += length;
