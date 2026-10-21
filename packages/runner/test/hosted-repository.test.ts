@@ -516,7 +516,7 @@ describe('scanHostedRepository', () => {
       [home, null, ['command line:']],
       [cacheRepo, cacheRepo, ['command line:', `file:${cacheRepo}/config`]],
     ] as const) {
-      const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', gitDir);
+      const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', gitDir, null);
       const listing = execFileSync(
         'git',
         hostedGitArgs('file', ['config', '--show-origin', '--list']),
@@ -534,7 +534,7 @@ describe('scanHostedRepository', () => {
     // to the enclosing one.
     const broken = join(cache, 'repos', 'broken.git');
     writeFiles(broken, { garbage: 'not a repository' });
-    const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', broken);
+    const { env } = buildHostedGitEnv({ PATH: process.env.PATH }, home, 'local', broken, null);
     delete env.GIT_CEILING_DIRECTORIES;
     const unbounded = execFileSync(
       'git',
@@ -709,6 +709,42 @@ describe('scanHostedRepository', () => {
       message: 'The repository tree is invalid.',
     });
     expect(objectsIn(cacheOf(repository.id)).filter((o) => o.type === 'blob')).toEqual([]);
+  });
+
+  it('scans a tree whose entries carry legacy or unusual modes: git canonicalises them (issue #61)', async () => {
+    const remote = new FixtureRemote(remotes, 'acme', 'legacy-modes', { 'README.md': '# x\n' });
+    const agents = git(remote.bare, ['hash-object', '-w', '--stdin'], '# Rules\n').trim();
+    const claude = git(remote.bare, ['hash-object', '-w', '--stdin'], '# Claude\n').trim();
+    // Raw tree bytes, as old git versions and other tools wrote them (`git mktree` would
+    // normalise the modes): `<mode> <name>\0<binary oid>`, sorted by name.
+    const entry = (mode: string, name: string, oid: string) =>
+      Buffer.concat([Buffer.from(`${mode} ${name}\0`), Buffer.from(oid, 'hex')]);
+    const raw = Buffer.concat([
+      entry('100664', 'AGENTS.md', agents),
+      entry('100000', 'CLAUDE.md', claude),
+      entry('140000', 'GEMINI.md', claude),
+    ]);
+    const tree = git(
+      remote.bare,
+      ['hash-object', '-t', 'tree', '--literally', '-w', '--stdin'],
+      raw,
+    ).trim();
+    // The stored object keeps the modes as written (even `cat-file -p` would show them normalised).
+    expect(git(remote.bare, ['cat-file', 'tree', tree])).toContain('100664 AGENTS.md');
+    const commit = git(remote.bare, ['commit-tree', tree, '-m', 'legacy modes'], '').trim();
+    git(remote.bare, ['update-ref', 'refs/heads/main', commit]);
+    // What the scan lists: regular files as 100644, anything unknown as a submodule (160000).
+    expect(git(remote.bare, ['ls-tree', '-r', '--full-tree', commit])).toBe(
+      `100644 blob ${agents}\tAGENTS.md\n100644 blob ${claude}\tCLAUDE.md\n160000 commit ${claude}\tGEMINI.md\n`,
+    );
+    const repository = await registered(remote);
+    const result = await scan(repository);
+    expect(result).toMatchObject({ ok: true, scannedFiles: 2, discovered: 2, errorCount: 0 });
+    const paths = handle.sqlite
+      .prepare('select path from artifact_occurrences order by path')
+      .all()
+      .map((row) => (row as { path: string }).path);
+    expect(paths).toEqual(['AGENTS.md', 'CLAUDE.md']);
   });
 
   posixOnly('rejects a file name that is not valid UTF-8', async () => {

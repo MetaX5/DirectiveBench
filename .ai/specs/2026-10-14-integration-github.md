@@ -3,7 +3,7 @@ id: SPEC-201
 title: GitHub repository integration
 status: draft
 created: 2026-10-14
-updated: 2026-10-20
+updated: 2026-10-21
 category: integration
 related: [SPEC-003, SPEC-007, SPEC-012, SPEC-102, SPEC-104, SPEC-105, SPEC-115, SPEC-202, ADR-0008, ADR-0009]
 ---
@@ -294,7 +294,11 @@ GET costing 1 point ([G2]).
   `git-default` exception yet, since no credentials are used), 5 (`http.followRedirects=false`; a 3xx is `invalid-url` "register
   its new URL"), 6 (`protocol.allow=never`, `protocol.https.allow=always`), 7 (`core.hooksPath=/dev/null`
   — not an empty directory — `core.fsmonitor=false`, `GIT_LFS_SKIP_SMUDGE=1`, no submodules), 8 (bare,
-  shallow, single-branch, blob-less partial clone without tags or templates). Observed: without
+  shallow, single-branch, blob-less partial clone without tags or templates). TLS (§8): verification
+  is never disabled; a TLS-intercepting proxy's CA is trusted only through `GIT_SSL_CAINFO` of the
+  runner's environment, forwarded as its canonical path when it is a readable regular file and
+  refused otherwise; no CA setting is read from git config (SPEC-105 §9.1, issue #61, tested over
+  real TLS on loopback). Observed: without
   credentials github.com answers a missing or private repository with git's "unable to get password
   from user" (with `credential.interactive=false`) or "could not read Username … terminal prompts
   disabled"; both map to `auth-required` "not found or not public". github.com serves blob-by-ID
