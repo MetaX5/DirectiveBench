@@ -58,6 +58,7 @@ function fakeClaude(options: { version?: string; auth?: string } = {}): FakeClau
     [
       '#!/bin/sh',
       `echo "$PWD|$*" >> '${log}'`,
+      'if [ "$1" = --setting-sources ]; then shift 2; fi',
       'case "$1" in',
       `  --version) ${version} ;;`,
       `  auth) env > '${envLog}'; ${auth} ;;`,
@@ -212,7 +213,7 @@ posixOnly('checkClaudeCodeReadiness', () => {
       }
     });
 
-    it('runs `claude auth status --json` in an empty directory without secrets or overrides', async () => {
+    it('runs `claude auth status --json` without user settings, secrets or overrides, in an empty directory', async () => {
       const fake = fakeClaude();
       await checkClaudeCodeReadiness(
         'subscription',
@@ -220,7 +221,8 @@ posixOnly('checkClaudeCodeReadiness', () => {
       );
       const [, auth] = fake.calls();
       const [cwd, argv] = auth!.split('|');
-      expect(argv).toBe('auth status --json');
+      // Same settings sources as the subscription run: user settings (`apiKeyHelper`) excluded.
+      expect(argv).toBe('--setting-sources project,local auth status --json');
       expect(cwd).toContain('directivebench-probe-');
       expect(cwd).not.toBe(process.cwd());
       const env = fake.authEnv();
@@ -237,10 +239,55 @@ posixOnly('checkClaudeCodeReadiness', () => {
       expect(env).not.toContain(PLANTED_KEY);
     });
 
-    it('says so when auth status reports no method', async () => {
+    it('reports auth-mismatch for a login that is not a Claude subscription', async () => {
+      const cases = [
+        { method: 'api_key', reported: 'api_key' },
+        { method: 'api_key_helper', reported: 'api_key_helper' },
+        { method: 'console', reported: 'console' },
+      ];
+      for (const { method, reported } of cases) {
+        const status = JSON.stringify({ loggedIn: true, authMethod: method });
+        const fake = fakeClaude({ auth: `echo '${status}'` });
+        const report = await checkClaudeCodeReadiness('subscription', cliEnv(fake.bin));
+        expect(report).toMatchObject({
+          ready: false,
+          code: 'auth-mismatch',
+          detail: `Logged in with ${reported}, not a Claude subscription: run \`claude\` and \`/login\` with a subscription account, or use API key mode.`,
+        });
+      }
+    });
+
+    it('does not count a user-level apiKeyHelper as a subscription login', async () => {
+      // Emulates 2.1.302 with `apiKeyHelper` in ~/.claude/settings.json: without
+      // `--setting-sources project,local` it reports `api_key_helper`, with it nobody is logged in.
+      const bin = tempDir('fake-claude-helper-');
+      writeFileSync(
+        join(bin, 'claude'),
+        [
+          '#!/bin/sh',
+          'case "$*" in',
+          '  --version) echo "2.1.302 (Claude Code)" ;;',
+          `  '--setting-sources project,local auth status --json') echo '${LOGGED_OUT}'; exit 1 ;;`,
+          `  'auth status'*) echo '{"loggedIn":true,"authMethod":"api_key_helper"}' ;;`,
+          '  *) exit 64 ;;',
+          'esac',
+          '',
+        ].join('\n'),
+      );
+      chmodSync(join(bin, 'claude'), 0o755);
+      const report = await checkClaudeCodeReadiness('subscription', cliEnv(bin));
+      expect(report).toMatchObject({ ready: false, code: 'auth-missing' });
+    });
+
+    it('fails closed when auth status reports a login without a method', async () => {
       const fake = fakeClaude({ auth: `echo '{"loggedIn":true}'` });
       const report = await checkClaudeCodeReadiness('subscription', cliEnv(fake.bin));
-      expect(report).toMatchObject({ ready: true, detail: 'Logged in (method not reported).' });
+      expect(report).toMatchObject({
+        ready: false,
+        code: 'auth-mismatch',
+        detail:
+          'Logged in with an unreported method, not a Claude subscription: run `claude` and `/login` with a subscription account, or use API key mode.',
+      });
     });
 
     it('reports auth-missing when nobody is logged in', async () => {
@@ -365,7 +412,9 @@ posixOnly('claudeCodeReadiness', () => {
         detail: "ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
       },
     ]);
-    expect(fake.calls().map((call) => call.split('|')[1])).toEqual(['auth status --json']);
+    expect(fake.calls().map((call) => call.split('|')[1])).toEqual([
+      '--setting-sources project,local auth status --json',
+    ]);
   });
 
   it('reports binary-not-found for every mode when claude is missing', async () => {

@@ -185,6 +185,7 @@ posixOnly('detectCliAgent for Claude Code', () => {
       dir,
       'claude',
       [
+        'if [ "$1" = --setting-sources ]; then shift 2; fi',
         'case "$1" in',
         '  --version) echo "2.1.302 (Claude Code)" ;;',
         `  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","email":"person@example.com"}' ;;`,
@@ -210,7 +211,7 @@ posixOnly('detectCliAgent for Claude Code', () => {
     writeScript(
       dir,
       'claude',
-      'case "$1" in\n  --version) echo "2.1.302" ;;\n  auth) echo \'{"loggedIn":false}\'; exit 1 ;;\nesac',
+      'if [ "$1" = --setting-sources ]; then shift 2; fi\ncase "$1" in\n  --version) echo "2.1.302" ;;\n  auth) echo \'{"loggedIn":false}\'; exit 1 ;;\nesac',
     );
     const detection = await detectCliAgent(claudeCode, {
       PATH: `${dir}:${process.env.PATH}`,

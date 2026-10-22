@@ -71,9 +71,8 @@ PR: #107
   no `CLAUDE_CONFIG_DIR` override for the agent).
 - **Ready only when `loggedIn: true` and exit 0**; everything else fails closed as
   `auth-missing`. `auth-expired` only for unparsed output containing the SPEC-203 §9 text
-  "Login expired" — the real expired shape could not be observed. `authMethod` is shown but not
-  enforced, because `auth status` loads user settings that a subscription run excludes
-  (`--setting-sources project,local`), so a mismatch there would be a false refusal.
+  "Login expired" — the real expired shape could not be observed. (Superseded in the Codex round
+  below: `authMethod` is now enforced and the probe uses the run's settings sources.)
 - **Detection reports both modes**; `auth` is `ready` when one mode is ready (SPEC-203 AC-2).
   `doctor` warns only when no mode is ready, since the agent is optional.
 - **Probes are killed with SIGKILL** on timeout (`execFile` destroys the pipes, so a grandchild
@@ -91,6 +90,33 @@ PR: #107
 4. Agent Connections readiness column and Playwright test — 1846543.
 5. SPEC-203 §3.2/§4.2/§13 (+ evidence L2), SPEC-118 §20, SPEC-116 table, two lessons — 4148e9b.
 6. Review round 1 fixes — a5b827f.
+
+## Codex adversarial review round
+
+Finding (MEDIUM, triaged valid by the coordinator): any exit-0 `loggedIn: true` passed
+subscription readiness, including `authMethod` `api_key` or none, and the probe loaded user
+settings while the subscription run uses `--setting-sources project,local` — a user configured
+only through a user-level `apiKeyHelper` got "subscription ready" without subscription
+credentials.
+
+Evidence (real `claude` 2.1.302, empty temp `HOME` with a dummy user-level `apiKeyHelper`):
+`auth status` → `loggedIn: true`, `authMethod: "api_key_helper"`, exit 0;
+`claude --setting-sources project,local auth status` → `loggedIn: false`, `authMethod: "none"`,
+exit 1. `claude auth status --setting-sources …` is rejected (exit 1), so the option goes before
+the subcommand.
+
+Resolution: (a) the probe runs `claude --setting-sources project,local auth status --json`;
+(b) only `authMethod` `claude.ai` (observed for a subscription login, SPEC-203 L2) is ready,
+any other or missing method → new readiness code `auth-mismatch` (already in FR-118-15's stop
+list; added to SPEC-203 §9). Regression tests: user-level `apiKeyHelper` emulation → not ready;
+`api_key`, `api_key_helper`, `console` → `auth-mismatch`; missing method → `auth-mismatch`;
+`claude.ai` → ready; all five fail on the previous code.
+
+Verified after the fix: the full gate (format, lint, typecheck, test at 100% coverage — agent-adapters
+77 tests —, build, verify:pack, test:e2e 39 passed). With the built CLI, `doctor` still reports
+subscription `ready: Logged in (claude.ai).` on this machine. With an empty `HOME` holding only a
+dummy user-level `apiKeyHelper`, it now reports `not ready (auth-missing)`; before the fix this
+setup reported a login.
 
 ## Verification
 

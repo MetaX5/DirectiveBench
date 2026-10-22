@@ -51,7 +51,7 @@ function tempDir(): string {
 
 /** A fake `claude`: `--version` prints `version`, `auth status` runs `auth`. */
 function fakeClaudeScript(version: string, auth: string): string {
-  return `#!/bin/sh\ncase "$1" in\n  --version) echo "${version}" ;;\n  auth) ${auth} ;;\nesac\n`;
+  return `#!/bin/sh\nif [ "$1" = --setting-sources ]; then shift 2; fi\ncase "$1" in\n  --version) echo "${version}" ;;\n  auth) ${auth} ;;\nesac\n`;
 }
 
 /** A PATH containing a logged-in `claude`, a broken `codex` and no `cursor-agent`. */

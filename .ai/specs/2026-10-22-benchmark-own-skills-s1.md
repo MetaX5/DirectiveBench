@@ -698,7 +698,9 @@ changed before merge.
   `checkClaudeCodeReadiness(mode)` in `packages/agent-adapters/src/claude-code-readiness.ts`:
   `claude` on `PATH` (`binary-not-found`), version ≥ `CLAUDE_CODE_MIN_VERSION` 2.1.259
   (`version-unsupported`, also for an unreadable version), in subscription mode
-  `claude auth status --json` with only `loggedIn` and `authMethod` kept (`auth-missing`;
+  `claude --setting-sources project,local auth status --json` (the subscription run's settings
+  sources) with only `loggedIn` and `authMethod` kept, ready only for `authMethod` `claude.ai`
+  (`auth-mismatch` for any other or missing method, e.g. a user-level `apiKeyHelper`; `auth-missing`;
   `auth-expired` for the documented "Login expired" text; a timeout, oversized or unreadable
   output and a login reported with a non-zero exit fail closed as `auth-missing`), in api-key mode
   a non-empty `ANTHROPIC_API_KEY` checked for presence only. Status probes run argv-only with an

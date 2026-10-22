@@ -22,6 +22,7 @@ writeFileSync(
   join(fakeAgentBin, 'claude'),
   [
     '#!/bin/sh',
+    'if [ "$1" = --setting-sources ]; then shift 2; fi',
     'case "$1" in',
     '  --version) echo "2.1.302 (Claude Code)" ;;',
     `  auth) echo '{"loggedIn":true,"authMethod":"claude.ai"}' ;;`,

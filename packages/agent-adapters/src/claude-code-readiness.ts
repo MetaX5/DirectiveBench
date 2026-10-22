@@ -19,8 +19,27 @@ export const CLAUDE_AUTH_STATUS_TIMEOUT_MS = 10_000;
 /** Output kept from `claude auth status`; the JSON object is a few hundred bytes. */
 export const CLAUDE_AUTH_STATUS_MAX_OUTPUT_BYTES = 64 * 1024;
 
-/** `--json` is the default today; passing it keeps the parser independent of that default. */
-export const CLAUDE_AUTH_STATUS_ARGS: readonly string[] = ['auth', 'status', '--json'];
+/**
+ * Arguments of the subscription login probe. `--setting-sources project,local` (a top-level
+ * option: `auth status` itself rejects it) matches the subscription run (SPEC-203 §6, §8), so a
+ * user-level `apiKeyHelper` — which the run never loads — cannot make the probe report a login
+ * (observed on 2.1.302: with it `authMethod` is `api_key_helper`, without it `none`). `--json` is
+ * the default today; passing it keeps the parser independent of that default.
+ */
+export const CLAUDE_AUTH_STATUS_ARGS: readonly string[] = [
+  '--setting-sources',
+  'project,local',
+  'auth',
+  'status',
+  '--json',
+];
+
+/**
+ * `authMethod` values of a Claude subscription login (SPEC-203 §3.2, evidence L2: `claude.ai`).
+ * Any other or missing method — `api_key`, `api_key_helper`, a cloud provider — is not the
+ * subscription the run would use, so it fails closed.
+ */
+export const CLAUDE_SUBSCRIPTION_AUTH_METHODS: readonly string[] = ['claude.ai'];
 
 /** The only API-key source in S1 (FR-118-02, Q6): the CLI process environment. */
 export const CLAUDE_API_KEY_VARIABLE = 'ANTHROPIC_API_KEY';
@@ -31,7 +50,7 @@ export const CLAUDE_AUTH_MODES: readonly ClaudeAuthMode[] = ['subscription', 'ap
 
 /** SPEC-203 §9 codes a readiness check can end with. */
 export type ClaudeReadinessCode =
-  'binary-not-found' | 'version-unsupported' | 'auth-missing' | 'auth-expired';
+  'binary-not-found' | 'version-unsupported' | 'auth-missing' | 'auth-expired' | 'auth-mismatch';
 
 export interface ClaudeCodeReadiness extends AgentModeReadiness {
   mode: ClaudeAuthMode;
@@ -131,10 +150,16 @@ async function subscriptionReadiness(
   }
   const status = parseClaudeAuthStatus(probe.stdout);
   if (status?.loggedIn && probe.exitCode === 0) {
+    if (
+      status.authMethod !== null &&
+      CLAUDE_SUBSCRIPTION_AUTH_METHODS.includes(status.authMethod)
+    ) {
+      return result('subscription', null, `Logged in (${status.authMethod}).`);
+    }
     return result(
       'subscription',
-      null,
-      `Logged in (${status.authMethod ?? 'method not reported'}).`,
+      'auth-mismatch',
+      `Logged in with ${status.authMethod ?? 'an unreported method'}, not a Claude subscription: run \`claude\` and \`/login\` with a subscription account, or use API key mode.`,
     );
   }
   if (status?.loggedIn === false) {
