@@ -182,6 +182,16 @@ AC-27 covers the internal→external chain, a memory file bundled in a skill, a 
 `setup`, and imports in code fences. Q20 supersedes Q19's import rule. SPEC-203 §8, SPEC-108
 FR-108-16 and SPEC-110 FR-110-05a synced.
 
+## Review round: Codex adversarial review, round 6 (2026-10-22)
+
+Security findings exhausted; one MEDIUM: **a `/<name>` prompt counted as invoked by its prefix
+alone.** Confirmed: FR-118-09 set `invoked` when the prompt began with `/<name>`; both variants
+get that prompt, so a clean `none` baseline would trip rule (c) and become `not-comparable` after
+the sessions were spent. Resolved: a slash prompt counts only with stream evidence of expansion
+(inline: a `user` message with the rendered skill, an AC-22 assumption; forked: `forked-command-`
+parent ids, documented), and a suite with a `/`-prefixed prompt is refused with `--baseline none`
+at plan time (`slash-prompt-needs-ab-baseline`, FR-118-12). AC-28, §13, §14, Q21.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
