@@ -2,7 +2,13 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, AgentRunResult, TraceEvent } from '@directivebench/agent-adapters';
-import { canonicalJson, hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
+import {
+  baselineArtifactIssue,
+  canonicalJson,
+  hashManifest,
+  sha256,
+  type ArtifactBundle,
+} from '@directivebench/core';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
 import {
@@ -51,6 +57,20 @@ export type EngineTraceEvent =
     }
   | { type: 'setup'; command: string[]; exitCode: number | null; durationMs: number };
 
+/**
+ * The agent conditions a real-agent adapter reports (SPEC-118 §8.2, SPEC-203 §4.2). `hostId`
+ * — the installation's `installationId` from `config.json` — exists only for the `user-profile`
+ * isolation, whose results may include one machine's user-level configuration (§8.3).
+ */
+export type AgentProfile = {
+  authMode: 'subscription' | 'api-key';
+  permissionProfile: 'edit-only' | 'edit-and-shell';
+  /** sha256 of the normalised argv (FR-118-04). */
+  flagsHash: string;
+  /** The session model every agent run resolved (FR-118-04). */
+  executionModel: string;
+} & ({ isolationProfile: 'isolated' } | { isolationProfile: 'user-profile'; hostId: string });
+
 export interface EnvironmentMetadata {
   kind: 'local-process';
   sandboxed: false;
@@ -63,6 +83,8 @@ export interface EnvironmentMetadata {
   model: BenchmarkDefinition['execution']['model'];
   timeoutSeconds: number;
   repetitions: number;
+  /** Reported by real-agent adapters only; absent for the mock agent (SPEC-118 §8.3). */
+  agentProfile?: AgentProfile;
 }
 
 export interface RunBenchmarkInput {
@@ -71,7 +93,14 @@ export interface RunBenchmarkInput {
   fixtures: Record<string, CaseFixtures>;
   /** Content-addressed fixture store (`<dataDir>/fixtures`). */
   fixtureStore: string;
+  /** The candidate: the artifact version under test. */
   artifact: ArtifactBundle;
+  /**
+   * The A/B baseline: another version of the same artifact, installed into every baseline
+   * workspace exactly as the candidate is installed into its own. Absent = baseline kind `none`,
+   * a workspace without the artifact (SPEC-118 FR-118-10/11).
+   */
+  baselineArtifact?: ArtifactBundle;
   adapter: AgentAdapter;
   /** Directory for temporary workspaces of this run; removed afterwards unless `keepWorkspaces`. */
   workRoot: string;
@@ -95,7 +124,7 @@ export interface BenchmarkOutcome {
 export function assertRunnable(
   input: Pick<
     RunBenchmarkInput,
-    'definition' | 'fixtures' | 'artifact' | 'adapter' | 'executionApproved'
+    'definition' | 'fixtures' | 'artifact' | 'baselineArtifact' | 'adapter' | 'executionApproved'
   >,
 ): void {
   const { definition, adapter } = input;
@@ -126,6 +155,10 @@ export function assertRunnable(
       `Suite evaluates ${definition.artifactTypes.join(', ')} artifacts, not ${input.artifact.type}.`,
     );
   }
+  if (input.baselineArtifact) {
+    const issue = baselineArtifactIssue(input.artifact, input.baselineArtifact);
+    if (issue) throw new BenchmarkConfigurationError(issue);
+  }
   for (const benchmarkCase of definition.cases) {
     if (!input.fixtures[benchmarkCase.id]) {
       throw new BenchmarkConfigurationError(
@@ -136,14 +169,17 @@ export function assertRunnable(
 }
 
 /**
- * Comparability key: results are only aggregated or compared when everything except the
- * artifact version is identical.
+ * Comparability key (SPEC-111 FR-111-43, SPEC-118 §8.3): results are only aggregated or compared
+ * when everything except the artifact version is identical. `agentProfile` is hashed only when
+ * an adapter reports one, so every mock-agent key stays byte-identical. The A/B baseline is not
+ * part of the key: it says what the candidate was compared with, not under which conditions.
  */
 export function comparabilityKey(
   definition: BenchmarkDefinition,
   fixtures: Record<string, CaseFixtures>,
   adapterId: string,
   adapterVersion: string | null,
+  agentProfile?: AgentProfile,
 ): string {
   return sha256(
     canonicalJson({
@@ -153,6 +189,7 @@ export function comparabilityKey(
       fixtures,
       adapterId,
       adapterVersion,
+      ...(agentProfile ? { agentProfile } : {}),
     }),
   );
 }
@@ -265,9 +302,11 @@ async function executeAgentRun(
       }
     }
 
-    if (variant === 'candidate') {
+    // The baseline variant installs the baseline version, if any, by the same procedure.
+    const installing = variant === 'candidate' ? input.artifact : input.baselineArtifact;
+    if (installing) {
       stage('install');
-      const installed = await adapter.installArtifact(workspaceDir, input.artifact);
+      const installed = await adapter.installArtifact(workspaceDir, installing);
       trace.push({
         type: 'message',
         text: `Installed artifact files: ${installed.paths.join(', ')}`,
@@ -385,8 +424,8 @@ export function equivalenceIssues(
 }
 
 /**
- * RED/GREEN evaluation. For each case and repetition the baseline (no artifact) and candidate
- * (exact artifact version installed) run in fresh, independent workspaces from the same fixture
+ * RED/GREEN evaluation. For each case and repetition the baseline (no artifact, or the exact
+ * baseline version installed) and candidate (exact artifact version installed) run in fresh, independent workspaces from the same fixture
  * snapshot with identical prompt, adapter, model and limits. The order alternates between
  * repetitions to reduce drift. Results are never adjusted: a baseline may pass, a candidate may fail.
  */
@@ -472,7 +511,13 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
 
   return {
     summary,
-    comparabilityKey: comparabilityKey(definition, input.fixtures, adapter.id, detection.version),
+    comparabilityKey: comparabilityKey(
+      definition,
+      input.fixtures,
+      adapter.id,
+      detection.version,
+      environment.agentProfile,
+    ),
     environment,
     warnings,
     agentRuns,
