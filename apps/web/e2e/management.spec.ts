@@ -199,6 +199,47 @@ test.describe('benchmarks and executions', () => {
     }
   });
 
+  test('a suite with a non-mock agent is never enqueued from the UI and shows the CLI command (SPEC-118 FR-118-05/53)', async ({
+    page,
+  }) => {
+    const db = openDatabase();
+    const original = db.prepare('select id, definition from benchmark_suite_versions').all() as {
+      id: string;
+      definition: string;
+    }[];
+    try {
+      await openDemoBenchmark(page);
+      const run = page.getByRole('button', { name: 'Run' });
+      await expect(run).toBeEnabled();
+      // The suite switches to a real agent after the page was rendered: the server action
+      // itself must refuse it, not only the page.
+      db.exec(
+        `update benchmark_suite_versions
+            set definition = json_set(definition, '$.execution.agent', 'claude-code')`,
+      );
+      const jobsBefore = count(db, 'select count(*) as n from jobs');
+      await run.click();
+      await expect(page.getByTestId('enqueue-error')).toContainText(
+        'This suite uses agent "claude-code". The web UI runs only mock-agent suites',
+      );
+      expect(count(db, 'select count(*) as n from jobs')).toBe(jobsBefore);
+
+      // Re-rendered for the real agent: no Run button, the planned CLI command instead.
+      const cli = page.getByTestId('run-from-cli');
+      await expect(cli.getByRole('heading', { name: 'Run from the CLI' })).toBeVisible();
+      await expect(cli).toContainText('Planned — not implemented yet');
+      await expect(cli).toContainText(
+        `directivebench benchmark run <suite-folder> --artifact ${DEMO_ARTIFACT}`,
+      );
+      await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+      await expect(page.getByText(MOCK_LABEL)).toHaveCount(0);
+    } finally {
+      const restore = db.prepare('update benchmark_suite_versions set definition = ? where id = ?');
+      for (const { id, definition } of original) restore.run(definition, id);
+      db.close();
+    }
+  });
+
   /*
    * Cancellation needs a job that stays `pending` or `running` until the test clicks Cancel. The
    * runner in the served CLI polls every second and finishes the mock benchmark in ~2 s, so a

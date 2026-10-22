@@ -154,6 +154,29 @@ describe('enqueueBenchmarkRunAction', () => {
     expect(next.revalidatePath).not.toHaveBeenCalled();
   });
 
+  it('refuses a suite whose agent is not the mock agent, even when called directly (SPEC-118 FR-118-05)', async () => {
+    const artifact = await importArtifact();
+    const definition = await exampleDefinitionDocument();
+    const execution = definition.execution as Record<string, unknown>;
+    const suite = await importSuite(
+      { ...definition, execution: { ...execution, agent: 'claude-code' } },
+      'bundled-example',
+    );
+
+    const url = await redirectOf(
+      enqueueBenchmarkRunAction(
+        form({ suiteVersionId: suite.versionId, artifactId: artifact.artifactId }),
+      ),
+    );
+
+    expect(new URL(url, 'http://localhost').searchParams.get('error')).toBe(
+      'This suite uses agent "claude-code". The web UI runs only mock-agent suites; real agents run from the CLI (planned — not implemented yet).',
+    );
+    expect(url.startsWith(`/benchmarks/${suite.suiteId}?error=`)).toBe(true);
+    expect(await listJobs(handle.db)).toEqual([]);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
   it('reports every blocker, including an environment this build cannot run', async () => {
     const artifact = await importArtifact();
     const definition = await exampleDefinitionDocument();
