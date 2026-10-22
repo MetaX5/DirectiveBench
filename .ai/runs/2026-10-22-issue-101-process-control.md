@@ -58,7 +58,9 @@ fake CLI ignoring SIGINT/SIGTERM.
   no signal is sent after the leader exited; `stray-processes` takes precedence in
   `claudeProcessEnd`; command assertions fail on stray processes; a throwing `spawn` records only
   the error code. Not changed: the install inspects with role `candidate` (the role is not used in
-  the message).
+  the message). Round 2 (`eb0dc38`): approve; nit n3 (Windows: any background child holding the
+  output counts as stray) documented in `78157ab`, which also merges `main` (PR #105) and keeps
+  the stray check in the restructured command assertion; gate re-run on the merged tree: pass.
 
 ## Work performed
 
