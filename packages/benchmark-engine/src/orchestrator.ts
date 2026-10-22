@@ -370,21 +370,21 @@ async function executeAgentRun(
           'stray-processes',
         );
       }
+      // Checked after every command: the next one must not run in a replacement (SPEC-118 §12).
+      const replaced = await workspacePinIssue(workspace);
+      if (replaced !== null) {
+        return fail(
+          'infrastructure-error',
+          `workspace-replaced: ${replaced} after setup.`,
+          'workspace-replaced',
+        );
+      }
       if (result.exitCode !== 0) {
         return fail(
           'infrastructure-error',
           `Setup command failed: ${command.join(' ')} (${result.error ?? result.exitCode ?? result.signal})`,
         );
       }
-    }
-
-    const replaced = await workspacePinIssue(workspace);
-    if (replaced !== null) {
-      return fail(
-        'infrastructure-error',
-        `workspace-replaced: ${replaced} after setup.`,
-        'workspace-replaced',
-      );
     }
 
     // The baseline variant installs the baseline version, if any, by the same procedure.

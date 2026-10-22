@@ -410,7 +410,9 @@ describe('setup commands', () => {
   it.skipIf(process.platform === 'win32')(
     'refuses a workspace a setup command replaced, before installing or running the agent',
     async () => {
-      // Moves the workspace away and leaves a link to another directory at its path.
+      // Moves the workspace away and leaves a link to another directory at its path; the second
+      // command must never run in the replacement (Codex review).
+      const marker = join(tmp('marker'), 'second-ran');
       const input = await suite({
         cases: [
           testCase({
@@ -420,6 +422,7 @@ describe('setup commands', () => {
                 '-c',
                 'cd .. && mv workspace moved && mkdir elsewhere && ln -s "$PWD/elsewhere" workspace',
               ],
+              nodeScript(`require('fs').writeFileSync(${JSON.stringify(marker)}, '1')`),
             ],
           }),
         ],
@@ -451,6 +454,7 @@ describe('setup commands', () => {
       ]);
       expect(installs).toBe(0);
       expect(adapter.requests).toHaveLength(0);
+      expect(existsSync(marker)).toBe(false);
     },
   );
 

@@ -111,6 +111,11 @@ fake CLI ignoring SIGINT/SIGTERM.
   run (FR-118-15 updated). Red first: the orchestrator and timeout-plus-survivor tests fail on
   ae4c0bc.
 
+- Codex round 2, high: the workspace pin was checked only after the whole setup loop, so a second
+  setup command ran with the replacement as its cwd. The pin is now checked after every setup
+  command, before the next one starts. Red first: the two-command regression (a marker the second
+  command would write) fails on 5101f22.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
