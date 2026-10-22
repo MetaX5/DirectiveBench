@@ -59,7 +59,7 @@ Benchmarks must be reviewable in pull requests, portable between machines, repro
 | FR-108-13 | `categories[]` are category **slugs** ([SPEC-106](2026-10-14-category-management.md)); unknown slugs are import warnings, not validation errors. `technologies[]` are free-form labels. |
 | FR-108-14 | **Import** (`prepareSuiteImport`) SHALL snapshot every fixture and overlay directory into `<dataDir>/fixtures/<sha256>/` and compute the suite content hash; identical content re-imported yields the existing suite version ([SPEC-107](2026-10-14-benchmark-engine.md) FR-107-02/03). |
 | FR-108-15 | A definition that runs commands (`definitionRunsCommands`) SHALL require execution approval of its suite version before running ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-46). |
-| FR-108-16 | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-06): for a `claude-code` suite, import SHALL refuse fixtures and overlays that contain Claude Code configuration at any depth (`.claude`, `.claude-plugin`, `.mcp.json`, `CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`) or a `CLAUDE.md`/`AGENTS.md` `@` import resolving outside the fixture; execution approval does not lift this. |
+| FR-108-16 | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-06): for a `claude-code` suite, import SHALL refuse fixtures and overlays that contain Claude Code configuration at any depth (`.claude`, `.claude-plugin`, `.mcp.json`, `CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`) and any file whose `@` import token resolves to an existing path outside the fixture (FR-118-27); execution approval does not lift this. |
 
 ## 7. Non-functional requirements
 

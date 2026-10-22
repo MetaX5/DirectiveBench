@@ -165,6 +165,23 @@ Capability removed: S1 suites cannot run a skill inside an existing Claude Code 
 (project settings, MCP servers, other project skills/commands/agents, rules, output styles) or
 with `CLAUDE.local.md`.
 
+## Review round: Codex adversarial review, round 5 (2026-10-22)
+
+One HIGH finding: **host-file disclosure through recursive memory imports.** Confirmed: the memory
+docs say imports expand recursively (four hops) and accept relative, absolute and `~` paths, while
+FR-118-06 checked only `CLAUDE.md`/`AGENTS.md` and treated inside imports as safe, FR-118-26
+checked imports only for instruction-type artifacts, and the pre-spawn check exempted artifact
+paths. Resolved by closing the class instead of walking the graph: new FR-118-27 scans every
+workspace file (fixture, overlay at plan time, both artifact versions, `setup` output) for `@`
+tokens, canonicalises each target (`~` per the agent's `HOME`) and refuses existing outside
+targets, outward or unresolvable symlinks and multiply-linked files, at plan time and before every
+spawn with no artifact exemption (`workspace-imports-outside`); named caps
+`WORKSPACE_SCAN_MAX_FILES`/`WORKSPACE_SCAN_MAX_BYTES` fail closed (`workspace-scan-limit`).
+Non-existent outside targets pass, so TypeScript `@/` aliases do not refuse ordinary fixtures.
+AC-27 covers the internal→external chain, a memory file bundled in a skill, a symlink created by
+`setup`, and imports in code fences. Q20 supersedes Q19's import rule. SPEC-203 §8, SPEC-108
+FR-108-16 and SPEC-110 FR-110-05a synced.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
