@@ -19,6 +19,8 @@ export interface CreateBenchmarkRunInput {
   jobId: string | null;
   suiteVersionId: string;
   artifactVersionId: string;
+  /** The A/B baseline version, or null for baseline kind `none` (SPEC-118 FR-118-13). */
+  baselineArtifactVersionId: string | null;
   agentAdapterId: string;
   agentVersion: string | null;
   model: { provider: string; model: string } | null;

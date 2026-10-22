@@ -441,6 +441,7 @@ export class LocalRunner {
         jobId: job.id,
         suiteVersionId: suiteVersion.version.id,
         artifactVersionId: artifact.versionId,
+        baselineArtifactVersionId: null,
         agentAdapterId: adapter.id,
         agentVersion: detection.version,
         model: definition.execution.model,
