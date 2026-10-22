@@ -147,6 +147,22 @@ was undocumented; nit: the long lane may exceed `concurrency`. All fixed in the 
 results matched by job id (15/15 runs pass), the status reworded, symlinks written through (new
 test) and the race documented, comments added. Full gate re-run: pass, 100% coverage.
 
+Codex adversarial review (coordinator, head `0fb21e3`): needs-attention, two medium findings,
+both valid and fixed in the Codex-fix commit:
+
+1. Concurrent initialisations could replace an already-returned `installationId` (FR-115-15
+   "generated once"). `ensureInstallationId` now takes `config.json.lock` with `wx`, re-reads the
+   file under the lock and generates only if the identifier is still absent
+   (`CONFIG_LOCK_TIMEOUT_MS` 5 s, `CONFIG_LOCK_STALE_MS` 30 s, `CONFIG_LOCK_RETRY_MS` 20 ms).
+   Test: a second process holds the lock and stores an identifier; the call waits and returns it.
+   Also tested: lock released on an invalid re-read, stale lock removed, timeout, `EACCES`
+   propagated, lock vanishing during the check (mocked `statSync`). Red first: the interleaving
+   and null tests fail on the previous `config.ts`. Residual: two processes breaking the same
+   stale lock in the same instant (documented in the code and SPEC-115).
+2. JSON `null` in `config.json` was treated as a missing file (`?? {}`), so `loadConfig` returned
+   defaults and `ensureInstallationId` overwrote it (FR-115-11). Defaults now apply only when the
+   file is absent; test: `null` throws `ConfigError` and the file stays unchanged.
+
 ## Lessons recorded
 
 - [2026-10-22 — Pin each migration's up/down test to its own journal prefix](../lessons/2026-10-22-pin-migration-tests-to-their-journal-prefix.md)

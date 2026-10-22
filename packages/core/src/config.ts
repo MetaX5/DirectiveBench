@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -115,9 +125,17 @@ function parseConfig(configPath: string, json: unknown): DirectiveBenchConfig {
   return result.data;
 }
 
+/**
+ * Validates the parsed `config.json`; only an absent file (`undefined`) yields defaults, so a
+ * file containing `null` is invalid like any other non-object (FR-115-11).
+ */
+function configFromJson(configPath: string, json: unknown): DirectiveBenchConfig {
+  return parseConfig(configPath, json === undefined ? {} : json);
+}
+
 /** Reads `config.json`; a missing file yields defaults, an invalid file is an error. */
 export function loadConfig(configPath: string): DirectiveBenchConfig {
-  return parseConfig(configPath, readConfigJson(configPath) ?? {});
+  return configFromJson(configPath, readConfigJson(configPath));
 }
 
 /** Writes JSON atomically (temp file + rename, mode 0600) so a crash never leaves a partial file. */
@@ -133,28 +151,82 @@ export function saveConfig(configPath: string, config: DirectiveBenchConfig): vo
   writeConfigFile(configPath, configSchema.parse(config));
 }
 
+/** How long `ensureInstallationId` waits for another process's `config.json.lock`. */
+export const CONFIG_LOCK_TIMEOUT_MS = 5000;
+/** A lock older than this is left by a process that died and is removed. */
+export const CONFIG_LOCK_STALE_MS = 30_000;
+/** Pause between attempts to take the lock. */
+export const CONFIG_LOCK_RETRY_MS = 20;
+
+/** Blocks the calling thread; the callers of `ensureInstallationId` are synchronous start-up code. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Runs `fn` while holding `<configPath>.lock`, created with `wx` (O_CREAT | O_EXCL), so only one
+ * process at a time can add an `installationId`. A lock older than {@link CONFIG_LOCK_STALE_MS}
+ * is removed; after {@link CONFIG_LOCK_TIMEOUT_MS} the call fails with a `ConfigError` naming the
+ * lock. Residual: two processes that find the same stale lock in the same instant can both
+ * remove it, the second removing the first's fresh lock.
+ */
+function withConfigLock<T>(configPath: string, fn: () => T): T {
+  const lock = `${configPath}.lock`;
+  mkdirSync(dirname(configPath), { recursive: true });
+  const deadline = Date.now() + CONFIG_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      closeSync(openSync(lock, 'wx', 0o600));
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const held = statSync(lock, { throwIfNoEntry: false });
+    // Released between our attempt and the check: try again at once.
+    if (held === undefined) continue;
+    if (Date.now() - held.mtimeMs > CONFIG_LOCK_STALE_MS) {
+      rmSync(lock, { force: true });
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      throw new ConfigError(
+        `Timed out after ${CONFIG_LOCK_TIMEOUT_MS} ms waiting for ${lock}; delete it if no DirectiveBench process is starting.`,
+      );
+    }
+    sleepSync(CONFIG_LOCK_RETRY_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
 /**
  * Returns the configuration with an `installationId`, generating and storing one when the file
  * has none (SPEC-115 FR-115-15). A missing file is created with every default; an existing file
  * keeps its keys exactly as written and only gains the identifier, so defaults are not frozen
  * into it, and a symlinked `config.json` is written through to its target. An invalid file is an
- * error and is never rewritten (FR-115-11). The write is atomic, but not exclusive: two processes
- * adding an identifier in the same instant each generate one and the last rename wins, so one of
- * them may return an identifier that was replaced. It is read back after the write to narrow that
- * window; consumers read `installationId` from the file when a run starts, after initialisation.
+ * error and is never rewritten (FR-115-11). The identifier is generated once: the file is read
+ * again while holding the exclusive config lock and an identifier is generated only if it is
+ * still absent, so concurrent initialisations all return the one that was stored.
  */
 export function ensureInstallationId(configPath: string): DirectiveBenchConfig {
-  const json = readConfigJson(configPath);
-  const config = parseConfig(configPath, json ?? {});
-  if (config.installationId) return config;
-  const installationId = randomUUID();
-  if (json === undefined) {
-    writeConfigFile(configPath, { ...config, installationId });
-  } else {
-    // A valid existing file is a JSON object: the strict schema accepts nothing else.
-    writeConfigFile(realpathSync(configPath), { ...(json as object), installationId });
-  }
-  return loadConfig(configPath);
+  const current = loadConfig(configPath);
+  if (current.installationId) return current;
+  return withConfigLock(configPath, () => {
+    const json = readConfigJson(configPath);
+    const config = configFromJson(configPath, json);
+    if (config.installationId) return config;
+    const installationId = randomUUID();
+    if (json === undefined) {
+      writeConfigFile(configPath, { ...config, installationId });
+    } else {
+      // A valid existing file is a JSON object: the strict schema accepts nothing else.
+      writeConfigFile(realpathSync(configPath), { ...(json as object), installationId });
+    }
+    return loadConfig(configPath);
+  });
 }
 
 export function isLoopbackHost(host: string): boolean {

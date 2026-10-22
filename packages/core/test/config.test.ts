@@ -1,4 +1,7 @@
+import { spawn } from 'node:child_process';
 import {
+  chmodSync,
+  existsSync,
   lstatSync,
   mkdtempSync,
   readFileSync,
@@ -6,12 +9,15 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CONFIG_LOCK_STALE_MS,
+  CONFIG_LOCK_TIMEOUT_MS,
   ConfigError,
   dataDirLayout,
   ensureInstallationId,
@@ -217,4 +223,118 @@ describe('ensureInstallationId (SPEC-115 FR-115-15)', () => {
     expect(() => ensureInstallationId(path)).toThrow(ConfigError);
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ installationId: 'host-1' });
   });
+});
+
+describe('config.json that is JSON null (FR-115-11)', () => {
+  it('is invalid, never defaults, and is never rewritten', () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, 'null');
+    expect(() => loadConfig(path)).toThrow(ConfigError);
+    expect(() => ensureInstallationId(path)).toThrow(ConfigError);
+    expect(readFileSync(path, 'utf8')).toBe('null');
+    expect(existsSync(`${path}.lock`)).toBe(false);
+  });
+});
+
+/**
+ * Another process following the lock protocol: it takes `<config>.lock` with `wx`, writes
+ * `content` to the config after `delayMs` and releases the lock. Resolves once it holds the lock.
+ */
+async function lockHolder(
+  path: string,
+  content: string,
+  delayMs: number,
+): Promise<{ exited: Promise<number | null> }> {
+  const script = `
+    const fs = require('node:fs');
+    const [lock, config, content, delay] = process.argv.slice(1);
+    fs.writeFileSync(lock, String(process.pid), { flag: 'wx' });
+    setTimeout(() => { fs.writeFileSync(config, content); fs.rmSync(lock); }, Number(delay));
+  `;
+  const child = spawn(
+    process.execPath,
+    ['-e', script, `${path}.lock`, path, content, String(delayMs)],
+    {
+      stdio: 'ignore',
+    },
+  );
+  const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
+  while (!existsSync(`${path}.lock`)) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return { exited };
+}
+
+describe('ensureInstallationId across processes (FR-115-15, generated once)', () => {
+  const id = '3cbf0376-12b1-40e7-bed0-07f18b2b76ca';
+
+  it('waits for another process that holds the lock and returns the identifier it stored', async () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, JSON.stringify({ server: { port: 5000 } }));
+    // The other process read the file without an identifier too; it stores one while we wait.
+    const other = await lockHolder(
+      path,
+      JSON.stringify({ server: { port: 5000 }, installationId: id }),
+      300,
+    );
+    expect(ensureInstallationId(path).installationId).toBe(id);
+    expect(await other.exited).toBe(0);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+      server: { port: 5000 },
+      installationId: id,
+    });
+    expect(existsSync(`${path}.lock`)).toBe(false);
+  });
+
+  it('releases the lock when the file it re-reads under the lock is invalid', async () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, '{}');
+    const other = await lockHolder(path, '{ broken', 300);
+    expect(() => ensureInstallationId(path)).toThrow(/not valid JSON/);
+    expect(await other.exited).toBe(0);
+    expect(readFileSync(path, 'utf8')).toBe('{ broken');
+    expect(existsSync(`${path}.lock`)).toBe(false);
+  });
+
+  it('removes a stale lock left by a process that died', () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(`${path}.lock`, '12345');
+    const old = (Date.now() - CONFIG_LOCK_STALE_MS - 1000) / 1000;
+    utimesSync(`${path}.lock`, old, old);
+    expect(ensureInstallationId(path).installationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(existsSync(`${path}.lock`)).toBe(false);
+  });
+
+  it('gives up on a live lock after the named timeout without touching the file', () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, '{}');
+    writeFileSync(`${path}.lock`, '12345');
+    // Each clock read advances one second, so the timeout passes without real waiting.
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => (now += 1000));
+    expect(() => ensureInstallationId(path)).toThrow(
+      new ConfigError(
+        `Timed out after ${CONFIG_LOCK_TIMEOUT_MS} ms waiting for ${path}.lock; delete it if no DirectiveBench process is starting.`,
+      ),
+    );
+    vi.restoreAllMocks();
+    expect(readFileSync(path, 'utf8')).toBe('{}');
+    expect(existsSync(`${path}.lock`)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'propagates a lock that cannot be created for another reason',
+    () => {
+      const dir = tempDir();
+      const path = join(dir, 'config.json');
+      writeFileSync(path, '{}');
+      chmodSync(dir, 0o500);
+      try {
+        expect(() => ensureInstallationId(path)).toThrow(/EACCES/);
+      } finally {
+        chmodSync(dir, 0o700);
+      }
+      expect(readFileSync(path, 'utf8')).toBe('{}');
+    },
+  );
 });
