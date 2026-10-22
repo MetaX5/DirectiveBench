@@ -64,6 +64,11 @@ registration in `createExecutableAdapters()` (#97).
    | 4 | `ba65fae` | `.`, relative or empty `PATH` entries resolve against the workspace | `44ce663`: child `PATH` keeps absolute entries only |
    | 5 | `44ce663` | approve | — |
 
+- Maintainer decision 2026-10-22 (after review): `binary-replaced` joins the FR-118-15 stop codes
+  (a replaced `claude` or interpreter repeats for every run); SPEC-118 FR-118-15 and SPEC-203 §9
+  updated; the two engine tests now expect the run to stop after the first agent run (red on the
+  previous head: both still saw two runs).
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` — pass on the final head, 100%

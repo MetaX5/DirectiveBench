@@ -405,15 +405,13 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
       adapter: { authMode: 'api-key' },
       env: { PATH: `${early}:${interp}:PLACEHOLDER`, ANTHROPIC_API_KEY: KEY },
     });
-    outcomeOf(result);
-    expect(records.map((record) => record.errorCode)).toEqual([
-      'binary-replaced',
-      'binary-replaced',
-    ]);
+    // A stop code (maintainer decision 2026-10-22): the second run never starts.
+    stopped(result, 'binary-replaced');
+    expect(records.map((record) => record.errorCode)).toEqual(['binary-replaced']);
     expect(records[0]?.error).toContain('fake-sh now resolves to another file');
     expect(fake.starts()).toEqual([]);
-    // Only the engine's final detection ran the planted interpreter (for `--version`).
-    expect(readFileSync(marker, 'utf8')).not.toContain(' -p');
+    // The planted interpreter never ran a session (at most a `--version` detection).
+    expect(existsSync(marker) ? readFileSync(marker, 'utf8') : '').not.toContain(' -p');
   });
 
   it.each([
@@ -457,11 +455,8 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
         ],
       ],
     });
-    outcomeOf(result);
-    expect(records.map((record) => record.errorCode)).toEqual([
-      'binary-replaced',
-      'binary-replaced',
-    ]);
+    stopped(result, 'binary-replaced');
+    expect(records.map((record) => record.errorCode)).toEqual(['binary-replaced']);
     expect(fake.starts()).toEqual([]);
   });
 
