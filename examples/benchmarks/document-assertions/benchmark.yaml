@@ -1,0 +1,48 @@
+# SPECIFICATION-ONLY EXAMPLE — not executable in this release.
+#
+# It validates against the benchmark definition schema (checked in CI), and its assertions are
+# evaluated against the sample documents in ./documents by the engine's unit tests. Running it
+# needs the planned `claude-code` adapter and `directivebench benchmark run` (SPEC-118 Phases 3
+# and 4). The estimation task is a reference scenario: nothing in DirectiveBench knows about
+# estimates; the same assertion types grade any Markdown document an agent writes.
+schemaVersion: 1
+id: document-assertions
+name: Project estimate document
+description: >-
+  An agent turns a short project brief into a Markdown estimate. Graded deterministically by
+  required headings, required phrases and a number in a table cell within a range.
+technologies: [markdown]
+categories: [documentation]
+artifactTypes: [skill]
+
+execution:
+  agent: claude-code
+  model: null
+  repetitions: 3
+
+cases:
+  - id: estimate-from-brief
+    name: Estimate a small web project
+    prompt: |
+      Read brief.md and write a project estimate in Markdown to a new file next to it. Include
+      your assumptions, an estimate table with hours per work item, and the risks.
+    fixture:
+      path: ./fixture
+    assertions:
+      - id: structure
+        type: markdown-sections
+        file: '**/*.md'
+        headings: [Assumptions, Estimate, Risks]
+        ordered: true
+      - id: mentions-qa-and-pm
+        type: required-phrases
+        file: '**/*.md'
+        phrases: [QA, { pattern: "project manag|PM\\b", flags: i }]
+      - id: backend-hours-realistic
+        type: markdown-table-value
+        file: '**/*.md'
+        row: { pattern: 'Backend API', flags: i }
+        column: Hours
+        min: 16
+        max: 40
+        weight: 3
