@@ -80,8 +80,12 @@ Claude Code that are only assumptions stay marked for the AC-22 live check.
 - **`agents-md` always imports through `CLAUDE.md`** (SPEC-203 §4.1 updated): one
   version-independent layout instead of a version-dependent install; the builder needs no CLI
   version.
-- **Subscription mode passes a user-set `CLAUDE_CONFIG_DIR` through** (SPEC-203 §3.2 updated):
-  that is where the user's own login lives; DirectiveBench never overrides it.
+- **Subscription mode drops `CLAUDE_CONFIG_DIR`** like the #107 readiness probe, so the run and
+  the readiness check see the same login (an earlier commit passed a user-set value through; it
+  was aligned when #107 merged).
+- **One version parser:** after #107 merged, this branch's `version.ts` was removed in favour of
+  `parseClaudeCodeVersion` / `isSupportedClaudeCodeVersion` / `CLAUDE_CODE_MIN_VERSION` and
+  `ClaudeAuthMode` from `claude-code-readiness.ts`.
 - **Import scan as a superset of Claude Code's grammar** (FR-118-27 updated): every `@`, cut also
   at a lone backslash and without trailing punctuation, both spellings of escaped spaces; lexical
   (canonical and given workspace path) and physical (`realpath`) resolution; in a workspace with

@@ -1,5 +1,5 @@
 import { isAbsolute, join } from 'node:path';
-import type { ClaudeAuthMode } from './argv';
+import type { ClaudeAuthMode } from '../claude-code-readiness';
 import { ClaudeCodeError } from './errors';
 
 /** Which user-level configuration the agent can see (SPEC-203 §8, FR-118-03). */
@@ -47,8 +47,8 @@ function absolute(path: string, what: string): string {
  * `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CODE_USE_*` never reach the child unless set here.
  *
  * - Local Subscription Mode: the real `HOME` (the declared exception of SPEC-203 §3.2, needed for
- *   the CLI's own login; `USERPROFILE` and a user-set `CLAUDE_CONFIG_DIR` are kept for the same
- *   reason) and no credential variable at all. A missing or relative `HOME` is `auth-missing`.
+ *   the CLI's own login; `USERPROFILE` is kept for the same reason), no `CLAUDE_CONFIG_DIR` (as the
+ *   readiness probe, so both see the same login) and no credential variable at all. A missing or relative `HOME` is `auth-missing`.
  * - API Key Mode: `HOME`/`USERPROFILE` are the run-local home, `CLAUDE_CONFIG_DIR` is below it, and
  *   the key is `ANTHROPIC_API_KEY`. An empty key, or one containing a line break or NUL, is
  *   `auth-missing`.
@@ -72,10 +72,8 @@ export function buildClaudeEnv(input: ClaudeEnvInput): Record<string, string> {
       );
     }
     env.HOME = home;
-    for (const name of ['USERPROFILE', 'CLAUDE_CONFIG_DIR'] as const) {
-      const value = input.baseEnv[name];
-      if (value !== undefined) env[name] = value;
-    }
+    const profile = input.baseEnv.USERPROFILE;
+    if (profile !== undefined) env.USERPROFILE = profile;
     return env;
   }
   if (input.apiKey.trim() === '' || /[\r\n\0]/.test(input.apiKey)) {

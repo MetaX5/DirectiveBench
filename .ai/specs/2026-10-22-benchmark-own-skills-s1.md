@@ -714,8 +714,7 @@ changed before merge.
   - FR-118-02/03 env (`buildClaudeEnv`, `claudeAuthProfile`): allowlist only; subscription keeps the
     real `HOME` and no `ANTHROPIC_*`/`CLAUDE_CODE_OAUTH_TOKEN`/`CLAUDE_CODE_USE_*`; api-key mode
     sets run-local `HOME`/`CLAUDE_CONFIG_DIR` and the key only as `ANTHROPIC_API_KEY`.
-  - Version parser and minimum (`parseClaudeVersion`, `isSupportedClaudeVersion`, 2.1.259) and the
-    install convention of SPEC-203 §4.1 (`installClaudeArtifact`), which refuses to write through a
+  - The install convention of SPEC-203 §4.1 (`installClaudeArtifact`), which refuses to write through a
     symbolic link or onto a hard-linked instruction file a `setup` command planted.
   - FR-118-26 (`inspectArtifactVersions`): candidate and baseline; frontmatter is read as Claude
     Code reads it (an opening `---` with trailing blanks); a SKILL.md that opens a block it never
@@ -729,6 +728,25 @@ changed before merge.
     `--allowedTools` value), its exact `@` token grammar, and every behaviour marked as an
     assumption — all for the AC-22 live check. The engine and CLI wiring (plan-time and pre-spawn
     calls, codes as exit 2 / `infrastructure-error`) is Phase 3 steps 2–3 and Phase 4.
+- **Implemented — Phase 3 step 4 (issue #102, verified on 2026-10-22 with a fake `claude` and
+  read-only against the real `claude` 2.1.302 on the maintainer's machine):** the readiness half
+  of FR-118-35 and the API-key source of FR-118-02 as a library function,
+  `checkClaudeCodeReadiness(mode)` in `packages/agent-adapters/src/claude-code-readiness.ts`:
+  `claude` on `PATH` (`binary-not-found`), version ≥ `CLAUDE_CODE_MIN_VERSION` 2.1.259
+  (`version-unsupported`, also for an unreadable version), in subscription mode
+  `claude --setting-sources project,local auth status --json` (the subscription run's settings
+  sources) with only `loggedIn` and `authMethod` kept, ready only for `authMethod` `claude.ai`
+  (`auth-mismatch` for any other or missing method, e.g. a user-level `apiKeyHelper`; `auth-missing`;
+  `auth-expired` for the documented "Login expired" text; a timeout, oversized or unreadable
+  output and a login reported with a non-zero exit fail closed as `auth-missing`), in api-key mode
+  a non-empty `ANTHROPIC_API_KEY` checked for presence only. Status probes run argv-only with an
+  environment allowlist (no `ANTHROPIC_*`, `CLAUDE_CODE_*` or `CLAUDE_CONFIG_DIR`), in an empty
+  temporary directory, with named timeouts and output caps (`packages/agent-adapters/src/probe.ts`).
+  Claude Code detection reports `ready`/`missing` with per-mode readiness, shown by
+  `directivebench doctor` and the Agent Connections page (unit tests in
+  `packages/agent-adapters/test/`, `apps/cli/test/doctor.test.ts`; Playwright test in
+  `apps/web/e2e/management.spec.ts`). Calling it before the job is created, with exit code 2, is
+  `benchmark run` (Phase 4).
 - **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
   has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
   direct calls of `comparabilityKey` exercise profile hashing; the adapter→engine wiring and
@@ -738,7 +756,8 @@ changed before merge.
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 steps 2–4 (Claude Code adapter),
+- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 steps 2–3 (Claude Code
+  stream parser and process control),
   Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
   other requirement of §6 not listed above.
 

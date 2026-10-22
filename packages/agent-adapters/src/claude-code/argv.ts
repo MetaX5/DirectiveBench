@@ -1,9 +1,7 @@
 import { canonicalJson, sha256, type ModelSelection } from '@directivebench/core';
+import type { ClaudeAuthMode } from '../claude-code-readiness';
 import { ClaudeCodeError } from './errors';
 import { assertClaudeSkillName } from './skill-name';
-
-/** How the agent process authenticates (SPEC-118 FR-118-02; gateway and cloud modes are not in S1). */
-export type ClaudeAuthMode = 'subscription' | 'api-key';
 
 /** What the agent may do (SPEC-203 §7); `edit-and-shell` only for execution-approved suites. */
 export type ClaudePermissionProfile = 'edit-only' | 'edit-and-shell';

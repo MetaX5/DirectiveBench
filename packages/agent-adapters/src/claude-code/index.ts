@@ -5,5 +5,4 @@ export * from './errors';
 export * from './import-tokens';
 export * from './install';
 export * from './skill-name';
-export * from './version';
 export * from './workspace-inspection';

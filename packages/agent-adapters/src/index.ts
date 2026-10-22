@@ -2,10 +2,12 @@ import type { AgentAdapter } from './contract';
 import { MockAgentAdapter } from './mock';
 
 export * from './claude-code';
+export * from './claude-code-readiness';
 export * from './contract';
 export * from './detection';
 export * from './mock';
 export * from './paths';
+export * from './probe';
 
 /**
  * Adapters that can execute benchmarks in this build. Real harness adapters are added here

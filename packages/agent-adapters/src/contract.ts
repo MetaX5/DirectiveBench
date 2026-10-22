@@ -23,13 +23,28 @@ export interface AgentCapabilities {
 
 export type AuthReadiness = 'ready' | 'not-required' | 'unknown' | 'missing';
 
+/** Whether an agent can run in one auth mode (e.g. `subscription`, `api-key`). */
+export interface AgentModeReadiness {
+  mode: string;
+  ready: boolean;
+  /** Error code (e.g. SPEC-203 §9 `auth-missing`) when not ready, otherwise null. */
+  code: string | null;
+  /** Explanation for the user; never contains a secret or raw command output. */
+  detail: string;
+}
+
 export interface AgentDetection {
   adapterId: string;
   installed: boolean;
   version: string | null;
   executablePath: string | null;
-  /** Authentication state when it can be determined without reading credential files. */
+  /**
+   * Authentication state when it can be determined without reading credential files: `ready`
+   * when at least one auth mode in `readiness` is ready, `missing` when none is.
+   */
   auth: AuthReadiness;
+  /** Per-auth-mode readiness, for agents whose readiness check is implemented. */
+  readiness?: AgentModeReadiness[];
   notes: string[];
 }
 

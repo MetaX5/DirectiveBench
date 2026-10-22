@@ -1,48 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildClaudeEnv,
-  CLAUDE_CODE_MINIMUM_VERSION,
-  claudeAuthProfile,
-  ClaudeCodeError,
-  isSupportedClaudeVersion,
-  parseClaudeVersion,
-} from '../../src/claude-code';
-
-describe('parseClaudeVersion', () => {
-  it('reads the semantic version from the first output line', () => {
-    expect(parseClaudeVersion('2.1.296 (Claude Code)\n')).toBe('2.1.296');
-    expect(parseClaudeVersion('  2.1.259\nsecond line')).toBe('2.1.259');
-    expect(parseClaudeVersion('02.001.0300 (Claude Code)')).toBe('2.1.300');
-  });
-
-  it('returns null when the first line does not start with a version', () => {
-    for (const output of ['', 'Claude Code 2.1.296', 'v2.1.296', '2.1', 'x\n2.1.296']) {
-      expect(parseClaudeVersion(output), output).toBeNull();
-    }
-  });
-});
-
-describe('isSupportedClaudeVersion', () => {
-  it('accepts the minimum and newer versions', () => {
-    for (const version of [CLAUDE_CODE_MINIMUM_VERSION, '2.1.296', '2.2.0', '3.0.0', '2.1.1000']) {
-      expect(isSupportedClaudeVersion(version), version).toBe(true);
-    }
-  });
-
-  it('rejects older versions and anything that is not exactly major.minor.patch', () => {
-    for (const version of [
-      '2.1.258',
-      '2.0.999',
-      '1.9.9',
-      '2.1.296 (Claude Code)',
-      '2.1',
-      'x',
-      '',
-    ]) {
-      expect(isSupportedClaudeVersion(version), version).toBe(false);
-    }
-  });
-});
+import { buildClaudeEnv, claudeAuthProfile, ClaudeCodeError } from '../../src/claude-code';
 
 const hostEnv: NodeJS.ProcessEnv = {
   PATH: '/usr/bin',
@@ -81,7 +38,6 @@ describe('buildClaudeEnv', () => {
       LANG: 'C.UTF-8',
       HOME: '/home/user',
       USERPROFILE: '/home/user',
-      CLAUDE_CONFIG_DIR: '/home/user/.config/claude',
       TMPDIR: '/run/tmp',
       TEMP: '/run/tmp',
       TMP: '/run/tmp',
