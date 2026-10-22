@@ -126,6 +126,9 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
   let seenShortening = false;
   let loneBackslash = -1;
   let loneBackslashPunctuation = -1;
+  // The two nearest Markdown cut characters to the right of the current index (-1 when none).
+  let nearestCut = -1;
+  let secondCut = -1;
   /**
    * A `.`/`..` segment may end here in some candidate: at the end of the word, a `/`, or where a
    * variant may be cut — any backslash or punctuation character (conservative: a cut variant
@@ -155,6 +158,10 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
       }
     } else if (current === AT && index + 1 < end) {
       yield* tokenCandidates(index + 1);
+    }
+    if (MARKDOWN_CUTS.has(current)) {
+      secondCut = nearestCut;
+      nearestCut = index;
     }
   }
 
@@ -189,10 +196,15 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
           return;
         }
         // The whole token cannot name a file, but a Markdown lexer may end the path early: check
-        // the prefixes cut inside the first IMPORT_TOKEN_MAX_LENGTH characters (O(limit) per `@`).
-        variants = withMarkdownCuts(
-          text.slice(tokenStart, tokenStart + IMPORT_TOKEN_MAX_LENGTH),
-        ).slice(1);
+        // the prefixes cut inside the first IMPORT_TOKEN_MAX_LENGTH characters. Without a cut in
+        // that window this costs O(1); with one, every step after the first cut is bounded by the
+        // window and each cut found yields a candidate the scanner counts against its limit.
+        const firstCut = nearestCut > tokenStart ? nearestCut : secondCut;
+        if (firstCut < 0 || firstCut - tokenStart > IMPORT_TOKEN_MAX_LENGTH) continue;
+        variants = [];
+        for (let index = firstCut; index < tokenStart + IMPORT_TOKEN_MAX_LENGTH; index += 1) {
+          if (MARKDOWN_CUTS.has(code(index))) variants.push(text.slice(tokenStart, index));
+        }
       } else {
         const raw = text.slice(tokenStart, stop);
         const spellings = raw.includes('\\ ') ? [raw.replaceAll('\\ ', ' '), raw] : [raw];

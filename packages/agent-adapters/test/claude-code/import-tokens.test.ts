@@ -141,6 +141,9 @@ describe('importCandidates (FR-118-27)', () => {
       (n: number) => `${'@a'.repeat(n / 2)}/../x`,
       (n: number) => 'word@host.example '.repeat(n / 18),
       (n: number) => `@${'/'.repeat(n)}`,
+      (n: number) => '@/'.repeat(n / 2),
+      (n: number) => '@/a'.repeat(n / 3),
+      (n: number) => `${'@/*'.repeat(n / 3)}`,
     ];
     for (const make of inputs) {
       const time = (size: number) => {

@@ -152,6 +152,14 @@ Fixed: a long token without shortening sequences still yields its cut prefixes w
 close at a `---` inside a line; any inner `---` now fails closed. R2-N1 (NFKC flags full-width
 look-alikes) accepted as a harmless over-report.
 
+Round 3 (head `1cc2751`): changes requested — **R3-M1 (major)**: the round-2 fix scanned the
+4 096-character window of every over-long token even without a cut character, uncounted
+(`'@/'.repeat(n)`: 10.7 s per MiB, ~45 min at the byte limit). Fixed: the right-to-left pass
+tracks the nearest cut characters, so a window without one costs O(1) and every step after the
+first cut is bounded by the window and yields counted candidates; 1 MiB of `@/` now takes 106 ms.
+`'@/'`, `'@/a'` and `'@/*'` runs added to the linear-time test. R3-N1: the inner-`---` message now
+tells the author to replace it.
+
 ## Lessons recorded
 
 - [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)

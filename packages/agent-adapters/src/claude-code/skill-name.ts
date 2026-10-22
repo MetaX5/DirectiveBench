@@ -31,7 +31,11 @@ export function parseSkillFrontmatter(content: string): {
   const block = text.slice(0, text.length - parsed.body.length);
   const inner = block.slice(block.indexOf('\n') + 1, block.lastIndexOf('---'));
   if (inner.includes('---')) {
-    return { frontmatter: {}, error: 'the frontmatter contains --- inside the block' };
+    return {
+      frontmatter: {},
+      error:
+        'the frontmatter contains --- inside the block, where Claude Code may end it; replace that ---',
+    };
   }
   return { frontmatter: parsed.frontmatter };
 }
