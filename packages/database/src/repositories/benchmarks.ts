@@ -284,9 +284,7 @@ export async function suiteVersionApproval(
     .select({ at: benchmarkSuiteVersions.executionApprovedAt })
     .from(benchmarkSuiteVersions)
     .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
-    .where(
-      and(eq(benchmarkSuites.slug, slug), eq(benchmarkSuiteVersions.contentHash, contentHash)),
-    )
+    .where(and(eq(benchmarkSuites.slug, slug), eq(benchmarkSuiteVersions.contentHash, contentHash)))
     .get();
   return row ? row.at !== null : null;
 }
