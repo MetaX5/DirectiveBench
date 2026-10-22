@@ -425,9 +425,10 @@ export function equivalenceIssues(
 
 /**
  * RED/GREEN evaluation. For each case and repetition the baseline (no artifact, or the exact
- * baseline version installed) and candidate (exact artifact version installed) run in fresh, independent workspaces from the same fixture
- * snapshot with identical prompt, adapter, model and limits. The order alternates between
- * repetitions to reduce drift. Results are never adjusted: a baseline may pass, a candidate may fail.
+ * baseline version installed) and candidate (exact artifact version installed) run in fresh,
+ * independent workspaces from the same fixture snapshot with identical prompt, adapter, model and
+ * limits. The order alternates between repetitions to reduce drift. Results are never adjusted:
+ * a baseline may pass, a candidate may fail.
  */
 export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkOutcome> {
   assertRunnable(input);
