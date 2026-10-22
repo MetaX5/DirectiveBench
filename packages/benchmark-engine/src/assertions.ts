@@ -53,8 +53,14 @@ async function evaluateCommand(
     stdout: run.stdout,
     stderr: run.stderr,
     truncated: run.truncated,
+    strayProcesses: run.strayProcesses,
   };
   if (run.error) return result(assertion, false, `Command failed to start: ${run.error}`, details);
+  // Survivors could still change the workspace under the following assertions; they also outlive a
+  // timeout, so they are reported first and the engine stops the run (`stray-processes`).
+  if (run.strayProcesses) {
+    return result(assertion, false, 'Command left processes that could not be stopped', details);
+  }
   if (run.timedOut) return result(assertion, false, 'Command timed out', details);
   if (run.cancelled) return result(assertion, false, 'Command cancelled', details);
   const passed = run.exitCode === assertion.expectExitCode;

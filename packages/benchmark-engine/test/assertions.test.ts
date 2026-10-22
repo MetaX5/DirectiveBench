@@ -26,6 +26,58 @@ const assertion = (input: Record<string, unknown>): AssertionDefinition =>
   assertionSchema.parse({ id: 'a', ...input });
 
 describe('command assertions', () => {
+  it.skipIf(process.platform === 'win32')(
+    'fails when the command leaves a process that cannot be stopped',
+    async () => {
+      const result = await evaluateAssertion(
+        assertion({
+          type: 'command',
+          command: [
+            'sh',
+            '-c',
+            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+          ],
+        }),
+        context(),
+      );
+      const details = result.details as { stdout: string; strayProcesses: boolean };
+      process.kill(Number(details.stdout.trim()), 'SIGKILL');
+      expect(result).toMatchObject({
+        passed: false,
+        message: 'Command left processes that could not be stopped',
+      });
+      expect(details.strayProcesses).toBe(true);
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports survivors before a timeout (Codex review)',
+    async () => {
+      const result = await evaluateAssertion(
+        assertion({
+          type: 'command',
+          timeoutSeconds: 1,
+          command: [
+            'sh',
+            '-c',
+            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid; sleep 30',
+          ],
+        }),
+        context(),
+      );
+      const details = result.details as {
+        stdout: string;
+        strayProcesses: boolean;
+        timedOut: boolean;
+      };
+      process.kill(Number(details.stdout.trim()), 'SIGKILL');
+      expect(details).toMatchObject({ timedOut: true, strayProcesses: true });
+      expect(result.message).toBe('Command left processes that could not be stopped');
+    },
+    30_000,
+  );
+
   it('passes on the expected exit code and records command details', async () => {
     const result = await evaluateAssertion(
       assertion({

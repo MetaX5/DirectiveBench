@@ -1,4 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import {
+  killProcessGroup,
+  PROCESS_KILL_CONFIRM_MS,
+  PROCESS_OUTPUT_DRAIN_MS,
+  signalProcessGroup,
+  usesProcessGroups,
+} from '@directivebench/agent-adapters';
 import { redactSecrets } from '@directivebench/core';
 
 export interface CommandOptions {
@@ -26,6 +33,11 @@ export interface CommandResult {
   truncated: boolean;
   /** Spawn failure, e.g. executable not found. */
   error: string | null;
+  /**
+   * True when processes the command started were still alive after the command ended and its
+   * process group was killed (see {@link runCommand}); the workspace may still change.
+   */
+  strayProcesses: boolean;
 }
 
 const ENV_ALLOWLIST = ['PATH', 'LANG', 'LC_ALL', 'TZ', 'SystemRoot', 'PATHEXT', 'COMSPEC'];
@@ -83,8 +95,11 @@ class OutputBuffer {
 
 /**
  * Runs an argv command without a shell. On timeout or cancellation the whole process group
- * (POSIX) receives SIGTERM and, if still alive after the grace period, SIGKILL. Output is
- * truncated and secret-redacted before it is returned.
+ * (POSIX) receives SIGTERM and, if still alive after the grace period, SIGKILL. When the command
+ * itself exits, whatever it left running in its group — a backgrounded child, even one that closed
+ * its output — is killed and awaited before the result is returned, so nothing a `setup` command
+ * started can change the workspace after it (SPEC-118 §12); `strayProcesses` reports a group that
+ * would not go away. Output is truncated and secret-redacted before it is returned.
  */
 export function runCommand(
   command: readonly string[],
@@ -94,7 +109,13 @@ export function runCommand(
   const started = performance.now();
   const stdout = new OutputBuffer(options.maxOutputBytes);
   const stderr = new OutputBuffer(options.maxOutputBytes);
-  const base = { command: [...command], stdout: '', stderr: '', truncated: false };
+  const base = {
+    command: [...command],
+    stdout: '',
+    stderr: '',
+    truncated: false,
+    strayProcesses: false,
+  };
 
   return new Promise((resolve) => {
     if (!executable) {
@@ -121,12 +142,12 @@ export function runCommand(
       });
       return;
     }
-    const detached = process.platform !== 'win32';
+    const groups = usesProcessGroups();
     const child: ChildProcess = spawn(executable, args, {
       cwd: options.cwd,
       env: options.env,
       shell: false,
-      detached,
+      detached: groups,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -134,24 +155,53 @@ export function runCommand(
     let cancelled = false;
     let spawnError: string | null = null;
 
-    let closed = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
-    const sendSignal = (signal: NodeJS.Signals) => {
-      if (closed || child.pid === undefined) return;
-      try {
-        if (detached) process.kill(-child.pid, signal);
-        else child.kill(signal);
-      } catch {
-        // already gone
-      }
-    };
+    let confirmTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
+    let settled = false;
+    // Set when a process outside the group still held the output pipes after the drain period.
+    let drained = false;
+    // Resolves to whether the group is gone; settled when the command exits (or never started).
+    let groupGone: Promise<boolean> = Promise.resolve(true);
+    // The leader's exit clears the timers and removes the abort listener, so no signal is ever
+    // sent to its group id after that (the id may be reused once the group is gone).
+    const sendSignal = (signal: NodeJS.Signals) => signalProcessGroup(child, groups, signal);
     const terminate = () => {
       if (forceKillTimer) return;
       sendSignal('SIGTERM');
-      forceKillTimer = setTimeout(
-        () => sendSignal('SIGKILL'),
-        options.killGraceMs ?? DEFAULT_KILL_GRACE_MS,
-      );
+      forceKillTimer = setTimeout(() => {
+        sendSignal('SIGKILL');
+        // A leader that still does not exit (the signal was refused, EPERM, or it hangs in the
+        // kernel) is given up after a bound instead of keeping the run pending forever.
+        confirmTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+          finish(null, null, true);
+        }, PROCESS_KILL_CONFIRM_MS);
+      }, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
+    };
+    const finish = (code: number | null, signal: string | null, stray: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
+      clearTimeout(drainTimer);
+      options.signal.removeEventListener('abort', onAbort);
+      resolve({
+        command: [...command],
+        exitCode: code,
+        signal,
+        timedOut,
+        cancelled,
+        durationMs: Math.round(performance.now() - started),
+        stdout: stdout.toString(),
+        stderr: stderr.toString(),
+        truncated: stdout.truncated || stderr.truncated,
+        error: spawnError,
+        strayProcesses: stray,
+      });
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -168,23 +218,26 @@ export function runCommand(
     child.on('error', (error: Error) => {
       spawnError = error.message;
     });
-    child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
-      closed = true;
+    // The leader exited: kill what it left in its group. This also closes output pipes a
+    // background child inherited, so `close` follows instead of waiting for the timeout. A
+    // process that left the group (or, on Windows, any background child) can hold them forever:
+    // after the drain period they are closed and it is reported as a stray process.
+    child.on('exit', () => {
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
       options.signal.removeEventListener('abort', onAbort);
-      resolve({
-        command: [...command],
-        exitCode: code,
-        signal,
-        timedOut,
-        cancelled,
-        durationMs: Math.round(performance.now() - started),
-        stdout: stdout.toString(),
-        stderr: stderr.toString(),
-        truncated: stdout.truncated || stderr.truncated,
-        error: spawnError,
-      });
+      groupGone = killProcessGroup(child, groups);
+      drainTimer = setTimeout(() => {
+        drained = true;
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }, PROCESS_OUTPUT_DRAIN_MS);
+    });
+    child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
+      clearTimeout(drainTimer);
+      const gone = await groupGone;
+      finish(code, signal, !gone || drained);
     });
   });
 }

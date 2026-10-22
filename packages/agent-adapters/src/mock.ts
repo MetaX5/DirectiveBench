@@ -12,6 +12,7 @@ import type {
 } from './contract';
 import { writeArtifactFiles } from './install';
 import { resolveInside } from './paths';
+import type { WorkspacePin } from './workspace-pin';
 
 export const MOCK_AGENT_ID = 'mock';
 export const MOCK_AGENT_VERSION = '1.0.0';
@@ -70,9 +71,10 @@ export class MockAgentAdapter implements AgentAdapter {
   }
 
   async installArtifact(
-    workspaceDir: string,
+    workspace: WorkspacePin,
     artifact: ArtifactBundle,
   ): Promise<InstalledArtifact> {
+    const workspaceDir = workspace.path;
     const target =
       artifact.type === 'skill'
         ? `.agents/skills/${artifact.slug}`
@@ -108,7 +110,7 @@ export class MockAgentAdapter implements AgentAdapter {
       return finish('agent-error', 'Mock agent could not start', message);
     }
 
-    const context = await loadInstructionContext(request.workspaceDir);
+    const context = await loadInstructionContext(request.workspace.path);
     trace.push({ type: 'context-loaded', files: context.files });
     const haystack = context.text.toLowerCase();
 
@@ -126,7 +128,7 @@ export class MockAgentAdapter implements AgentAdapter {
         continue;
       }
       try {
-        const target = resolveInside(request.workspaceDir, step.write.path);
+        const target = resolveInside(request.workspace.path, step.write.path);
         await mkdir(dirname(target), { recursive: true });
         await writeFile(target, step.write.content);
       } catch (error) {

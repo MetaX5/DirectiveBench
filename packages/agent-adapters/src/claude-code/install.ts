@@ -5,9 +5,10 @@ import type { ArtifactBundle, ArtifactFormat } from '@directivebench/core';
 import type { InstalledArtifact } from '../contract';
 import { writeArtifactFiles } from '../install';
 import type { ClaudeArtifactProfile } from './argv';
+import { artifactRefusalCode, inspectArtifactBundle } from './bundle-inspection';
 import { ClaudeCodeError } from './errors';
 import { claudeSkillName } from './skill-name';
-import { workspacePinIssue, type WorkspacePin } from './workspace-pin';
+import { workspacePinIssue, type WorkspacePin } from '../workspace-pin';
 
 /** Artifact formats Claude Code can load from a workspace (SPEC-203 §4.1). */
 export const CLAUDE_INSTALLABLE_FORMATS = [
@@ -154,6 +155,16 @@ export async function installClaudeArtifact(
   artifact: ArtifactBundle,
 ): Promise<InstalledArtifact> {
   const format = assertInstallable(artifact);
+  // Second line behind the plan-time refusal (FR-118-26): a version that executes code or
+  // overrides the model is never installed, so no `claude` process can load it.
+  const findings = inspectArtifactBundle(artifact, 'candidate');
+  const refusal = artifactRefusalCode(findings);
+  if (refusal !== null) {
+    throw new ClaudeCodeError(
+      refusal,
+      `The artifact version is refused: ${findings.map((finding) => `${finding.file}: ${finding.detail}`).join('; ')}.`,
+    );
+  }
   const workspaceDir = workspace.canonical;
   const assertPinned = async () => {
     const issue = await workspacePinIssue(workspace);

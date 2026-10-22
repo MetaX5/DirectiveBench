@@ -1,6 +1,17 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type * as AgentAdapters from '@directivebench/agent-adapters';
+import { ClaudeCodeError } from '@directivebench/agent-adapters';
 import type {
   AgentAdapter,
   AgentCapabilities,
@@ -8,6 +19,7 @@ import type {
   AgentRunRequest,
   AgentRunResult,
   InstalledArtifact,
+  WorkspacePin,
 } from '@directivebench/agent-adapters';
 import type { ArtifactBundle } from '@directivebench/core';
 import type { BenchmarkDefinitionInput } from '../src/definition';
@@ -20,7 +32,19 @@ import {
   type AgentRunRecord,
   type RunBenchmarkInput,
 } from '../src/orchestrator';
+import { BenchmarkStoppedError } from '../src/agent-conditions';
 import { collectGarbage, nodeScript, useTempDirs } from './helpers';
+
+/** When set, the process-group kill after a command reports a survivor (`strayProcesses`). */
+const strayGroup = vi.hoisted(() => ({ survives: false }));
+vi.mock('@directivebench/agent-adapters', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentAdapters>();
+  return {
+    ...actual,
+    killProcessGroup: async (...args: Parameters<typeof actual.killProcessGroup>) =>
+      strayGroup.survives ? false : actual.killProcessGroup(...args),
+  };
+});
 
 const tmp = useTempDirs();
 
@@ -41,7 +65,7 @@ const completed = (overrides: Partial<AgentRunResult> = {}): AgentRunResult => (
 
 /** Writes `out.txt` naming the variant; the candidate is recognised by the installed artifact. */
 const writeVariant: RunHandler = async (request, variant) => {
-  writeFileSync(join(request.workspaceDir, 'out.txt'), variant);
+  writeFileSync(join(request.workspace.path, 'out.txt'), variant);
   return completed({
     trace: [{ type: 'file-written', path: 'out.txt', bytes: variant.length }],
     usage: { inputTokens: 10, outputTokens: 5 },
@@ -87,13 +111,13 @@ class FakeAdapter implements AgentAdapter {
     });
   }
 
-  installArtifact(workspaceDir: string): Promise<InstalledArtifact> {
-    return this.install(workspaceDir);
+  installArtifact(workspace: WorkspacePin): Promise<InstalledArtifact> {
+    return this.install(workspace.path);
   }
 
   run(request: AgentRunRequest): Promise<AgentRunResult> {
     this.requests.push(request);
-    const variant = existsSync(join(request.workspaceDir, '.agent')) ? 'candidate' : 'baseline';
+    const variant = existsSync(join(request.workspace.path, '.agent')) ? 'candidate' : 'baseline';
     return this.onRun(request, variant);
   }
 }
@@ -202,7 +226,7 @@ describe('runBenchmark with a nondeterministic adapter', () => {
       ['Write out.txt', 30_000, null, { mode: 'test' }],
       ['Write out.txt', 30_000, null, { mode: 'test' }],
     ]);
-    expect(adapter.requests[0]?.workspaceDir).not.toBe(adapter.requests[1]?.workspaceDir);
+    expect(adapter.requests[0]?.workspace.path).not.toBe(adapter.requests[1]?.workspace.path);
 
     expect(outcome.summary).toMatchObject({ verdict: 'improved', conclusive: false });
     expect(outcome.environment).toMatchObject({
@@ -357,6 +381,341 @@ describe('setup commands', () => {
     }
     expect(outcome.summary.verdict).toBe('error');
   });
+
+  it('pins the workspace before setup and hands the pin, installed paths and a scratch directory to the adapter', async () => {
+    const input = await suite({ execution: { agent: 'fake', timeoutSeconds: 30, repetitions: 1 } });
+    const adapter = new FakeAdapter();
+    const pins: WorkspacePin[] = [];
+    const install = adapter.install;
+    adapter.installArtifact = (workspace: WorkspacePin) => {
+      pins.push(workspace);
+      return install(workspace.path);
+    };
+    const scratch: string[][] = [];
+    const onRun = adapter.run.bind(adapter);
+    adapter.run = async (request) => {
+      scratch.push(readdirSync(request.scratchDir));
+      return onRun(request);
+    };
+    await runBenchmark({ ...input, adapter, keepWorkspaces: true, signal: signal() });
+    const [baseline, candidate] = adapter.requests;
+    expect(baseline?.installedPaths).toEqual([]);
+    expect(candidate?.installedPaths).toEqual(['.agent/skill.md']);
+    expect(candidate?.workspace).toBe(pins[0]);
+    expect(candidate?.workspace).toMatchObject({
+      path: expect.stringMatching(/candidate-1[/\\]workspace$/) as string,
+      canonical: realpathSync(candidate?.workspace.path as string),
+    });
+    expect(candidate?.scratchDir).toMatch(/candidate-1[/\\]agent$/);
+    expect(scratch).toEqual([[], []]);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a workspace a setup command replaced, before installing or running the agent',
+    async () => {
+      // Moves the workspace away and leaves a link to another directory at its path; the second
+      // command must never run in the replacement (Codex review).
+      const marker = join(tmp('marker'), 'second-ran');
+      const input = await suite({
+        cases: [
+          testCase({
+            setup: [
+              [
+                'sh',
+                '-c',
+                'cd .. && mv workspace moved && mkdir elsewhere && ln -s "$PWD/elsewhere" workspace',
+              ],
+              nodeScript(`require('fs').writeFileSync(${JSON.stringify(marker)}, '1')`),
+            ],
+          }),
+        ],
+      });
+      const adapter = new FakeAdapter();
+      let installs = 0;
+      adapter.install = async () => {
+        installs += 1;
+        return { paths: [] };
+      };
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      // A stop code (FR-118-15): the second agent run never starts.
+      expect(stopped).toBeInstanceOf(BenchmarkStoppedError);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records.map((run) => [run.executionStatus, run.errorCode, run.error])).toEqual([
+        [
+          'infrastructure-error',
+          'workspace-replaced',
+          'workspace-replaced: the workspace path is no longer a directory after setup.',
+        ],
+      ]);
+      expect(installs).toBe(0);
+      expect(adapter.requests).toHaveLength(0);
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'kills a background process of a setup command before installation (SPEC-118 §12)',
+    async () => {
+      // Without the kill, the background child would write configuration after the checks.
+      const late =
+        '(sleep 1; mkdir -p .claude; echo late > .claude/settings.local.json) > /dev/null 2>&1 < /dev/null &';
+      const input = await suite({ cases: [testCase({ setup: [['sh', '-c', late]] })] });
+      const adapter = new FakeAdapter(async (request, variant) => {
+        // Give the background child time to write, had it survived setup.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        writeFileSync(join(request.workspace.path, 'out.txt'), variant);
+        return completed();
+      });
+      const outcome = await runBenchmark({
+        ...input,
+        adapter,
+        keepWorkspaces: true,
+        signal: signal(),
+      });
+      for (const request of adapter.requests) {
+        expect(existsSync(join(request.workspace.path, '.claude'))).toBe(false);
+      }
+      expect(outcome.agentRuns.map((run) => run.executionStatus)).toEqual([
+        'completed',
+        'completed',
+      ]);
+    },
+    20_000,
+  );
+
+  it('stops the benchmark when a setup command leaves processes that cannot be stopped (FR-118-15)', async () => {
+    const input = await suite({
+      cases: [testCase({ setup: [nodeScript('process.exit(0)')] })],
+    });
+    const adapter = new FakeAdapter();
+    const records: AgentRunRecord[] = [];
+    strayGroup.survives = true;
+    let stopped: unknown;
+    try {
+      await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      });
+    } catch (error) {
+      stopped = error;
+    } finally {
+      strayGroup.survives = false;
+    }
+    expect(stopped).toBeInstanceOf(BenchmarkStoppedError);
+    expect(stopped).toMatchObject({ code: 'stray-processes' });
+    // Only the first agent run's setup ran; nothing after it.
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      executionStatus: 'infrastructure-error',
+      errorCode: 'stray-processes',
+      error: expect.stringMatching(
+        /^Setup command left processes that could not be stopped: /,
+      ) as string,
+    });
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it('stops the benchmark when an assertion command leaves processes that cannot be stopped (Codex review)', async () => {
+    const input = await suite({
+      cases: [
+        testCase({
+          assertions: [
+            { id: 'leaves', type: 'command', command: nodeScript('process.exit(0)') },
+            { id: 'next', type: 'file-exists', path: 'hidden.txt' },
+          ],
+        }),
+      ],
+    });
+    const adapter = new FakeAdapter();
+    const records: AgentRunRecord[] = [];
+    strayGroup.survives = true;
+    let stopped: unknown;
+    try {
+      await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      });
+    } catch (error) {
+      stopped = error;
+    } finally {
+      strayGroup.survives = false;
+    }
+    expect(stopped).toMatchObject({ code: 'stray-processes' });
+    expect(adapter.requests).toHaveLength(1);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      executionStatus: 'infrastructure-error',
+      errorCode: 'stray-processes',
+      error: 'Assertion command left processes that could not be stopped: leaves',
+      score: null,
+    });
+    // The next assertion never ran.
+    expect(records[0]?.assertions.map((a) => a.assertionId)).toEqual(['leaves']);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when a command assertion replaces the workspace; the next one never runs in it (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite({
+        cases: [
+          testCase({
+            assertions: [
+              {
+                id: 'replaces',
+                type: 'command',
+                command: [
+                  'sh',
+                  '-c',
+                  `mv "$PWD" "$PWD.saved" && ln -s ${JSON.stringify(victim)} "$PWD"`,
+                ],
+              },
+              { id: 'writes', type: 'command', command: ['sh', '-c', 'touch marker'] },
+            ],
+          }),
+        ],
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter: new FakeAdapter(),
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        executionStatus: 'infrastructure-error',
+        errorCode: 'workspace-replaced',
+        error: expect.stringMatching(
+          /^workspace-replaced: .* after assertion replaces\.$/,
+        ) as string,
+      });
+      expect(records[0]?.assertions.map((a) => a.assertionId)).toEqual(['replaces']);
+      expect(readdirSync(victim)).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when the agent replaces the workspace, before the overlay is copied (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        return completed();
+      });
+      const stopped = await runBenchmark({ ...input, adapter, signal: signal() }).catch(
+        (error: unknown) => error,
+      );
+      expect(stopped).toMatchObject({
+        code: 'workspace-replaced',
+        message: expect.stringContaining('after the agent run.') as string,
+      });
+      expect(readdirSync(victim)).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32').each([
+    ['agent-error', undefined, 'workspace-replaced'],
+    ['timeout', undefined, 'workspace-replaced'],
+    // A code that already stops the run keeps precedence.
+    ['agent-error', 'auth-expired', 'auth-expired'],
+  ] as const)(
+    'stops when a %s agent run replaced the workspace (Codex review, code %s)',
+    async (status, errorCode, stopCode) => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        return completed({ status, error: 'failed', ...(errorCode ? { errorCode } : {}) });
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: stopCode });
+      expect(records).toHaveLength(1);
+      expect(adapter.requests).toHaveLength(1);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when the adapter replaced the workspace and then threw (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        throw new Error('adapter crashed');
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records[0]?.error).toMatch(
+        /^workspace-replaced: .* after an error \(adapter crashed\)\.$/,
+      );
+      expect(adapter.requests).toHaveLength(1);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    "keeps an installation's own stop code when it replaced the workspace and threw",
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter();
+      adapter.install = async (workspaceDir) => {
+        renameSync(workspaceDir, `${workspaceDir}.saved`);
+        symlinkSync(victim, workspaceDir);
+        throw new ClaudeCodeError('workspace-replaced', 'refused by the installation');
+      };
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records.at(-1)?.error).toBe('refused by the installation');
+    },
+  );
 
   it('stops the benchmark when cancelled during setup', async () => {
     const input = await suite({
@@ -542,7 +901,7 @@ describe('assertions that cannot finish (SPEC-118 FR-118-46)', () => {
   /** The candidate writes text on which `(a+)+$` backtracks for minutes. */
   const writeAdversarial: RunHandler = async (request, variant) => {
     writeFileSync(
-      join(request.workspaceDir, 'out.txt'),
+      join(request.workspace.path, 'out.txt'),
       variant === 'candidate' ? `${'a'.repeat(32)}!` : 'b',
     );
     return completed({ usage: { inputTokens: 1, outputTokens: 1 } });

@@ -30,7 +30,9 @@ describe('MockAgentAdapter with a non-Error filesystem failure', () => {
     tempDirs.push(ws);
     failure.value = 'disk on fire';
     const result = await new MockAgentAdapter().run({
-      workspaceDir: ws,
+      workspace: { path: ws, canonical: ws, dev: 0, ino: 0 },
+      installedPaths: [],
+      scratchDir: ws,
       prompt: 'task',
       timeoutMs: 1000,
       signal: new AbortController().signal,

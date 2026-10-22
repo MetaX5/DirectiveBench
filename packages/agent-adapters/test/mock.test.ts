@@ -6,6 +6,7 @@ import type { ArtifactBundle } from '@directivebench/core';
 import type { AgentRunRequest } from '../src/contract';
 import { MOCK_AGENT_ID, MOCK_AGENT_VERSION, MockAgentAdapter } from '../src/mock';
 import { PathEscapeError } from '../src/paths';
+import type { WorkspacePin } from '../src/workspace-pin';
 
 const skill: ArtifactBundle = {
   artifactId: 'art_1',
@@ -35,7 +36,21 @@ function request(
   opts: unknown = options,
   signal = new AbortController().signal,
 ): AgentRunRequest {
-  return { workspaceDir, prompt: 'task', timeoutMs: 1000, signal, model: null, options: opts };
+  return {
+    workspace: pin(workspaceDir),
+    installedPaths: [],
+    scratchDir: workspaceDir,
+    prompt: 'task',
+    timeoutMs: 1000,
+    signal,
+    model: null,
+    options: opts,
+  };
+}
+
+/** The mock reads and writes `workspace.path` only; it never checks the pin's identity. */
+function pin(path: string): WorkspacePin {
+  return { path, canonical: path, dev: 0, ino: 0 };
 }
 
 const tempDirs: string[] = [];
@@ -94,7 +109,7 @@ describe('MockAgentAdapter', () => {
 
   it('follows directives from an installed skill (candidate)', async () => {
     const ws = workspace();
-    const installed = await adapter.installArtifact(ws, skill);
+    const installed = await adapter.installArtifact(pin(ws), skill);
     expect(installed.paths).toEqual(['.agents/skills/validate-input/SKILL.md']);
     const result = await adapter.run(request(ws));
     expect(result.summary).toBe('Applied 2 of 2 playbook steps');
@@ -107,7 +122,7 @@ describe('MockAgentAdapter', () => {
 
   it('installs instructions under .agents/instructions and appends them to AGENTS.md', async () => {
     const ws = workspace();
-    const first = await adapter.installArtifact(ws, {
+    const first = await adapter.installArtifact(pin(ws), {
       ...skill,
       type: 'instruction',
       format: 'agents-md',
@@ -115,7 +130,7 @@ describe('MockAgentAdapter', () => {
     expect(first.paths).toEqual(['.agents/instructions/validate-input/SKILL.md', 'AGENTS.md']);
     expect(readFileSync(join(ws, 'AGENTS.md'), 'utf8')).toBe('Always VALIDATE external input.');
 
-    await adapter.installArtifact(ws, {
+    await adapter.installArtifact(pin(ws), {
       ...skill,
       slug: 'second-rule',
       type: 'rule',
@@ -207,7 +222,7 @@ describe('MockAgentAdapter', () => {
   it('refuses artifact files that escape the install directory', async () => {
     const ws = workspace();
     await expect(
-      adapter.installArtifact(ws, {
+      adapter.installArtifact(pin(ws), {
         ...skill,
         files: [{ path: '../../../outside.txt', sha256: '', size: 0, content: '' }],
       }),
@@ -216,7 +231,7 @@ describe('MockAgentAdapter', () => {
 
   it('never overwrites an existing artifact file', async () => {
     const ws = workspace();
-    await adapter.installArtifact(ws, skill);
-    await expect(adapter.installArtifact(ws, skill)).rejects.toThrow(/EEXIST/);
+    await adapter.installArtifact(pin(ws), skill);
+    await expect(adapter.installArtifact(pin(ws), skill)).rejects.toThrow(/EEXIST/);
   });
 });
