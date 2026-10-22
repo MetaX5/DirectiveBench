@@ -433,6 +433,15 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     ]);
   });
 
+  it('ignores one byte order mark at the start, as cmark-gfm does (Codex review)', () => {
+    expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
+      headings: [],
+      tables: [],
+    });
+    expect(scanMarkdown('\uFEFF# Real').headings).toEqual(['Real']);
+    expect(scanMarkdown('\uFEFF\uFEFF# Not').headings).toEqual([]);
+  });
+
   it('stops the scan at a setext underline below a possible link definition (fail-safe)', () => {
     expect(scan(['# Before', '[a]: /url', '===', '# After']).headings).toEqual(['Before']);
     expect(scan(['[not a definition] text', '---', '# After']).headings).toEqual([

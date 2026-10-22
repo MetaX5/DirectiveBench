@@ -434,7 +434,9 @@ export function scanMarkdown(text: string): MarkdownScan {
   // After a blank line only list items with content remain open, and each continues on the next
   // blank line: consecutive blank lines skip the walk (a blank line cannot open a container).
   let afterBlankLine = false;
-  for (const line of text.split(/\r\n|\r|\n/)) {
+  // One byte order mark at the start is no content, as in cmark-gfm (`readFile` keeps it).
+  const body = text.startsWith('\uFEFF') ? text.slice(1) : text;
+  for (const line of body.split(/\r\n|\r|\n/)) {
     cursor.reset(line);
     const blankLine = onlyWhitespaceFrom(line, 0);
     // 1. Continue the open containers.

@@ -164,6 +164,10 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   that may start with a link definition ends the scan, so nothing below it is reported. Red first:
   the scanner, assertion and linear-time tests fail on fb9fe45 (the timing runs also slowed an
   unrelated timing test under that load).
+- Codex review round 4, high: a leading byte order mark (kept by `readFile(..., 'utf8')`) hid an
+  opening fence, so a heading or table inside it was reported. The scan now drops one U+FEFF at the
+  start, as cmark-gfm does (checked with cmarkgfm 2025.10.22, including that a second one stays
+  text). Red first: the scanner and assertion tests fail on 5048c16.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.
