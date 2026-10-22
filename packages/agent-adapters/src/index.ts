@@ -1,6 +1,7 @@
 import type { AgentAdapter } from './contract';
 import { MockAgentAdapter } from './mock';
 
+export * from './claude-code';
 export * from './contract';
 export * from './detection';
 export * from './mock';
