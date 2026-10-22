@@ -66,6 +66,26 @@ None beyond the coverage fix above.
 
 None new.
 
+## Codex round on PR #113
+
+- **Finding (MEDIUM, valid):** `listVersionComparisonRuns` ranked rows that included the summary
+  extractions, and SQLite carried each qualifying run's full `summary` through the window sorter,
+  deferring the JSON extraction until after ranking.
+- **Reproduced:** with 2 000 runs × 32 KiB summaries, a fresh process replaying the exact SQL with
+  `temp_store = MEMORY` grew its peak RSS by 65.5 MiB. With the default temp store the same bytes
+  spill to temporary files.
+- **Fix:** the window subquery selects only the id, the version, the key and the rank (the
+  filters still read the summary in WHERE but nothing carries it). `rank = 1` and the limit are
+  applied, and only then is the result joined back to `benchmark_runs` to extract the fields.
+  Growth is now 2.5 MiB.
+- **Page query checked:** `listArtifactRuns` showed 2.7 MiB before and after (a top-200 sort), so
+  it is left unchanged.
+- **Regression test:** `packages/database/test/runs-memory.test.ts` records both statements the
+  repository runs and replays each in a child process. It asserts the peak growth stays below
+  16 MiB, and it failed at 65.5 MiB on the previous query.
+- **Tried and rejected:** in-process `maxRSS` is masked by the test runner's earlier peak, and
+  `PRAGMA hard_heap_limit` is not enforced by Node's SQLite build.
+
 ## Follow-ups
 
 - Paging through older runs (a "show older" link) if real histories need it.
