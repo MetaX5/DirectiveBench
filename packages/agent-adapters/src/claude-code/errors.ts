@@ -20,7 +20,11 @@ export type ClaudeCodeErrorCode =
   /** The install target already exists or is not a plain path in the workspace (SPEC-203 §4.1). */
   | 'artifact-install-conflict'
   /** The workspace path no longer is the directory pinned at creation (SPEC-118 §12). */
-  | 'workspace-replaced';
+  | 'workspace-replaced'
+  /** The version contains executable customizations (FR-118-26), refused again at install. */
+  | 'artifact-executes-code'
+  /** The version overrides the execution model (FR-118-26), refused again at install. */
+  | 'artifact-overrides-model';
 
 export class ClaudeCodeError extends Error {
   override name = 'ClaudeCodeError';

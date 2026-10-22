@@ -119,7 +119,7 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | FR-118-12 | The baseline version SHALL differ from the candidate version (different `artifact_versions.id` **and** content hash); same artifact, same format. Violations are rejected before any job is created. A suite with a case whose prompt begins with `/` (explicit skill invocation) SHALL be refused with `--baseline none` at plan time (exit 2, before any job or session; code `slash-prompt-needs-ab-baseline`), with the message "An explicit /<name> invocation has no meaningful no-skill control; use an A/B baseline: --baseline v<n>". |
 | FR-118-13 | The baseline SHALL be stored on the benchmark run (`benchmark_runs.baseline_artifact_version_id`, null = `none`, §8). It is **not** part of the comparability key (§8.3): the key describes the conditions, the baseline describes what the candidate was compared with. |
 | FR-118-14 | Delta, verdict and display status keep their SPEC-111 meaning with "baseline" read as "the chosen baseline": `improved` in an A/B run means the candidate version scored better than the baseline version. Every surface SHALL name the baseline ("Baseline: no artifact" / "Baseline: v3"). |
-| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited`, `auth-mismatch`, `artifact-not-loaded` (FR-118-09), `workspace-contains-claude-config` (FR-118-06), `workspace-imports-outside` or `workspace-scan-limit` (FR-118-27), the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors, and a temporary server overload, `overloaded` → `provider-error`, per the maintainer decision of 2026-10-22) are recorded and the run continues (SPEC-112 §13). |
+| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited`, `auth-mismatch`, `artifact-not-loaded` (FR-118-09), `workspace-contains-claude-config` (FR-118-06), `workspace-imports-outside` or `workspace-scan-limit` (FR-118-27), `workspace-replaced` or `stray-processes` (§12: a `setup` command, the agent or a command assertion replaced the workspace — the pin is checked after each of them, before the next step — or a `setup` command, an assertion command or the agent left processes that could not be stopped — maintainer decision 2026-10-22; an assertion command's survivors also end that run's assertions; `output-limit` and `spawn-failed` stay per-run failures), the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors, and a temporary server overload, `overloaded` → `provider-error`, per the maintainer decision of 2026-10-22) are recorded and the run continues (SPEC-112 §13). |
 
 ### 6.3 Suites bound to registry artifacts
 
@@ -439,18 +439,24 @@ Additions and residual risks of this slice:
   payload, database, logs, traces or CLI output; the exact value is added to redaction.
 - **Setup processes must not outlive `setup` (FR-118-06/27).** Installation and the pre-spawn
   inspection assume nothing a `setup` command started is still running: such a process could change
-  the workspace after the checks. Today `runCommand` (`packages/benchmark-engine/src/commands.ts`)
-  signals the command's process group only on timeout or cancellation, so a backgrounded child that
-  closed its output survives a normal exit. **Requirement for Phase 3 step 3 / the orchestrator:**
-  kill each `setup` command's process group when it ends, before installation and before the
-  pre-spawn inspection. Until then the install itself never writes through the workspace by
-  pathname (staged in a private directory next to it and moved in with `rename`, which fails closed
-  on a planted `.claude`), so a late change cannot redirect an install write outside the workspace.
+  the workspace after the checks. `runCommand` (`packages/benchmark-engine/src/commands.ts`) therefore
+  kills the command's process group with SIGKILL as soon as the command exits — also after a normal
+  exit, also a backgrounded child that closed its output — and waits until the group is gone
+  (`PROCESS_GROUP_EXIT_TIMEOUT_MS`, 2 s); a group that is still there (an orphan nobody reaps, a
+  set-uid member) is reported as `strayProcesses` and the agent run ends `infrastructure-error`
+  before installation. The same applies to `claude` itself and the processes its tools started.
+  Independently, the install never writes through the workspace by pathname (staged in a private
+  directory next to it and moved in with `rename`, which fails closed on a planted `.claude`).
+  Residual: a process that leaves its group (`setsid`, a double fork into a new session) is not
+  reached; `local-process` is not a sandbox (ADR-0007) — the pre-spawn inspection still checks the
+  result of anything that ran before it.
 - **Workspace identity pinned before `setup` (FR-118-06/27).** A `setup` command can move the
   workspace away and leave a link to a host directory (or another directory) at its path, then
-  exit normally. **Requirement for the orchestrator (Phase 3 step 3, #101):** create the workspace,
-  then pin it with `pinWorkspace` (real directory, device + inode, canonical path) **before** any
-  `setup` command runs, and pass the pin to `installClaudeArtifact` and `inspectWorkspace`. Both
+  exit normally. The orchestrator creates the workspace, pins it with `pinWorkspace` (real
+  directory, device + inode, canonical path) **before** any `setup` command runs, re-checks the pin
+  after `setup` (agent run `infrastructure-error` `workspace-replaced`, for every adapter), and
+  passes the pin to the adapter (`installArtifact(pin, …)`, `AgentRunRequest.workspace`), which
+  hands it to `installClaudeArtifact` and `inspectWorkspace`. Both
   check the path against the pin before reading or writing, before and after the move, and at the
   start of the inspection, and fail closed with `workspace-replaced`; the staging directory is
   created beside the pinned canonical path.
@@ -864,6 +870,61 @@ changed before merge.
   `packages/agent-adapters/test/`, `apps/cli/test/doctor.test.ts`; Playwright test in
   `apps/web/e2e/management.spec.ts`). Calling it before the job is created, with exit code 2, is
   `benchmark run` (Phase 4).
+- **Implemented — Phase 3 step 3 (issue #101, verified on 2026-10-22 with a fake `claude` on a
+  test `PATH`, Linux; no real `claude` was started):** process control, not yet wrapped in an
+  `AgentAdapter` (the stream parser is Phase 3 step 2, #100):
+  - `runClaudeProcess` (`packages/agent-adapters/src/claude-code/process.ts`): argv only (no
+    shell), the given environment only, the prompt on stdin (never in argv), cwd = the pinned
+    workspace's canonical path, its own process group; on timeout or cancellation SIGTERM to the
+    group and SIGKILL after `CLAUDE_KILL_GRACE_MS` (5 s); an abort whose reason is a
+    `TimeoutError` counts as a timeout. Whenever `claude` exits, its group is SIGKILLed and awaited
+    (`strayProcesses` otherwise); output pipes a process outside the group holds are closed after
+    `PROCESS_OUTPUT_DRAIN_MS` and reported as stray processes too (fail closed; the same holds for
+    `runCommand`, whose timeout could not end such a holder before). stdout is returned as raw lines (CRLF stripped, a last line without a
+    line feed kept) for the parser; above `CLAUDE_STDOUT_MAX_BYTES` (32 MiB) the run is stopped;
+    stderr keeps its last `CLAUDE_STDERR_MAX_BYTES` (64 KiB). Output is unredacted; the parser
+    redacts what it keeps.
+  - AC-10 (process part): with a fake that ignores SIGINT and SIGTERM and a background child that
+    does too, a SIGINT to its group changes nothing, and after the abort no process of the group
+    remains, within the 5 s grace plus the kill (< 10 s). The CLI part (Ctrl-C → exit 130) is Phase 4.
+  - `runClaudeCode` (`run.ts`): nothing starts after a cancellation or timeout (also one during
+    the inspection); `inspectWorkspace` runs right before each spawn with `~` resolved against the
+    agent's own `HOME` and the installed paths exempt from the configuration check only; any
+    finding ends the run `infrastructure-error` with the finding's code (FR-118-06/27, the
+    FR-118-15 stop codes) and the fake is never
+    started. Process-level ends map to `cancelled`, `timeout`, `infrastructure-error`
+    `spawn-failed` / `stray-processes` and `agent-error` `output-limit` (SPEC-203 §9); otherwise
+    `ended` is null and the parser decides.
+  - Engine (§12): workspace pinned before `setup` and re-checked after it; `setup` (and assertion)
+    commands' process groups killed when they exit, and a command assertion with stray processes
+    fails (regression tests: a background child that
+    closed its output is gone when `runCommand` returns; a late `.claude` write of a background
+    child never happens); the adapter contract carries the pin, the installed paths, a run-local
+    `scratchDir` and the status `infrastructure-error`; the engine waits `AGENT_STOP_GRACE_MS`
+    (10 s) beyond the timeout for an adapter's own stop sequence.
+  - FR-118-15 stop mechanism (engine, `packages/benchmark-engine/src/agent-conditions.ts`): adapters report
+    a code in `AgentRunResult.errorCode`; the engine keeps it in `AgentRunRecord.errorCode` (and
+    sets its own: `stray-processes`, `workspace-replaced`, `assertion-error`, and the `code` of a
+    `ClaudeCodeError` an installation throws); after each agent run `assertNotStopped` throws
+    `BenchmarkStoppedError` (`code`, message naming case, variant and repetition) when the code is
+    in `STOP_CODES` (the FR-118-15 list, one place), so no further setup, installation or adapter
+    call happens and the runner records the benchmark run `error` with that message. Verified with
+    the fake: a `setup` that writes `.claude/settings.local.json` ends the first agent run
+    `workspace-contains-claude-config` and nothing else runs (no install, no spawn). The parser's
+    codes (auth, quota, `artifact-not-loaded`) use the same path (#100).
+  - A `claude` (or command) that does not exit within `PROCESS_KILL_CONFIRM_MS` after SIGKILL —
+    the signal refused with `EPERM` in the tests — is given up: pipes closed, no longer waited for,
+    reported `stray-processes`; the run never stays pending.
+  - FR-118-26 second line: `installClaudeArtifact` refuses a version with executable
+    customizations or a model override again (`artifact-executes-code` /
+    `artifact-overrides-model`), so a candidate with frontmatter `hooks` never reaches `claude`
+    (engine integration test with the fake, which records every start).
+  - Not verified here: the `permission-denied` record of an out-of-workspace edit (the fake's
+    denial line reaches the parser's input unchanged; classifying it is #100), Windows (process
+    groups are not used there; only `claude` itself is signalled, best effort, NFR-118-04, and any
+    background child that keeps a command's output open is reported as stray, so such a `setup`
+    fails closed there), macOS,
+    and the real CLI.
 - **Implemented — Phase 5 (issue #98, verified on 2026-10-22 with seeded runs, no agent):**
   read-only results by artifact version.
   - FR-118-50: `listArtifactRuns` (`packages/database/src/repositories/runs.ts`) returns every run
@@ -931,8 +992,8 @@ changed before merge.
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 3 step 3 (process control, issue #101),
-  Phase 4 (`benchmark init` / `benchmark run`) and every
+- **Not implemented:** the `ClaudeCodeAdapter` that composes installation, process control and
+  the parser, Phase 4 (`benchmark init` / `benchmark run`) and every
   other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan

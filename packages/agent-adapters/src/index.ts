@@ -8,6 +8,8 @@ export * from './detection';
 export * from './mock';
 export * from './paths';
 export * from './probe';
+export * from './process-group';
+export { pinWorkspace, workspacePinIssue, type WorkspacePin } from './workspace-pin';
 
 /**
  * Adapters that can execute benchmarks in this build. Real harness adapters are added here

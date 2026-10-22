@@ -1,12 +1,16 @@
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
-import type {
-  AgentAdapter,
-  AgentRunMetadata,
-  AgentRunResult,
-  SkillActivation,
-  TraceEvent,
+import {
+  ClaudeCodeError,
+  pinWorkspace,
+  workspacePinIssue,
+  type AgentAdapter,
+  type AgentRunMetadata,
+  type AgentRunResult,
+  type SkillActivation,
+  type TraceEvent,
+  type WorkspacePin,
 } from '@directivebench/agent-adapters';
 import {
   baselineArtifactIssue,
@@ -23,6 +27,7 @@ import {
   assertNotStopped,
   observedAgentProfile,
   skillInvocationRates,
+  STOP_CODES,
 } from './agent-conditions';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
@@ -60,7 +65,11 @@ export interface AgentRunRecord extends RunOutcome {
   trace: (TraceEvent | EngineTraceEvent)[];
   usage: Record<string, number> | null;
   error: string | null;
-  /** SPEC-203 §9 / SPEC-118 code of a failed agent run, when known. */
+  /**
+   * SPEC-203 §9 / SPEC-118 code of a failed agent run, when known (from the adapter's
+   * `errorCode`, or the engine's own: `stray-processes`, `workspace-replaced`, `assertion-error`).
+   * A code in `STOP_CODES` stops the benchmark run (FR-118-15).
+   */
   errorCode: string | null;
   /** Warning codes of this agent run (adapter warnings and `artifact-not-invoked`). */
   warnings: string[];
@@ -230,6 +239,14 @@ export function comparabilityKey(
   );
 }
 
+/**
+ * How long the engine waits, after an agent run's timeout, for the adapter to return before it
+ * records the run as timed out and moves on. Longer than an adapter's own stop sequence (SIGTERM,
+ * a 5 s grace, SIGKILL of the process group and waiting for it, SPEC-203 §5), so an adapter that
+ * honours the signal always reports its own result.
+ */
+export const AGENT_STOP_GRACE_MS = 10_000;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<T>((resolve) => {
@@ -277,6 +294,7 @@ async function executeAgentRun(
   const runDir = join(input.workRoot, benchmarkCase.id, `${variant}-${repetition}`);
   const workspaceDir = join(runDir, 'workspace');
   const homeDir = join(runDir, 'home');
+  const scratchDir = join(runDir, 'agent');
   const trace: AgentRunRecord['trace'] = [];
   const stage = (name: Extract<EngineTraceEvent, { type: 'stage' }>['stage']) =>
     trace.push({ type: 'stage', stage: name, at: new Date().toISOString() });
@@ -295,20 +313,28 @@ async function executeAgentRun(
     usage: null,
     errorCode: null,
     warnings: [],
-    assertions: [],
+    assertions: [] as AssertionResult[],
   };
-  const fail = (executionStatus: ExecutionStatus, error: string): AgentRunRecord => ({
+  const fail = (
+    executionStatus: ExecutionStatus,
+    error: string,
+    errorCode: string | null = null,
+  ): AgentRunRecord => ({
     ...base,
     executionStatus,
     score: null,
     passed: null,
     durationMs: Math.round(performance.now() - started),
     error,
+    errorCode,
   });
 
+  // Set once the workspace is pinned; a step that throws after that is checked too.
+  let pinned: WorkspacePin | null = null;
   try {
     stage('prepare');
     await mkdir(homeDir, { recursive: true });
+    await mkdir(scratchDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
     // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
     const copiedHash = hashManifest(await buildManifest(workspaceDir));
@@ -318,6 +344,23 @@ async function executeAgentRun(
         `Workspace does not match fixture snapshot ${caseFixtures.fixture.slice(0, 12)} (got ${copiedHash.slice(0, 12)}); the fixture store may be corrupted.`,
       );
     }
+    // Pin the workspace before any untrusted command runs in it: installation and the adapter's
+    // checks compare the path with this identity, so a `setup` command that moves the workspace
+    // away and leaves a link to another directory is refused (SPEC-118 §12).
+    const workspace = await pinWorkspace(workspaceDir);
+    pinned = workspace;
+    // Every step that runs untrusted code (setup, the agent, command assertions) is followed by this
+    // check, so the next step never runs in, copies into or reads a replacement (SPEC-118 §12).
+    const replacedAfter = async (step: string): Promise<AgentRunRecord | null> => {
+      const replaced = await workspacePinIssue(workspace);
+      return replaced === null
+        ? null
+        : fail(
+            'infrastructure-error',
+            `workspace-replaced: ${replaced} after ${step}.`,
+            'workspace-replaced',
+          );
+    };
 
     if (benchmarkCase.setup.length > 0) stage('setup');
     for (const command of benchmarkCase.setup) {
@@ -335,6 +378,17 @@ async function executeAgentRun(
         durationMs: result.durationMs,
       });
       if (result.cancelled) return fail('cancelled', 'Cancelled during setup');
+      // runCommand killed what the command left in its process group; a survivor could still
+      // change the workspace after installation and the adapter's checks.
+      if (result.strayProcesses) {
+        return fail(
+          'infrastructure-error',
+          `Setup command left processes that could not be stopped: ${command.join(' ')}`,
+          'stray-processes',
+        );
+      }
+      const replaced = await replacedAfter('setup');
+      if (replaced) return replaced;
       if (result.exitCode !== 0) {
         return fail(
           'infrastructure-error',
@@ -345,12 +399,13 @@ async function executeAgentRun(
 
     // The baseline variant installs the baseline version, if any, by the same procedure.
     const installing = variant === 'candidate' ? input.artifact : input.baselineArtifact;
+    let installedPaths: string[] = [];
     if (installing) {
       stage('install');
-      const installed = await adapter.installArtifact(workspaceDir, installing);
+      installedPaths = (await adapter.installArtifact(workspace, installing)).paths;
       trace.push({
         type: 'message',
-        text: `Installed artifact files: ${installed.paths.join(', ')}`,
+        text: `Installed artifact files: ${installedPaths.join(', ')}`,
       });
     }
 
@@ -364,15 +419,16 @@ async function executeAgentRun(
     try {
       agentResult = await withTimeout(
         adapter.run({
-          workspaceDir,
+          workspace,
+          installedPaths,
+          scratchDir,
           prompt: benchmarkCase.prompt,
           timeoutMs,
           signal: agentAbort.signal,
           model: definition.execution.model,
           options: benchmarkCase.agentOptions[adapter.id],
         }),
-        // Grace period for adapters that ignore the abort signal.
-        timeoutMs + 5000,
+        timeoutMs + AGENT_STOP_GRACE_MS,
         () => ({
           status: 'timeout',
           durationMs: timeoutMs,
@@ -391,10 +447,19 @@ async function executeAgentRun(
     if (agentResult.metadata) base.metadata = agentResult.metadata;
     if (agentResult.skillActivation) base.skillActivation = agentResult.skillActivation;
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
-    if (agentResult.status !== 'completed') {
-      return fail(agentResult.status, agentResult.error ?? agentResult.summary);
+    // Whatever the agent run's status: a failed or timed-out run that replaced the workspace must
+    // still stop the benchmark run, and a code that already stops it keeps precedence.
+    if (agentResult.errorCode === undefined || !STOP_CODES.includes(agentResult.errorCode)) {
+      const replacedByAgent = await replacedAfter('the agent run');
+      if (replacedByAgent) return replacedByAgent;
     }
-
+    if (agentResult.status !== 'completed') {
+      return fail(
+        agentResult.status,
+        agentResult.error ?? agentResult.summary,
+        agentResult.errorCode ?? null,
+      );
+    }
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
 
@@ -410,16 +475,32 @@ async function executeAgentRun(
     const assertions: AssertionResult[] = [];
     for (const assertion of benchmarkCase.assertions) {
       if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');
-      assertions.push(
-        await evaluateAssertion(assertion, {
-          workspaceDir,
+      const evaluated = await evaluateAssertion(assertion, {
+        workspaceDir,
+        changedFiles,
+        commandEnv,
+        defaultTimeoutMs: timeoutMs,
+        maxOutputBytes: definition.execution.maxOutputBytes,
+        signal: input.signal,
+      });
+      assertions.push(evaluated);
+      // A command assertion left processes that could not be stopped: they could change the
+      // workspace under the next assertions and runs, so none runs (SPEC-118 §12, FR-118-15).
+      if (evaluated.details?.strayProcesses === true) {
+        return {
+          ...fail(
+            'infrastructure-error',
+            `Assertion command left processes that could not be stopped: ${evaluated.assertionId}`,
+            'stray-processes',
+          ),
           changedFiles,
-          commandEnv,
-          defaultTimeoutMs: timeoutMs,
-          maxOutputBytes: definition.execution.maxOutputBytes,
-          signal: input.signal,
-        }),
-      );
+          assertions,
+        };
+      }
+      if (assertion.type === 'command') {
+        const replaced = await replacedAfter(`assertion ${evaluated.assertionId}`);
+        if (replaced) return { ...replaced, changedFiles, assertions };
+      }
     }
     // A bounded pattern terminated by cancellation must not read as an assertion error.
     if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');
@@ -432,8 +513,8 @@ async function executeAgentRun(
         ...fail(
           'infrastructure-error',
           `assertion-error: assertion "${unfinished.assertionId}" could not be evaluated: ${unfinished.message}`,
+          'assertion-error',
         ),
-        errorCode: 'assertion-error',
         changedFiles,
         assertions,
         usage,
@@ -452,7 +533,22 @@ async function executeAgentRun(
       error: null,
     };
   } catch (error) {
-    return fail('infrastructure-error', error instanceof Error ? error.message : String(error));
+    // An adapter's refusal (e.g. an installation that finds executable code) keeps its code.
+    const code = error instanceof ClaudeCodeError ? error.code : null;
+    const message = error instanceof Error ? error.message : String(error);
+    // A step that replaced the workspace and then threw (e.g. a rejecting adapter) must still stop
+    // the benchmark run; a code that already stops it keeps precedence.
+    if (pinned !== null && (code === null || !STOP_CODES.includes(code))) {
+      const replaced = await workspacePinIssue(pinned);
+      if (replaced !== null) {
+        return fail(
+          'infrastructure-error',
+          `workspace-replaced: ${replaced} after an error (${message}).`,
+          'workspace-replaced',
+        );
+      }
+    }
+    return fail('infrastructure-error', message, code);
   } finally {
     if (!input.keepWorkspaces) await rm(runDir, { recursive: true, force: true });
   }
@@ -542,7 +638,8 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
           agentRuns.push(record);
           await input.onAgentRun?.(record);
           if (record.executionStatus === 'cancelled') throw new BenchmarkCancelledError();
-          // A systematic failure (login, quota, skill not loaded, …) ends the run (FR-118-15).
+          // A systematic failure (workspace refused, login, quota, skill not loaded, …) ends the
+          // run: no further setup, installation or adapter call (FR-118-15).
           assertNotStopped(record);
         }
       }

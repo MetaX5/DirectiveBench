@@ -17,12 +17,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   inspectWorkspace,
   isClaudeConfigPath,
-  pinWorkspace,
   WORKSPACE_SCAN_MAX_BYTES,
   WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES,
   type WorkspaceFinding,
   type WorkspaceInspectionOptions,
 } from '../../src/claude-code';
+import { pinWorkspace } from '../../src/workspace-pin';
 import { bundle, inspectPinned, installPinned } from './helpers';
 
 /** Timeout for the heavier tests: they take well under a second alone, but CI runs every package on 2 cores. */

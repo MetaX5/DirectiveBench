@@ -91,7 +91,7 @@ class ReportingAdapter extends MockAgentAdapter {
 
   override async run(request: AgentRunRequest): Promise<AgentRunResult> {
     const result = await super.run(request);
-    const match = /(baseline|candidate)-(\d+)[\\/]workspace$/.exec(request.workspaceDir);
+    const match = /(baseline|candidate)-(\d+)[\\/]workspace$/.exec(request.workspace.path);
     const variant = match?.[1] as 'baseline' | 'candidate';
     this.calls.push(`${variant}-${match?.[2]}`);
     return { ...result, ...this.script(variant, Number(match?.[2])) };

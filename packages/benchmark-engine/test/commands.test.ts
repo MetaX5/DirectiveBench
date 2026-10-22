@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { PROCESS_KILL_CONFIRM_MS } from '@directivebench/agent-adapters';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_KILL_GRACE_MS,
   buildCommandEnv,
@@ -98,6 +99,7 @@ describe('runCommand', () => {
       stderr: '',
       truncated: false,
       error: 'empty command',
+      strayProcesses: false,
     });
   });
 
@@ -202,6 +204,83 @@ describe('runCommand', () => {
     expect(result).toMatchObject({ timedOut: true, cancelled: true, signal: 'SIGKILL' });
     expect(result.durationMs).toBeGreaterThanOrEqual(850);
   });
+
+  posixOnly(
+    'kills a background child a command leaves behind when it exits (SPEC-118 §12)',
+    async () => {
+      // The child closed its output, so nothing but the process group ties it to the command.
+      const result = await runCommand(
+        ['sh', '-c', 'sleep 600 > /dev/null 2>&1 < /dev/null & echo $!'],
+        options(),
+      );
+      const child = Number(result.stdout.trim());
+      expect(result).toMatchObject({ exitCode: 0, strayProcesses: false, timedOut: false });
+      expect(() => process.kill(child, 0)).toThrow(/ESRCH/);
+    },
+  );
+
+  posixOnly(
+    'ends when the command exits although a background child holds its output',
+    async () => {
+      const result = await runCommand(['sh', '-c', 'sleep 600 & echo started'], options());
+      expect(result).toMatchObject({ exitCode: 0, timedOut: false, stdout: 'started\n' });
+      expect(result.durationMs).toBeLessThan(5000);
+    },
+  );
+
+  posixOnly(
+    'reports a process that left the group and holds the output as stray, after the drain period',
+    async () => {
+      // `setsid` escapes the group kill; before, `close` never came and even the timeout could not
+      // end the command, because its group was already empty.
+      const result = await runCommand(
+        [
+          'sh',
+          '-c',
+          'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+        ],
+        {
+          ...options(),
+          timeoutMs: 60_000,
+        },
+      );
+      const escaped = Number(result.stdout.trim());
+      try {
+        expect(result).toMatchObject({ exitCode: 0, strayProcesses: true, timedOut: false });
+        expect(result.durationMs).toBeLessThan(30_000);
+      } finally {
+        process.kill(escaped, 'SIGKILL');
+      }
+    },
+    60_000,
+  );
+
+  posixOnly(
+    'gives up on a leader that cannot be killed (signals refused with EPERM) after a bound',
+    async () => {
+      const kill = process.kill.bind(process);
+      // Every signal to the group is refused, so the leader never exits.
+      const refuse = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      });
+      let result: Awaited<ReturnType<typeof runCommand>>;
+      try {
+        result = await runCommand(['sh', '-c', 'echo $$; while :; do sleep 1; done'], {
+          ...options(),
+          timeoutMs: 100,
+          killGraceMs: 100,
+        });
+      } finally {
+        refuse.mockRestore();
+      }
+      const leader = Number(result.stdout.trim());
+      kill(-leader, 'SIGKILL');
+      expect(result).toMatchObject({ timedOut: true, exitCode: null, strayProcesses: true });
+      expect(result.durationMs).toBeGreaterThanOrEqual(200 + PROCESS_KILL_CONFIRM_MS - 50);
+      expect(result.durationMs).toBeLessThan(200 + PROCESS_KILL_CONFIRM_MS + 5000);
+    },
+    30_000,
+  );
 
   it('handles cancellation of a command whose executable could not be started', async () => {
     const controller = new AbortController();

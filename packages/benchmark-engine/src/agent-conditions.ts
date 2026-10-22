@@ -25,6 +25,11 @@ export const STOP_CODES: readonly string[] = [
   'workspace-contains-claude-config',
   'workspace-imports-outside',
   'workspace-scan-limit',
+  // §12 (maintainer decision 2026-10-22): a `setup` command replaced the workspace, or it (or the
+  // agent) left processes that could not be stopped; both repeat for every run of the suite.
+  // `output-limit` and `spawn-failed` stay per-run failures.
+  'workspace-replaced',
+  'stray-processes',
 ];
 
 /** The agent-run facts these rules read. */

@@ -8,4 +8,5 @@ export * from './normalize';
 export * from './skill-name';
 export * from './stream-parser';
 export * from './workspace-inspection';
-export { pinWorkspace, workspacePinIssue, type WorkspacePin } from './workspace-pin';
+export * from './process';
+export * from './run';
