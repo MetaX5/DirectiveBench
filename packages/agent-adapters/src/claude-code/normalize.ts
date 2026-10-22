@@ -47,7 +47,8 @@ const API_ERROR_CODES: Readonly<Record<string, ClaudeRunErrorCode>> = {
   cloud_credential_error: 'auth-invalid',
   billing_error: 'billing',
   rate_limit: 'rate-limited',
-  overloaded: 'rate-limited',
+  // A temporary server overload fails this agent run only (maintainer decision 2026-10-22).
+  overloaded: 'provider-error',
   model_not_found: 'model-not-found',
 };
 

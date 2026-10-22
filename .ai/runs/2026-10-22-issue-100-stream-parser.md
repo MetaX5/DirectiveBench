@@ -132,6 +132,12 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
      depth check (`CLAUDE_TRACE_INPUT_MAX_DEPTH` 64) makes such a line malformed first. Test:
      10 000 nested arrays.
 
+10. Maintainer decision (2026-10-22, relayed by the coordinator): `overloaded` no longer stops the
+    run — it maps to `provider-error` (not a stop code). SPEC-203 §9 and SPEC-118 FR-118-15 note
+    the decision; regression test: an overloaded first agent run fails alone and the other five
+    run (parser → engine); red first: with `overloaded → rate-limited` the same test stops the run
+    after baseline repetition 1. Merged origin/main (PR #113) without conflicts.
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck` — pass.
@@ -173,6 +179,4 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
   the cases that expect `timeout`.
 - #99's `import-tokens` linear-time test flaked once on CI (`@a@a…` ratio 13 vs bound 12 on
   run 39783979231); worth measuring at three sizes per the timing lesson.
-- Spec decision for the maintainer: SPEC-203 §9 maps `overloaded` → `rate-limited`, a stop code,
-  although a 529 is a transient server condition (review nit); kept as specified.
 - Phase 4: pass `installationId` as `RunBenchmarkInput.hostId`; show `summary.skillInvocation`.

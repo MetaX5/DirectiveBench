@@ -101,7 +101,7 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     expect(run('account_on_hold')).toBe('auth-invalid');
     expect(run('verification_required')).toBe('auth-invalid');
     expect(run('cloud_credential_error')).toBe('auth-invalid');
-    expect(run('overloaded')).toBe('rate-limited');
+    expect(run('overloaded')).toBe('provider-error');
     expect(run('model_not_found')).toBe('model-not-found');
     expect(run('server_error')).toBe('provider-error');
   });

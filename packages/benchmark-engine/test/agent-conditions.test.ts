@@ -478,6 +478,57 @@ describe('parser to engine (Codex review)', () => {
     expect(result.summary.verdict).toBe('error');
   }, 60_000);
 
+  it('an overloaded API fails that agent run only; the next one still runs (maintainer decision)', async () => {
+    const valid = readFileSync(join(streams, 'api-key-success.ndjson'), 'utf8');
+    const lines = valid.trim().split('\n');
+    const overloaded = [
+      lines[0],
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          model: '<synthetic>',
+          content: [{ type: 'text', text: 'API Error: 529 Overloaded' }],
+        },
+        parent_tool_use_id: null,
+        error: 'overloaded',
+      }),
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        result: 'API Error: 529 Overloaded',
+      }),
+    ].join('\n');
+    // The recorded skill run is a subscription session; this suite runs in api-key mode.
+    const invoked = readFileSync(join(streams, 'skill-invoked.ndjson'), 'utf8').replace(
+      '"apiKeySource": "none"',
+      '"apiKeySource": "ANTHROPIC_API_KEY"',
+    );
+    const { run, adapter } = await input((variant, repetition) => {
+      const stream = variant === 'candidate' ? invoked : repetition === 1 ? overloaded : valid;
+      const { trace: _trace, ...rest } = claudeRunOutcome(
+        parseClaudeStream(stream, { skillName: 'pdf', prompt: 'x' }),
+        { exitCode: 0 },
+        {
+          adapterVersion: '2.1.302',
+          authMode: 'api-key',
+          permissionProfile: 'edit-only',
+          requestedModel: MODEL,
+          flagsHash: 'a'.repeat(64),
+          skill: variant === 'candidate',
+        },
+      );
+      return rest;
+    });
+    const result = await runBenchmark(run);
+    expect(adapter.calls).toHaveLength(6);
+    expect(result.agentRuns[0]).toMatchObject({
+      executionStatus: 'agent-error',
+      errorCode: 'provider-error',
+    });
+    expect(result.agentRuns.slice(1).every((r) => r.executionStatus === 'completed')).toBe(true);
+  }, 60_000);
+
   it('a completed run that reports no execution model is not comparable', async () => {
     const { run } = await input((variant, repetition) => ({
       metadata: metadata(
