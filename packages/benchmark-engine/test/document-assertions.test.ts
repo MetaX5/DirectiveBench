@@ -536,6 +536,9 @@ describe('bounded pattern evaluation in assertions', () => {
   }, 30_000);
 });
 
+/** Wall-clock bound for one 2 MiB evaluation on a loaded CI runner (lesson 2026-10-21). */
+const MAX_LOADED_RUNNER_MS = 5000;
+
 describe('performance on a 2 MiB document (NFR-118-02)', () => {
   it('evaluates each document assertion quickly, worker start-up included', async () => {
     const block = [
@@ -584,9 +587,11 @@ describe('performance on a 2 MiB document (NFR-118-02)', () => {
         fastest = Math.min(fastest, performance.now() - started);
         expect(result.error).toBeUndefined();
       }
-      // NFR-118-02 targets < 200 ms (measured 65–110 ms locally, see the run log); the bound is
-      // wider so a loaded CI runner cannot flake it, while a superlinear scan still fails it.
-      expect(fastest).toBeLessThan(1000);
+      // NFR-118-02 targets < 200 ms (measured 65–110 ms locally, see the run log). On a 2-core
+      // CI runner, shared with the adversarial tests' busy workers, it took 1.2 s, so the bound is
+      // 5 s: far above a loaded run, far below a superlinear scan of 2 MiB (seconds to minutes).
+      // Linearity itself is tested by the normalised size-ratio tests in markdown.test.ts.
+      expect(fastest).toBeLessThan(MAX_LOADED_RUNNER_MS);
     }
   }, 30_000);
 });

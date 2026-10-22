@@ -680,7 +680,7 @@ changed before merge.
   limits of FR-118-46; fences inside block quotes and list items hide their headings; a table
   body ends at a list item, block quote or thematic break as in GFM.
   NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
-  development machine; the CI test bounds it at 1 s (plus linearity tests normalised by a linear
+  development machine; the CI test bounds it at 5 s (plus linearity tests normalised by a linear
   baseline) so a loaded runner cannot flake it.
 - **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**
   - FR-118-10/11: `RunBenchmarkInput.baselineArtifact`; every baseline workspace receives exactly
