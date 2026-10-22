@@ -112,3 +112,6 @@ fake CLI ignoring SIGINT/SIGTERM.
   passing locally on 2 cores: `packages/runner/test/hosted-git.test.ts` "fails the blob fetch…"
   (a 200 ms fake-git timeout read as `timeout` instead of `git-failed`) and
   `apps/web/test/markdown.test.ts` "parses pathological input in linear time" (ratio bound).
+- The hosted-git flake failed CI twice on this branch (also on `a21ad5e`, run 39789383614 attempt
+  2), so its test now uses the 200 ms timeouts only for the cases that expect a timeout (test-only
+  change in `packages/runner/test/hosted-git.test.ts`); the web ratio flake is left as is.
