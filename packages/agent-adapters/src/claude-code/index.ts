@@ -1,3 +1,4 @@
+export * from './adapter';
 export * from './argv';
 export * from './bundle-inspection';
 export * from './env';

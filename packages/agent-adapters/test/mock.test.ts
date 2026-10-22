@@ -40,6 +40,8 @@ function request(
     workspace: pin(workspaceDir),
     installedPaths: [],
     scratchDir: workspaceDir,
+    artifact: skill,
+    baselineArtifact: null,
     prompt: 'task',
     timeoutMs: 1000,
     signal,

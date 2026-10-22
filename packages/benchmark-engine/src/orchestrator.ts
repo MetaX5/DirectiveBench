@@ -422,6 +422,8 @@ async function executeAgentRun(
           workspace,
           installedPaths,
           scratchDir,
+          artifact: input.artifact,
+          baselineArtifact: input.baselineArtifact ?? null,
           prompt: benchmarkCase.prompt,
           timeoutMs,
           signal: agentAbort.signal,

@@ -40,13 +40,16 @@ export interface ClaudeRunEnd {
   message: string;
 }
 
-export interface ClaudeRunOutcome {
-  ended: ClaudeRunEnd | null;
-  /** Findings of the pre-spawn inspection; non-empty only when it refused the run. */
-  findings: WorkspaceFinding[];
-  /** The process result, or null when no process was started (refused or cancelled first). */
-  process: ClaudeProcessResult | null;
-}
+export type ClaudeRunOutcome =
+  /** No process was started: refused by the inspection, or cancelled or timed out first. */
+  | {
+      ended: ClaudeRunEnd;
+      /** Findings of the pre-spawn inspection; non-empty only when it refused the run. */
+      findings: WorkspaceFinding[];
+      process: null;
+    }
+  /** `claude` was started (or its spawn failed); `ended` is null when the parser decides. */
+  | { ended: ClaudeRunEnd | null; findings: []; process: ClaudeProcessResult };
 
 function refusalMessage(findings: readonly WorkspaceFinding[]): string {
   const shown = findings.slice(0, REFUSAL_FINDINGS_SHOWN).map((finding) => {
