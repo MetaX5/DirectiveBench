@@ -66,9 +66,26 @@ const TAB_STOP = 4;
 /** Indentation from which a line is indented code (CommonMark §4.4). */
 const CODE_INDENT = 4;
 
+/**
+ * Whitespace as cmark-gfm's `cmark_isspace` reads it (space, tab, line feed, line tabulation, form
+ * feed, carriage return). JavaScript's `trim` and `\s` also accept Unicode spaces such as U+00A0,
+ * which cmark-gfm treats as content: a header row ending in one has an extra cell and is no table.
+ */
+const isMarkdownSpace = (char: string | undefined): boolean =>
+  char === ' ' || char === '\t' || char === '\n' || char === '\v' || char === '\f' || char === '\r';
+
+/** `text` without leading and trailing characters for which `isSpace` holds. */
+function trimWith(text: string, isSpace: (char: string | undefined) => boolean): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && isSpace(text[start])) start += 1;
+  while (end > start && isSpace(text[end - 1])) end -= 1;
+  return text.slice(start, end);
+}
+
 /** Splits a table row into trimmed cells; `\|` is a literal pipe. */
 export function splitTableRow(line: string): string[] {
-  let text = line.trim();
+  let text = trimWith(line, isMarkdownSpace);
   if (text.startsWith('|')) text = text.slice(1);
   if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1);
   const cells: string[] = [];
@@ -79,13 +96,13 @@ export function splitTableRow(line: string): string[] {
       cell += '|';
       index += 1;
     } else if (char === '|') {
-      cells.push(cell.trim());
+      cells.push(trimWith(cell, isMarkdownSpace));
       cell = '';
     } else {
       cell += char;
     }
   }
-  cells.push(cell.trim());
+  cells.push(trimWith(cell, isMarkdownSpace));
   return cells;
 }
 
@@ -166,7 +183,8 @@ function atxHeading(line: string, start: number): string | null {
   if (level < 1 || level > 6) return null;
   const after = line[start + level];
   if (after !== undefined && !isSpaceOrTab(after)) return null;
-  let content = line.slice(start + level).trimEnd();
+  // Only spaces and tabs end the content (cmark-gfm keeps a trailing U+00A0 or form feed).
+  let content = trimWith(line.slice(start + level), isSpaceOrTab);
   // An optional closing sequence of #s, preceded by whitespace (or forming the whole content).
   let hashes = content.length;
   while (hashes > 0 && content[hashes - 1] === '#') hashes -= 1;
@@ -284,9 +302,10 @@ function runEnd(pattern: RegExp, line: string, start: number): number {
 
 const TAG_NAME = /[A-Za-z][A-Za-z0-9-]*/y;
 const ATTRIBUTE_NAME = /[A-Za-z_:][A-Za-z0-9_.:-]*/y;
-const UNQUOTED_VALUE = /[^\s"'=<>`]+/y;
-const HTML_WHITESPACE = /\s*/y;
-const ONLY_WHITESPACE = /\s*$/y;
+// HTML whitespace is `cmark_isspace`'s, not JavaScript's `\s` (see `isMarkdownSpace`).
+const UNQUOTED_VALUE = /[^ \t\n\v\f\r"'=<>`]+/y;
+const HTML_WHITESPACE = /[ \t\n\v\f\r]*/y;
+const ONLY_WHITESPACE = /[ \t\n\v\f\r]*$/y;
 
 /**
  * True when `line` from `start` is one complete open or closing tag followed only by whitespace
@@ -332,7 +351,10 @@ function htmlBlockStart(line: string, start: number): HtmlKind | null {
   const lower = line.slice(start, start + 12).toLowerCase();
   for (const tag of RAW_TEXT_TAGS) {
     const after = lower[tag.length + 1];
-    if (lower.startsWith(`<${tag}`) && (after === undefined || after === '>' || /\s/.test(after)))
+    if (
+      lower.startsWith(`<${tag}`) &&
+      (after === undefined || after === '>' || isMarkdownSpace(after))
+    )
       return 1;
   }
   if (lower.startsWith('<!--')) return 2;
@@ -346,7 +368,7 @@ function htmlBlockStart(line: string, start: number): HtmlKind | null {
     if (
       after === undefined ||
       after === '>' ||
-      /\s/.test(after) ||
+      isMarkdownSpace(after) ||
       line.startsWith('/>', nameEnd)
     ) {
       return 6;

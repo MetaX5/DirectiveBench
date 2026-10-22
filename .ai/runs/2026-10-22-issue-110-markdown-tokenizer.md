@@ -168,6 +168,12 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   opening fence, so a heading or table inside it was reported. The scan now drops one U+FEFF at the
   start, as cmark-gfm does (checked with cmarkgfm 2025.10.22, including that a second one stays
   text). Red first: the scanner and assertion tests fail on 5048c16.
+- Codex review round 5, high: `splitTableRow` used JavaScript's `trim`, which removes U+00A0, so a
+  header row ending in a no-break space (a third cell for cmark-gfm, hence no table) was read as a
+  table. Fixed for the whole class: table rows and cells and HTML tag lines use cmark-gfm's
+  whitespace (`cmark_isspace`: space, tab, LF, VT, FF, CR), and an ATX closing sequence ends only
+  before spaces and tabs; every case was checked with cmarkgfm 2025.10.22. Heading-text
+  comparison (`collapseWhitespace`) still folds Unicode spaces on both sides. Red first on aef16eb.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.

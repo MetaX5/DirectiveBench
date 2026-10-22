@@ -433,6 +433,24 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     ]);
   });
 
+  it("reads whitespace as cmark-gfm does, not JavaScript's Unicode spaces (Codex review)", () => {
+    const table = (header: string, delimiter = '|---|---|') =>
+      scanMarkdown(`${header}\n${delimiter}\n| B | 24 |`).tables;
+    // A trailing U+00A0 is a third header cell: no table. Line tabulation and form feed are trimmed.
+    expect(table('| Role | Hours |\u00a0')).toEqual([]);
+    expect(table('| Role | Hours |', '|---|---|\u00a0')).toEqual([]);
+    expect(table('| Role | Hours |\v')).toHaveLength(1);
+    expect(table('|\fRole | Hours |\f')).toHaveLength(1);
+    expect(scanMarkdown('| R | H |\n|---|---|\n| B\u00a0| 24 |').tables[0]?.rows[0]?.cells).toEqual(
+      ['B\u00a0', '24'],
+    );
+    // An ATX closing sequence ends only before spaces and tabs.
+    expect(scanMarkdown('# H #\u00a0\n# I #\f\n# J # ').headings).toEqual(['H #', 'I #', 'J']);
+    // A tag line followed by U+00A0 is no HTML block; by a form feed it is.
+    expect(scanMarkdown('<x>\u00a0\n# y').headings).toEqual(['y']);
+    expect(scanMarkdown('<x>\f\n# y\n\n<x a\fb>\n# z').headings).toEqual([]);
+  });
+
   it('ignores one byte order mark at the start, as cmark-gfm does (Codex review)', () => {
     expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
       headings: [],

@@ -270,6 +270,21 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
   });
 
+  it('does not read a table whose header row ends in a no-break space (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\u00a0\n|---|---|\n| Backend | 24 |' }),
+    );
+    expect(result).toMatchObject({ passed: false });
+  });
+
   it('does not accept a heading in a fence after a byte order mark (Codex review)', async () => {
     const result = await evaluateAssertion(
       assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
