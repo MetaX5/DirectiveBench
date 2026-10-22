@@ -54,16 +54,87 @@ Claude Code that are only assumptions stay marked for the AC-22 live check.
 
 ### Phase 1: Builders
 
-- [ ] 1.1 argv per permission profile and artifact type, `Skill` rules, settings, normalised flags hash, version parser
-- [ ] 1.2 env per auth mode (subscription strips credential variables, api-key isolates `HOME`/`CLAUDE_CONFIG_DIR`)
-- [ ] 1.3 Install convention (§4.1) with symlink-safe writes, skill name resolution and `baseline-skill-name-differs`
+- [x] 1.1 argv per permission profile and artifact type, `Skill` rules, settings, normalised flags hash, version parser — ebb43d8
+- [x] 1.2 env per auth mode (subscription strips credential variables, api-key isolates `HOME`/`CLAUDE_CONFIG_DIR`) — ebb43d8
+- [x] 1.3 Install convention (§4.1) with symlink-safe writes, skill name resolution and `baseline-skill-name-differs` — ebb43d8
 
 ### Phase 2: Inspection
 
-- [ ] 2.1 Artifact bundle inspection (FR-118-26) for candidate and baseline
-- [ ] 2.2 Workspace walk with named limits and the Claude-configuration check (FR-118-06)
-- [ ] 2.3 Import and link scan (FR-118-27) with a linear-time test
+- [x] 2.1 Artifact bundle inspection (FR-118-26) for candidate and baseline — f449832
+- [x] 2.2 Workspace walk with named limits and the Claude-configuration check (FR-118-06) — f449832
+- [x] 2.3 Import and link scan (FR-118-27) with a linear-time test — f449832
 
 ### Phase 3: Verification and documentation
 
-- [ ] 3.1 Quality gate, SPEC-118 §20 / SPEC-203 §13 status, lessons, run log
+- [x] 3.1 Quality gate, SPEC-118 §20 / SPEC-203 §13 status, lessons, run log — see the docs commit
+
+## Decisions
+
+- **Module layout** `packages/agent-adapters/src/claude-code/` (SPEC-203 §5) with one export line
+  in `src/index.ts`; `detection.ts` untouched (issue #102 works there in parallel).
+- **`ClaudeCodeError` with a code** for every builder refusal; inspections return findings
+  (`{ code, path/file, detail, token?, target? }`) so the CLI can list each one (FR-118-06/26/27).
+- **Skill name restricted to the documented form** (lowercase letters, digits, hyphens, ≤ 64):
+  `Skill(<name>)` is an argv value, so a space, comma, `*` or parenthesis would widen the allow
+  list. New code `skill-name-unsupported`, added to SPEC-203 §9.
+- **`agents-md` always imports through `CLAUDE.md`** (SPEC-203 §4.1 updated): one
+  version-independent layout instead of a version-dependent install; the builder needs no CLI
+  version.
+- **Subscription mode passes a user-set `CLAUDE_CONFIG_DIR` through** (SPEC-203 §3.2 updated):
+  that is where the user's own login lives; DirectiveBench never overrides it.
+- **Import scan as a superset of Claude Code's grammar** (FR-118-27 updated): every `@`, cut also
+  at a lone backslash and without trailing punctuation, both spellings of escaped spaces; lexical
+  (canonical and given workspace path) and physical (`realpath`) resolution; in a workspace with
+  a symbolic link, relative tokens climbing above their directory are refused. Linear: one O(1)
+  decision per `@` (right-to-left pass per word); resolution bounded by the new named limits
+  `WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES` (100 000) and `IMPORT_TOKEN_MAX_LENGTH` (4 096).
+- **Fail closed beyond the letter of FR-118-26**: bundles are also refused for the FR-118-06 file
+  names (`CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`), for `!`-fences (```` ```! ````),
+  and frontmatter keys are compared case- and separator-insensitively (`allowed_tools`); path
+  segments are compared case-insensitively (macOS, Windows). Special files (FIFOs) in a
+  workspace are refused.
+- **Install refuses links a `setup` command planted** (setup runs before installation in the
+  orchestrator): every existing directory component is `lstat`ed, files are created with `wx`,
+  instruction files are appended only when regular with one link and identical when opened.
+
+## Work performed
+
+1. Plan and draft PR #108 (0ce4a67).
+2. Builders: errors, version, argv + flags hash, skill name, env, install, with tests (ebb43d8).
+3. Inspection: bundle inspection, import tokenizer, workspace walk / configuration check /
+   import and link scan, race tests through a wrapped `node:fs/promises` (f449832).
+4. SPEC-118 FR-118-27 and §20, SPEC-203 §3.2/§4.1/§9/§13, lesson, this log.
+
+## Verification
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:pack` at f449832 | pass; 100% statements/branches/functions/lines in every package; agent-adapters 130 tests (was 44), core 266, database 131, benchmark-engine 115, runner 229, web 157, cli 75; "Packaging verification passed" |
+| Manual exercise (`tsx` script in a temporary workspace, not committed) | skill-md argv as specified; install wrote `.claude/skills/estimate-project/SKILL.md`; flags hash equal for two workspaces; subscription env keys `HOME,LANG,PATH,TEMP,TMP,TMPDIR`; clean workspace → no findings; planted `.claude/settings.local.json`, `.claude/agents`, `@/etc/hostname` and `@~/.bashrc` (via `CLAUDE.md` → `docs/context.md`) → four findings with targets; a baseline with `hooks`, `allowed-tools: Skill`, `model: opus` and `` !`id` `` → four findings |
+| `claude --help` drift check (2.1.302, read-only) | every flag the argv uses exists: `--print`, `--output-format`, `--verbose`, `--model`, `--tools`, `--permission-mode`, `--allowedTools`, `--permission-prompts`, `--no-session-persistence`, `--strict-mcp-config`, `--settings`, `--setting-sources`, `--max-budget-usd` |
+
+Not verified: how Claude Code parses the argv (e.g. `Skill(<name> *)` as one `--allowedTools`
+value — the help says "comma or space-separated" and shows `"Bash(git *)"` as one rule), its
+exact `@` token grammar, `disableSkillShellExecution` and `blockReadsOutsideWorkingDirectories`
+in effect — all reserved for the AC-22 live check. No `claude -p` run was started. Windows was not
+run (O_NOFOLLOW/O_NONBLOCK OR to 0 there; the identity checks cover it).
+
+## Problems and deviations
+
+- The first tokenizer draft treated any backslash as "shortening", so a long word with a lone
+  backslash was refused instead of checked at the cut; fixed with a test.
+- No deviation from an approved spec (both specs are drafts); the spec text was updated for the
+  decisions above in the same change.
+
+## Lessons recorded
+
+- [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)
+
+## Follow-ups
+
+- Phase 3 step 2–3: wire the builders into a `ClaudeCodeAdapter` (call `inspectWorkspace` with the
+  installed paths right before spawn; map codes to `infrastructure-error` and FR-118-15 stops).
+- Phase 4: plan-time calls — `inspectArtifactVersions`, `baselineSkillNameIssue`, a materialised
+  workspace (fixture + overlay + both artifact versions) through `inspectWorkspace` with
+  `claudeConfigCode: 'fixture-contains-claude-config'` for fixture/overlay; exit 2.
+- AC-22 live check: record the token grammar, the `--allowedTools` parsing and the field names.
