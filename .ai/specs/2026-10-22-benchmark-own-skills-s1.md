@@ -143,11 +143,11 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | FR-118-32 | On an interactive terminal the CLI SHALL ask for confirmation; `--yes` skips it; without a TTY and without `--yes` it SHALL refuse with exit code 2. |
 | FR-118-33 | A suite version that runs commands (`definitionRunsCommands`) SHALL run only when execution-approved. Fixture configuration is never approvable in S1 (FR-118-06). `--approve-commands` SHALL print every `setup` and `command` argv of the suite version; approval with source `user` (SPEC-110 FR-110-46) is recorded only after the confirmation of FR-118-32, in the same transaction that creates the job. Without the flag such a suite is refused with exit code 2 and a message naming the flag. Approval is per suite version, so changing the suite requires approving again. |
 | FR-118-34 | The CLI SHALL create the benchmark job **already acquired by its own runner** (one statement inserting `status = 'running'` with its `runner_id`), heartbeat it and execute it in-process, so a concurrently running `serve` runner can never pick it up (SPEC-114). A CLI killed mid-run leaves the job to the existing stale-heartbeat recovery (`interrupted`). |
-| FR-118-35 | Readiness SHALL be checked before the job is created: `claude` found and version ≥ the minimum (SPEC-203 §7); in subscription mode `claude auth status` reports logged in (parsing only the fields needed, never persisting the output); in api-key mode `ANTHROPIC_API_KEY` is non-empty. Failures exit with code 2 and the SPEC-203 §9 error code. |
+| FR-118-35 | Readiness SHALL be checked before the job is created: `claude` found and version ≥ the minimum (SPEC-203 §7); in subscription mode `claude auth status` reports logged in (parsing only the fields needed, never persisting the output); in api-key mode `ANTHROPIC_API_KEY` passes the same structural check the run applies (at least the exact-value redaction minimum of 8 characters, on one line, no NUL), so readiness never accepts a key every run would refuse. Failures exit with code 2 and the SPEC-203 §9 error code. |
 | FR-118-36 | SIGINT during the run SHALL cancel the job through its `AbortSignal` (SPEC-203 cancellation escalation), record `cancelled` and exit with code 130. |
 | FR-118-37 | At the end the CLI SHALL print the same summary as `demo` (baseline, candidate, delta, verdict, confidence, display status, run id) plus, for a skill, the invocation rate per variant (FR-118-09), the execution model, warnings and tokens/cost (cost "n/a (subscription)" in subscription mode, "estimated" in api-key mode, SPEC-203 §4). `--json` prints one JSON object instead. |
 | FR-118-38 | Exit code: 0 when the display status is `passed`; 6 for `failed`, `regression`, `unstable`, `error` and `not-comparable` (roadmap M3: non-zero on regressed/failed); 130 on cancel; 2 for usage and readiness errors. |
-| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline, inspect both versions and scan imports (FR-118-08/26/27) → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged. |
+| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline, inspect both versions and scan imports (FR-118-08/26/27) → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged: the checks read an initialised, fully migrated database read-only, a missing database or one with pending migrations is refused (exit 2, naming `directivebench init`) without creating, migrating or seeding it, and the data directory is opened for writing only after the confirmation. |
 
 ### 6.5 Document-oriented assertions
 
@@ -871,7 +871,8 @@ changed before merge.
   (`auth-mismatch` for any other or missing method, e.g. a user-level `apiKeyHelper`; `auth-missing`;
   `auth-expired` for the documented "Login expired" text; a timeout, oversized or unreadable
   output and a login reported with a non-zero exit fail closed as `auth-missing`), in api-key mode
-  a non-empty `ANTHROPIC_API_KEY` checked for presence only. Status probes run argv-only with an
+  a non-empty `ANTHROPIC_API_KEY` checked for presence only (since PR #118 the structural check of
+  FR-118-35, `claudeApiKeyIssue`, shared with `buildClaudeEnv`). Status probes run argv-only with an
   environment allowlist (no `ANTHROPIC_*`, `CLAUDE_CODE_*` or `CLAUDE_CONFIG_DIR`), in an empty
   temporary directory, with named timeouts and output caps (`packages/agent-adapters/src/probe.ts`).
   Claude Code detection reports `ready`/`missing` with per-mode readiness, shown by
@@ -1085,9 +1086,15 @@ changed before merge.
     was approved before (FR-118-33) → per case the fixture and the overlay alone
     (`fixture-contains-claude-config`) and the fixture with each version installed, inspected with
     `~` resolved against the real `HOME` (subscription) or an empty run-local home (api-key)
-    (FR-118-06/27) → readiness (FR-118-35). Every refusal exits 2 and leaves the database unchanged
-    (row counts of jobs, suites, suite versions, fixture versions, runs and assignments compared in
-    `apps/cli/test/benchmark-run.test.ts`; AC-15).
+    (FR-118-06/27) → readiness (FR-118-35; an API key the run would refuse — shorter than 8
+    characters or multi-line — is `auth-missing` here, through the shared `claudeApiKeyIssue`).
+    Every refusal exits 2 and leaves the database unchanged (row counts of jobs, suites, suite
+    versions, fixture versions, runs and assignments compared in
+    `apps/cli/test/benchmark-run.test.ts`; AC-15). The checks run on a read-only connection
+    (`openInitializedDatabase` in `apps/cli/src/setup.ts`): a fresh data directory is refused
+    without being created, a database with pending migrations without being migrated or seeded
+    (migration and category counts compared), and `initialize` runs only after the confirmation
+    (Codex adversarial review round 1 of PR #118).
   - FR-118-31/32 plan and confirmation: suite, content hash prefix, candidate, baseline, agent
     version, auth mode and isolation, model ("CLI default — unpinned"), agent-run count, budget,
     `disable-model-invocation`, the cost, data-leaving, Not-sandboxed and (subscription)

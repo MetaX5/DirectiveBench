@@ -177,11 +177,42 @@ Not verified: a real `claude` session in either auth mode (#103), Windows.
 - `pnpm build` needs `pnpm` on `PATH` for turbo; with pnpm only through corepack, a shim from
   `corepack enable --install-directory <dir> pnpm` was used.
 
+## Codex adversarial review, round 1 (`om-auto-fix-pr`, 2026-10-22)
+
+Both medium findings of the review on `f4fa96b`
+([comment](https://github.com/MetaX5/DirectiveBench/pull/118#issuecomment-6350229110)) fixed;
+the maintainer chose option (a) for the first, so FR-118-39 is unchanged in substance.
+
+1. **Writes before validation and consent.** `benchmark run` no longer calls `initialize()`
+   first: `openInitializedDatabase` (`apps/cli/src/setup.ts`) opens an existing, fully migrated
+   database read-only for every check; a missing database or one with pending migrations exits 2
+   naming `directivebench init`, an unreadable one exits with the data-directory code, and
+   `initialize()` runs only after the confirmation. `config.json` is validated read-only before
+   the plan. The migration count is shared with `doctor` (`migrationStatus`).
+2. **Readiness accepting unusable API keys.** `claudeApiKeyIssue` (agent-adapters) is the one
+   structural check (≥ 8 characters, one line, no NUL) used by readiness and `buildClaudeEnv`.
+
+| Check | Result |
+| --- | --- |
+| Red first: the 5 new tests (fresh dir, older DB, unreadable DB, short/multi-line key in CLI and in readiness) on the old code | 5 fail; pass with the fix |
+| `pnpm format:check && pnpm lint && pnpm typecheck` (macOS) | pass |
+| `pnpm test` (macOS) | CLI 129 tests: all pass except the known `doctor` hint test (see above), 100% coverage; agent-adapters: only the known macOS process tests (#120) fail, the changed files are at 100%; core, database, web (except #114) pass; benchmark-engine (untouched by this PR) is SIGKILLed on this machine — CI on Linux is authoritative |
+| `pnpm build && pnpm verify:pack` (macOS) | pass |
+| Real app, built CLI: `benchmark run` on a fresh `--data-dir` | exit 2, "run `directivebench init` first", directory not created |
+| Real app: `ANTHROPIC_API_KEY=abc` and a two-line key, `--auth api-key --yes` | exit 2 `auth-missing` at readiness, no job |
+| Real app: a database with a migration record removed (simulated older DB) | exit 2 `2/3 migrations applied`; migration, category and job counts unchanged |
+
+Not verified: a real older release's data directory (simulated by a journal prefix in tests and
+a removed migration record in the real-app run), Windows.
+
+Lesson: `.ai/lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md`.
+
 ## Lessons recorded
 
 - `.ai/lessons/2026-10-22-review-prs-through-om-auto-review-pr.md` (human correction; also a rule
   in AGENTS.md §4)
 - `.ai/lessons/2026-10-22-commander-version-flag-shadows-subcommands.md`
+- `.ai/lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md`
 
 ## Follow-ups
 
