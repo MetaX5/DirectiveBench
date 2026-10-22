@@ -3,7 +3,7 @@ title: One shared linear-time helper and named timeouts for the flaky timing tes
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: coordinator brief for issue #114 (flaky timing tests on the 2-core CI runner)
-status: completed
+status: in-progress
 branch: fix/issue-114-flaky-timing-tests
 specs: [SPEC-012, SPEC-014]
 ---
@@ -127,6 +127,21 @@ granularity (Linux only here).
 - Updated `.ai/lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md` and its index
   entry: use the shared helper, measure CPU time, one GC after building inputs, warm-up round,
   prove a ratio helper both ways under load, named timeouts for heavy outcome tests.
+
+## Paused 2026-10-22 (maintainer request; resume 2026-10-23)
+
+State when stopped:
+- Codex round 1 is fixed in `89d255d`: a 32× step catches N^1.5 growth, and ratios use the thread's CPU time. `origin/main` (#119) is merged in `f2d6329`.
+- Work in progress, committed as `wip`: `claude-code/stream-parser.test.ts` "is linear in the stream size" moved onto `expectLinearTime`. The file passes alone (37/37) and the package typechecks. The full gate was **not** rerun after this change.
+- Not checked for timing tests yet: the new #119 test files (`agent-adapters/test/claude-code/adapter.test.ts`, `benchmark-engine/test/claude-code-adapter.test.ts`).
+- The one-off failures were being reproduced: unloaded, "rejects over-long call ids" took 65 ms and `process.test.ts` AC-10 took 5.1 s (a 5 s grace inside a 10 s spec bound). The loaded reruns were still pending.
+
+To resume:
+1. Finish checking the #119 test files.
+2. Run the load script for the AC-10 and over-long-ids reproductions.
+3. Run the full gate.
+4. Update the PR body: ⚠️ Decision needed and ## Review (Codex round 1).
+5. Run Codex round 2. Do not merge.
 
 ## Follow-ups
 
