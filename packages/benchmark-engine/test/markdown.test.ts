@@ -164,6 +164,36 @@ describe('scanMarkdown tables', () => {
     ]);
   });
 
+  it('finds tables with single-dash delimiters and tables inside list items', () => {
+    const { tables } = scanMarkdown(
+      [
+        'a | b',
+        '- | -',
+        '1 | 2',
+        '',
+        '- Estimate:',
+        '  | Item | Hours |',
+        '  |---|---|',
+        '  | Backend API | 24 |',
+        '',
+        '- a',
+        '| Item | Hours |',
+        '|---|---|',
+        '',
+        '> | Quoted | table |',
+        '> | --- | --- |',
+      ].join('\n'),
+    );
+    expect(tables).toEqual([
+      { header: ['a', 'b'], rows: [{ text: '1 | 2', cells: ['1', '2'] }] },
+      {
+        header: ['Item', 'Hours'],
+        rows: [{ text: '  | Backend API | 24 |', cells: ['Backend API', '24'] }],
+      },
+      { header: ['Item', 'Hours'], rows: [] },
+    ]);
+  });
+
   it('requires a header line with a pipe and a matching delimiter row', () => {
     const { tables, headings } = scanMarkdown(
       [

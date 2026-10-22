@@ -221,21 +221,9 @@ export function scanMarkdown(text: string): MarkdownScan {
       paragraph = [];
       continue;
     }
-    const inner = containerContent(line);
-    if (inner !== null) {
-      const nested = atxHeading(inner);
-      if (nested !== null) headings.push(nested);
-      paragraph = [];
-      container = true;
-      continue;
-    }
     const header = paragraph.at(-1);
-    if (header === undefined && (container || indentation(line) >= 4)) continue;
-    if (header === undefined && isSetextUnderline(line) && line.trim()[0] === '-') {
-      // Without a paragraph above, `---` is a thematic break (or an empty list item), not text.
-      continue;
-    }
     if (header !== undefined) {
+      // Checked on the raw line first: `- | -` is a delimiter row, not a list item.
       const columns = header.includes('|') ? delimiterCells(line) : null;
       const headerCells = columns === null ? [] : splitTableRow(header);
       if (headerCells.length === columns) {
@@ -244,11 +232,30 @@ export function scanMarkdown(text: string): MarkdownScan {
         paragraph = [];
         continue;
       }
-      if (isSetextUnderline(line)) {
-        headings.push(collapseWhitespace(paragraph.join(' ')));
-        paragraph = [];
-        continue;
-      }
+    }
+    const inner = containerContent(line);
+    if (inner !== null) {
+      const nested = atxHeading(inner);
+      container = true;
+      // A new block-quote or list-item line starts a new paragraph inside the container.
+      paragraph = nested === null && inner.trim() !== '' ? [inner.trim()] : [];
+      if (nested !== null) headings.push(nested);
+      continue;
+    }
+    if (container) {
+      // Lazy or indented continuation: its text can head a table, never a setext heading.
+      paragraph.push(line.trim());
+      continue;
+    }
+    if (header === undefined && indentation(line) >= 4) continue;
+    if (header === undefined && isSetextUnderline(line) && line.trim()[0] === '-') {
+      // Without a paragraph above, `---` is a thematic break (or an empty list item), not text.
+      continue;
+    }
+    if (header !== undefined && isSetextUnderline(line)) {
+      headings.push(collapseWhitespace(paragraph.join(' ')));
+      paragraph = [];
+      continue;
     }
     paragraph.push(line);
   }
