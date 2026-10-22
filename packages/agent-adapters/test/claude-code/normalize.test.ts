@@ -224,6 +224,19 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     expect(classifyClaudeRun(sub, { exitCode: 1 }, 'subscription').errorCode).toBe('agent-failed');
 
     const mainError = { ...subagent, parent_tool_use_id: null };
+    // A later synthetic message without a category keeps the error (review r2-m1).
+    const notice = {
+      type: 'assistant',
+      message: {
+        model: '<synthetic>',
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+      parent_tool_use_id: null,
+    };
+    const isError = { ...ok, is_error: true };
+    const kept = parseClaudeStream(lines(init, mainError, notice, isError), SKILL);
+    expect(kept.apiError).toBe('rate_limit');
+    expect(classifyClaudeRun(kept, { exitCode: 1 }, 'subscription').errorCode).toBe('rate-limited');
     const recovered = parseClaudeStream(lines(init, mainError, answer, maxTurns), SKILL);
     expect(recovered.apiError).toBeNull();
     expect(classifyClaudeRun(recovered, { exitCode: 1 }, 'subscription').errorCode).toBe(

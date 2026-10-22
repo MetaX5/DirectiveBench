@@ -476,8 +476,9 @@ export class ClaudeStreamParser {
     if (main) {
       this.assistantSeen = true;
       const error = extras.data.error;
-      this.state.apiError =
-        error === undefined ? null : this.clip(error, CLAUDE_STREAM_NAME_MAX_CHARS);
+      // A synthetic message without a category (e.g. a CLI notice) keeps the last error.
+      if (error !== undefined) this.state.apiError = this.clip(error, CLAUDE_STREAM_NAME_MAX_CHARS);
+      else if (!synthetic) this.state.apiError = null;
       // A model answer means the API recovered: earlier retries and CLI-written errors are over.
       if (!synthetic) {
         this.state.lastRetryCategory = null;

@@ -105,6 +105,12 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
    their stop codes; m4 — cancelled/timed-out runs are exempt from `artifact-not-loaded`. Nit:
    the linear-time test takes the fastest of three with a named 60 s timeout (it had hit vitest's
    5 s default at load average 12 with parallel agents on the machine).
+8. Review round 2 (`a50bcdc`): approve-equivalent; two minors fixed — a synthetic message without
+   a category no longer clears the last API error category (regression test), and SPEC-203 §9's
+   `is_error` rule now states the CLI-reported-failure exception. CI run 39786117837 on `a50bcdc`
+   passed every job; CI on `e75c4df` had failed on this PR's timing test (5 s default timeout,
+   fixed in `a50bcdc`) and once on #99's `import-tokens` ratio test (13 > 12), which passed on
+   the next run.
 
 ## Verification
 
@@ -140,6 +146,8 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 - #101: spawn `claude`, feed `ClaudeStreamParser.push` with stdout, call `claudeRunOutcome` with
   the exit code/stderr and add `durationMs`; report pre-spawn inspection failures as
   `infrastructure-error` with their code so the stop rule applies.
+- #99's `import-tokens` linear-time test flaked once on CI (`@a@a…` ratio 13 vs bound 12 on
+  run 39783979231); worth measuring at three sizes per the timing lesson.
 - Spec decision for the maintainer: SPEC-203 §9 maps `overloaded` → `rate-limited`, a stop code,
   although a 529 is a transient server condition (review nit); kept as specified.
 - Phase 4: pass `installationId` as `RunBenchmarkInput.hostId`; show `summary.skillInvocation`.

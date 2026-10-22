@@ -273,7 +273,7 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | Cancel | `AbortSignal` | `cancelled` | — (exit 143 after SIGTERM expected) |
 | Spawn failure (EACCES, ENOENT after detection) | spawn error | `infrastructure-error` | `spawn-failed` |
 
-Tool denials (`permission_denials`) are **not** errors. They are recorded in the trace and surfaced as a warning, because they are part of the measured behaviour. A run is `completed` if the process exits 0 with `subtype: "success"`, even if `is_error` is true. In that case it is recorded as warning `agent-reported-error`. **Assumption — requires validation:** the exact semantics of `is_error: true` with `subtype: "success"`.
+Tool denials (`permission_denials`) are **not** errors. They are recorded in the trace and surfaced as a warning, because they are part of the measured behaviour. A run is `completed` if the process exits 0 with `subtype: "success"`, even if `is_error` is true. In that case it is recorded as warning `agent-reported-error` — unless the CLI itself reported the failure: an `error` category on the last main-conversation assistant message, a CLI-written (`<synthetic>`) message after the last model answer, or one of its known failure messages in `errors[]`, which classify as in the API-failure row (an uncategorised synthetic message → `provider-error`). The agent's own answer text is never classified. **Assumption — requires validation:** the exact semantics of `is_error: true` with `subtype: "success"`.
 
 ## 10. Compatibility restrictions
 

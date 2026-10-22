@@ -356,7 +356,7 @@ describe('ClaudeStreamParser events', () => {
     const parsed = parseClaudeStream(lines(...many, ...synthetic), SKILL);
     expect(parsed.messageModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
     expect(parsed.modelsOverflow).toBe(true);
-    expect(parsed.apiError).toBe(null);
+    expect(parsed.apiError).toBe('unknown');
     expect(parsed.syntheticTexts).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
 
     const usage = Object.fromEntries(
