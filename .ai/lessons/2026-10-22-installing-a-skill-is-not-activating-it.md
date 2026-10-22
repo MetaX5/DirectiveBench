@@ -33,4 +33,11 @@ installing an untrusted skill needs the same inspection as any other executable 
   MCP or settings files as executable; inspect candidate **and** baseline versions.
 - Never evaluate a user-supplied regular expression on the runner's event loop; bound it with a
   terminable worker and a named deadline (SPEC-118 FR-118-46).
+- Inspect every skill-equivalent location, not just `.claude/skills/`: legacy
+  `.claude/commands/*.md` take the same frontmatter, and nested `<dir>/.claude/skills/` load when
+  Claude first touches a file in `<dir>`. A frontmatter `model` or `context: fork` moves the task
+  off the session model.
+- Never use bare `Read`/`Edit`/`Write` allow rules to "confine" an agent: they approve every
+  path. Scope with `Edit(/**)` and `blockReadsOutsideWorkingDirectories` (round 2 of the same
+  review).
 - Prove agent-harness assumptions with an opt-in live check that uses the exact production argv.

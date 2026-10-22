@@ -98,6 +98,36 @@ All four were valid.
 Resolved-assumption rows Q9 updated and Q14–Q16 added. Lesson
 `2026-10-22-installing-a-skill-is-not-activating-it.md` recorded.
 
+## Review round: Codex adversarial review, round 2 (2026-10-22)
+
+Three new HIGH findings (verdict needs-attention), checked against the spec text and the Claude
+Code docs (permissions, skills; new SPEC-203 evidence C11). All three valid; the simplest
+fail-closed option was taken each time.
+
+1. **Profiles still allowed reads and writes outside the workspace.** Confirmed: SPEC-203 §7
+   prescribed bare `Read,Edit,Write,Glob,Grep` allow rules, which approve every use of the tool,
+   contradicting FR-118-07. Resolved: no bare file-tool allow rule; edits only via `Edit(/**)`
+   (anchored at the workspace for CLI rules; `Write` is checked against `Edit` rules); reads in
+   the workspace need no rule; `--settings` adds
+   `permissions.blockReadsOutsideWorkingDirectories`. FR-118-07 rewritten, live production-argv
+   proof added to AC-22, AC-16 updated, §12 bullet; SPEC-203 §6/§7, AC-14.
+2. **A skill's `model` override bypassed the equivalence check.** Confirmed (round 1 had treated
+   it as part of the treatment). Resolved by refusal: `model` other than `inherit` and
+   `context: fork` are refused in artifact versions (`artifact-overrides-model`, FR-118-26) and
+   fixture skills/commands (`fixture-overrides-model`, FR-118-06); FR-118-04 additionally requires
+   every main-conversation assistant message to carry `executionModel`, and only models no task
+   turn ran on count as auxiliary. AC-25; edge cases, Q17, §19; SPEC-203 §4/§8, SPEC-112
+   FR-112-04, SPEC-111 FR-111-43.
+3. **Legacy commands escaped fixture inspection.** Confirmed: `.claude/commands/*.md` accept the
+   skill frontmatter except `name`/`paths`; also found nested `<dir>/.claude/skills/` that load on
+   first file access in `<dir>`. Resolved: FR-118-06 inspects skills, commands and agents in
+   `.claude/` at any depth (approval for hooks/injection/`allowed-tools`, refusal for model
+   overrides, unparsable frontmatter fails closed, all before any process starts); FR-118-26
+   refuses any nested `.claude/` inside an artifact bundle. AC-26; SPEC-203 §8.
+
+Additional assumptions for the live check: `message.model` on assistant stream messages, and
+`--settings` taking effect alongside `--setting-sources project,local`.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
