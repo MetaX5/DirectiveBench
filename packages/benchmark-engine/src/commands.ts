@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   killProcessGroup,
+  PROCESS_KILL_CONFIRM_MS,
   PROCESS_OUTPUT_DRAIN_MS,
   signalProcessGroup,
   usesProcessGroups,
@@ -155,7 +156,9 @@ export function runCommand(
     let spawnError: string | null = null;
 
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let confirmTimer: NodeJS.Timeout | undefined;
     let drainTimer: NodeJS.Timeout | undefined;
+    let settled = false;
     // Set when a process outside the group still held the output pipes after the drain period.
     let drained = false;
     // Resolves to whether the group is gone; settled when the command exits (or never started).
@@ -166,10 +169,39 @@ export function runCommand(
     const terminate = () => {
       if (forceKillTimer) return;
       sendSignal('SIGTERM');
-      forceKillTimer = setTimeout(
-        () => sendSignal('SIGKILL'),
-        options.killGraceMs ?? DEFAULT_KILL_GRACE_MS,
-      );
+      forceKillTimer = setTimeout(() => {
+        sendSignal('SIGKILL');
+        // A leader that still does not exit (the signal was refused, EPERM, or it hangs in the
+        // kernel) is given up after a bound instead of keeping the run pending forever.
+        confirmTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+          finish(null, null, true);
+        }, PROCESS_KILL_CONFIRM_MS);
+      }, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
+    };
+    const finish = (code: number | null, signal: string | null, stray: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
+      clearTimeout(drainTimer);
+      options.signal.removeEventListener('abort', onAbort);
+      resolve({
+        command: [...command],
+        exitCode: code,
+        signal,
+        timedOut,
+        cancelled,
+        durationMs: Math.round(performance.now() - started),
+        stdout: stdout.toString(),
+        stderr: stderr.toString(),
+        truncated: stdout.truncated || stderr.truncated,
+        error: spawnError,
+        strayProcesses: stray,
+      });
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -193,6 +225,7 @@ export function runCommand(
     child.on('exit', () => {
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
       options.signal.removeEventListener('abort', onAbort);
       groupGone = killProcessGroup(child, groups);
       drainTimer = setTimeout(() => {
@@ -202,24 +235,9 @@ export function runCommand(
       }, PROCESS_OUTPUT_DRAIN_MS);
     });
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
-      clearTimeout(timer);
-      clearTimeout(forceKillTimer);
       clearTimeout(drainTimer);
-      options.signal.removeEventListener('abort', onAbort);
       const gone = await groupGone;
-      resolve({
-        command: [...command],
-        exitCode: code,
-        signal,
-        timedOut,
-        cancelled,
-        durationMs: Math.round(performance.now() - started),
-        stdout: stdout.toString(),
-        stderr: stderr.toString(),
-        truncated: stdout.truncated || stderr.truncated,
-        error: spawnError,
-        strayProcesses: !gone || drained,
-      });
+      finish(code, signal, !gone || drained);
     });
   });
 }

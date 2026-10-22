@@ -14,7 +14,8 @@ import {
 import { hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
 import type { BenchmarkDefinitionInput } from '../src/definition';
 import { prepareSuiteImport } from '../src/import';
-import { runBenchmark } from '../src/orchestrator';
+import { runBenchmark, type AgentRunRecord } from '../src/orchestrator';
+import { BenchmarkStoppedError } from '../src/stop';
 import { useTempDirs } from './helpers';
 
 /**
@@ -95,6 +96,7 @@ function claudeAdapter(root: string, executable: string): AgentAdapter {
         trace: [],
         usage: null,
         error: ended ? `${ended.errorCode}: ${ended.message}` : null,
+        ...(ended?.errorCode ? { errorCode: ended.errorCode } : {}),
       };
     },
   };
@@ -166,29 +168,38 @@ posix('runBenchmark with the Claude Code process layer and a fake claude', () =>
     expect(fake.starts()).toBe(2);
   });
 
-  it('ends the run infrastructure-error when setup wrote Claude Code configuration, and never starts claude (AC-26)', async () => {
+  it('stops the benchmark run when setup wrote Claude Code configuration, and never starts claude (AC-26, FR-118-15)', async () => {
     const root = tmp('claude-engine');
     const fake = fakeClaude(root);
     const write =
       'mkdir .claude && echo \'{"permissions":{"allow":["Skill"]}}\' > .claude/settings.local.json';
-    const outcome = await runBenchmark({
+    const records: AgentRunRecord[] = [];
+    const adapter = claudeAdapter(root, fake.executable);
+    let installs = 0;
+    const install = adapter.installArtifact.bind(adapter);
+    adapter.installArtifact = (workspace, artifact) => {
+      installs += 1;
+      return install(workspace, artifact);
+    };
+    const run = runBenchmark({
       ...(await suite(root, [['sh', '-c', write]])),
       artifact: skill(''),
-      adapter: claudeAdapter(root, fake.executable),
+      adapter,
+      onAgentRun: async (record) => {
+        records.push(record);
+      },
     });
-    const [baseline, candidate] = outcome.agentRuns;
-    // The baseline installs nothing: the pre-spawn inspection refuses the workspace.
-    expect(baseline).toMatchObject({
-      variant: 'baseline',
-      executionStatus: 'infrastructure-error',
-    });
-    expect(baseline?.error).toMatch(/^workspace-contains-claude-config: .*\.claude/);
-    // The candidate's installation already refuses the planted `.claude`.
-    expect(candidate).toMatchObject({
-      variant: 'candidate',
-      executionStatus: 'infrastructure-error',
-    });
-    expect(candidate?.error).toMatch(/^Cannot install at \.claude/);
+    const stopped = await run.catch((error: unknown) => error);
+    expect(stopped).toBeInstanceOf(BenchmarkStoppedError);
+    expect(stopped).toMatchObject({ code: 'workspace-contains-claude-config' });
+    expect((stopped as Error).message).toMatch(
+      /^Stopped after case c, baseline repetition 1 \(workspace-contains-claude-config\): /,
+    );
+    // Only the baseline ran up to the pre-spawn inspection: no candidate setup, install or spawn.
+    expect(
+      records.map((record) => [record.variant, record.executionStatus, record.errorCode]),
+    ).toEqual([['baseline', 'infrastructure-error', 'workspace-contains-claude-config']]);
+    expect(installs).toBe(0);
     expect(fake.starts()).toBe(0);
   });
 
@@ -203,6 +214,8 @@ posix('runBenchmark with the Claude Code process layer and a fake claude', () =>
     const candidate = outcome.agentRuns.find((run) => run.variant === 'candidate');
     expect(candidate?.executionStatus).toBe('infrastructure-error');
     expect(candidate?.error).toMatch(/^The artifact version is refused: SKILL\.md: /);
+    // The adapter's refusal code is kept; it is not a stop code, so the run went on.
+    expect(candidate?.errorCode).toBe('artifact-executes-code');
     // Only the baseline (no artifact) started claude.
     expect(fake.starts()).toBe(1);
   });

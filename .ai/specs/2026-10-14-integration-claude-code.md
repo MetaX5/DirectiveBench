@@ -272,7 +272,7 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | Cancel | `AbortSignal` | `cancelled` | — (exit 143 after SIGTERM expected) |
 | Spawn failure (EACCES, ENOENT after detection) | spawn error | `infrastructure-error` | `spawn-failed` |
 | stdout above `CLAUDE_STDOUT_MAX_BYTES` (32 MiB) | process layer; run stopped (SIGTERM, then SIGKILL) | `agent-error` | `output-limit` |
-| Processes of `claude`'s group still alive after it exited and the group was killed | process layer | `infrastructure-error` | `stray-processes` |
+| Processes of `claude`'s group still alive after it exited and the group was killed, a process outside the group still holding its output after `PROCESS_OUTPUT_DRAIN_MS`, or `claude` itself not exiting within `PROCESS_KILL_CONFIRM_MS` (2 s) after SIGKILL (e.g. the signal is refused with `EPERM`; it is then no longer waited for) | process layer | `infrastructure-error` | `stray-processes` |
 
 Tool denials (`permission_denials`) are **not** errors. They are recorded in the trace and surfaced as a warning, because they are part of the measured behaviour. A run is `completed` if the process exits 0 with `subtype: "success"`, even if `is_error` is true. In that case it is recorded as warning `agent-reported-error`. **Assumption — requires validation:** the exact semantics of `is_error: true` with `subtype: "success"`.
 

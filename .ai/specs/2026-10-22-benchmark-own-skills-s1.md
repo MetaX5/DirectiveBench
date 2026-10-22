@@ -825,7 +825,7 @@ changed before merge.
     the inspection); `inspectWorkspace` runs right before each spawn with `~` resolved against the
     agent's own `HOME` and the installed paths exempt from the configuration check only; any
     finding ends the run `infrastructure-error` with the finding's code (FR-118-06/27, the
-    FR-118-15 stop codes; the stop itself is the engine rule of #100) and the fake is never
+    FR-118-15 stop codes) and the fake is never
     started. Process-level ends map to `cancelled`, `timeout`, `infrastructure-error`
     `spawn-failed` / `stray-processes` and `agent-error` `output-limit` (SPEC-203 §9); otherwise
     `ended` is null and the parser decides.
@@ -836,6 +836,19 @@ changed before merge.
     child never happens); the adapter contract carries the pin, the installed paths, a run-local
     `scratchDir` and the status `infrastructure-error`; the engine waits `AGENT_STOP_GRACE_MS`
     (10 s) beyond the timeout for an adapter's own stop sequence.
+  - FR-118-15 stop mechanism (engine, `packages/benchmark-engine/src/stop.ts`): adapters report
+    a code in `AgentRunResult.errorCode`; the engine keeps it in `AgentRunRecord.errorCode` (and
+    sets its own: `stray-processes`, `workspace-replaced`, `assertion-error`, and the `code` of a
+    `ClaudeCodeError` an installation throws); after each agent run `assertNotStopped` throws
+    `BenchmarkStoppedError` (`code`, message naming case, variant and repetition) when the code is
+    in `STOP_CODES` (the FR-118-15 list, one place), so no further setup, installation or adapter
+    call happens and the runner records the benchmark run `error` with that message. Verified with
+    the fake: a `setup` that writes `.claude/settings.local.json` ends the first agent run
+    `workspace-contains-claude-config` and nothing else runs (no install, no spawn). The parser's
+    codes (auth, quota, `artifact-not-loaded`) use the same path (#100).
+  - A `claude` (or command) that does not exit within `PROCESS_KILL_CONFIRM_MS` after SIGKILL —
+    the signal refused with `EPERM` in the tests — is given up: pipes closed, no longer waited for,
+    reported `stray-processes`; the run never stays pending.
   - FR-118-26 second line: `installClaudeArtifact` refuses a version with executable
     customizations or a model override again (`artifact-executes-code` /
     `artifact-overrides-model`), so a candidate with frontmatter `hooks` never reaches `claude`

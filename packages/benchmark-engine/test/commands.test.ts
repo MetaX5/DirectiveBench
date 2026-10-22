@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { PROCESS_KILL_CONFIRM_MS } from '@directivebench/agent-adapters';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_KILL_GRACE_MS,
   buildCommandEnv,
@@ -252,6 +253,33 @@ describe('runCommand', () => {
       }
     },
     60_000,
+  );
+
+  posixOnly(
+    'gives up on a leader that cannot be killed (signals refused with EPERM) after a bound',
+    async () => {
+      const kill = process.kill.bind(process);
+      // Every signal to the group is refused, so the leader never exits.
+      const refuse = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      });
+      let result: Awaited<ReturnType<typeof runCommand>>;
+      try {
+        result = await runCommand(['sh', '-c', 'echo $$; while :; do sleep 1; done'], {
+          ...options(),
+          timeoutMs: 100,
+          killGraceMs: 100,
+        });
+      } finally {
+        refuse.mockRestore();
+      }
+      const leader = Number(result.stdout.trim());
+      kill(-leader, 'SIGKILL');
+      expect(result).toMatchObject({ timedOut: true, exitCode: null, strayProcesses: true });
+      expect(result.durationMs).toBeGreaterThanOrEqual(200 + PROCESS_KILL_CONFIRM_MS - 50);
+      expect(result.durationMs).toBeLessThan(200 + PROCESS_KILL_CONFIRM_MS + 5000);
+    },
+    30_000,
   );
 
   it('handles cancellation of a command whose executable could not be started', async () => {

@@ -2,6 +2,7 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
 import {
+  ClaudeCodeError,
   pinWorkspace,
   workspacePinIssue,
   type AgentAdapter,
@@ -16,6 +17,7 @@ import {
   type ArtifactBundle,
 } from '@directivebench/core';
 import { evaluateAssertion, type AssertionResult } from './assertions';
+import { assertNotStopped } from './stop';
 import { buildCommandEnv, runCommand } from './commands';
 import {
   executionBlockers,
@@ -51,6 +53,12 @@ export interface AgentRunRecord extends RunOutcome {
   trace: (TraceEvent | EngineTraceEvent)[];
   usage: Record<string, number> | null;
   error: string | null;
+  /**
+   * SPEC-203 §9 / SPEC-118 code of a failed agent run, when known (from the adapter's
+   * `errorCode`, or the engine's own: `stray-processes`, `workspace-replaced`, `assertion-error`).
+   * A code in `STOP_CODES` stops the benchmark run (FR-118-15).
+   */
+  errorCode: string | null;
   assertions: AssertionResult[];
 }
 
@@ -269,15 +277,21 @@ async function executeAgentRun(
     changedFiles: [] as FileChange[],
     trace,
     usage: null,
+    errorCode: null,
     assertions: [] as AssertionResult[],
   };
-  const fail = (executionStatus: ExecutionStatus, error: string): AgentRunRecord => ({
+  const fail = (
+    executionStatus: ExecutionStatus,
+    error: string,
+    errorCode: string | null = null,
+  ): AgentRunRecord => ({
     ...base,
     executionStatus,
     score: null,
     passed: null,
     durationMs: Math.round(performance.now() - started),
     error,
+    errorCode,
   });
 
   try {
@@ -320,6 +334,7 @@ async function executeAgentRun(
         return fail(
           'infrastructure-error',
           `Setup command left processes that could not be stopped: ${command.join(' ')}`,
+          'stray-processes',
         );
       }
       if (result.exitCode !== 0) {
@@ -332,7 +347,11 @@ async function executeAgentRun(
 
     const replaced = await workspacePinIssue(workspace);
     if (replaced !== null) {
-      return fail('infrastructure-error', `workspace-replaced: ${replaced} after setup.`);
+      return fail(
+        'infrastructure-error',
+        `workspace-replaced: ${replaced} after setup.`,
+        'workspace-replaced',
+      );
     }
 
     // The baseline variant installs the baseline version, if any, by the same procedure.
@@ -382,7 +401,11 @@ async function executeAgentRun(
     trace.push(...agentResult.trace);
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     if (agentResult.status !== 'completed') {
-      return fail(agentResult.status, agentResult.error ?? agentResult.summary);
+      return fail(
+        agentResult.status,
+        agentResult.error ?? agentResult.summary,
+        agentResult.errorCode ?? null,
+      );
     }
 
     const after = await buildManifest(workspaceDir);
@@ -422,6 +445,7 @@ async function executeAgentRun(
         ...fail(
           'infrastructure-error',
           `assertion-error: assertion "${unfinished.assertionId}" could not be evaluated: ${unfinished.message}`,
+          'assertion-error',
         ),
         changedFiles,
         assertions,
@@ -441,7 +465,12 @@ async function executeAgentRun(
       error: null,
     };
   } catch (error) {
-    return fail('infrastructure-error', error instanceof Error ? error.message : String(error));
+    // An adapter's refusal (e.g. an installation that finds executable code) keeps its code.
+    return fail(
+      'infrastructure-error',
+      error instanceof Error ? error.message : String(error),
+      error instanceof ClaudeCodeError ? error.code : null,
+    );
   } finally {
     if (!input.keepWorkspaces) await rm(runDir, { recursive: true, force: true });
   }
@@ -526,6 +555,9 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
           agentRuns.push(record);
           await input.onAgentRun?.(record);
           if (record.executionStatus === 'cancelled') throw new BenchmarkCancelledError();
+          // A systematic failure (workspace refused, login, quota, …) ends the run: no further
+          // setup, installation or adapter call (FR-118-15).
+          assertNotStopped(record);
         }
       }
     }

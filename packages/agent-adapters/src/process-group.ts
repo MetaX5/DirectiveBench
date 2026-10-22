@@ -27,6 +27,14 @@ export const PROCESS_GROUP_EXIT_TIMEOUT_MS = 2000;
  */
 export const PROCESS_OUTPUT_DRAIN_MS = 1000;
 
+/**
+ * How long a caller waits after SIGKILL for the process it killed to exit. A leader that does not
+ * exit by then — the signal could not be delivered (`EPERM`), or it is stuck in the kernel — is
+ * given up: its pipes are closed, it is no longer waited for, and the run reports surviving
+ * processes (fail closed) instead of staying pending forever.
+ */
+export const PROCESS_KILL_CONFIRM_MS = 2000;
+
 /** Whether children are started in their own process group on this platform. */
 export function usesProcessGroups(): boolean {
   return process.platform !== 'win32';

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import {
   killProcessGroup,
+  PROCESS_KILL_CONFIRM_MS,
   PROCESS_OUTPUT_DRAIN_MS,
   signalProcessGroup,
   usesProcessGroups,
@@ -216,7 +217,9 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
 
   return new Promise((resolve) => {
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let confirmTimer: NodeJS.Timeout | undefined;
     let drainTimer: NodeJS.Timeout | undefined;
+    let settled = false;
     // Set once `claude` exited: from then on no signal is sent to its (possibly reused) id.
     let exited = false;
     let drained = false;
@@ -226,10 +229,28 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
       if (forceKillTimer || exited) return;
       signalProcessGroup(child, groups, 'SIGTERM');
       // Cleared when `claude` exits, so it never signals a group id that may be reused.
-      forceKillTimer = setTimeout(
-        () => signalProcessGroup(child, groups, 'SIGKILL'),
-        input.killGraceMs ?? CLAUDE_KILL_GRACE_MS,
-      );
+      forceKillTimer = setTimeout(() => {
+        signalProcessGroup(child, groups, 'SIGKILL');
+        // A `claude` that still does not exit (the signal was refused, EPERM, or it hangs in the
+        // kernel) is given up after a bound instead of keeping the run pending forever.
+        confirmTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+          finish(null, null, false);
+        }, PROCESS_KILL_CONFIRM_MS);
+      }, input.killGraceMs ?? CLAUDE_KILL_GRACE_MS);
+    };
+    const finish = (code: number | null, signal: string | null, gone: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
+      clearTimeout(drainTimer);
+      input.signal.removeEventListener('abort', onAbort);
+      stdout.end();
+      resolve(result(child, code, signal, gone));
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -257,6 +278,7 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
       exited = true;
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
+      clearTimeout(confirmTimer);
       input.signal.removeEventListener('abort', onAbort);
       groupGone = killProcessGroup(child, groups);
       drainTimer = setTimeout(() => {
@@ -266,13 +288,9 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
       }, PROCESS_OUTPUT_DRAIN_MS);
     });
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
-      clearTimeout(timer);
-      clearTimeout(forceKillTimer);
       clearTimeout(drainTimer);
-      input.signal.removeEventListener('abort', onAbort);
-      stdout.end();
       const gone = await groupGone;
-      resolve(result(child, code, signal, gone && !drained));
+      finish(code, signal, gone && !drained);
     });
   });
 }

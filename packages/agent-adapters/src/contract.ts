@@ -99,6 +99,11 @@ export interface AgentRunResult {
   trace: TraceEvent[];
   usage: AgentUsage | null;
   error: string | null;
+  /**
+   * Machine-readable failure code (SPEC-203 §9), when the adapter has one. The engine stops the
+   * benchmark run after a code in its FR-118-15 stop list (`STOP_CODES`).
+   */
+  errorCode?: string;
 }
 
 export interface InstalledArtifact {

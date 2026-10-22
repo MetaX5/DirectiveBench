@@ -62,6 +62,17 @@ fake CLI ignoring SIGINT/SIGTERM.
   output counts as stray) documented in `78157ab`, which also merges `main` (PR #105) and keeps
   the stray check in the restructured command assertion; gate re-run on the merged tree: pass.
 
+- Codex adversarial review (needs-attention, two HIGH, both valid), fixed in a third round:
+  (1) after SIGKILL nothing bounded the wait for `exit`/`close`, so a leader whose signals were
+  refused (`EPERM`) kept `runClaudeProcess` and `runCommand` pending forever — now
+  `PROCESS_KILL_CONFIRM_MS` gives it up (pipes closed, child unref'd, `strayProcesses`); tests
+  inject `EPERM` and fail without the bound (verified by disabling it). (2) `infrastructure-error`
+  did not stop the benchmark (FR-118-15): the integration test even let the candidate run after
+  the baseline's refusal. Now `AgentRunResult.errorCode` → `AgentRunRecord.errorCode` →
+  `assertNotStopped` with `STOP_CODES` in `benchmark-engine/src/stop.ts` throws
+  `BenchmarkStoppedError`; names match PR #111's draft so #100 can import them instead of its own
+  copy.
+
 ## Work performed
 
 1. `process-group.ts` (signal, kill-and-wait); `runCommand` kills the group on exit.

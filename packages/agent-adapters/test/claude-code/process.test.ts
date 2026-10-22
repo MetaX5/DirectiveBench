@@ -1,17 +1,19 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildClaudeArgv,
   buildClaudeEnv,
   CLAUDE_KILL_GRACE_MS,
   CLAUDE_STDERR_MAX_BYTES,
   CLAUDE_STDOUT_MAX_BYTES,
+  claudeProcessEnd,
   runClaudeProcess,
   type ClaudeProcessInput,
 } from '../../src/claude-code';
 import { findExecutable } from '../../src/probe';
+import { PROCESS_KILL_CONFIRM_MS } from '../../src/process-group';
 import { alive, waitFor, writeFakeClaude, type FakeClaudeMode } from './fake-claude';
 
 const posix = describe.skipIf(process.platform === 'win32');
@@ -151,6 +153,27 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     expect(alive(pid)).toBe(false);
     expect(alive(child)).toBe(false);
     expect(alive(-pid)).toBe(false);
+  }, 30_000);
+
+  it('gives up on a claude that cannot be killed (signals refused with EPERM) after a bound', async () => {
+    const { fake, input } = setup('hang');
+    const kill = process.kill.bind(process);
+    const pending = runClaudeProcess(input({ timeoutMs: 100, killGraceMs: 100 }));
+    const pid = await waitFor(() => fake.pid());
+    track(pid, await waitFor(() => fake.childPid()));
+    const refuse = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+    });
+    let result: Awaited<typeof pending>;
+    try {
+      result = await pending;
+    } finally {
+      refuse.mockRestore();
+    }
+    kill(-pid, 'SIGKILL');
+    expect(result).toMatchObject({ timedOut: true, exitCode: null, strayProcesses: true });
+    expect(result.durationMs).toBeLessThan(PROCESS_KILL_CONFIRM_MS + 10_000);
+    expect(claudeProcessEnd(result)?.errorCode).toBe('stray-processes');
   }, 30_000);
 
   it('escalates a timeout from SIGTERM to SIGKILL after the grace period', async () => {
