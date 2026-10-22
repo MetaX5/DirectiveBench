@@ -59,6 +59,45 @@ generic design as a lesson.
   `init --dir/--version`; split the CLI and UI into separate phases and moved the web guard into
   phase 2; SPEC-115 change scheduled in phase 2.
 
+## Review round: Codex adversarial review, round 1 (2026-10-22)
+
+Four HIGH findings; each was checked against the spec text and, for 1–3, against the Claude Code
+docs (skills, hooks, cli-reference, tools-reference, headless; recorded as SPEC-203 C8–C10).
+All four were valid.
+
+1. **Permission profiles omitted skill invocation.** Confirmed: `Skill` is a built-in tool that
+   requires permission (tools reference) and the profile's `--tools` list left it out, so the
+   installed skill could never be invoked. Resolved: per-artifact-type profiles in SPEC-203 §7
+   (`Skill` in `--tools`, only `Skill(<name>)`/`Skill(<name> *)` allowed; none for instruction
+   types); SPEC-118 FR-118-08 (skill access, A/B name rule), FR-118-09 (`skillActivation` per run:
+   not loaded → `infrastructure-error` `artifact-not-loaded` and stop; loaded but not invoked →
+   scored with warning `artifact-not-invoked` and an invocation rate on every surface; a `none`
+   baseline invoking the tested skill → `not-comparable`), AC-21, AC-22 (opt-in live check with
+   the exact production argv), §15 live check, SPEC-203 AC-11.
+2. **Approval ignored code inside artifact versions.** Confirmed and wider than reported: besides
+   frontmatter `hooks`, `` !`cmd` `` placeholders and `allowed-tools` grants also take effect in
+   an untrusted `-p` run. Resolved by refusal (the simpler safe option): FR-118-26 inspects
+   candidate and baseline bundles and refuses with `artifact-executes-code` (fail closed); argv
+   adds `disableSkillShellExecution` as a second line; FR-118-06 extended to fixture skills,
+   subagents and plugin manifests; AC-23; SPEC-203 §8, §9, AC-12. Approval bound to
+   artifact-version hashes is future work (§19).
+3. **Observed model changes still produced verdicts.** Confirmed (FR-118-04 made a reported-model
+   difference a warning). Resolved: `executionModel` from `system/init` must be identical for all
+   agent runs (`not-comparable`, `execution-model-mismatch`), is hashed into the comparability key
+   (§8.3), auxiliary `modelUsage` models are recorded with warning `auxiliary-models`; AC-18
+   rewritten; SPEC-112 FR-112-04/08/09 and §14, SPEC-111 FR-111-43/44, SPEC-113 FR-113-10,
+   SPEC-203 §4/§4.2, AC-13.
+4. **Arbitrary regexes defeated the runtime bound.** Confirmed: `(a+)+$` took 279 ms / 1.1 s /
+   4.5 s at 22/24/26 characters on Node 24 (≈ 5 min at 32). Resolved: FR-118-46 — every user
+   pattern (new types and `file-contains`) runs in a `node:worker_threads` worker with
+   `ASSERTION_REGEX_TIMEOUT_MS` = 2 000 ms, terminated on deadline or abort → assertion error,
+   agent run `infrastructure-error` `assertion-error`; literals matched by linear scans;
+   NFR-118-02, §8.1, §8.2 (`AssertionResult.error`), §15 adversarial/heartbeat/cancellation
+   tests, AC-24, phase 1 step 3; SPEC-107 §8.3 and SPEC-108 FR-108-10 aligned. No RE2.
+
+Resolved-assumption rows Q9 updated and Q14–Q16 added. Lesson
+`2026-10-22-installing-a-skill-is-not-activating-it.md` recorded.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
@@ -66,6 +105,11 @@ generic design as a lesson.
 - `pnpm lint` / typecheck / tests: not run — docs-only change, no file in their scope changed.
 - Not verified: anything about Claude Code behaviour beyond what SPEC-203 already records; the
   `system/init` auth-source field is marked as an assumption in FR-118-06.
+- Review round 1: Claude Code behaviour checked against the docs only (no live run). Still
+  assumptions, to be settled by the opt-in live check (AC-22): the init field listing skills,
+  the `Skill` tool input field, `disableSkillShellExecution` under `--setting-sources`, whether
+  `allowed-tools` can re-add a tool removed by `--tools`, and which copy wins when a user-level
+  skill has the tested skill's name.
 
 ## Problems and deviations
 
@@ -75,6 +119,7 @@ generic design as a lesson.
 ## Lessons recorded
 
 - [2026-10-22-design-generic-not-for-the-example.md](../lessons/2026-10-22-design-generic-not-for-the-example.md)
+- [2026-10-22-installing-a-skill-is-not-activating-it.md](../lessons/2026-10-22-installing-a-skill-is-not-activating-it.md)
 
 ## Follow-ups
 

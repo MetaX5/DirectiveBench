@@ -34,6 +34,9 @@ Every statement about Claude Code is labelled:
 | C5 | https://code.claude.com/docs/en/llm-gateway |
 | C6 | https://code.claude.com/docs/en/agent-sdk/overview |
 | C7 | https://code.claude.com/docs/en/agent-sdk/typescript |
+| C8 | https://code.claude.com/docs/en/hooks (checked 2026-10-22) |
+| C9 | https://code.claude.com/docs/en/cli-reference (checked 2026-10-22) |
+| C10 | https://code.claude.com/docs/en/tools-reference (checked 2026-10-22) |
 | L1 | Local `claude --version` → `2.1.296 (Claude Code)`; `claude --help`, `claude auth --help`, `claude auth status --help` (Linux, 2026-10-14) |
 
 ## 2. Official integration options
@@ -98,7 +101,7 @@ Mapping to the `AgentAdapter` capability contract ([SPEC-110 §8](2026-10-14-ben
 | **Version** | `claude --version` → `2.1.296 (Claude Code)`; parse `^(\d+\.\d+\.\d+)`. Also `-v`. | Confirmed (L1, 2026-10-14) |
 | **Auth readiness** | Subscription: `claude auth status` (JSON default). API key: secret reference resolves. | Command confirmed (L1). Output schema: Assumption — requires validation |
 | **Execution modes** | Non-interactive `-p/--print` only. | Confirmed (C1, L1) |
-| **Model selection** | `--model <alias or full name>` (aliases such as `opus`, `sonnet`). The model actually used is read from the `system/init` event (`model`) and from `modelUsage` keys in the result. `--fallback-model` must **never** be passed (it would silently change the model and break comparability). | Flag confirmed (L1, C7). `init.model` field: Confirmed (C1) |
+| **Model selection** | `--model <alias or full name>` (aliases such as `opus`, `sonnet`). The session model actually used (**execution model**) is read from the `system/init` event (`model`); `modelUsage` keys in the result can additionally contain auxiliary models used for internal tasks and a model a skill switches to through its `model` frontmatter (C3), so they are recorded but are not the execution model. Execution models must be equal across all agent runs being compared ([SPEC-112](2026-10-14-red-green-evaluation.md) FR-112-04/08). `--fallback-model` must **never** be passed (it would silently change the model and break comparability). | Flag confirmed (L1, C7). `init.model` field: Confirmed (C1) |
 | **Tool permissions** | `--permission-mode` (`acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan`), `--allowedTools`/`--disallowedTools` (rule syntax e.g. `Bash(git diff *)`), `--tools` (restrict the built-in set), `--permission-prompts none` (deny anything that would prompt; v2.1.259+). | Confirmed (C1, L1) |
 | **Working directory** | Spawn with `cwd` = workspace root. Do **not** use `--add-dir` or `--worktree`. | Confirmed (C3: project skills load from the start directory up to the repository root; C4: CLAUDE.md/AGENTS.md load from the working directory and above) |
 | **Instructions/skills injection** | Candidate artifacts are written into the workspace (install convention §4.1). Never via `--append-system-prompt`, because that does not exercise discovery. | Confirmed discovery paths (C3, C4) |
@@ -133,7 +136,7 @@ Real CLI adapters need these **proposed extensions**. They are shared by [SPEC-2
 
 - `AgentRunRequest.auth: { mode: 'subscription' | 'api-key' | 'gateway'; secretRef?: SecretRef }` (`SecretRef` = `{ source: 'keychain' | 'env'; name: string }`, [SPEC-115 FR-115-30](2026-10-14-settings-and-configuration.md)), resolved by the runner and never serialized with the secret value.
 - `AgentRunRequest.options` (already present: `agentOptions[adapterId]`) carries the validated permission profile.
-- `AgentRunResult.errorCode?: string` (codes in §9), `warnings: string[]`, `metadata: { adapterVersion, authMode, isolationProfile, requestedModel, reportedModels[], flagsHash }`.
+- `AgentRunResult.errorCode?: string` (codes in §9), `warnings: string[]`, `metadata: { adapterVersion, authMode, isolationProfile, permissionProfile, requestedModel, executionModel, reportedModels[], flagsHash }` and, for `skill-md` artifacts, `skillActivation: { loaded, invoked, invocations, otherSkills[] }` derived from `system/init` and `Skill` tool calls ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-04/09).
 - New `TraceEvent` variants: `{ type: 'tool-call'; tool: string; input?: unknown; callId: string }`, `{ type: 'tool-result'; callId: string; ok: boolean; output?: string }` (truncated, redacted), `{ type: 'permission-denied'; tool: string }`, `{ type: 'retry'; attempt: number; category: string }`, `{ type: 'usage'; … }`.
 - `AgentUsage` gains `cachedInputTokens?`, `reasoningTokens?`, `costIsEstimate?: boolean`.
 
@@ -185,6 +188,7 @@ claude -p
   --permission-prompts none              # v2.1.259+
   --no-session-persistence
   --strict-mcp-config                    # load no MCP servers (no --mcp-config given)
+  --settings '{"disableSkillShellExecution":true}'   # defence in depth, see §8
   [--setting-sources project,local]      # Local Subscription Mode only, see §8
   [--max-budget-usd <n>]                 # API Key Mode, optional
   (prompt on stdin)
@@ -217,18 +221,19 @@ Per agent configuration (stored in `config.json` / DB without secrets; [SPEC-115
 | `authMode` | `subscription` \| `api-key` \| `gateway` | `subscription` (maintainer decision for S1, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md); previously "none: the user must choose explicitly"). Every run shows the mode, and subscription runs carry `ambient-user-config` (§8). `gateway` is not offered in S1. |
 | `secretRef` | reference to `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (api-key/gateway) | — (S1: only `{ source: 'env', name: 'ANTHROPIC_API_KEY' }` from the CLI environment, until [ADR-0008](../decisions/0008-secret-storage-and-authentication.md) keychain storage exists) |
 | `baseUrl` | gateway URL (gateway mode) | — |
-| `permissionProfile` | `edit-only` → `--tools "Read,Edit,Write,Glob,Grep" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep"`. `--tools` removes `Bash` entirely, because under `dontAsk` the read-only command set would otherwise still run (C1). `edit-and-shell` → adds `Bash` to both lists (only for execution-approved suites). | `edit-only` |
+| `permissionProfile` | `edit-only` → `--tools "Read,Edit,Write,Glob,Grep" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep"`. `--tools` removes `Bash` entirely, because under `dontAsk` the read-only command set would otherwise still run (C1). `edit-and-shell` → adds `Bash` to both lists (only for execution-approved suites). **Per artifact type:** for `skill-md` both profiles add `Skill` to `--tools` and `Skill(<name>)`, `Skill(<name> *)` to `--allowedTools`, where `<name>` is the installed skill's resolved name; `Skill` is a built-in tool that requires permission (C10), so without this the installed skill could never be invoked, and under `dontAsk` every other skill is denied (C3). Instruction types (`claude-md`, `agents-md`, `claude-rule`) load without `Skill` and get the profile without it. | `edit-only` |
 | `maxBudgetUsd` | number (API Key Mode) | unset |
 | `minimumVersion` | semver | `2.1.259` (needed for `--permission-prompts`). Proposed; tested with 2.1.296 |
 
-Benchmark `execution.model` (`{provider: "anthropic", model}`) maps to `--model`. A provider other than `anthropic` (or a cloud/gateway provider explicitly configured) is rejected before enqueue ([ADR-0006](../decisions/0006-agent-adapters-vs-model-providers.md)). Exact tool names in the profiles (`Glob`, `Grep`, `Write`): **Assumption — requires validation** against the tools reference.
+Benchmark `execution.model` (`{provider: "anthropic", model}`) maps to `--model`. A provider other than `anthropic` (or a cloud/gateway provider explicitly configured) is rejected before enqueue ([ADR-0006](../decisions/0006-agent-adapters-vs-model-providers.md)). Exact tool names in the profiles (`Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash`, `Skill`): Confirmed (C10, 2026-10-22); `Glob` and `Grep` are absent from the default set on macOS/Linux/WSL and are enabled by naming them in `--tools` (C9).
 
 ## 8. Security concerns
 
 Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../decisions/0007-local-runner-execution-and-isolation.md), [SPEC-110 command rules](2026-10-14-benchmark-execution.md).
 
 - **Not sandboxed.** On `local-process`, Claude Code runs with the user's OS permissions. The UI shows "Not sandboxed". Claude Code's own permission system limits which tools run without approval, but it is not an OS isolation boundary. Shell access (`Bash`) is off by default (`edit-only` profile).
-- **Repository-controlled code under `-p`.** Print mode skips the trust dialog, so fixture-provided `.claude/settings.json` hooks and `.mcp.json` servers would run (C1). Mitigations: `--strict-mcp-config`. Fixture import flags `.claude/settings*.json` with `hooks` and `.mcp.json` as "executes code", and these require suite execution approval ([SPEC-110 FR-110-46](2026-10-14-benchmark-execution.md)). Disabling hooks through a `--settings` override (e.g. a `disableAllHooks` key): **Assumption — requires validation**.
+- **Repository-controlled code under `-p`.** Print mode skips the trust dialog, so fixture-provided `.claude/settings.json` hooks and `.mcp.json` servers would run (C1). Mitigations: `--strict-mcp-config`. Fixture import flags `.claude/settings*.json` with `hooks` and `.mcp.json` as "executes code", and these require suite execution approval ([SPEC-110 FR-110-46](2026-10-14-benchmark-execution.md)). Disabling hooks through a `--settings` override: `--settings '{"disableAllHooks": true}'` turns hooks off for one run (Confirmed for settings-file hooks, C8); whether it also covers skill-frontmatter hooks is not documented (C8). It is not used, because approved fixture hooks must run.
+- **Code embedded in skills.** A skill can execute code without the `Bash` tool, even in an untrusted `-p` run: frontmatter `hooks` are registered when the skill is invoked and run for the rest of the session (C8); `` !`command` `` placeholders run before the skill content reaches the model, checked only against permission rules (C3); frontmatter `allowed-tools` grants tools during the invoking turn (C3). An artifact version (candidate or baseline) with any of these, or bundling a plugin manifest, `.mcp.json`, `hooks.json` or settings file, is refused in S1 ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-26); fixture skills and subagents with hooks need suite execution approval. The argv also sets `disableSkillShellExecution` (C3: replaces each placeholder with a "disabled by policy" note for project skills; observed effect under `--setting-sources`: **Assumption — requires validation**). Whether `allowed-tools` can re-add a tool removed by `--tools`: **Assumption — requires validation** (the inspection refuses such skills either way).
 - **Ambient user-level instructions.** Without isolation, Claude Code loads `~/.claude/CLAUDE.md`, `~/.claude/rules/`, `~/.claude/skills/` (including claude.ai-synced skills under `~/.claude/skills/synced/`), user settings/hooks/plugins, and the managed policy files (`/etc/claude-code/CLAUDE.md`, managed skills) (Confirmed, C3, C4).
   - API Key Mode: `HOME` and `CLAUDE_CONFIG_DIR` point to a run-local temp directory, so user-level config is excluded. Managed policy files cannot be excluded (C4). If they exist, the adapter records warning `managed-policy-present`.
   - Local Subscription Mode: user-level config is loaded (real `HOME` is needed for auth). The adapter passes `--setting-sources project,local` (excludes user settings/hooks) and records warning `ambient-user-config` on every run. Results are labelled "may include user-level instructions" and are never compared across machines.
@@ -250,6 +255,8 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | `error_max_budget_usd` | result subtype | `agent-error` | `budget-exceeded` |
 | `error_max_turns` / `error_during_execution` | result subtype | `agent-error` | `agent-failed` (message from `errors[]`) |
 | No `result` line / malformed NDJSON | parser | `agent-error` | `output-parse-error` (keep raw tail, redacted) |
+| Installed skill missing from `system/init` (`Skill` tool absent, or the skill not listed) | parser | `infrastructure-error` | `artifact-not-loaded` |
+| Artifact version contains executable customizations | inspection before enqueue | run rejected before enqueue | `artifact-executes-code` |
 | Timeout | DirectiveBench timer | `timeout` | — |
 | Cancel | `AbortSignal` | `cancelled` | — (exit 143 after SIGTERM expected) |
 | Spawn failure (EACCES, ENOENT after detection) | spawn error | `infrastructure-error` | `spawn-failed` |
@@ -271,7 +278,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md). **No paid or authenticated calls
 - **Unit:** argv builder (snapshot per permission profile/auth mode; asserts no secret in argv, no `--fallback-model`, no dangerous flags); env builder (API Key Mode isolates `HOME`/`CLAUDE_CONFIG_DIR`; subscription mode strips `ANTHROPIC_*`/`CLAUDE_CODE_USE_*`); version parser (`2.1.296 (Claude Code)`); install convention table.
 - **Contract tests with recorded fixtures:** redacted NDJSON transcripts captured manually from real runs, stored under `packages/agent-adapters/test/fixtures/claude-code/<cliVersion>/` (success with edits, permission denial, max budget, auth failure, api_retry, malformed/truncated stream). Assert parser → `TraceEvent[]`, usage and normalized errors.
 - **Fake CLI:** a Node script exposed as `claude` on a test `PATH`, emulating `--version`, `auth status` and `-p` streaming, plus hang/ignore-SIGINT modes. Covers spawn, stdin prompt, timeout escalation, cancellation and process-group cleanup.
-- **Opt-in live tests:** `DIRECTIVEBENCH_LIVE_TESTS=claude-code` plus explicit auth mode. Run manually by a developer, never in CI. They use a tiny fixture and `--max-budget-usd` in API Key Mode. They refresh the recorded fixtures (after redaction review).
+- **Opt-in live tests:** `DIRECTIVEBENCH_LIVE_TESTS=claude-code` plus explicit auth mode. Run manually by a developer, never in CI. They use a tiny fixture and `--max-budget-usd` in API Key Mode, and the **exact production argv** of §6/§7. They prove discovery and invocation: a planted skill appears in `system/init`, is invoked through `Skill` and its marker instruction is followed; another skill is denied; a `CLAUDE.md` marker is followed. They record the field names this spec marks as assumptions and refresh the recorded fixtures (after redaction review).
 - **Drift check (manual or CI only when the binary is present):** parse `claude --help` and assert every flag the adapter uses still exists. Read-only, no auth.
 
 ## 12. Acceptance criteria
@@ -286,10 +293,13 @@ Per [SPEC-012](2026-10-14-testing-strategy.md). **No paid or authenticated calls
 - [ ] AC-8: Cancellation and timeout terminate the whole process group within 10 s (fake CLI test) and yield `cancelled` / `timeout`.
 - [ ] AC-9: Configurations requesting `bypassPermissions`, `--dangerously-skip-permissions`, `--bare` for candidate runs, or `--fallback-model` are rejected with a clear message.
 - [ ] AC-10: Error fixtures map to the codes in §9.
+- [ ] AC-11: The `skill-md` argv allows `Skill` only for the installed skill and instruction types get no `Skill`; recorded streams yield `skillActivation` (loaded, invoked, denied other skills), and the opt-in live test proves discovery and invocation with the production argv ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-08/09).
+- [ ] AC-12: A candidate or baseline skill with frontmatter `hooks`, a `` !` `` placeholder or `allowed-tools` beyond the profile is refused before `claude` starts (SPEC-118 FR-118-26).
+- [ ] AC-13: `executionModel` is read from `system/init`; agent runs with different execution models are `not-comparable`; auxiliary `modelUsage` models are recorded and do not affect comparability (SPEC-118 FR-118-04).
 
 ## 13. Current implementation status
 
-The first execution slice (S1) is specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md): print mode with `stream-json`, both auth modes (subscription default; API key from the environment only), the `edit-only`/`edit-and-shell` profiles, install convention §4.1 for candidate and A/B baseline, the §4.2 extensions it needs, cancellation, parsing, usage and §9 errors. The Agent SDK option, gateway and cloud-provider modes stay out of S1. The terms review of §3.2 must be recorded here before a release ships subscription mode as the default.
+The first execution slice (S1) is specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md): print mode with `stream-json`, both auth modes (subscription default; API key from the environment only), the `edit-only`/`edit-and-shell` profiles in their per-artifact-type form (`Skill` for skills), skill-activation recording, refusal of executable skill customizations, the execution-model comparability rule, install convention §4.1 for candidate and A/B baseline, the §4.2 extensions it needs, cancellation, parsing, usage and §9 errors. The Agent SDK option, gateway and cloud-provider modes stay out of S1. The terms review of §3.2 must be recorded here before a release ships subscription mode as the default.
 
 - **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; the missing-executable path is verified by `packages/agent-adapters/test/mock.test.ts` "detectCliAgent"; detection of an installed `claude` is not covered by a test): a detection descriptor (`id: 'claude-code'`, executable `claude`, `--version`). It locates the binary on `PATH` without a shell, runs `--version` with a 5 s timeout, stores the first output line, reports `auth: 'unknown'`, and never reads credential files. The results are shown on the Agent Connections page and by `directivebench doctor`.
 - **Partially implemented:** version parsing. The raw first line is stored (e.g. `2.1.296 (Claude Code)`). The semver extraction and minimum-version check from AC-1/§10 are not implemented.

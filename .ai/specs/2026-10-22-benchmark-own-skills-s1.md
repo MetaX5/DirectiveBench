@@ -92,17 +92,23 @@ reference scenario used to check that the design is sufficient — not a target 
 
 ## 6. Functional requirements
 
+Evidence keys C1–C10 and L1 refer to the source table of
+[SPEC-203 §1](2026-10-14-integration-claude-code.md#evidence-labels).
+
 ### 6.1 Claude Code execution adapter
 
 | ID | Requirement |
 | --- | --- |
-| FR-118-01 | `packages/agent-adapters` SHALL provide an executable `claude-code` adapter implementing [SPEC-203](2026-10-14-integration-claude-code.md) §2–§9 for the scope of this slice: CLI print mode with `stream-json`, the argv of §6, prompt on stdin, the `edit-only` permission profile by default (`edit-and-shell` only for execution-approved suites), install convention §4.1, cancellation and timeout escalation, stream parsing, usage reporting and the error codes of §9. |
+| FR-118-01 | `packages/agent-adapters` SHALL provide an executable `claude-code` adapter implementing [SPEC-203](2026-10-14-integration-claude-code.md) §2–§9 for the scope of this slice: CLI print mode with `stream-json`, the argv of §6, prompt on stdin, the `edit-only` permission profile by default (`edit-and-shell` only for execution-approved suites) in the per-artifact-type form of SPEC-203 §7 (for `skill-md` the profile includes the `Skill` tool, allowed only for the installed skill; FR-118-08), install convention §4.1, cancellation and timeout escalation, stream parsing, usage reporting and the error codes of §9. |
 | FR-118-02 | The adapter SHALL support both auth modes of SPEC-203 §3: **Local Subscription Mode (default)** and **API Key Mode**. In S1, API Key Mode reads the key only from the `ANTHROPIC_API_KEY` variable of the CLI process environment (secret reference `{ source: 'env', name: 'ANTHROPIC_API_KEY' }`); OS-keychain references wait for [ADR-0008](../decisions/0008-secret-storage-and-authentication.md). Gateway and cloud-provider modes are not offered. |
 | FR-118-03 | In Local Subscription Mode the adapter SHALL record warning `ambient-user-config` on every run and isolation profile `user-profile`; in API Key Mode it SHALL isolate `HOME` and `CLAUDE_CONFIG_DIR` to the run directory and record isolation profile `isolated` (SPEC-203 §8). |
-| FR-118-04 | Every agent run SHALL report adapter metadata `{ adapterVersion, authMode, isolationProfile, permissionProfile, requestedModel, reportedModels[], flagsHash }` (SPEC-203 §4.2). `flagsHash` is the sha256 of the argv **normalised**: without the prompt and with run-local paths (workspace, isolated `HOME`, temp directories) replaced by fixed placeholders, so two workspaces of one run hash equally. The engine records the metadata once per benchmark run in `EnvironmentMetadata` and checks that `adapterVersion`, `authMode`, `isolationProfile`, `permissionProfile`, `requestedModel` and `flagsHash` are identical for every agent run (SPEC-112 FR-112-08). A difference in `reportedModels` (e.g. an alias resolving to another snapshot) is a warning `unpinned-model`, not a comparability failure. |
+| FR-118-04 | Every agent run SHALL report adapter metadata `{ adapterVersion, authMode, isolationProfile, permissionProfile, requestedModel, executionModel, reportedModels[], flagsHash }` (SPEC-203 §4.2). `executionModel` is the session model the CLI resolved, read from the `model` field of the `system/init` event (Confirmed, SPEC-203 §4); `reportedModels` are all keys of `result.modelUsage`, which can also contain auxiliary models the CLI uses for internal tasks and a model a skill switches to through its `model` frontmatter. `flagsHash` is the sha256 of the argv **normalised**: without the prompt and with run-local paths (workspace, isolated `HOME`, temp directories) and the installed skill name of FR-118-08 replaced by fixed placeholders, so two workspaces of one run hash equally. The engine records the metadata in `EnvironmentMetadata` and checks that `adapterVersion`, `authMode`, `isolationProfile`, `permissionProfile`, `requestedModel`, `executionModel` and `flagsHash` are identical for **every** agent run of both variants (SPEC-112 FR-112-08); any difference, including an alias or `model: null` resolving to another `executionModel`, makes the run `not-comparable` (issue `execution-model-mismatch`, listing the models per variant), never `improved` or `regressed`. Differences only in the other `reportedModels` keys are not a comparability failure: they are recorded per agent run, shown, and produce warning `auxiliary-models`. `execution.model: null` or an alias additionally produces warning `unpinned-model`. |
 | FR-118-05 | `createExecutableAdapters()` SHALL include `claude-code` only in the runner that `benchmark run` starts (§6.4). The `serve` runner stays mock-only in S1, and the web app SHALL NOT enqueue a run whose suite uses an agent other than `mock` (§11). |
-| FR-118-06 | A fixture or verification overlay that contains `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, `CLAUDE.local.md` or a `.claude/hooks/` directory SHALL be treated as running commands: the suite needs execution approval (FR-118-33), and the plan lists those files. Independently of approval, the adapter SHALL refuse a run whose project settings set `env`, `apiKeyHelper`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or a `CLAUDE_CODE_USE_*` key, because they would change where requests go or who pays (`infrastructure-error`, code `fixture-overrides-auth`). The adapter SHALL also check the auth source reported in the `system/init` event (field name: Assumption — requires validation, SPEC-203 §3) against the chosen mode and record `auth-mismatch` (agent run `agent-error`) when they differ. |
+| FR-118-06 | A fixture or verification overlay that contains `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, `CLAUDE.local.md`, a `.claude/hooks/` directory, a plugin manifest (`.claude-plugin/` directory or `plugin.json`), or a skill or subagent file (`.claude/skills/**/SKILL.md`, `.claude/agents/*.md`) with an executable customization of FR-118-26 SHALL be treated as running commands: the suite needs execution approval (FR-118-33), and the plan lists those files. Independently of approval, the adapter SHALL refuse a run whose project settings set `env`, `apiKeyHelper`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or a `CLAUDE_CODE_USE_*` key, because they would change where requests go or who pays (`infrastructure-error`, code `fixture-overrides-auth`). The adapter SHALL also check the auth source reported in the `system/init` event (field name: Assumption — requires validation, SPEC-203 §3) against the chosen mode and record `auth-mismatch` (agent run `agent-error`) when they differ. |
 | FR-118-07 | Both permission profiles SHALL confine edits to the workspace (`--permission-mode dontAsk` with allow rules scoped to the workspace; no `--add-dir`); a test SHALL show that an attempted edit of a path outside the workspace (e.g. `~/.claude/CLAUDE.md`) is denied and recorded as `permission-denied`. Shell commands (`edit-and-shell`) are not confined on `local-process`; that residual is labelled "Not sandboxed". |
+| FR-118-08 | **Skill access.** For a `skill-md` artifact both permission profiles SHALL add the `Skill` tool to `--tools` and allow only the installed skill: `--allowedTools` gains `Skill(<name>)` and `Skill(<name> *)`, where `<name>` is the skill name Claude Code resolves (the frontmatter `name`, else the install directory `<slug>`; SPEC-203 §4.1). Under `dontAsk` every other skill, including user-level skills in subscription mode, is denied and recorded as `permission-denied` (C3: `Skill(name)` rules; C10: `Skill` requires permission). Instruction types (`claude-md`, `agents-md`, `claude-rule`) are loaded by Claude Code without the `Skill` tool, so their profiles do not include it. Both variants of one run use the same argv: in an A/B run the two versions SHALL resolve to the same `<name>` (else refused before any job, `baseline-skill-name-differs`); in a `none` run the allow rule names a skill that is not installed. |
+| FR-118-09 | **Skill invocation record.** For `skill-md` artifacts the adapter SHALL record per agent run `skillActivation: { loaded, invoked, invocations, otherSkills[] }` from the stream: `loaded` is true when the `system/init` `tools` list contains `Skill` and, where the init event lists skills (field: Assumption — requires validation), the list contains `<name>`; `invoked` is true when an assistant `tool_use` block named `Skill` targets `<name>` (input field: Assumption — requires validation) and its `tool_result` is not an error or denial, or when the prompt itself begins with `/<name>`; `otherSkills` lists other skill names attempted (all denied by FR-118-08). Rules: (a) a candidate run, or a baseline run of an A/B run, with `loaded = false` is `infrastructure-error` code `artifact-not-loaded` and stops further agent runs as in FR-118-15, because the cause is systematic; (b) a run that loaded but never invoked the skill is scored normally — whether the description makes Claude use the skill is part of what is measured — and carries warning `artifact-not-invoked`; (c) a baseline run of a `none` run that invokes `<name>` (an ambient copy of the skill) makes the benchmark run `not-comparable` (issue `baseline-invoked-tested-skill`). Every surface shows the invocation rate per variant next to the verdict ("Skill invoked in 2/3 candidate runs"); when it is 0 for the candidate, the summary says the result measures a skill that was never used. For instruction types `skillActivation` is absent (loading is not visible in the trace; residual, §12). |
+
 
 ### 6.2 Baseline selection (A/B)
 
@@ -113,7 +119,7 @@ reference scenario used to check that the design is sufficient — not a target 
 | FR-118-12 | The baseline version SHALL differ from the candidate version (different `artifact_versions.id` **and** content hash); same artifact, same format. Violations are rejected before any job is created. |
 | FR-118-13 | The baseline SHALL be stored on the benchmark run (`benchmark_runs.baseline_artifact_version_id`, null = `none`, §8). It is **not** part of the comparability key (§8.3): the key describes the conditions, the baseline describes what the candidate was compared with. |
 | FR-118-14 | Delta, verdict and display status keep their SPEC-111 meaning with "baseline" read as "the chosen baseline": `improved` in an A/B run means the candidate version scored better than the baseline version. Every surface SHALL name the baseline ("Baseline: no artifact" / "Baseline: v3"). |
-| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited` or `auth-mismatch`, the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors) are recorded and the run continues (SPEC-112 §13). |
+| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited`, `auth-mismatch` or `artifact-not-loaded` (FR-118-09), the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors) are recorded and the run continues (SPEC-112 §13). |
 
 ### 6.3 Suites bound to registry artifacts
 
@@ -125,27 +131,29 @@ reference scenario used to check that the design is sufficient — not a target 
 | FR-118-23 | `benchmark run <suite>` SHALL accept a path to a definition file or to a folder containing `benchmark.yaml`, and import it with the existing `prepareSuiteImport` + `importSuiteVersion` path (content-addressed, idempotent: unchanged content reuses the existing suite version). |
 | FR-118-24 | After any benchmark run that reaches status `completed` (whatever its verdict) the CLI SHALL record the assignment artifact ↔ suite (`artifact_benchmark_assignments`, existing table) so the artifact page lists the suite. |
 | FR-118-25 | The artifact type SHALL be in the suite's `artifactTypes` and its format SHALL be installable by the adapter (SPEC-203 §4.1); otherwise the run is refused before any job is created, with the reason. |
+| FR-118-26 | **Artifact bundle inspection.** Before readiness and the plan (FR-118-39), the CLI SHALL inspect the stored files of **both** the candidate and the baseline artifact version and refuse the run (exit 2, code `artifact-executes-code`, listing each finding) when a version contains an executable customization: SKILL.md frontmatter `hooks` (registered on invocation even in an untrusted `-p` run, C8); a shell-injection placeholder `` !`…` `` in SKILL.md (run before the content reaches the model, C3), detected by a line scan that fails closed on any `` !` `` sequence; frontmatter `allowed-tools` naming a tool outside the run's permission profile (applied even in an untrusted `-p` run, C3); or a bundled file Claude Code could load as configuration (`.claude-plugin/`, `plugin.json`, `hooks.json`, `hooks/`, `.mcp.json`, `settings.json`, `settings.local.json`). S1 refuses rather than offers approval, because suite approval (FR-118-33) is bound to the suite version, not to artifact versions; approval bound to artifact-version content hashes is future work (§19). Unparsable frontmatter is a finding (fail closed, SPEC-014). As defence in depth the argv always carries `--settings '{"disableSkillShellExecution":true}'` (C3; effect on project skills: Assumption — requires validation by the live check). A frontmatter `model` or `context: fork` is not refused; the plan names it, because it changes what the skill runs on. |
 
 ### 6.4 `benchmark run`
 
 | ID | Requirement |
 | --- | --- |
 | FR-118-30 | `directivebench benchmark run <suite> --artifact <ref> [--version <n>] [--baseline none\|v<n>] [--auth subscription\|api-key] [--max-budget-usd <n>] [--approve-commands] [--yes] [--json]`. Defaults: latest version, `--baseline none`, `--auth subscription`. `--max-budget-usd` is accepted only with `--auth api-key` (exit 2 otherwise), because the CLI enforces it only in print mode with an API key (SPEC-203 §4). Subscription mode has no cost cap; the plan (FR-118-31) is the guard. |
-| FR-118-31 | Before starting, the CLI SHALL print the plan: suite (name, version, content hash prefix), candidate and baseline, agent and detected version, auth mode, isolation profile, model (or "CLI default — unpinned"), number of agent runs (`cases × repetitions × 2`), and these notices: runs count against the user's Claude plan (subscription) or API spend (api-key); prompt, fixture files and the artifact are sent to Anthropic; **Not sandboxed**; in subscription mode "may include user-level instructions". |
+| FR-118-31 | Before starting, the CLI SHALL print the plan: suite (name, version, content hash prefix), candidate and baseline, agent and detected version, auth mode, isolation profile, model (or "CLI default — unpinned"), number of agent runs (`cases × repetitions × 2`), for a skill whether it sets `model`, `context: fork` or `disable-model-invocation` (FR-118-26), and these notices: runs count against the user's Claude plan (subscription) or API spend (api-key); prompt, fixture files and the artifact are sent to Anthropic; **Not sandboxed**; in subscription mode "may include user-level instructions". |
 | FR-118-32 | On an interactive terminal the CLI SHALL ask for confirmation; `--yes` skips it; without a TTY and without `--yes` it SHALL refuse with exit code 2. |
 | FR-118-33 | A suite version that runs commands (`definitionRunsCommands`, or FR-118-06) SHALL run only when execution-approved. `--approve-commands` SHALL print every `setup` and `command` argv and every FR-118-06 file of the suite version; approval with source `user` (SPEC-110 FR-110-46) is recorded only after the confirmation of FR-118-32, in the same transaction that creates the job. Without the flag such a suite is refused with exit code 2 and a message naming the flag. Approval is per suite version, so changing the suite requires approving again. |
 | FR-118-34 | The CLI SHALL create the benchmark job **already acquired by its own runner** (one statement inserting `status = 'running'` with its `runner_id`), heartbeat it and execute it in-process, so a concurrently running `serve` runner can never pick it up (SPEC-114). A CLI killed mid-run leaves the job to the existing stale-heartbeat recovery (`interrupted`). |
 | FR-118-35 | Readiness SHALL be checked before the job is created: `claude` found and version ≥ the minimum (SPEC-203 §7); in subscription mode `claude auth status` reports logged in (parsing only the fields needed, never persisting the output); in api-key mode `ANTHROPIC_API_KEY` is non-empty. Failures exit with code 2 and the SPEC-203 §9 error code. |
 | FR-118-36 | SIGINT during the run SHALL cancel the job through its `AbortSignal` (SPEC-203 cancellation escalation), record `cancelled` and exit with code 130. |
-| FR-118-37 | At the end the CLI SHALL print the same summary as `demo` (baseline, candidate, delta, verdict, confidence, display status, run id) plus warnings and tokens/cost (cost "n/a (subscription)" in subscription mode, "estimated" in api-key mode, SPEC-203 §4). `--json` prints one JSON object instead. |
+| FR-118-37 | At the end the CLI SHALL print the same summary as `demo` (baseline, candidate, delta, verdict, confidence, display status, run id) plus, for a skill, the invocation rate per variant (FR-118-09), the execution model, warnings and tokens/cost (cost "n/a (subscription)" in subscription mode, "estimated" in api-key mode, SPEC-203 §4). `--json` prints one JSON object instead. |
 | FR-118-38 | Exit code: 0 when the display status is `passed`; 6 for `failed`, `regression`, `unstable`, `error` and `not-comparable` (roadmap M3: non-zero on regressed/failed); 130 on cancel; 2 for usage and readiness errors. |
-| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged. |
+| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline and inspect both versions (FR-118-08/26) → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged. |
 
 ### 6.5 Document-oriented assertions
 
 All three are deterministic, never execute commands, never throw (failures become failed
-assertions with a message), read at most 2 MiB per file (as `file-contains`) and pass or fail
-(score 0 or 1); weights and `required` work as for every assertion (SPEC-111).
+assertions with a message; an evaluation that cannot finish becomes an assertion error,
+FR-118-46), read at most 2 MiB per file (as `file-contains`) and pass or fail (score 0 or 1);
+weights and `required` work as for every assertion (SPEC-111).
 
 | ID | Requirement |
 | --- | --- |
@@ -155,6 +163,8 @@ assertions with a message), read at most 2 MiB per file (as `file-contains`) and
 | FR-118-43 | **`markdown-table-value`** `{ file, row: { pattern, flags? }, column, min?, max?, decimalSeparator?: '.' \| ',' }` scans the GFM tables of the file in order, takes the first body row whose first cell matches `row.pattern` in a table that has a header cell equal to `column` (case-insensitive, trimmed), parses the first number of that cell and passes iff `min ≤ value ≤ max` (at least one bound required; bounds inclusive). No matching row or column, or no number in the cell, fails with that reason. Details: table index, row text, cell text, parsed value. Selecting other row columns or checking every matching row is future work (§19). |
 | FR-118-44 | **Number parsing** for FR-118-43: the first token matching an optional sign, digits with optional grouping and an optional decimal part. `decimalSeparator: '.'` (default) treats `,`, spaces, no-break and thin spaces as grouping; `','` treats `.` and those spaces as grouping. A range such as `8–12` yields its first number (8); users who need the upper bound match a separate column or row. |
 | FR-118-45 | The three types SHALL be added to the format v1 union additively (no `schemaVersion` change): existing definitions validate and hash exactly as before ([SPEC-108](2026-10-14-benchmark-definition-format.md)). Regular expressions follow FR-108-10 (flags `i`, `m`, `s`, `u`; invalid patterns are validation errors at their path). |
+| FR-118-46 | **Bounded pattern evaluation.** A syntax check (FR-108-10) does not bound matching time, and a user pattern such as `(a+)+$` backtracks exponentially (≈ 4.5 s at 26 characters on Node 24, doubling per character). Every match of a **user-supplied** regular expression — in the three new types and in the existing `file-contains` — SHALL run in a `node:worker_threads` worker, never on the runner's event loop. The worker receives the patterns and the texts to match (file text, or heading and first-cell texts extracted by the line scans) and returns the match results; one worker serves one assertion evaluation. The engine waits for it with a named deadline `ASSERTION_REGEX_TIMEOUT_MS` (2 000 ms per assertion evaluation, all its patterns together) and terminates it (`worker.terminate()`) on the deadline or on the run's `AbortSignal`. A terminated or crashed evaluation SHALL yield an **assertion error** — neither pass nor fail — with the message "Pattern evaluation exceeded 2000 ms; simplify the regular expression" (or the crash reason) and `details.patterns`; the agent run becomes `infrastructure-error` code `assertion-error`, as for missing assertion results (SPEC-111 §13), so it is excluded from quality and counts toward the error rate. Literal strings (headings, phrases, the `column` header) are matched without a user regex, by linear scans on the runner thread. No new dependency (no RE2): the worker is in the platform and keeps JavaScript regex semantics. |
+
 
 ### 6.6 Results per artifact version (web, read-only)
 
@@ -162,16 +172,20 @@ assertions with a message), read at most 2 MiB per file (as `file-contains`) and
 | --- | --- |
 | FR-118-50 | The artifact detail page SHALL list the artifact's versions, newest first, and per version its completed benchmark runs: suite name and version, baseline ("no artifact" / "vN"), agent and version, auth mode and isolation profile, model, display status, delta, confidence, date, link to the run. |
 | FR-118-51 | Runs SHALL be grouped by comparability key; groups are labelled "not comparable with each other" and no number is compared across groups (SPEC-111 FR-111-45). Within a group, version regressions are highlighted per SPEC-111 FR-111-50…52. |
-| FR-118-52 | The run detail page SHALL show the baseline in its header and column labels ("Baseline (no artifact)" / "Baseline (v3)" vs "Candidate (v4)"), the auth mode, isolation profile, permission profile, warnings including `ambient-user-config` with the text "may include user-level instructions", tokens and cost as reported (never invented), the new assertions' details, and the Claude Code trace (tool calls, permission denials, retries) as escaped text. |
+| FR-118-52 | The run detail page SHALL show the baseline in its header and column labels ("Baseline (no artifact)" / "Baseline (v3)" vs "Candidate (v4)"), the auth mode, isolation profile, permission profile, execution model and other reported models, for a skill the invocation per agent run and rate per variant (FR-118-09), warnings including `ambient-user-config` with the text "may include user-level instructions", tokens and cost as reported (never invented), the new assertions' details, and the Claude Code trace (tool calls, permission denials, retries) as escaped text. |
 | FR-118-53 | For a suite whose agent is not `mock`, the UI SHALL NOT offer "Run"; it shows the CLI command to run instead (running from the UI is S2). |
 
 ## 7. Non-functional requirements
 
 - NFR-118-01: No paid or authenticated call in CI or in `pnpm test`; the adapter is tested with
   recorded, redacted stream fixtures and a fake `claude` executable (SPEC-203 §11).
-- NFR-118-02: The new assertions evaluate a 2 MiB Markdown file in < 200 ms and in linear time;
-  heading and table parsing are line-based scans without backtracking regular expressions over the
-  whole file (lessons 2026-10-21 on delimited spans and superlinear parses).
+- NFR-118-02: The new assertions evaluate a 2 MiB Markdown file in < 200 ms (including worker
+  start-up, for patterns without catastrophic backtracking); heading, table and literal matching
+  are line-based linear scans without backtracking regular expressions over the whole file
+  (lessons 2026-10-21 on delimited spans and superlinear parses). User-supplied patterns cannot be
+  made linear, so they are bounded instead: they never run on the runner's event loop and stop
+  after `ASSERTION_REGEX_TIMEOUT_MS` (FR-118-46); heartbeat and cancellation stay responsive
+  while one runs.
 - NFR-118-03: Engine overhead per agent run stays < 2 s (NFR-107-01); the CLI adds < 1 s before
   the first agent starts, excluding `claude auth status`.
 - NFR-118-04: Linux and macOS. Windows is best effort (process-tree kill: SPEC-203 §10).
@@ -190,6 +204,8 @@ One additive, nullable column; no other schema change. Existing rows read as bas
 | `jobs.payload` (`benchmark-run`) | Optional `baselineArtifactVersionId`, `auth: { mode: 'subscription' \| 'api-key' }`, `maxBudgetUsd?`. The payload never contains a secret value. |
 | `benchmark_suite_versions` | Unchanged; `execution_approval_source = 'user'` is now written by `--approve-commands`. |
 | `artifact_benchmark_assignments` | Unchanged; now written by `benchmark run` (FR-118-24). |
+| `agent_runs.trace` (json) | Gains a first `agent-metadata` event with the per-run metadata of FR-118-04 (execution model, reported models) and `skillActivation` (FR-118-09); no column change. |
+| `assertion_results` | Unchanged columns; an assertion error (FR-118-46) is stored with `passed = 0`, `score = 0` and `details.error = { code, message }`, and its agent run is `infrastructure-error`, so the score never enters quality. |
 
 ```mermaid
 flowchart LR
@@ -229,13 +245,26 @@ interface AgentProfile {
   authMode: 'subscription' | 'api-key';
   isolationProfile: 'isolated' | 'user-profile';
   permissionProfile: 'edit-only' | 'edit-and-shell';
-  flagsHash: string;                      // sha256 of the argv without the prompt
+  flagsHash: string;                      // sha256 of the normalised argv (FR-118-04)
+  executionModel: string;                 // system/init model, identical for all agent runs (FR-118-04)
   hostId?: string;                        // only for 'user-profile', §8.3
+}
+
+// Per agent run, skill-md only (FR-118-09); stored in the agent-metadata trace event (§8.1)
+interface SkillActivation {
+  loaded: boolean;
+  invoked: boolean;
+  invocations: number;                    // successful Skill calls for <name>, + 1 for a /<name> prompt
+  otherSkills: string[];                  // other skill names attempted (denied)
 }
 ```
 
 `assertRunnable` additionally rejects a `baselineArtifact` of another artifact, of the same
 content hash, or of another format than the candidate.
+
+`AssertionResult` ([SPEC-107](2026-10-14-benchmark-engine.md) §8.3) gains
+`error?: { code: 'pattern-timeout' | 'pattern-worker-failed'; message: string }` (FR-118-46);
+an evaluator still never throws.
 
 ### 8.3 Comparability key ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43)
 
@@ -243,7 +272,12 @@ The hashed object gains `agentProfile` **only when the adapter reports one**; th
 reports none, so every existing key stays byte-identical. In `user-profile` isolation the profile
 carries `hostId`, a random identifier created once in the data directory's `config.json`, so runs
 that may include one machine's user-level configuration never share a key with another machine's
-runs (export/import is future work). The baseline is not part of the key (FR-118-13).
+runs (export/import is future work). The profile also carries `executionModel` (FR-118-04),
+so runs on different resolved models never share a history group, even when both requested
+`model: null` or the same alias. Because it is observed, the key of a real-agent run is computed
+when the run is summarised; when the agent runs disagree the run is `not-comparable` and the key
+hashes the sorted set of observed models, so it never joins a clean group. Auxiliary
+`reportedModels` are not hashed. The baseline is not part of the key (FR-118-13).
 
 ### 8.4 Assertion definitions ([SPEC-108](2026-10-14-benchmark-definition-format.md) §8.1)
 
@@ -330,7 +364,9 @@ S1 UI is read-only; there is no new page, only changes to existing ones.
   group (FR-118-50/51). Empty state: "No benchmark runs yet. Create a suite with
   `directivebench benchmark init --artifact <slug>`." The command is shown as copyable text.
 - **Run detail** (`/results/[id]`): baseline named in the header and columns; an "Agent profile"
-  row (auth mode, isolation, permission profile, model requested / reported); warnings panel
+  row (auth mode, isolation, permission profile, model requested / execution / other reported);
+  for a skill, an "Invoked" column per agent run and "Skill invoked in n/N runs" per variant next
+  to the verdict (FR-118-09); warnings panel
   shows `ambient-user-config` as "May include user-level instructions (Local Subscription Mode)";
   tokens and cost as reported, cost labelled "estimated" or "n/a (subscription)"; badges "Not
   sandboxed" and, for real agents, "Real agent — results vary between runs" next to confidence.
@@ -369,8 +405,24 @@ Additions and residual risks of this slice:
   planned UI approval; it prints every argv before recording approval and binds it to the
   content-hashed suite version (FR-118-33).
 - **Not sandboxed.** The agent runs with the user's OS permissions; Bash is off unless the suite
-  is approved and asks for `edit-and-shell`. Fixture `.claude/settings*.json` with hooks and
-  `.mcp.json` are flagged as "executes code" and need approval (SPEC-203 §8).
+  is approved and asks for `edit-and-shell`. Fixture `.claude/settings*.json` with hooks,
+  `.mcp.json`, plugin manifests and skills or subagents with hooks are flagged as "executes code"
+  and need approval (FR-118-06, SPEC-203 §8). With `edit-and-shell` the agent may also run
+  scripts bundled with the artifact; the approval of that profile covers any agent shell command.
+- **Code embedded in artifact versions.** A skill can execute code without the Bash tool:
+  frontmatter `hooks` run on invocation, `` !`…` `` placeholders run before the model sees the
+  skill, and `allowed-tools` grants itself tools, all even in an untrusted `-p` run (C3, C8).
+  Suite approval does not cover the artifact, so S1 inspects both artifact versions and refuses
+  such a run before any job exists (FR-118-26); the inspection fails closed, and
+  `disableSkillShellExecution` is set as a second line. Residual: a form of executable
+  customization Claude Code adds later is not detected until the inspection list is updated; the
+  version drift check (SPEC-203 §11) is the trigger to review it.
+- **Skill access and activation.** The `Skill` tool is allowed only for the installed skill
+  (FR-118-08), which also denies ambient user-level skills in subscription mode. Whether the
+  tested skill was used is recorded per run (FR-118-09); a candidate that never invoked its skill
+  is reported as such, not silently scored as the skill's effect. Residual: loading of instruction
+  types (`CLAUDE.md`, `AGENTS.md`, rules) is not visible in the trace; the opt-in live check
+  (§15) proves it for the production flags.
 - **Secrets.** The API key exists only in the agent child's environment; never in argv, job
   payload, database, logs, traces or CLI output; the exact value is added to redaction.
 - **Untrusted output.** Agent output, traces and assertion details are rendered as escaped text;
@@ -385,6 +437,12 @@ Additions and residual risks of this slice:
 | Artifact type/format not supported by suite or adapter | Reason; exit 2 | Nothing |
 | `claude` missing / too old / not logged in / no API key | SPEC-203 §9 code and a fix hint; exit 2 | Nothing |
 | Suite runs commands, no approval | Message naming `--approve-commands`; exit 2 | Nothing |
+| Candidate or baseline version contains hooks, shell injection, extra `allowed-tools` or configuration files | `artifact-executes-code` with each finding; exit 2 | Nothing |
+| A/B versions resolve to different skill names | `baseline-skill-name-differs`; exit 2 | Nothing |
+| Installed skill not loaded by Claude Code | `artifact-not-loaded`; no further agent runs; run `error` | `agent_runs` `infrastructure-error` |
+| Skill loaded but never invoked | Warning `artifact-not-invoked`; invocation rate in summary | Warning on the agent run |
+| Agent runs resolved different execution models | Verdict `not-comparable` with the models per variant | `execution-model-mismatch` reason |
+| Regular-expression evaluation exceeds `ASSERTION_REGEX_TIMEOUT_MS` | Assertion error with the message of FR-118-46 | Agent run `infrastructure-error` `assertion-error`; `assertion_results.details` |
 | No TTY and no `--yes` | Message naming `--yes`; exit 2 | Nothing |
 | Agent run fails (auth expired, rate limit, budget, parse error, timeout) | Per-run status and code in summary; run continues with other agent runs | `agent_runs` with status and code |
 | Ctrl-C | "Cancelled"; exit 130 | Job and benchmark run `cancelled` |
@@ -409,7 +467,18 @@ Additions and residual risks of this slice:
 - The agent writes two Markdown files and the assertion uses a glob: fail with both names; the
   author narrows the glob or names the file in the prompt.
 - `claude` auto-updates during a run: SPEC-112 FR-112-08 → `not-comparable`.
-- `execution.model: null`: CLI default model; warning `unpinned-model` (FR-118-04); reported model shown.
+- `execution.model: null`: CLI default model; warning `unpinned-model` (FR-118-04); execution
+  model shown. If the default changes between agent runs (e.g. the user changes `/model` in
+  another session, or the alias moves to a new snapshot), the run is `not-comparable`; between
+  runs in history, it lands in another comparability group.
+- The skill sets `model:` in its frontmatter: in a `-p` run the override lasts for the rest of
+  the turn, i.e. the run (C3). It is part of the treatment: `executionModel` (session model)
+  stays equal, the switched-to model appears in `reportedModels`, and the plan names the override.
+- The skill sets `disable-model-invocation: true`: Claude cannot invoke it; unless the prompt
+  starts with `/<name>`, every run carries `artifact-not-invoked` and the plan says so.
+- The user has a copy of the tested skill in `~/.claude/skills/` (subscription mode): a `none`
+  baseline that invokes it is `not-comparable` (FR-118-09 c); which copy wins when both exist is
+  an Assumption — requires validation (live check).
 - Two `benchmark run` processes at once: allowed (each owns its job), but they share the plan's rate limits; the plan notice says so and a `rate-limited` result stops the affected run (FR-118-15).
 - Suite edited after a run: re-import creates a new suite version; earlier runs keep theirs and
   land in another comparability group.
@@ -425,18 +494,36 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
   paths, existing examples hash unchanged); comparability key unchanged for mock, changed by
   `agentProfile` and `hostId`; A/B validation in `assertRunnable`; argv/env builders, version
   parser and stream parser per SPEC-203 §11; job creation as `running` in one statement;
-  `resolveArtifactRef`; CLI argument parsing, plan text, confirmation, exit-code mapping.
+  `resolveArtifactRef`; CLI argument parsing, plan text, confirmation, exit-code mapping;
+  per-type profiles (`Skill` and `Skill(<name>)` only for `skill-md`, placeholder in the flags
+  hash); bundle inspection (each executable customization in candidate and in baseline, `` !` ``
+  in prose fails closed, unparsable frontmatter); `skillActivation` from recorded streams
+  (invoked, denied, other skill, `/<name>` prompt, not loaded); comparability with equal and
+  different `executionModel`, auxiliary models only → warning.
+- **Pattern evaluation:** adversarial patterns (`(a+)+$` on 32 `a` + `!`, `(a|a)*b`,
+  `(.*a){20}` on a long line) in each new type and in `file-contains` yield an assertion error
+  within `ASSERTION_REGEX_TIMEOUT_MS` plus a wide margin and the agent run `infrastructure-error`
+  `assertion-error`; while one runs, a timer on the runner thread keeps firing (heartbeat
+  responsiveness) and aborting the run's signal terminates the worker at once; benign patterns
+  return the same results as on the main thread (lesson 2026-10-21 on timing tests under load).
 - **Integration:** `runBenchmark` with `baselineArtifact` and the mock agent (baseline workspace
   holds exactly the baseline version, candidate exactly the candidate); `benchmark run` against a
   temp data dir with a fake `claude` on `PATH` emitting recorded NDJSON, for subscription and
   api-key modes (env assertions: no `ANTHROPIC_*` in subscription; isolated `HOME` in api-key;
   key absent from argv, DB, logs and stdout); a concurrent `LocalRunner` polling the same DB never
-  acquires the CLI's job; SIGINT → `cancelled` and process group gone within 10 s.
+  acquires the CLI's job; SIGINT → `cancelled` and process group gone within 10 s; an artifact
+  version with frontmatter `hooks` is refused and the fake `claude` is never started (it records
+  every invocation; the hook's marker file never appears).
 - **E2E (Playwright):** seeded runs (two versions, A/B and `none`, two comparability groups) →
   artifact page groups and labels; run detail shows baseline label, agent profile, warnings and
   "not reported" tokens where absent; benchmark page shows "Run from the CLI" for a non-mock suite.
-- **Manual, opt-in (`DIRECTIVEBENCH_LIVE_TESTS=claude-code`):** one tiny suite, both auth modes;
-  refreshes the recorded fixtures after redaction review.
+- **Manual, opt-in (`DIRECTIVEBENCH_LIVE_TESTS=claude-code`):** one tiny suite, both auth modes,
+  with the **exact production argv** of SPEC-203 §6/§7: a planted skill with a unique description
+  and a marker instruction is listed in `system/init`, invoked through `Skill`, and its marker
+  appears in the output file; a second, user-level-like skill is denied; a `CLAUDE.md` marker is
+  followed (instruction types); `disableSkillShellExecution` neutralises a `` !` `` placeholder in
+  a project skill. Records the init and `Skill` field names that FR-118-09 marks as assumptions
+  and refreshes the recorded fixtures after redaction review. Required before Phase 4 ships.
 
 ## 16. Acceptance criteria
 
@@ -457,19 +544,25 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-15: Running the same unchanged suite folder twice reuses one suite version; every refusal before the final transaction (readiness, declined confirmation, missing approval) leaves the database unchanged, including no approval record (FR-118-23/39).
 - [ ] AC-16: A fixture with `.claude/settings.json` or `.mcp.json` requires approval; one whose settings set `env`, `apiKeyHelper` or an `ANTHROPIC_*` key is refused with `fixture-overrides-auth`; an attempted edit outside the workspace is denied and recorded (FR-118-06/07).
 - [ ] AC-17: With a fake `claude` returning `rate_limit` (or an expired login) on the first agent run, no further agent run starts and the benchmark run ends `error` (FR-118-15); `--max-budget-usd` without `--auth api-key` exits 2.
-- [ ] AC-18: The flags hash of two agent runs in different workspaces is equal; a different reported model snapshot yields `unpinned-model`, not `not-comparable` (FR-118-04).
+- [ ] AC-18: The flags hash of two agent runs in different workspaces is equal; agent runs whose `system/init` models differ (baseline vs candidate, or between repetitions) yield `not-comparable` with `execution-model-mismatch`, never `improved`/`regressed`; runs that differ only in auxiliary `modelUsage` models stay comparable with warning `auxiliary-models`; two otherwise identical runs on different execution models get different comparability keys (FR-118-04, §8.3).
 - [ ] AC-19: The web server action refuses to enqueue a suite whose agent is not `mock` even when called directly (FR-118-05), and version regressions within a comparability group are highlighted on the artifact page (FR-118-51).
 - [ ] AC-20: The summary and the `--json` object contain baseline, candidate, delta, verdict, confidence, display status, run id, warnings and tokens/cost as reported (FR-118-37).
+- [ ] AC-21: For a `skill-md` artifact the argv contains `Skill` in `--tools` and only `Skill(<name>)`/`Skill(<name> *)` in `--allowedTools`; instruction types get no `Skill`; from recorded streams each agent run records `skillActivation`; a run without the skill loaded ends `artifact-not-loaded` and stops the run; a loaded but uninvoked candidate run is scored with `artifact-not-invoked` and the summary shows the invocation rate; a `none` baseline invoking `<name>` yields `not-comparable` (FR-118-08/09).
+- [ ] AC-22: The opt-in live check of §15 passes with the exact production argv in both auth modes and its results (including the field names marked as assumptions) are recorded in SPEC-203 before Phase 4 ships.
+- [ ] AC-23: A candidate **or** baseline version with frontmatter `hooks`, a `` !` `` placeholder, `allowed-tools` beyond the profile, or a bundled configuration file is refused with `artifact-executes-code` before any database change, and no `claude` process starts; a fixture skill with `hooks` requires execution approval (FR-118-06/26).
+- [ ] AC-24: An adversarial pattern in any regex-capable assertion ends as an assertion error within `ASSERTION_REGEX_TIMEOUT_MS` (+ margin), the agent run is `infrastructure-error` `assertion-error`, the runner thread stays responsive meanwhile, and cancellation terminates the worker (FR-118-46, NFR-118-02).
 
 ## 17. Dependencies
 
 - Specs changed in the same change set (sections): [SPEC-203](2026-10-14-integration-claude-code.md)
-  §4.1, §7, §12, §13 (baseline install, default auth mode and env-only key, S1 scope);
+  §1 evidence, §4, §4.1, §4.2, §6, §7, §8, §11, §12, §13 (baseline install, default auth mode and
+  env-only key, per-type profiles with `Skill`, executable skill customizations, execution model,
+  S1 scope);
   [SPEC-107](2026-10-14-benchmark-engine.md) FR-107-06, §8.1, §8.3, §8.4;
-  [SPEC-108](2026-10-14-benchmark-definition-format.md) §8.1, §19;
+  [SPEC-108](2026-10-14-benchmark-definition-format.md) FR-108-10, §8.1, §19;
   [SPEC-110](2026-10-14-benchmark-execution.md) FR-110-05;
-  [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43;
-  [SPEC-112](2026-10-14-red-green-evaluation.md) §4, FR-112-01/03, §19;
+  [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43, FR-111-44;
+  [SPEC-112](2026-10-14-red-green-evaluation.md) §4, FR-112-01/03/04/08/09, §14, §19;
   [SPEC-113](2026-10-14-results-and-reporting.md) FR-113-10, FR-113-21;
   [SPEC-114](2026-10-14-runner-management.md) FR-114-02;
   [SPEC-009](2026-10-14-cli-architecture.md) §2; [SPEC-013](2026-10-14-implementation-roadmap.md) M3, M4, §4.
@@ -514,11 +607,14 @@ changed before merge.
 | Q6 | How does API Key Mode get the key without the keychain? | `ANTHROPIC_API_KEY` from the CLI environment only | ADR-0008 keychain storage is not accepted or built | reversible |
 | Q7 | Can `serve` pick up a CLI-created job? | No: the CLI creates the job already acquired by its own runner | Avoids running a real agent in a process with another environment | reversible |
 | Q8 | How are cost and consent handled? | Plan + notices before every run; TTY confirmation or `--yes`; refuse otherwise | Brief: UI and CLI must say runs count against the plan | reversible |
-| Q9 | Which comparability dimensions are added? | `agentProfile` (auth, isolation, permissions, flags hash; `hostId` for user-profile), only when reported, so mock keys stay identical | Brief: mode and isolation are part of the key; "never compared across machines" | reversible |
+| Q9 | Which comparability dimensions are added? | `agentProfile` (auth, isolation, permissions, flags hash, observed execution model; `hostId` for user-profile), only when reported, so mock keys stay identical; differing execution models → `not-comparable` (Codex review round 1) | Brief: mode and isolation are part of the key; "never compared across machines"; SPEC-112 same-model invariant | reversible |
 | Q10 | How does an assertion find an output file whose name varies? | `file` accepts a glob over agent-changed files; exactly one match | Real agents choose names; avoids special-casing one skill | reversible |
 | Q11 | How are numbers in table cells parsed? | First number; `decimalSeparator` `.` (default) or `,`; ranges use the first number | Covers common Polish/English notations without a locale engine | reversible |
 | Q12 | Exit codes of `benchmark run`? | 0 only for `passed`; 6 otherwise; 2 usage; 130 cancel | Roadmap M3: non-zero on regressed/failed; reuses `ExitCode` | reversible |
 | Q13 | Can the web UI start real-agent runs? | No; it shows the CLI command (S2 brings Run) | Brief: UI is read-only in S1 | reversible |
+| Q14 | How is skill activation handled? | `Skill` allowed only for the installed skill; per-run `skillActivation`; not loaded → `infrastructure-error` and stop; loaded but not invoked → scored with a warning and an invocation rate (Codex review round 1) | Triggering is part of a skill's quality, so non-invocation is a result, not an invalid run; a missing load is a setup failure | reversible |
+| Q15 | Approve or refuse executable code inside artifact versions? | Refuse in S1 (`artifact-executes-code`) for candidate and baseline (Codex review round 1) | Suite approval is per suite version; binding approval to artifact hashes needs a new approval record — future work | reversible |
+| Q16 | How are user regular expressions bounded? | Worker thread per assertion evaluation, `ASSERTION_REGEX_TIMEOUT_MS` = 2 000 ms, terminate → assertion error (Codex review round 1) | No dependency; keeps JS regex semantics; RE2 would change semantics and add a native module | reversible |
 
 ## 19. Future extensions
 
@@ -530,6 +626,8 @@ changed before merge.
   phrases, other row-key columns and all-rows checks for the document assertions; `benchmark list`;
   JSON/Markdown export ([SPEC-113](2026-10-14-results-and-reporting.md) §6).
 - Three-way runs (none, v(n-1), v(n)) in one benchmark run.
+- Execution approval bound to artifact-version content hashes, so skills with hooks or shell
+  injection can be benchmarked (S1 refuses them, FR-118-26).
 
 ## 20. Implementation status
 
@@ -547,9 +645,11 @@ Each phase leaves the application working and is shippable on its own PR.
 1. Introduce the assertion plugin registry (SPEC-107 §8.3) with the four existing types; no
    behaviour change (existing tests unchanged, example hashes unchanged).
 2. `file` target resolution (path or glob over changed files) with tests.
-3. `markdown-sections`, then `required-phrases`, then `markdown-table-value` (+ number parsing),
+3. Bounded pattern evaluation (FR-118-46) as a shared worker helper, moving `file-contains` onto
+   it; adversarial-pattern, heartbeat and cancellation tests.
+4. `markdown-sections`, then `required-phrases`, then `markdown-table-value` (+ number parsing),
    each with schema, evaluator, unit tests and a linear-time test.
-4. Extend the mock example set with a specification-only document suite that validates.
+5. Extend the mock example set with a specification-only document suite that validates.
 
 **Phase 2 — A/B baseline, run storage and guards** (engine, database, runner, web action; mock agent).
 1. `RunBenchmarkInput.baselineArtifact` + `assertRunnable` checks; integration test with the mock.
@@ -564,10 +664,12 @@ Phases 2 and 3 have no new user-visible behaviour on their own beyond the guard;
 shippable because each leaves the mock path unchanged and fully tested.
 
 **Phase 3 — Claude Code adapter** (agent-adapters).
-1. Pure builders: argv (normalised flags hash), env per auth mode, version parser, install
-   convention, fixture-settings checks (FR-118-06); unit tests.
-2. Stream parser and error normalisation against recorded fixtures; stop-on-auth/quota codes
-   (FR-118-15) in the engine.
+1. Pure builders: argv per artifact type (normalised flags hash, `Skill` rules), env per auth
+   mode, version parser, install convention, fixture-settings checks (FR-118-06) and artifact
+   bundle inspection (FR-118-26); unit tests.
+2. Stream parser and error normalisation against recorded fixtures, including execution model
+   and `skillActivation`; stop-on-auth/quota/not-loaded codes (FR-118-09/15) and the
+   execution-model comparability check (FR-118-04) in the engine.
 3. Process control with the fake `claude` (stdin prompt, timeout, cancellation, process group,
    out-of-workspace edit denied).
 4. Readiness (`auth status`, API key presence); detection reports `ready`/`missing`.
