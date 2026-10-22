@@ -162,7 +162,7 @@ describe('importCandidates (FR-118-27)', () => {
       };
       for (const build of inputs) {
         await expectLinearTime(
-          { build, run: scan, baseline: textBaseline, size: 24_000 },
+          { build, run: scan, baseline: textBaseline, size: 192_000 },
           build(8),
         );
       }

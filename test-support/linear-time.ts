@@ -2,16 +2,16 @@
  * The one helper for linear-time assertions in every package's tests (issue #114, lesson
  * 2026-10-21 "Timing tests must survive a loaded CI runner").
  *
- * A test builds its input at two sizes, `size` and `size × LINEAR_SIZE_STEP`, and measures the
+ * A test builds its input at two sizes, `size ÷ LINEAR_SIZE_STEP` and `size`, and measures the
  * code under test and a linear baseline on both. The result is the growth of the code divided by
- * the growth of the baseline: about 1 for linear code, about `LINEAR_SIZE_STEP` (8) for quadratic
- * code, whatever the machine. Raw growth depends on the machine: once inputs outgrow the CPU
+ * the growth of the baseline: about 1 for linear code, √32 ≈ 5.7 for N^1.5 code and 32 for
+ * quadratic code, whatever the machine. Raw growth depends on the machine: once inputs outgrow the CPU
  * caches even `split` grows ~16× for 8× the input, and a loaded 2-core runner slows everything.
  *
  * Measurement rules, from CI failures and their reproduction under `taskset -c 0,1` with load:
  * - a full garbage collection after building the inputs, so their garbage cannot land inside a
  *   measurement;
- * - samples measure the process's CPU time, not wall-clock time, so other processes on the
+ * - samples measure the test thread's CPU time, not wall-clock time, so other processes on the
  *   shared cores cannot stretch a sample (they did, unevenly, by whole scheduler time slices);
  * - every sample repeats the call until it has used `MIN_SAMPLE_MS` of CPU time, so timer
  *   resolution cannot dominate a small input;
@@ -28,14 +28,19 @@ import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { expect } from 'vitest';
 
-/** Factor between the small and the large input. */
-export const LINEAR_SIZE_STEP = 8;
+/**
+ * Factor between the small and the large input. 32 rather than 8 so that N^1.5 growth (√8 ≈ 2.8
+ * at 8×) clears the bound too (Codex review of PR #121); the large inputs keep the sizes the tests
+ * used before, so only the small ones shrank.
+ */
+export const LINEAR_SIZE_STEP = 32;
 
 /**
- * Bound on the normalised growth: linear code measures ~1 (up to ~2 under load), quadratic code
- * ~8 and an N^1.5 scan ~2.8 × noise, so the bound sits between linear and quadratic.
+ * Bound on the normalised growth. Measured under `taskset -c 0,1` with two `yes` processes and
+ * four parallel vitest runs: every linear shape 0.8–1.9 (one Markdown code-span shape up to 2.45),
+ * an N^1.5 control 5.5–6.4 and a quadratic control 33–39.
  */
-export const MAX_LINEAR_RATIO = 4;
+export const MAX_LINEAR_RATIO = 3.5;
 
 /** Fastest of this many interleaved samples per series. */
 export const LINEAR_TIME_ROUNDS = 3;
@@ -72,13 +77,24 @@ export interface LinearTimeCase<T> {
   run: (input: T) => unknown;
   /** Code known to be linear in the input, measured on the same inputs (`textBaseline` for text). */
   baseline: (input: T) => unknown;
-  /** The small size; the large one is `size × LINEAR_SIZE_STEP`. */
+  /** The large size; the small one is `size ÷ LINEAR_SIZE_STEP`. Keep it small enough for 2 cores. */
   size: number;
 }
 
-/** CPU time this process has used, in milliseconds (user and system, all threads). */
+/**
+ * CPU time of the calling thread, in milliseconds (user and system). Process-wide CPU time also
+ * bills V8's helper threads (concurrent marking and sweeping, background compilation), whose work
+ * follows the size of vitest's heap rather than the input, and inflated samples of large inputs.
+ * `process.threadCpuUsage` exists from Node.js 23.9 (CI runs 24); older versions fall back to the
+ * process-wide figure.
+ */
+const threadCpuUsage: () => NodeJS.CpuUsage =
+  typeof process.threadCpuUsage === 'function'
+    ? () => process.threadCpuUsage()
+    : () => process.cpuUsage();
+
 function cpuMs(): number {
-  const { user, system } = process.cpuUsage();
+  const { user, system } = threadCpuUsage();
   return (user + system) / 1000;
 }
 
@@ -86,30 +102,36 @@ function cpuMs(): number {
  * CPU milliseconds per call of `fn(input)`, measured over at least `MIN_SAMPLE_MS` of CPU time.
  * CPU time, not wall-clock time: on a loaded runner the scheduler takes the core away for whole
  * time slices, which inflated wall-clock samples unevenly (a quadratic function measured ~2 under
- * load), while the CPU time a call uses barely changes.
+ * load), while the CPU time a call uses barely changes. Calls run in doubling batches and the
+ * clock is read once per batch: reading it after every call (a system call of about a
+ * microsecond) inflated the baseline on small inputs, where one call takes about as long.
  */
 async function sample<T>(fn: (input: T) => unknown, input: T): Promise<number> {
   let calls = 0;
+  let batch = 1;
   const started = cpuMs();
   let elapsed: number;
   do {
-    // Await only real promises: an `await` per synchronous call would add a constant cost that
-    // makes small inputs look slower and hides growth.
-    const result = fn(input);
-    if (result instanceof Promise) await result;
-    calls += 1;
+    for (let call = 0; call < batch; call += 1) {
+      // Await only real promises: an `await` per synchronous call would add a constant cost
+      // that makes small inputs look slower and hides growth.
+      const result = fn(input);
+      if (result instanceof Promise) await result;
+    }
+    calls += batch;
+    batch *= 2;
     elapsed = cpuMs() - started;
   } while (elapsed < MIN_SAMPLE_MS);
   return elapsed / calls;
 }
 
-/** Growth of `run` from `size` to `size × LINEAR_SIZE_STEP`, divided by the baseline's growth. */
+/** Growth of `run` from `size ÷ LINEAR_SIZE_STEP` to `size`, divided by the baseline's growth. */
 export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<number> {
-  const small = await test.build(test.size);
-  const large = await test.build(test.size * LINEAR_SIZE_STEP);
+  const small = await test.build(test.size / LINEAR_SIZE_STEP);
+  const large = await test.build(test.size);
   // One collection before measuring, not one per sample: the garbage of building the inputs must
-  // not land in a sample, but a forced collection leaves background sweeping that counts towards
-  // the process's CPU time and inflated the next short sample (a quadratic function measured ~3).
+  // not land in a sample, and a forced collection before every sample made the samples slower
+  // and noisier (a quadratic function measured ~3).
   await collectGarbage();
   const series = [
     [test.run, small],
@@ -130,7 +152,7 @@ export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<numbe
   return runLarge / runSmall / (baseLarge / baseSmall);
 }
 
-/** Asserts that `run` grows no faster than the linear baseline (normalised ratio below 4). */
+/** Asserts that `run` grows like the linear baseline (normalised ratio below `MAX_LINEAR_RATIO`). */
 export async function expectLinearTime<T>(test: LinearTimeCase<T>, label?: string): Promise<void> {
   expect(await linearTimeRatio(test), label).toBeLessThan(MAX_LINEAR_RATIO);
 }

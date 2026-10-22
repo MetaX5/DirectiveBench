@@ -737,7 +737,7 @@ describe('linear time', () => {
     'scans %s in linear time',
     async (name) => {
       const build = shapes[name] as (size: number) => string;
-      await expectLinearTime({ build, run: scanMarkdown, baseline: textBaseline, size: 20_000 });
+      await expectLinearTime({ build, run: scanMarkdown, baseline: textBaseline, size: 160_000 });
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
@@ -749,13 +749,13 @@ describe('linear time', () => {
         build: (size) => `${'word '.repeat(size)}QA`,
         run: (text) => containsLiteral(text, 'word   QA', false),
         baseline: textBaseline,
-        size: 50_000,
+        size: 400_000,
       });
       await expectLinearTime({
         build: (size) => '1 000'.repeat(size),
         run: (text) => parseFirstNumber(text, '.'),
         baseline: textBaseline,
-        size: 50_000,
+        size: 400_000,
       });
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,

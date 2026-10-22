@@ -271,7 +271,7 @@ describe('parseMarkdown blocks', () => {
         build: (size) => wideTable(size, size / 10),
         run: parseMarkdown,
         baseline: textBaseline,
-        size: 2_000,
+        size: 16_000,
       });
       // Extra cells beyond the header are dropped.
       expect(parseMarkdown('a |\n- |\nx | y | z')).toEqual([
@@ -308,7 +308,7 @@ describe('parseMarkdown blocks', () => {
       ];
       for (const build of shapes) {
         await expectLinearTime(
-          { build, run: parseMarkdown, baseline: textBaseline, size: 12_000 },
+          { build, run: parseMarkdown, baseline: textBaseline, size: 96_000 },
           build(12).slice(0, 12),
         );
       }

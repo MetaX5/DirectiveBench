@@ -395,7 +395,7 @@ describe('inspectWorkspace: limits (FR-118-27)', () => {
         build: fill,
         run: (dir) => inspectPinned(dir, { homeDir: home }),
         baseline: readAll,
-        size: 12,
+        size: 128,
       });
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,

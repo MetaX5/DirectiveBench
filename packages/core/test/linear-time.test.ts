@@ -19,6 +19,14 @@ function countSpaces(text: string): number {
   return count;
 }
 
+/** N^1.5: one pass per √length, like a search repeated for every distinct run length. */
+function countSpacesRepeatedly(text: string): number {
+  let count = 0;
+  const passes = Math.floor(Math.sqrt(text.length));
+  for (let pass = 0; pass < passes; pass += 1) count += countSpaces(text);
+  return count;
+}
+
 /** Quadratic: rescans the rest of the text from every space, like an unbounded lookahead. */
 function countSpacePairs(text: string): number {
   let count = 0;
@@ -41,8 +49,22 @@ describe('expectLinearTime', () => {
         build: words,
         run: countSpaces,
         baseline: textBaseline,
-        size: 100_000,
+        size: 800_000,
       });
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'fails N^1.5 code',
+    async () => {
+      const superlinear = {
+        build: words,
+        run: countSpacesRepeatedly,
+        baseline: textBaseline,
+        size: 32_000,
+      };
+      expect(await linearTimeRatio(superlinear)).toBeGreaterThan(MAX_LINEAR_RATIO);
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
@@ -50,7 +72,12 @@ describe('expectLinearTime', () => {
   it(
     'fails quadratic code',
     async () => {
-      const quadratic = { build: words, run: countSpacePairs, baseline: textBaseline, size: 2_000 };
+      const quadratic = {
+        build: words,
+        run: countSpacePairs,
+        baseline: textBaseline,
+        size: 16_000,
+      };
       expect(await linearTimeRatio(quadratic)).toBeGreaterThan(MAX_LINEAR_RATIO);
       await expect(expectLinearTime(quadratic, 'quadratic')).rejects.toThrow(/quadratic/);
     },
@@ -61,7 +88,7 @@ describe('expectLinearTime', () => {
     'measures asynchronous code',
     async () => {
       const run = async (text: string) => countSpaces(text);
-      await expectLinearTime({ build: words, run, baseline: textBaseline, size: 100_000 });
+      await expectLinearTime({ build: words, run, baseline: textBaseline, size: 800_000 });
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
