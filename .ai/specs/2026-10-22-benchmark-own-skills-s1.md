@@ -673,6 +673,9 @@ changed before merge.
   `test/document-assertions.test.ts`, `markdown.test.ts`, `pattern-worker.test.ts`,
   `definition.test.ts` and `orchestrator.test.ts` (AC-6, AC-24). Agent-written table text in
   messages and details is secret-redacted and cut to `MAX_EXCERPT_CHARS` (200) per FR-107-16.
+  Implementation details within the FRs: headings inside block quotes and list items count, HTML
+  comments and indented code do not; a minus is a sign only at the start or after whitespace or
+  `(` (`PM-5` → 5) and `.5` → 0.5 (FR-118-44); a glob mismatch names at most 20 files.
   NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
   development machine; the CI test bounds it at 1 s (plus size-ratio linearity tests) so a loaded
   runner cannot flake it.

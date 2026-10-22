@@ -111,6 +111,11 @@ source (a string, not instrumented — behaviour is tested end to end).
 - **Runner integration test added** (`packages/runner/test/document-assertions.test.ts`, new file)
   to prove the §8.1 persistence contract through SQLite; no runner source changed.
 
+- **Review round 1 refinements (FR-118-41/44 details not fixed by the spec):** headings inside
+  block quotes and list items count, their other lines (lazy continuation), indented code and
+  HTML comments never become setext content; a minus is a sign only at the start or after
+  whitespace or `(` (`PM-5` → 5), `.5` → 0.5, and a non-finite number is no number.
+
 ## Work performed
 
 1. Run log / execution plan, draft PR #105 — dab5b0a.
@@ -119,6 +124,9 @@ source (a string, not instrumented — behaviour is tested end to end).
    schemas and traits in `definition.ts`, assertion-error handling in `orchestrator.ts`; tests
    `pattern-worker`, `markdown`, `document-assertions`, `definition`, `orchestrator` — ae59f03.
 3. Example `examples/benchmarks/document-assertions/` — 9618119.
+5. Review round 1 (independent subagent, request changes: 1 major, 4 minor, nits): worker
+   construction fails closed, Markdown container/comment handling, number parsing, named option,
+   shared literal search, capped glob list, traits-based `deterministic` — see the next commit.
 4. SPEC-118 §20 and AC-6/AC-24, SPEC-107 §8.3/§20, SPEC-108 FR-108-10/§8.1/§19/§20, lesson,
    runner integration test, this log.
 
