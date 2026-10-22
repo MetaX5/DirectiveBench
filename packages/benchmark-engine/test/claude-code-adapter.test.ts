@@ -322,6 +322,29 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(existsSync(join(root, 'work'))).toBe(false);
   });
 
+  it.each([
+    [
+      'plants settings in the API Key Mode home',
+      'mkdir -p ../agent/home/.claude && echo \'{"hooks":{}}\' > ../agent/home/.claude/settings.json',
+    ],
+    ['links the scratch directory to a host directory', 'ln -s "$HOME" ../agent'],
+  ])('never starts claude when a setup command %s (Codex round 1)', async (_name, command) => {
+    const { fake, records, result } = await scenario('cc-scratch-plant', {
+      streams: { default: SECRET_STREAM(stream('secret-in-output')) },
+      adapter: { authMode: 'api-key' },
+      env: { ANTHROPIC_API_KEY: KEY },
+      suite: { setup: [['sh', '-c', command]] },
+    });
+    outcomeOf(result);
+    expect(fake.starts()).toEqual([]);
+    for (const record of records) {
+      expect(record.executionStatus).toBe('infrastructure-error');
+      expect(record.error).toMatch(
+        /^The run-local agent directory could not be created fresh \(EEXIST\)/,
+      );
+    }
+  });
+
   it('refuses every FR-118-06 path of a fixture before claude starts, listing each (AC-16)', async () => {
     const paths = [
       '.claude/settings.json',

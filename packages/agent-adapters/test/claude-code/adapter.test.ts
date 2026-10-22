@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -447,6 +447,36 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     expect(result).toMatchObject({ status: 'agent-error', errorCode: 'output-limit' });
   });
 
+  it.each([
+    [
+      'a planted home',
+      (scratch: string) => mkdirSync(join(scratch, 'home/.claude'), { recursive: true }),
+    ],
+    ['a planted temp directory', (scratch: string) => mkdirSync(join(scratch, 'tmp'))],
+  ])(
+    'refuses a scratch directory with %s before claude starts (Codex round 1)',
+    async (_name, plant) => {
+      const h = harness();
+      const request = await h.request();
+      plant(request.scratchDir);
+      const result = await h.adapter({ authMode: 'api-key' }).run(request);
+      expect(result).toMatchObject({ status: 'infrastructure-error' });
+      expect(result.error).toMatch(/EEXIST/);
+      expect(h.fake.invoked()).toBe(false);
+    },
+  );
+
+  it('refuses a scratch directory that is a link (Codex round 1)', async () => {
+    const h = harness();
+    const request = await h.request();
+    const link = join(h.root, 'scratch-link');
+    symlinkSync(request.scratchDir, link);
+    const result = await h.adapter().run({ ...request, scratchDir: link });
+    expect(result).toMatchObject({ status: 'infrastructure-error' });
+    expect(result.error).toMatch(/scratch directory .* not a real directory/);
+    expect(h.fake.invoked()).toBe(false);
+  });
+
   it('turns an unexpected error into infrastructure-error without a code', async () => {
     const h = harness();
     const request = await h.request();
@@ -458,7 +488,7 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
       status: 'infrastructure-error',
       warnings: ['ambient-user-config'],
     });
-    expect(result.error).toMatch(/ENOTDIR|EEXIST/);
+    expect(result.error).toMatch(/is not a real directory/);
     expect(result.errorCode).toBeUndefined();
     expect(h.fake.invoked()).toBe(false);
   });

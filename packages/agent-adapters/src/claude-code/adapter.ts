@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { lstat, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ArtifactBundle } from '@directivebench/core';
@@ -199,8 +199,14 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           ? { authMode, baseEnv: this.env, tempDir, isolatedHome, apiKey }
           : { authMode, baseEnv: this.env, tempDir };
       const env = buildClaudeEnv(envInput);
-      await mkdir(tempDir, { recursive: true, mode: 0o700 });
-      if (authMode === 'api-key') await mkdir(isolatedHome, { recursive: true, mode: 0o700 });
+      // Fresh and exclusive: a home or temporary directory that already exists (or a scratch
+      // directory that is a link) may hold configuration someone else planted, which the API Key
+      // Mode `CLAUDE_CONFIG_DIR` would load.
+      if (!(await lstat(request.scratchDir)).isDirectory()) {
+        throw new Error(`The scratch directory ${request.scratchDir} is not a real directory.`);
+      }
+      await mkdir(tempDir, { mode: 0o700 });
+      if (authMode === 'api-key') await mkdir(isolatedHome, { mode: 0o700 });
 
       const skillName = artifact.format === 'skill-md' ? artifact.skillName : undefined;
       const flagsHash = claudeFlagsHash(argv, {
