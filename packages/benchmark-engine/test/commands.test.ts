@@ -98,6 +98,7 @@ describe('runCommand', () => {
       stderr: '',
       truncated: false,
       error: 'empty command',
+      strayProcesses: false,
     });
   });
 
@@ -202,6 +203,29 @@ describe('runCommand', () => {
     expect(result).toMatchObject({ timedOut: true, cancelled: true, signal: 'SIGKILL' });
     expect(result.durationMs).toBeGreaterThanOrEqual(850);
   });
+
+  posixOnly(
+    'kills a background child a command leaves behind when it exits (SPEC-118 §12)',
+    async () => {
+      // The child closed its output, so nothing but the process group ties it to the command.
+      const result = await runCommand(
+        ['sh', '-c', 'sleep 600 > /dev/null 2>&1 < /dev/null & echo $!'],
+        options(),
+      );
+      const child = Number(result.stdout.trim());
+      expect(result).toMatchObject({ exitCode: 0, strayProcesses: false, timedOut: false });
+      expect(() => process.kill(child, 0)).toThrow(/ESRCH/);
+    },
+  );
+
+  posixOnly(
+    'ends when the command exits although a background child holds its output',
+    async () => {
+      const result = await runCommand(['sh', '-c', 'sleep 600 & echo started'], options());
+      expect(result).toMatchObject({ exitCode: 0, timedOut: false, stdout: 'started\n' });
+      expect(result.durationMs).toBeLessThan(5000);
+    },
+  );
 
   it('handles cancellation of a command whose executable could not be started', async () => {
     const controller = new AbortController();

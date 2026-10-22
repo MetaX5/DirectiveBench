@@ -1,4 +1,5 @@
 import type { ArtifactBundle, ModelSelection } from '@directivebench/core';
+import type { WorkspacePin } from './workspace-pin';
 
 /**
  * Capability flags describe what an adapter can do. The engine checks capabilities instead of
@@ -57,7 +58,19 @@ export type TraceEvent =
   | { type: 'error'; message: string };
 
 export interface AgentRunRequest {
-  workspaceDir: string;
+  /**
+   * The run workspace, pinned by the engine when it was created and before any `setup` command
+   * ran (SPEC-118 §12). The agent runs in this workspace; adapters that inspect or write it
+   * check the pin first.
+   */
+  workspace: WorkspacePin;
+  /** Workspace-relative paths `installArtifact` wrote for this run; empty when none was installed. */
+  installedPaths: readonly string[];
+  /**
+   * A private, empty, run-local directory outside the workspace (absolute) for the adapter's own
+   * files, such as an isolated home or temporary directory. Removed with the run.
+   */
+  scratchDir: string;
   prompt: string;
   timeoutMs: number;
   signal: AbortSignal;
@@ -66,7 +79,12 @@ export interface AgentRunRequest {
   options: unknown;
 }
 
-export type AgentExecutionStatus = 'completed' | 'agent-error' | 'timeout' | 'cancelled';
+/**
+ * `infrastructure-error`: the run could not take place for a reason outside the agent's behaviour,
+ * e.g. the pre-spawn workspace inspection refused it (SPEC-118 FR-118-06/27).
+ */
+export type AgentExecutionStatus =
+  'completed' | 'agent-error' | 'timeout' | 'cancelled' | 'infrastructure-error';
 
 export interface AgentUsage {
   inputTokens?: number;
@@ -93,8 +111,11 @@ export interface AgentAdapter {
   readonly displayName: string;
   readonly capabilities: AgentCapabilities;
   detect(): Promise<AgentDetection>;
-  /** Installs one exact artifact version into a workspace (GREEN/candidate variant only). */
-  installArtifact(workspaceDir: string, artifact: ArtifactBundle): Promise<InstalledArtifact>;
+  /**
+   * Installs one exact artifact version into the pinned workspace (candidate, and an A/B
+   * baseline's version). Called after `setup`, so adapters must not trust the path alone.
+   */
+  installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact>;
   run(request: AgentRunRequest): Promise<AgentRunResult>;
 }
 

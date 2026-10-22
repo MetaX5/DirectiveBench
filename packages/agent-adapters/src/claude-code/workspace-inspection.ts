@@ -3,7 +3,7 @@ import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { canonicalSegment } from './bundle-inspection';
 import { importCandidates, IMPORT_TOKEN_MAX_LENGTH } from './import-tokens';
-import { errorCode, workspacePinIssue, type WorkspacePin } from './workspace-pin';
+import { errorCode, workspacePinIssue, type WorkspacePin } from '../workspace-pin';
 
 /**
  * The most directory entries (files, directories, links and others) one inspection visits

@@ -7,10 +7,10 @@ import {
 import {
   inspectWorkspace,
   installClaudeArtifact,
-  pinWorkspace,
   type WorkspaceFinding,
   type WorkspaceInspectionOptions,
 } from '../../src/claude-code';
+import { pinWorkspace } from '../../src/workspace-pin';
 import type { InstalledArtifact } from '../../src/contract';
 
 /** An artifact bundle with the given files (path → content). */

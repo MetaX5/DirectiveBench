@@ -6,4 +6,5 @@ export * from './import-tokens';
 export * from './install';
 export * from './skill-name';
 export * from './workspace-inspection';
-export { pinWorkspace, workspacePinIssue, type WorkspacePin } from './workspace-pin';
+export * from './process';
+export * from './run';

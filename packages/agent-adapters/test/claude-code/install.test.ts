@@ -20,8 +20,8 @@ import {
   ClaudeCodeError,
   installClaudeArtifact,
   isClaudeInstallableFormat,
-  pinWorkspace,
 } from '../../src/claude-code';
+import { pinWorkspace } from '../../src/workspace-pin';
 import { bundle, installPinned } from './helpers';
 
 let scratch: string;
@@ -105,6 +105,21 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
         'artifact-format-unsupported',
       );
     }
+  });
+
+  it('refuses again, at install, a version that executes code or overrides the model (FR-118-26)', async () => {
+    const hooks = bundle('skill-md', {
+      'SKILL.md': '---\nname: pdf\ndescription: d\nhooks:\n  PreToolUse: []\n---\nBody\n',
+    });
+    await expect(installPinned(workspace, hooks)).rejects.toThrow(
+      /^The artifact version is refused: SKILL\.md: .*hooks/,
+    );
+    expect(await codeOf(() => installPinned(workspace, hooks))).toBe('artifact-executes-code');
+    const model = bundle('skill-md', {
+      'SKILL.md': '---\nname: pdf\ndescription: d\nmodel: opus\n---\nBody\n',
+    });
+    expect(await codeOf(() => installPinned(workspace, model))).toBe('artifact-overrides-model');
+    expect(await readdir(workspace)).toEqual([]);
   });
 
   it('refuses an existing skill directory and an existing rule file', async () => {

@@ -1,7 +1,13 @@
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
-import type { AgentAdapter, AgentRunResult, TraceEvent } from '@directivebench/agent-adapters';
+import {
+  pinWorkspace,
+  workspacePinIssue,
+  type AgentAdapter,
+  type AgentRunResult,
+  type TraceEvent,
+} from '@directivebench/agent-adapters';
 import {
   baselineArtifactIssue,
   canonicalJson,
@@ -194,6 +200,14 @@ export function comparabilityKey(
   );
 }
 
+/**
+ * How long the engine waits, after an agent run's timeout, for the adapter to return before it
+ * records the run as timed out and moves on. Longer than an adapter's own stop sequence (SIGTERM,
+ * a 5 s grace, SIGKILL of the process group and waiting for it, SPEC-203 §5), so an adapter that
+ * honours the signal always reports its own result.
+ */
+export const AGENT_STOP_GRACE_MS = 10_000;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<T>((resolve) => {
@@ -241,6 +255,7 @@ async function executeAgentRun(
   const runDir = join(input.workRoot, benchmarkCase.id, `${variant}-${repetition}`);
   const workspaceDir = join(runDir, 'workspace');
   const homeDir = join(runDir, 'home');
+  const scratchDir = join(runDir, 'agent');
   const trace: AgentRunRecord['trace'] = [];
   const stage = (name: Extract<EngineTraceEvent, { type: 'stage' }>['stage']) =>
     trace.push({ type: 'stage', stage: name, at: new Date().toISOString() });
@@ -268,6 +283,7 @@ async function executeAgentRun(
   try {
     stage('prepare');
     await mkdir(homeDir, { recursive: true });
+    await mkdir(scratchDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
     // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
     const copiedHash = hashManifest(await buildManifest(workspaceDir));
@@ -277,6 +293,10 @@ async function executeAgentRun(
         `Workspace does not match fixture snapshot ${caseFixtures.fixture.slice(0, 12)} (got ${copiedHash.slice(0, 12)}); the fixture store may be corrupted.`,
       );
     }
+    // Pin the workspace before any untrusted command runs in it: installation and the adapter's
+    // checks compare the path with this identity, so a `setup` command that moves the workspace
+    // away and leaves a link to another directory is refused (SPEC-118 §12).
+    const workspace = await pinWorkspace(workspaceDir);
 
     if (benchmarkCase.setup.length > 0) stage('setup');
     for (const command of benchmarkCase.setup) {
@@ -294,6 +314,14 @@ async function executeAgentRun(
         durationMs: result.durationMs,
       });
       if (result.cancelled) return fail('cancelled', 'Cancelled during setup');
+      // runCommand killed what the command left in its process group; a survivor could still
+      // change the workspace after installation and the adapter's checks.
+      if (result.strayProcesses) {
+        return fail(
+          'infrastructure-error',
+          `Setup command left processes that could not be stopped: ${command.join(' ')}`,
+        );
+      }
       if (result.exitCode !== 0) {
         return fail(
           'infrastructure-error',
@@ -302,14 +330,20 @@ async function executeAgentRun(
       }
     }
 
+    const replaced = await workspacePinIssue(workspace);
+    if (replaced !== null) {
+      return fail('infrastructure-error', `workspace-replaced: ${replaced} after setup.`);
+    }
+
     // The baseline variant installs the baseline version, if any, by the same procedure.
     const installing = variant === 'candidate' ? input.artifact : input.baselineArtifact;
+    let installedPaths: string[] = [];
     if (installing) {
       stage('install');
-      const installed = await adapter.installArtifact(workspaceDir, installing);
+      installedPaths = (await adapter.installArtifact(workspace, installing)).paths;
       trace.push({
         type: 'message',
-        text: `Installed artifact files: ${installed.paths.join(', ')}`,
+        text: `Installed artifact files: ${installedPaths.join(', ')}`,
       });
     }
 
@@ -323,15 +357,16 @@ async function executeAgentRun(
     try {
       agentResult = await withTimeout(
         adapter.run({
-          workspaceDir,
+          workspace,
+          installedPaths,
+          scratchDir,
           prompt: benchmarkCase.prompt,
           timeoutMs,
           signal: agentAbort.signal,
           model: definition.execution.model,
           options: benchmarkCase.agentOptions[adapter.id],
         }),
-        // Grace period for adapters that ignore the abort signal.
-        timeoutMs + 5000,
+        timeoutMs + AGENT_STOP_GRACE_MS,
         () => ({
           status: 'timeout',
           durationMs: timeoutMs,
