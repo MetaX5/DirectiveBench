@@ -37,8 +37,8 @@ unreliable oracle (below), so the reference became cmark-gfm itself, recorded in
 ## Decisions
 
 - **No Markdown library at run time** — micromark/mdast are quadratic on ordinary documents
-  (phase 1 table). Recorded in [ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md)
-  (Proposed).
+  (phase 1 table). Recorded in [ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md),
+  accepted by the maintainer on 2026-10-22.
 - **cmark-gfm, not markdown-it, as the differential reference** (deviation from the proposal):
   on 10 000 generated documents markdown-it differed from cmark-gfm on 1 533 and micromark on 805;
   markdown-it reports headings and rows GitHub does not (a table on a list item's first line read
@@ -46,7 +46,8 @@ unreliable oracle (below), so the reference became cmark-gfm itself, recorded in
   quote marker; tabs in nested quotes). Matching it would import those bugs. cmark-gfm readings
   are recorded once by `packages/benchmark-engine/scripts/cmark-gfm-corpus.mjs` (Python
   `cmarkgfm` 2025.10.22, development only) into `test/fixtures/cmark-gfm-corpus.json`; CI needs no
-  reference parser and no dependency was added. markdown-it was removed again.
+  reference parser and no dependency was added. markdown-it was removed again. The maintainer
+  confirmed cmark-gfm as the reference on 2026-10-22.
 - **Fail safe where GFM readers disagree or a construct is not modelled:** a table without a pipe
   in its header or delimiter row is read but not reported (cmark-gfm reads `Role\n|---|` as a
   table, markdown-it does not); a setext heading whose paragraph may start with a link reference

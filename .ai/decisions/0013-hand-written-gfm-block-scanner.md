@@ -1,6 +1,6 @@
 # ADR-0013: Read Markdown with a hand-written GFM block scanner, verified against cmark-gfm
 
-- **Status:** Proposed
+- **Status:** Accepted (maintainer decision 2026-10-22)
 - **Date:** 2026-10-22
 - **Deciders:** Project maintainer (option (d) on issue #110; pending review of this record)
 - **Related:** [SPEC-118](../specs/2026-10-22-benchmark-own-skills-s1.md) FR-118-41, FR-118-43,
