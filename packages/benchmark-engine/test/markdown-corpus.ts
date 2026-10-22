@@ -281,11 +281,16 @@ export interface Blocks {
  * is collapsed. Rows are cut or padded to the header's cells, as GFM does.
  */
 export function comparable(blocks: Blocks): string[] {
-  const text = (value: string) =>
-    value
-      .replace(/<!--[\s\S]*?-->|<[^>]*>|[`\\]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+  const text = (value: string) => {
+    // Repeated until stable, so a removal cannot leave a new tag behind (CodeQL
+    // js/incomplete-multi-character-sanitization; this is a comparison, not sanitisation).
+    let stripped = value;
+    for (let previous = ''; previous !== stripped;) {
+      previous = stripped;
+      stripped = stripped.replace(/<!--[\s\S]*?-->|<[^>]*>|[`\\]/g, '');
+    }
+    return stripped.replace(/\s+/g, ' ').trim();
+  };
   const row = (cells: readonly string[], width: number) =>
     Array.from({ length: width }, (_, column) => text(cells[column] ?? '')).join(' ¦ ');
   return [
