@@ -227,6 +227,33 @@ describe('runCommand', () => {
     },
   );
 
+  posixOnly(
+    'reports a process that left the group and holds the output as stray, after the drain period',
+    async () => {
+      // `setsid` escapes the group kill; before, `close` never came and even the timeout could not
+      // end the command, because its group was already empty.
+      const result = await runCommand(
+        [
+          'sh',
+          '-c',
+          'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+        ],
+        {
+          ...options(),
+          timeoutMs: 60_000,
+        },
+      );
+      const escaped = Number(result.stdout.trim());
+      try {
+        expect(result).toMatchObject({ exitCode: 0, strayProcesses: true, timedOut: false });
+        expect(result.durationMs).toBeLessThan(30_000);
+      } finally {
+        process.kill(escaped, 'SIGKILL');
+      }
+    },
+    60_000,
+  );
+
   it('handles cancellation of a command whose executable could not be started', async () => {
     const controller = new AbortController();
     const pending = runCommand(['definitely-not-a-command-xyz'], {

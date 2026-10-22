@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
   killProcessGroup,
+  PROCESS_OUTPUT_DRAIN_MS,
   signalProcessGroup,
   usesProcessGroups,
 } from '@directivebench/agent-adapters';
@@ -154,9 +155,13 @@ export function runCommand(
     let spawnError: string | null = null;
 
     let forceKillTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
+    // Set when a process outside the group still held the output pipes after the drain period.
+    let drained = false;
     // Resolves to whether the group is gone; settled when the command exits (or never started).
     let groupGone: Promise<boolean> = Promise.resolve(true);
-    // No signal is sent after `close`: the timers are cleared and the abort listener removed there.
+    // The leader's exit clears the timers and removes the abort listener, so no signal is ever
+    // sent to its group id after that (the id may be reused once the group is gone).
     const sendSignal = (signal: NodeJS.Signals) => signalProcessGroup(child, groups, signal);
     const terminate = () => {
       if (forceKillTimer) return;
@@ -182,13 +187,24 @@ export function runCommand(
       spawnError = error.message;
     });
     // The leader exited: kill what it left in its group. This also closes output pipes a
-    // background child inherited, so `close` follows instead of waiting for the timeout.
+    // background child inherited, so `close` follows instead of waiting for the timeout. A
+    // process that left the group can hold them forever: after the drain period they are closed
+    // and it is reported as a stray process.
     child.on('exit', () => {
+      clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      options.signal.removeEventListener('abort', onAbort);
       groupGone = killProcessGroup(child, groups);
+      drainTimer = setTimeout(() => {
+        drained = true;
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }, PROCESS_OUTPUT_DRAIN_MS);
     });
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
+      clearTimeout(drainTimer);
       options.signal.removeEventListener('abort', onAbort);
       const gone = await groupGone;
       resolve({
@@ -202,7 +218,7 @@ export function runCommand(
         stderr: stderr.toString(),
         truncated: stdout.truncated || stderr.truncated,
         error: spawnError,
-        strayProcesses: !gone,
+        strayProcesses: !gone || drained,
       });
     });
   });

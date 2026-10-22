@@ -782,7 +782,8 @@ changed before merge.
     group and SIGKILL after `CLAUDE_KILL_GRACE_MS` (5 s); an abort whose reason is a
     `TimeoutError` counts as a timeout. Whenever `claude` exits, its group is SIGKILLed and awaited
     (`strayProcesses` otherwise); output pipes a process outside the group holds are closed after
-    `CLAUDE_OUTPUT_DRAIN_MS`. stdout is returned as raw lines (CRLF stripped, a last line without a
+    `PROCESS_OUTPUT_DRAIN_MS` and reported as stray processes too (fail closed; the same holds for
+    `runCommand`, whose timeout could not end such a holder before). stdout is returned as raw lines (CRLF stripped, a last line without a
     line feed kept) for the parser; above `CLAUDE_STDOUT_MAX_BYTES` (32 MiB) the run is stopped;
     stderr keeps its last `CLAUDE_STDERR_MAX_BYTES` (64 KiB). Output is unredacted; the parser
     redacts what it keeps.
@@ -798,7 +799,8 @@ changed before merge.
     `spawn-failed` / `stray-processes` and `agent-error` `output-limit` (SPEC-203 §9); otherwise
     `ended` is null and the parser decides.
   - Engine (§12): workspace pinned before `setup` and re-checked after it; `setup` (and assertion)
-    commands' process groups killed when they exit (regression tests: a background child that
+    commands' process groups killed when they exit, and a command assertion with stray processes
+    fails (regression tests: a background child that
     closed its output is gone when `runCommand` returns; a late `.claude` write of a background
     child never happens); the adapter contract carries the pin, the installed paths, a run-local
     `scratchDir` and the status `infrastructure-error`; the engine waits `AGENT_STOP_GRACE_MS`

@@ -52,8 +52,13 @@ fake CLI ignoring SIGINT/SIGTERM.
   frontmatter `hooks` is never installed and `claude` never sees it.
 - Engine waits `AGENT_STOP_GRACE_MS` = 10 s (was an unnamed 5 s) beyond the timeout, longer than
   the adapter's own stop sequence.
-- Assertion `command` results do not yet check `strayProcesses` (PR #105 restructures
-  `assertions.ts`; left to avoid a conflict) — their groups are still killed on exit.
+- Review round 1 (independent `om-code-review`, changes requested) fixed in a second commit: a
+  process outside the group that holds the output pipes no longer blocks `runCommand` forever (a
+  named drain, `PROCESS_OUTPUT_DRAIN_MS`, reported as `strayProcesses` in both process layers);
+  no signal is sent after the leader exited; `stray-processes` takes precedence in
+  `claudeProcessEnd`; command assertions fail on stray processes; a throwing `spawn` records only
+  the error code. Not changed: the install inspects with role `candidate` (the role is not used in
+  the message).
 
 ## Work performed
 
@@ -90,4 +95,3 @@ fake CLI ignoring SIGINT/SIGTERM.
 
 - Compose `ClaudeCodeAdapter` (install + `runClaudeCode` + parser of #100) and register it for
   `benchmark run` only (FR-118-05, Phase 4).
-- Command assertions: fail on `strayProcesses` once PR #105 has landed.

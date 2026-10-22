@@ -1,6 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute } from 'node:path';
-import { killProcessGroup, signalProcessGroup, usesProcessGroups } from '../process-group';
+import {
+  killProcessGroup,
+  PROCESS_OUTPUT_DRAIN_MS,
+  signalProcessGroup,
+  usesProcessGroups,
+} from '../process-group';
 
 /**
  * Time between SIGTERM and SIGKILL when a `claude` run times out or is cancelled (SPEC-203 §5,
@@ -18,12 +23,6 @@ export const CLAUDE_STDOUT_MAX_BYTES = 32 * 1024 * 1024;
 
 /** Most stderr bytes kept: the last ones, where the CLI's diagnostics end up. */
 export const CLAUDE_STDERR_MAX_BYTES = 64 * 1024;
-
-/**
- * How long, after `claude` exited and its process group was killed, the output pipes may stay open
- * before they are closed by force: a process that left the group (`setsid`) can hold them forever.
- */
-export const CLAUDE_OUTPUT_DRAIN_MS = 1000;
 
 export interface ClaudeProcessInput {
   /** Absolute path of the `claude` executable (found on `PATH` without a shell). */
@@ -68,7 +67,10 @@ export interface ClaudeProcessResult {
   cancelled: boolean;
   /** stdout exceeded {@link CLAUDE_STDOUT_MAX_BYTES}; the run was stopped. */
   outputLimitExceeded: boolean;
-  /** Members of `claude`'s process group were still alive after it was killed (POSIX). */
+  /**
+   * Members of `claude`'s process group were still alive after it was killed (POSIX), or a
+   * process outside the group still held its output after {@link PROCESS_OUTPUT_DRAIN_MS}.
+   */
   strayProcesses: boolean;
   /** Spawn failure (`ENOENT`, `EACCES`) or another error of the child process. */
   error: string | null;
@@ -148,7 +150,7 @@ class TailBuffer {
  * receives SIGTERM and, after the grace period, SIGKILL. Whenever `claude` exits, whatever is left
  * in its group (background tool processes included) is killed and awaited before the result is
  * returned; output pipes held by a process that left the group are closed after
- * {@link CLAUDE_OUTPUT_DRAIN_MS}. Never rejects.
+ * {@link PROCESS_OUTPUT_DRAIN_MS} and reported as `strayProcesses`. Never rejects.
  *
  * Windows has no process groups: only `claude` itself is signalled (best effort, NFR-118-04).
  * Throws only for a relative `executable` (a programming error: it would resolve against `cwd`).
@@ -207,18 +209,23 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
     });
   } catch (spawnError) {
     // Invalid arguments (e.g. a NUL byte in the environment) throw before any process exists.
-    error = (spawnError as Error).message;
+    // Only the code: Node's message quotes the offending argument, e.g. an environment value.
+    error = `spawn failed (${String((spawnError as NodeJS.ErrnoException).code)})`;
     return Promise.resolve(result(null, null, null, true));
   }
 
   return new Promise((resolve) => {
     let forceKillTimer: NodeJS.Timeout | undefined;
     let drainTimer: NodeJS.Timeout | undefined;
+    // Set once `claude` exited: from then on no signal is sent to its (possibly reused) id.
+    let exited = false;
+    let drained = false;
     let groupGone: Promise<boolean> = Promise.resolve(true);
 
     const terminate = () => {
-      if (forceKillTimer) return;
+      if (forceKillTimer || exited) return;
       signalProcessGroup(child, groups, 'SIGTERM');
+      // Cleared when `claude` exits, so it never signals a group id that may be reused.
       forceKillTimer = setTimeout(
         () => signalProcessGroup(child, groups, 'SIGKILL'),
         input.killGraceMs ?? CLAUDE_KILL_GRACE_MS,
@@ -247,12 +254,16 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
       error = childError.message;
     });
     child.on('exit', () => {
+      exited = true;
       clearTimeout(timer);
+      clearTimeout(forceKillTimer);
+      input.signal.removeEventListener('abort', onAbort);
       groupGone = killProcessGroup(child, groups);
       drainTimer = setTimeout(() => {
+        drained = true;
         child.stdout?.destroy();
         child.stderr?.destroy();
-      }, CLAUDE_OUTPUT_DRAIN_MS);
+      }, PROCESS_OUTPUT_DRAIN_MS);
     });
     child.on('close', async (code: number | null, signal: NodeJS.Signals | null) => {
       clearTimeout(timer);
@@ -261,7 +272,7 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
       input.signal.removeEventListener('abort', onAbort);
       stdout.end();
       const gone = await groupGone;
-      resolve(result(child, code, signal, gone));
+      resolve(result(child, code, signal, gone && !drained));
     });
   });
 }

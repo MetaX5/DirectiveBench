@@ -74,11 +74,21 @@ export async function evaluateAssertion(
           stdout: run.stdout,
           stderr: run.stderr,
           truncated: run.truncated,
+          strayProcesses: run.strayProcesses,
         };
         if (run.error)
           return result(assertion, false, `Command failed to start: ${run.error}`, details);
         if (run.timedOut) return result(assertion, false, 'Command timed out', details);
         if (run.cancelled) return result(assertion, false, 'Command cancelled', details);
+        // Survivors could still change the workspace under the following assertions.
+        if (run.strayProcesses) {
+          return result(
+            assertion,
+            false,
+            'Command left processes that could not be stopped',
+            details,
+          );
+        }
         const passed = run.exitCode === assertion.expectExitCode;
         return result(
           assertion,

@@ -24,7 +24,7 @@ for every holder of the pipe, so the command looked hung until its timeout. Issu
   (`PROCESS_GROUP_EXIT_TIMEOUT_MS`) and fail closed (`strayProcesses`) when it does not happen —
   e.g. a container whose PID 1 never reaps orphans, or a set-uid member (`EPERM`).
 - A process that calls `setsid` leaves the group and can hold the output pipes forever; bound the
-  wait for `close` after `exit` (`CLAUDE_OUTPUT_DRAIN_MS`) and destroy the streams.
+  wait for `close` after `exit` (`PROCESS_OUTPUT_DRAIN_MS`) and destroy the streams.
 - A failed `spawn` (ENOENT) still emits `close`, with the negative errno as the "exit code";
   report `exitCode: null` when there was no pid.
 

@@ -208,6 +208,10 @@ describe('claudeProcessEnd', () => {
 
   it('maps each process-level end, in order of precedence', () => {
     expect(claudeProcessEnd(base)).toBeNull();
+    // Survivors win over every other end: they stop the run (FR-118-15).
+    expect(claudeProcessEnd({ ...base, strayProcesses: true, cancelled: true })?.errorCode).toBe(
+      'stray-processes',
+    );
     expect(claudeProcessEnd({ ...base, cancelled: true, timedOut: true })?.status).toBe(
       'cancelled',
     );

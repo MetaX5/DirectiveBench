@@ -62,6 +62,14 @@ function refusalMessage(findings: readonly WorkspaceFinding[]): string {
 
 /** Maps a process result to the end the process layer decides, or null for the parser. */
 export function claudeProcessEnd(result: ClaudeProcessResult): ClaudeRunEnd | null {
+  // First: survivors can change the workspace whatever else happened, and the code stops the run.
+  if (result.strayProcesses) {
+    return {
+      status: 'infrastructure-error',
+      errorCode: 'stray-processes',
+      message: 'Processes claude started could not be stopped after it exited.',
+    };
+  }
   if (result.cancelled) return { status: 'cancelled', errorCode: null, message: 'Cancelled' };
   if (result.timedOut) {
     return { status: 'timeout', errorCode: null, message: 'claude did not finish in time' };
@@ -71,13 +79,6 @@ export function claudeProcessEnd(result: ClaudeProcessResult): ClaudeRunEnd | nu
       status: 'infrastructure-error',
       errorCode: 'spawn-failed',
       message: `claude could not be started: ${result.error}`,
-    };
-  }
-  if (result.strayProcesses) {
-    return {
-      status: 'infrastructure-error',
-      errorCode: 'stray-processes',
-      message: 'Processes claude started could not be stopped after it exited.',
     };
   }
   if (result.outputLimitExceeded) {

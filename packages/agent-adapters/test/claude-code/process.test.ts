@@ -197,8 +197,9 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     const result = await runClaudeProcess(input());
     const escaped = fake.childPid() as number;
     track(escaped);
-    // `setsid` leaves the group (a residual of local-process execution); the run still ends.
-    expect(result).toMatchObject({ exitCode: 0, strayProcesses: false });
+    // `setsid` leaves the group, so it cannot be killed; the run still ends, and fails closed.
+    expect(result).toMatchObject({ exitCode: 0, strayProcesses: true });
+    expect(alive(escaped)).toBe(true);
     expect(result.lines).toHaveLength(1);
   });
 
@@ -243,7 +244,8 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     // Invalid arguments throw inside spawn before any process exists.
     const invalid = await runClaudeProcess(input({ env: { PATH: '/bin', HOME: 'a\0b' } }));
     expect(invalid).toMatchObject({ spawned: false });
-    expect(invalid.error).toMatch(/null bytes/);
+    // Only the error code: Node's message would quote the environment value.
+    expect(invalid.error).toBe('spawn failed (ERR_INVALID_ARG_VALUE)');
   });
 
   it('refuses a relative executable', () => {
@@ -266,7 +268,7 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     const child = fake.childPid();
     track(child);
     // Only the fake was killed; its background sleep survived and held the pipes until the drain.
-    expect(result).toMatchObject({ timedOut: true, signal: 'SIGKILL', strayProcesses: false });
+    expect(result).toMatchObject({ timedOut: true, signal: 'SIGKILL', strayProcesses: true });
     expect(alive(child as number)).toBe(true);
   });
 });

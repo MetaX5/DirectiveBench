@@ -81,8 +81,10 @@ function body(mode: FakeClaudeMode, dir: string): string {
     case 'escape-session':
       return [
         `cat > ${q('stdin.txt')}`,
-        `setsid sleep 600 &`,
-        `echo $! > ${q('child.pid')}`,
+        // The escapee writes its pid only after `setsid`; wait for it, or the group kill could
+        // reach it before it left the group.
+        `setsid sh -c 'echo $$ > ${join(dir, 'child.pid')}; exec sleep 600' &`,
+        `while [ ! -s ${q('child.pid')} ]; do sleep 0.01; done`,
         `echo $$ > ${q('pid')}`,
         `printf '%s\\n' '${NDJSON[1]}'`,
         'exit 0',

@@ -18,6 +18,14 @@ export const PROCESS_GROUP_POLL_MS = 10;
  */
 export const PROCESS_GROUP_EXIT_TIMEOUT_MS = 2000;
 
+/**
+ * How long, after a command's leader exited and its group was killed, its output pipes may stay
+ * open before they are closed by force. Only a process that left the group (`setsid`, a daemon)
+ * can still hold them then; callers report it as a stray process (fail closed), since it can keep
+ * changing the workspace.
+ */
+export const PROCESS_OUTPUT_DRAIN_MS = 1000;
+
 /** Whether children are started in their own process group on this platform. */
 export function usesProcessGroups(): boolean {
   return process.platform !== 'win32';
