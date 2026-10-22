@@ -133,6 +133,8 @@ Not verified: anything that needs a real agent (`agentProfile` reported by an ad
   2026-10-14); `serve` still shut down cleanly.
 - `f8c5213` already contains the `runAcquiredJob` code (both changes were in `runner.ts`); its
   tests are in `ea4768e`.
+- The shared session scratchpad let the parallel #94 agent overwrite this run's `pr-body.md`;
+  PR #106 briefly showed #94's description and was restored (second lesson below).
 - No deviation from SPEC-118. The index layout (composite) is an interpretation of §8.1.
 
 ## Review
@@ -148,6 +150,9 @@ test) and the race documented, comments added. Full gate re-run: pass, 100% cove
 ## Lessons recorded
 
 - [2026-10-22 — Pin each migration's up/down test to its own journal prefix](../lessons/2026-10-22-pin-migration-tests-to-their-journal-prefix.md)
+- [2026-10-22 — Parallel agents of one session share the scratchpad](../lessons/2026-10-22-parallel-agents-share-the-scratchpad.md)
+
+Review round 2 (`25f2190`): approve; CI green on `25f2190`.
 
 ## Follow-ups
 
