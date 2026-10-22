@@ -67,6 +67,17 @@ describe('importCandidates (FR-118-27)', () => {
       expect(tokens(text), text).toContain('absolute:/etc/hostname');
     }
     expect(tokens('@~/.bashrc*x*')).toContain('home:~/.bashrc');
+    const tail = 'a'.repeat(5000);
+    for (const text of [
+      `@/etc/hostname*x*${tail}`,
+      `@/etc/hostname#${tail}`,
+      `@/etc/hostname[${tail}](y)`,
+      `@/etc/hostname\`${tail}\``,
+      `@/etc/hostname&${tail}`,
+    ]) {
+      expect(tokens(text), text.slice(0, 20)).toContain('absolute:/etc/hostname');
+    }
+    expect(tokens(`@~/.bashrc*x*${tail}`)).toContain('home:~/.bashrc');
     expect(tokens('@../../etc/hostname*x*')).toContain('relative:../../etc/hostname');
   });
 

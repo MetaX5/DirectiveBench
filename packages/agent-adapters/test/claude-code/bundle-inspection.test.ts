@@ -168,6 +168,14 @@ describe('inspectArtifactBundle (FR-118-26)', () => {
     expect(codeOf(() => claudeSkillName(open))).toBe('skill-name-unsupported');
   });
 
+  it('fails closed on --- inside the frontmatter block, where Claude Code may close it', () => {
+    for (const frontmatter of ['description: a --- b', 'x: >\n  a\nmodel: opus---']) {
+      expect(inspectArtifactBundle(skill(frontmatter), 'candidate'), frontmatter).toEqual([
+        expect.objectContaining({ detail: expect.stringMatching(/--- inside the block/) }),
+      ]);
+    }
+  });
+
   it('fails closed on frontmatter it cannot parse', () => {
     expect(inspectArtifactBundle(skill('name: [unclosed'), 'candidate')).toEqual([
       expect.objectContaining({

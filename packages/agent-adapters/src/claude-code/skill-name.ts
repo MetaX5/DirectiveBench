@@ -27,6 +27,12 @@ export function parseSkillFrontmatter(content: string): {
       error: 'the file starts with --- but has no closed frontmatter block',
     };
   }
+  // Claude Code may also close the block at a `---` inside a line; any inner `---` fails closed.
+  const block = text.slice(0, text.length - parsed.body.length);
+  const inner = block.slice(block.indexOf('\n') + 1, block.lastIndexOf('---'));
+  if (inner.includes('---')) {
+    return { frontmatter: {}, error: 'the frontmatter contains --- inside the block' };
+  }
   return { frontmatter: parsed.frontmatter };
 }
 

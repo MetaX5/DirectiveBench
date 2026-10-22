@@ -145,6 +145,13 @@ on PR #108.
   N2 (≈4 s worst case at the limits) and N3 (`runLocalPaths` only required by FR-118-04) noted.
 - Red first: the new tests (11) fail on the round-1 source and pass after the fix.
 
+Round 2 (same reviewer, head `7b25396`): changes requested — **R2-B1 (blocker)**: tokens over
+4 096 characters skipped the Markdown-cut prefixes (`@/etc/hostname*x*` + 5 000 characters passed).
+Fixed: a long token without shortening sequences still yields its cut prefixes within the first
+4 096 characters; six regression tests. **R2-M1 (minor)**: Claude Code's frontmatter pattern may
+close at a `---` inside a line; any inner `---` now fails closed. R2-N1 (NFKC flags full-width
+look-alikes) accepted as a harmless over-report.
+
 ## Lessons recorded
 
 - [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)

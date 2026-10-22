@@ -1,8 +1,9 @@
 /**
- * The longest import token, in UTF-16 code units, that is resolved. A longer token names a path
- * longer than `PATH_MAX` (4096 bytes on Linux, 1024 on macOS), which no file system call can open
- * — unless `.`/`..` segments, repeated `/` or escaped spaces shorten it when it is normalised, in
- * which case it is reported as {@link ImportCandidate} `too-long` and the scan fails closed.
+ * The longest import token, in UTF-16 code units, that is resolved whole. A longer token names a
+ * path longer than `PATH_MAX` (4096 bytes on Linux, 1024 on macOS), which no file system call can
+ * open, so only its prefixes cut at Markdown split characters within this window are checked —
+ * unless `.`/`..` segments, repeated `/` or escaped spaces could shorten it when it is normalised,
+ * in which case it is reported as {@link ImportCandidate} `too-long` and the scan fails closed.
  */
 export const IMPORT_TOKEN_MAX_LENGTH = 4096;
 
@@ -181,16 +182,23 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
     const yielded = new Set<string>();
     for (const stop of ends) {
       if (stop <= tokenStart) continue;
+      let variants: string[];
       if (stop - tokenStart > IMPORT_TOKEN_MAX_LENGTH) {
         if (seenShortening || startsWithDot) {
           yield { kind: 'too-long', token: text.slice(tokenStart, tokenStart + 200) };
           return;
         }
-        continue;
+        // The whole token cannot name a file, but a Markdown lexer may end the path early: check
+        // the prefixes cut inside the first IMPORT_TOKEN_MAX_LENGTH characters (O(limit) per `@`).
+        variants = withMarkdownCuts(
+          text.slice(tokenStart, tokenStart + IMPORT_TOKEN_MAX_LENGTH),
+        ).slice(1);
+      } else {
+        const raw = text.slice(tokenStart, stop);
+        const spellings = raw.includes('\\ ') ? [raw.replaceAll('\\ ', ' '), raw] : [raw];
+        variants = spellings.flatMap(withMarkdownCuts);
       }
-      const raw = text.slice(tokenStart, stop);
-      const spellings = raw.includes('\\ ') ? [raw.replaceAll('\\ ', ' '), raw] : [raw];
-      for (const token of spellings.flatMap(withMarkdownCuts)) {
+      for (const token of variants) {
         // A `~` followed only by punctuation is home only once the punctuation is stripped.
         if (yielded.has(token) || (kind === 'home' && token !== '~' && !token.startsWith('~/'))) {
           continue;
