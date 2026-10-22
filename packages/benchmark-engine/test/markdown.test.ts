@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   collapseWhitespace,
   literalSearch,
+  MAX_MARKDOWN_NESTING,
+  MAX_TABLE_AUTOCOMPLETED_CELLS,
+  MAX_TABLE_ROW_CELLS,
   normalizeText,
   parseFirstNumber,
   scanMarkdown,
@@ -261,6 +264,256 @@ describe('scanMarkdown headings', () => {
   });
 });
 
+// Issue #110 and the GFM block rules behind it. Every expectation below was checked against
+// cmark-gfm, GitHub's own parser (the corpus test in markdown-reference.test.ts covers thousands of
+// generated documents the same way).
+describe('scanMarkdown GFM block structure (issue #110)', () => {
+  const scan = (lines: string[]) => {
+    const { headings, tables } = scanMarkdown(lines.join('\n'));
+    return { headings, tables: tables.map((t) => [t.header, ...t.rows.map((r) => r.cells)]) };
+  };
+
+  it('reads list content after the marker padding: 1–4 spaces, tab stops, 5+ is code', () => {
+    // Repro 1: `-   ` has content at column 4, so `  ```` ends the item and opens a top-level
+    // fence that hides `# Risks`.
+    expect(scan(['-   ```', '  ```', '# Risks', '```']).headings).toEqual([]);
+    expect(
+      scan([
+        '-    # Four',
+        '-     # Five',
+        '-\t# Tab',
+        '-  \t# Space and tab',
+        '1.   # Three',
+        '1.     # Five after one',
+      ]).headings,
+    ).toEqual(['Four', 'Tab', 'Space and tab', 'Three']);
+    // Tabs inside block quotes follow tab stops too.
+    expect(scan(['>\t\t# Code', '', '> \t# Quoted']).headings).toEqual(['Quoted']);
+  });
+
+  it('opens a list item with at most one blank line and keeps it open across blank lines', () => {
+    expect(
+      scan(['-', '    # In item', '', '-', '', '    # Code after empty item']).headings,
+    ).toEqual(['In item']);
+    expect(
+      scan(['- a', '', '', '', '  # Still in item', '> b', '', '', '    # Code']).headings,
+    ).toEqual(['Still in item']);
+  });
+
+  it('lets only bullets and `1.` with content interrupt a paragraph', () => {
+    expect(scan(['Text', '2. # Not a list', '', 'Text', '-', '# After']).headings).toEqual([
+      'Text',
+      'After',
+    ]);
+  });
+
+  it('ends a table at an HTML comment, which hides its lines (repro 2)', () => {
+    expect(
+      scan(['| Role | Hours |', '|---|---|', '<!--', '| Backend API | 24 |', '-->']).tables,
+    ).toEqual([[['Role', 'Hours']]]);
+  });
+
+  it('hides the content of every HTML block kind until its end condition', () => {
+    expect(
+      scan([
+        '<script>',
+        '# Hidden',
+        '</SCRIPT>',
+        '# One',
+        '<?x',
+        '# Hidden',
+        '?>',
+        '# Two',
+        '<!DOCTYPE html',
+        '# Hidden',
+        '>',
+        '# Three',
+        '<![CDATA[',
+        '# Hidden',
+        ']]>',
+        '# Four',
+        '<div class="x">',
+        '# Hidden',
+        '',
+        '# Five',
+        "<my-tag data-a=1 b='c' d>",
+        '# Hidden',
+        '',
+        '# Six',
+        '</my-tag >',
+        '# Hidden',
+        '',
+        '# Seven',
+        '<style media="x">',
+        '# Hidden',
+        '</style>',
+        '# Eight',
+        '<!',
+        '# Nine',
+        '<div',
+        '# Hidden',
+        '',
+        '# Ten',
+        '<div.',
+        '# Eleven',
+      ]).headings,
+    ).toEqual([
+      'One',
+      'Two',
+      'Three',
+      'Four',
+      'Five',
+      'Six',
+      'Seven',
+      'Eight',
+      'Nine',
+      'Ten',
+      'Eleven',
+    ]);
+  });
+
+  it('recognises a complete tag line (kind 7) only when it is one', () => {
+    expect(
+      scan([
+        '<a b="c',
+        'x',
+        '# h1',
+        '<a b=c d=>',
+        '# h2',
+        '<a/b>',
+        '# h3',
+        '<a =x>',
+        '# h4',
+        '<1a>',
+        '# h5',
+        '<a b>x',
+        '# h6',
+        '<pre',
+        '# h7',
+        '</pre>',
+        '<div/>',
+        '# h8',
+        '',
+        '<!-->',
+        '# h9',
+      ]).headings,
+    ).toEqual(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h9']);
+  });
+
+  it('starts kind 7 on a lazy line but not inside a paragraph; kind 6 interrupts one', () => {
+    expect(
+      scan([
+        'Para',
+        '<my-tag>',
+        '# Not hidden',
+        '',
+        '> Quote',
+        '<my-tag>',
+        '# Hidden by lazy kind 7',
+        '',
+        'Para',
+        '<div>',
+        '# Hidden by kind 6',
+      ]).headings,
+    ).toEqual(['Not hidden']);
+  });
+
+  it('reads tables as cmark-gfm does, reporting only those with pipes in both rows', () => {
+    // No table later in a paragraph that held a delimiter row.
+    expect(scan(['x', '-|-', 'c | d', '|-|-|']).tables).toEqual([]);
+    // A header without a pipe is a table to GitHub but not to every reader: its lines are read
+    // as a table (so `-` is no setext underline) but the table is not reported.
+    expect(scan(['Role', '|---|', '-'])).toEqual({ headings: [], tables: [] });
+    // A lazy header line keeps its indentation: `   |` is an empty first cell.
+    expect(scan(['> Alpha', '   | Role |', '> |-|-|', '> | 1 | 2 |']).tables).toEqual([
+      [
+        ['', 'Role'],
+        ['1', '2'],
+      ],
+    ]);
+  });
+
+  it("reads whitespace as cmark-gfm does, not JavaScript's Unicode spaces (Codex review)", () => {
+    const table = (header: string, delimiter = '|---|---|') =>
+      scanMarkdown(`${header}\n${delimiter}\n| B | 24 |`).tables;
+    // A trailing U+00A0 is a third header cell: no table. Line tabulation and form feed are trimmed.
+    expect(table('| Role | Hours |\u00a0')).toEqual([]);
+    expect(table('| Role | Hours |', '|---|---|\u00a0')).toEqual([]);
+    expect(table('| Role | Hours |\v')).toHaveLength(1);
+    expect(table('|\fRole | Hours |\f')).toHaveLength(1);
+    expect(scanMarkdown('| R | H |\n|---|---|\n| B\u00a0| 24 |').tables[0]?.rows[0]?.cells).toEqual(
+      ['B\u00a0', '24'],
+    );
+    // An ATX closing sequence ends only before spaces and tabs.
+    expect(scanMarkdown('# H #\u00a0\n# I #\f\n# J # ').headings).toEqual(['H #', 'I #', 'J']);
+    // A tag line followed by U+00A0 is no HTML block; by a form feed it is.
+    expect(scanMarkdown('<x>\u00a0\n# y').headings).toEqual(['y']);
+    expect(scanMarkdown('<x>\f\n# y\n\n<x a\fb>\n# z').headings).toEqual([]);
+    // Round 7: a line tabulation after a tag opens no HTML block; delimiter rows accept VT and FF.
+    expect(scanMarkdown('<span>\v\n# x').headings).toEqual(['x']);
+    expect(scanMarkdown('> <span>\v\n    text\n> 2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('> text\n> ---\f\ntext\n2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('> text\n> ---\v\ntext\n2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('| a | b |\n|-\v|-|\f\n| c | d |').tables).toHaveLength(1);
+  });
+
+  it('ends a table at a body line that is only a pipe, as cmark-gfm does (Codex review)', () => {
+    const rows = (line: string) =>
+      scanMarkdown(`| R | H |\n|---|---|\n${line}\n| B | 24 |`).tables[0]?.rows.length;
+    for (const lone of ['|', ' | ', '|\t', '|\f', '  |']) expect(rows(lone)).toBe(0);
+    expect(rows('||')).toBe(2);
+    expect(rows('| |')).toBe(2);
+    expect(scanMarkdown('> | R | H |\n> |---|---|\n> |\n> | B | 24 |').tables[0]?.rows).toEqual([]);
+    expect(scanMarkdown('- | R | H |\n  |---|---|\n  |\n  | B | 24 |').tables[0]?.rows).toEqual([]);
+  });
+
+  it('opens no table on a header that is only a pipe (Codex review)', () => {
+    const doc = '|\n|---|\n|\nRole | Hours\n|---|---|\nBackend API | 24';
+    expect(scanMarkdown(doc).tables).toEqual([]);
+    expect(scanMarkdown('  |  \n|---|\nx').tables).toEqual([]);
+    expect(scanMarkdown('> a\n   |\n> |-|-|\n> |1|2|').tables).toEqual([]);
+  });
+
+  it('ignores one byte order mark at the start, as cmark-gfm does (Codex review)', () => {
+    expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
+      headings: [],
+      tables: [],
+    });
+    expect(scanMarkdown('\uFEFF# Real').headings).toEqual(['Real']);
+    expect(scanMarkdown('\uFEFF\uFEFF# Not').headings).toEqual([]);
+  });
+
+  it('stops the scan at a setext underline below a possible link definition (fail-safe)', () => {
+    expect(scan(['# Before', '[a]: /url', '===', '# After']).headings).toEqual(['Before']);
+    expect(scan(['[not a definition] text', '---', '# After']).headings).toEqual([
+      '[not a definition] text',
+      'After',
+    ]);
+    // A multi-line label (CommonMark example 541; Codex review).
+    expect(scan(['[foo', 'bar]: /url', '---']).headings).toEqual([]);
+    // cmark-gfm: `---` is paragraph text after definitions only, so `2. # Fake` cannot interrupt it.
+    expect(scan(['[foo', 'bar]: /url', '---', '2. # Fake']).headings).toEqual([]);
+    // cmark-gfm: the heading `text`, then an HTML block hiding `# Fake` (Codex review).
+    expect(scan(['[foo]: /url', 'text', '---', '<x>', '# Fake']).headings).toEqual([]);
+    expect(scan(['[foo]: /url', 'text', '---', 'a | b', '- | -']).tables).toEqual([]);
+  });
+
+  it(`follows ${MAX_MARKDOWN_NESTING} nested containers and stops the scan below them`, () => {
+    const nested = (depth: number) => `${'> '.repeat(depth - 1)}- # Deep`;
+    expect(scan(['# Before', nested(MAX_MARKDOWN_NESTING), '# After']).headings).toEqual([
+      'Before',
+      'Deep',
+      'After',
+    ]);
+    expect(scan(['# Before', nested(MAX_MARKDOWN_NESTING + 1), '# After']).headings).toEqual([
+      'Before',
+    ]);
+    // Containers the line leaves do not count: the limit is the depth of the line being read.
+    const deepThenShallow = [`${'> '.repeat(MAX_MARKDOWN_NESTING)}a`, '- # Shallow'];
+    expect(scan(deepThenShallow).headings).toEqual(['Shallow']);
+  });
+});
+
 describe('scanMarkdown tables', () => {
   it('reads GFM tables with alignment, escaped pipes and short rows', () => {
     const { tables } = scanMarkdown(
@@ -311,28 +564,34 @@ describe('scanMarkdown tables', () => {
       expect([boundary, body(boundary)]).toEqual([boundary, ['Dev']]);
     }
     expect(body('| QA | 3 |')).toEqual(['Dev', 'QA', 'PM']);
-    // Indented four spaces, `---` is not a thematic break.
-    expect(body('    ---')).toEqual(['Dev', '---', 'PM']);
+    // A line indented four spaces starts indented code, which ends the table (cmark-gfm).
+    expect(body('    ---')).toEqual(['Dev']);
   });
 
-  it('finds tables with single-dash delimiters and tables inside list items', () => {
+  it('finds tables with single-dash delimiters, inside list items and block quotes', () => {
     const { tables } = scanMarkdown(
       [
         'a | b',
-        '- | -',
+        '-|-',
         '1 | 2',
+        '',
+        // A list item, not a delimiter row (cmark-gfm tries tables after every other block).
+        'c | d',
+        '- | -',
         '',
         '- Estimate:',
         '  | Item | Hours |',
         '  |---|---|',
         '  | Backend API | 24 |',
         '',
+        // Lazy continuation lines of the item's paragraph: no table.
         '- a',
         '| Item | Hours |',
         '|---|---|',
         '',
         '> | Quoted | table |',
         '> | --- | --- |',
+        '> | 1 | 2 |',
       ].join('\n'),
     );
     expect(tables).toEqual([
@@ -341,7 +600,7 @@ describe('scanMarkdown tables', () => {
         header: ['Item', 'Hours'],
         rows: [{ text: '  | Backend API | 24 |', cells: ['Backend API', '24'] }],
       },
-      { header: ['Item', 'Hours'], rows: [] },
+      { header: ['Quoted', 'table'], rows: [{ text: '> | 1 | 2 |', cells: ['1', '2'] }] },
     ]);
   });
 
@@ -498,6 +757,17 @@ describe('linear time', () => {
     'one long list item': (n) => `- item\n${'  continuation line\n'.repeat(n)}  ---\n`,
     'unclosed fences leaving quotes': (n) => '> ```\n> code\n\n'.repeat(n),
     'table body with breaks': (n) => `| a | b |\n|---|---|\n${'| 1 | 2 |\n* * *\n'.repeat(n)}`,
+    'deep list items and blank lines': (n) => `${'- 1. '.repeat(8)}x\n${'\n'.repeat(n * 12)}`,
+    'deep quotes and lazy lines': (n) => `${'> '.repeat(16)}x\n${'lazy line\n'.repeat(n)}`,
+    'tabs after container markers': (n) => '>\t-\t1.\tx\n'.repeat(n),
+    'tables in block quotes': (n) => `> | a | b |\n> |---|---|\n${'> | 1 | 2 |\n'.repeat(n)}`,
+    'html tag lines': (n) => '<span class="a" data-x=1>\n\n'.repeat(n),
+    'one long tag line': (n) => `<a${' b="c"'.repeat(n * 2)}>\n`,
+    'tag lines in a paragraph': (n) => `Para\n${'<my-tag>\n'.repeat(n)}`,
+    'one unclosed attribute': (n) => `<a b="${'x'.repeat(n * 12)}\n`,
+    'underlines below a possible link definition': (n) =>
+      `[x\n${'a\n'.repeat(n)}]: /url\n${'=\n'.repeat(n)}`,
+    'underlines below bracketed paragraphs': (n) => `${'[x\na\n=\n'.repeat(n)}`,
   };
 
   it.each(Object.keys(shapes))(
@@ -518,4 +788,39 @@ describe('linear time', () => {
     const number = (text: string) => () => parseFirstNumber(text, '.');
     expect(await ratio(digits, number, 50_000)).toBeLessThan(MAX_LINEAR_RATIO);
   }, 60_000);
+});
+
+describe('scanMarkdown table limits (cmark-gfm)', () => {
+  const sparse = (rows: number) => {
+    const columns = 1000;
+    return [
+      ['Role', 'Hours', ...Array<string>(columns - 2).fill('c')].join('|'),
+      Array<string>(columns).fill('-').join('|'),
+      ...Array<string>(rows).fill('x'),
+      'Dev|24',
+      'more|1',
+    ].join('\n');
+  };
+
+  it(`ends a table once it filled in more than ${MAX_TABLE_AUTOCOMPLETED_CELLS} cells (Codex review)`, () => {
+    // Each `x` row fills in 999 cells; cmark-gfm 2025.10.22 reads `Dev|24` as a row after 524 of
+    // them and as paragraph text after 525, with `more|1` continuing that paragraph.
+    const before = scanMarkdown(sparse(524)).tables[0];
+    expect(before?.rows).toHaveLength(525);
+    expect(before?.rows.at(-1)?.text).toBe('Dev|24');
+    const after = scanMarkdown(sparse(525)).tables;
+    expect(after).toHaveLength(1);
+    expect(after[0]?.rows).toHaveLength(525);
+    expect(after[0]?.rows.at(-1)?.text).toBe('x');
+  });
+
+  it(`reads at most ${MAX_TABLE_ROW_CELLS} cells in a row (Codex review)`, () => {
+    const row = (cells: number) => Array<string>(cells).fill('a').join('|');
+    const delimiter = (cells: number) => Array<string>(cells).fill('-').join('|');
+    expect(scanMarkdown(`${row(0xffff)}\n${delimiter(0xffff)}`).tables).toHaveLength(1);
+    expect(scanMarkdown(`${row(0x10000)}\n${delimiter(0x10000)}`).tables).toEqual([]);
+    // A wider body row ends the table: it and the next line are paragraph text.
+    const wide = scanMarkdown(`a|b\n-|-\n${row(0x10000)}\nc|d`).tables;
+    expect(wide).toEqual([{ header: ['a', 'b'], rows: [] }]);
+  });
 });

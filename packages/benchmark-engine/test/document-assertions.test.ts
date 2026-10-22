@@ -244,6 +244,148 @@ describe('markdown structure boundaries (Codex review)', () => {
       });
     }
   });
+
+  // Issue #110: two false passes found by the fourth Codex review of PR #105.
+  it('does not accept a heading that a list marker padding puts inside a fence', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Risks'] }),
+      workspace({ 'doc.md': '-   ```\n  ```\n# Risks\n```' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Risks' });
+  });
+
+  it('does not accept a link definition with a multi-line label as a heading (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['[foo bar]: /url'] }),
+      workspace({ 'doc.md': '[foo\nbar]: /url\n---' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: [foo bar]: /url' });
+  });
+
+  it('does not accept a heading in a list that cannot interrupt a definition paragraph (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+      workspace({ 'doc.md': '[foo\nbar]: /url\n---\n2. # Fake' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+  });
+
+  it('does not read a table whose header row ends in a no-break space (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\u00a0\n|---|---|\n| Backend | 24 |' }),
+    );
+    expect(result).toMatchObject({ passed: false });
+  });
+
+  it('does not accept headings after form feed or line tabulation boundaries (Codex review)', async () => {
+    for (const doc of ['> text\n> ---\f\ntext\n2. # Fake', '> <span>\v\n    text\n> 2. # Fake']) {
+      const result = await evaluateAssertion(
+        assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+        workspace({ 'doc.md': doc }),
+      );
+      expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+    }
+  });
+
+  it('does not read a table after a header that is only a pipe (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend API' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '|\n|---|\n|\nRole | Hours\n|---|---|\nBackend API | 24' }),
+    );
+    expect(result).toMatchObject({ passed: false });
+  });
+
+  it('does not read a row after a body line that is only a pipe (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend' },
+        column: 'Hours',
+        min: 24,
+        max: 24,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\n|---|---|\n|\n| Backend | 24 |' }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
+
+  it('does not accept a heading in a fence after a byte order mark (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+      workspace({ 'doc.md': '\uFEFF```\n# Fake\n```' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+  });
+
+  it('does not accept a heading hidden in an HTML block after a definition paragraph (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+      workspace({ 'doc.md': '[foo]: /url\ntext\n---\n<x>\n# Fake' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+  });
+
+  it('does not read a row after a table filled in its cell budget (Codex review)', async () => {
+    const columns = 1000;
+    const doc = [
+      ['Role', 'Hours', ...Array<string>(columns - 2).fill('c')].join('|'),
+      Array<string>(columns).fill('-').join('|'),
+      ...Array<string>(1000).fill('x'),
+      'Dev|24',
+    ].join('\n');
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: '^Dev$' },
+        column: 'Hours',
+        min: 24,
+        max: 24,
+      }),
+      workspace({ 'doc.md': doc }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
+
+  it('does not read a row hidden in an HTML comment after a table', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend API' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\n|---|---|\n<!--\n| Backend API | 24 |\n-->' }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
 });
 
 describe('required-phrases', () => {

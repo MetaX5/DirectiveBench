@@ -9,3 +9,4 @@ packages/database/migrations
 *.md
 .agents
 .claude
+packages/benchmark-engine/test/fixtures/cmark-gfm-corpus.json
