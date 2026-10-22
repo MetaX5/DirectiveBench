@@ -49,12 +49,19 @@ function tempDir(): string {
   return dir;
 }
 
-/** A PATH containing a working `claude`, a broken `codex` and no `cursor-agent`. */
+/** A fake `claude`: `--version` prints `version`, `auth status` runs `auth`. */
+function fakeClaudeScript(version: string, auth: string): string {
+  return `#!/bin/sh\nif [ "$1" = --setting-sources ]; then shift 2; fi\ncase "$1" in\n  --version) echo "${version}" ;;\n  auth) ${auth} ;;\nesac\n`;
+}
+
+/** A PATH containing a logged-in `claude`, a broken `codex` and no `cursor-agent`. */
 function fakeAgentPath(): string {
   const bin = tempDir();
-  actualFs.writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho "2.1.0 (Claude Code)"\n', {
-    mode: 0o755,
-  });
+  actualFs.writeFileSync(
+    join(bin, 'claude'),
+    fakeClaudeScript('2.1.302 (Claude Code)', `echo '{"loggedIn":true,"authMethod":"claude.ai"}'`),
+    { mode: 0o755 },
+  );
   actualFs.writeFileSync(join(bin, 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   return bin;
 }
@@ -103,6 +110,7 @@ const find = (checks: Check[], name: string) => checks.find((c) => c.name === na
 
 beforeEach(() => {
   vi.stubEnv('PATH', fakeAgentPath());
+  vi.stubEnv('ANTHROPIC_API_KEY', '');
   vi.stubEnv('DIRECTIVEBENCH_HOST', '127.0.0.1');
 });
 
@@ -135,7 +143,11 @@ describe('doctor', () => {
     );
     expect(lines.find((l) => l.includes(' port '))).toMatch(/127\.0\.0\.1:\d+ is free$/);
     expect(lines).toContain(
-      'ok    agent:claude-code  Claude Code found (2.1.0 (Claude Code)); benchmark execution not implemented yet',
+      'ok    agent:claude-code  Claude Code found (2.1.302 (Claude Code)); benchmark execution not implemented yet',
+    );
+    expect(lines).toContain('ok    agent:claude-code:subscription ready: Logged in (claude.ai).');
+    expect(lines).toContain(
+      "ok    agent:claude-code:api-key not ready (auth-missing): ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
     );
     expect(lines).toContain(
       'ok    agent:codex        OpenAI Codex CLI found (version unknown); benchmark execution not implemented yet',
@@ -143,6 +155,64 @@ describe('doctor', () => {
     expect(lines).toContain(
       'ok    agent:cursor       Cursor Agent CLI not found on PATH (optional)',
     );
+  });
+
+  it('warns when Claude Code is installed but no auth mode is ready', async () => {
+    const bin = tempDir();
+    actualFs.writeFileSync(
+      join(bin, 'claude'),
+      fakeClaudeScript('2.1.302 (Claude Code)', `echo '{"loggedIn":false}'; exit 1`),
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', bin);
+    const { checks } = await runDoctor(await initialisedDataDir());
+    expect(checks.filter((c) => c.name.startsWith('agent:claude-code'))).toEqual([
+      {
+        name: 'agent:claude-code',
+        status: 'ok',
+        detail:
+          'Claude Code found (2.1.302 (Claude Code)); benchmark execution not implemented yet',
+      },
+      {
+        name: 'agent:claude-code:subscription',
+        status: 'warn',
+        detail:
+          'not ready (auth-missing): Not logged in: run `claude` and `/login`, or use API key mode.',
+      },
+      {
+        name: 'agent:claude-code:api-key',
+        status: 'warn',
+        detail:
+          "not ready (auth-missing): ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
+      },
+    ]);
+  });
+
+  it('reports an unsupported version for every mode and never prints the API key', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-planted-doctor-key');
+    const bin = tempDir();
+    actualFs.writeFileSync(join(bin, 'claude'), fakeClaudeScript('2.1.0 (Claude Code)', 'exit 1'), {
+      mode: 0o755,
+    });
+    vi.stubEnv('PATH', bin);
+    const { checks, lines } = await runDoctor(await initialisedDataDir());
+    expect(find(checks, 'agent:claude-code:api-key')).toEqual({
+      name: 'agent:claude-code:api-key',
+      status: 'warn',
+      detail:
+        'not ready (version-unsupported): Claude Code 2.1.0 is older than the minimum 2.1.259; update it.',
+    });
+    expect(lines.join('\n')).not.toContain('sk-ant-planted-doctor-key');
+  });
+
+  it('prints no readiness lines for an agent that is not installed', async () => {
+    vi.stubEnv('PATH', tempDir());
+    const { checks } = await runDoctor(await initialisedDataDir());
+    expect(checks.filter((c) => c.name.startsWith('agent:')).map((c) => c.name)).toEqual([
+      'agent:claude-code',
+      'agent:codex',
+      'agent:cursor',
+    ]);
   });
 
   it('prints hints under failing checks in text form', async () => {

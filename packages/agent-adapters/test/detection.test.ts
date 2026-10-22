@@ -176,6 +176,82 @@ describe('detectCliAgent', () => {
   });
 });
 
+posixOnly('detectCliAgent for Claude Code', () => {
+  const claudeCode = CLI_AGENTS[0]!;
+
+  it('reports ready with per-mode readiness when the login is confirmed', async () => {
+    const dir = tempDir('bin-');
+    writeScript(
+      dir,
+      'claude',
+      [
+        'if [ "$1" = --setting-sources ]; then shift 2; fi',
+        'case "$1" in',
+        '  --version) echo "2.1.302 (Claude Code)" ;;',
+        `  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","email":"person@example.com"}' ;;`,
+        'esac',
+      ].join('\n'),
+    );
+    const detection = await detectCliAgent(claudeCode, { PATH: `${dir}:${process.env.PATH}` });
+    expect(detection).toMatchObject({
+      adapterId: 'claude-code',
+      installed: true,
+      version: '2.1.302 (Claude Code)',
+      auth: 'ready',
+      readiness: [
+        { mode: 'subscription', ready: true, code: null, detail: 'Logged in (claude.ai).' },
+        { mode: 'api-key', ready: false, code: 'auth-missing' },
+      ],
+    });
+    expect(JSON.stringify(detection)).not.toContain('person@example.com');
+  });
+
+  it('reports ready through an API key alone, without revealing it', async () => {
+    const dir = tempDir('bin-');
+    writeScript(
+      dir,
+      'claude',
+      'if [ "$1" = --setting-sources ]; then shift 2; fi\ncase "$1" in\n  --version) echo "2.1.302" ;;\n  auth) echo \'{"loggedIn":false}\'; exit 1 ;;\nesac',
+    );
+    const detection = await detectCliAgent(claudeCode, {
+      PATH: `${dir}:${process.env.PATH}`,
+      ANTHROPIC_API_KEY: 'sk-ant-planted-key',
+    });
+    expect(detection.auth).toBe('ready');
+    expect(detection.readiness?.map((mode) => [mode.mode, mode.ready, mode.code])).toEqual([
+      ['subscription', false, 'auth-missing'],
+      ['api-key', true, null],
+    ]);
+    expect(JSON.stringify(detection)).not.toContain('sk-ant-planted-key');
+  });
+
+  it('reports missing when claude is not installed', async () => {
+    const detection = await detectCliAgent(claudeCode, { PATH: tempDir('empty-') });
+    expect(detection).toEqual({
+      adapterId: 'claude-code',
+      installed: false,
+      version: null,
+      executablePath: null,
+      auth: 'missing',
+      readiness: [
+        {
+          mode: 'subscription',
+          ready: false,
+          code: 'binary-not-found',
+          detail: '`claude` was not found on PATH.',
+        },
+        {
+          mode: 'api-key',
+          ready: false,
+          code: 'binary-not-found',
+          detail: '`claude` was not found on PATH.',
+        },
+      ],
+      notes: ['`claude` was not found on PATH.'],
+    });
+  });
+});
+
 posixOnly('detectAllCliAgents', () => {
   it('detects every known agent against the given PATH', async () => {
     const dir = tempDir('bin-');
@@ -183,10 +259,16 @@ posixOnly('detectAllCliAgents', () => {
     writeScript(dir, 'codex', 'exit 1');
     const results = await detectAllCliAgents({ PATH: dir });
     expect(results.map((r) => r.descriptor)).toEqual(CLI_AGENTS);
-    expect(results.map(({ detection: d }) => [d.adapterId, d.installed, d.version])).toEqual([
-      ['claude-code', true, '2.0.0 (Claude Code)'],
-      ['codex', true, null],
-      ['cursor', false, null],
+    expect(
+      results.map(({ detection: d }) => [d.adapterId, d.installed, d.version, d.auth]),
+    ).toEqual([
+      ['claude-code', true, '2.0.0 (Claude Code)', 'missing'],
+      ['codex', true, null, 'unknown'],
+      ['cursor', false, null, 'unknown'],
+    ]);
+    expect(results[0]?.detection.readiness?.map((mode) => mode.code)).toEqual([
+      'version-unsupported',
+      'version-unsupported',
     ]);
   });
 

@@ -61,7 +61,7 @@ DirectiveBench's scope is broad (repositories, artifacts, categories, benchmarks
 | Benchmark Builder | `/builder` | Planned page | [SPEC-109](2026-10-14-benchmark-builder.md) |
 | Executions | `/executions` | Jobs list with cancel | [SPEC-114](2026-10-14-runner-management.md) |
 | Results | `/results`, `/runs/[id]` | Completed runs; run detail | [SPEC-113](2026-10-14-results-and-reporting.md) |
-| Agent Connections | `/agents` | Real CLI detection; execution "not implemented" | [SPEC-203](2026-10-14-integration-claude-code.md), [SPEC-204](2026-10-14-integration-openai-codex.md), [SPEC-205](2026-10-14-integration-cursor.md) |
+| Agent Connections | `/agents` | Real CLI detection, Claude Code readiness per auth mode; execution "not implemented" | [SPEC-203](2026-10-14-integration-claude-code.md), [SPEC-204](2026-10-14-integration-openai-codex.md), [SPEC-205](2026-10-14-integration-cursor.md) |
 | Model Providers | `/model-providers` | Planned page | [SPEC-206](2026-10-14-integration-anthropic-api.md), [SPEC-211](2026-10-14-integration-custom-model-providers.md) |
 | Settings | `/settings` | Read-only data dir paths and effective configuration; editing planned | [SPEC-115](2026-10-14-settings-and-configuration.md) |
 

@@ -380,6 +380,28 @@ test.describe('catalog and configuration', () => {
     }
   });
 
+  test('Claude Code readiness is shown per auth mode', async ({ page }) => {
+    // playwright.config.ts puts a fake, logged-in `claude` first on the server's PATH and clears
+    // ANTHROPIC_API_KEY, so this row is the same on every machine.
+    await page.goto('/agents');
+    const claude = page.locator('tr[data-agent="claude-code"]');
+    await expect(claude).toContainText('found');
+    await expect(claude).toContainText('2.1.302 (Claude Code)');
+    await expect(claude.getByText('ready', { exact: true })).toBeVisible();
+    await expect(claude.locator('[data-auth-mode="subscription"]')).toHaveText(
+      'Subscription: ready — Logged in (claude.ai).',
+    );
+    await expect(claude.locator('[data-auth-mode="api-key"]')).toHaveText(
+      "API key: not ready (auth-missing) — ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
+    );
+    // Execution stays unavailable until the adapter is wired into `benchmark run` (E06-S04).
+    await expect(claude).toContainText('not implemented');
+    // Readiness of the other agents is not implemented.
+    for (const id of ['codex', 'cursor']) {
+      await expect(page.locator(`tr[data-agent="${id}"]`)).toContainText('unknown');
+    }
+  });
+
   test('settings show the data directory and the effective configuration', async ({ page }) => {
     const config: unknown = JSON.parse(readFileSync(join(dataDir(), 'config.json'), 'utf8'));
     await page.goto('/settings');
