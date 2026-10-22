@@ -48,15 +48,24 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   linear-time test instead of a hand-rolled ratio (added 2026-10-22, issue #114). Hand-rolled
   ratios had drifted apart (raw ratios against 12 or 30, a `+ 50 ms` slack, no GC, a 4× step where
   quadratic code only reaches 16 against a bound of 12) and failed on CI at 12.2, 13.0 and 16.9.
-- Measure CPU time (`process.cpuUsage()`), not wall-clock time, in a ratio test. Under
-  `taskset -c 0,1` with two `yes` processes and six parallel vitest runs, a first helper version
-  with wall-clock samples (fastest of three, GC before each) measured a deliberately quadratic
-  function at 2.0–3.7 and linear scanners at 4.2–4.9 (bound 4): the scheduler takes whole time
-  slices away, unevenly. CPU time fixed that, with two more traps: a forced GC before every
-  sample leaves background sweeping that is billed to the next short sample (quadratic measured
-  ~3), so collect once after building the inputs; and the first samples of a process run before
-  the JIT optimised the code, so discard one warm-up round. Prove a ratio helper both ways under
-  load: linear stays ~1 and a deliberate quadratic stays ~8.
+- Measure the test thread's CPU time (`process.threadCpuUsage()`, Node.js ≥ 23.9), not
+  wall-clock time, in a ratio test, and prove the helper both ways under load (a linear and an
+  N^1.5 and a quadratic control). Under `taskset -c 0,1` with two `yes` processes and parallel
+  vitest runs, each trap below showed up as a wrong ratio:
+  - wall-clock samples (fastest of three, GC before each): a quadratic function measured
+    2.0–3.7 and linear scanners up to 4.95 against a bound of 4 — the scheduler takes whole time
+    slices away, unevenly;
+  - process-wide CPU time (`process.cpuUsage()`) bills V8's helper threads (concurrent GC,
+    background compilation), whose work follows vitest's heap, not the input: a linear Markdown
+    shape measured 3.9–15.6, while the same parser was flat in plain Node.js;
+  - reading the clock after every call (a ~1 µs system call) inflated the baseline on small
+    inputs, where one call takes about as long, and with it every ratio;
+  - a forced GC before every sample, and the first samples of a process before the JIT
+    optimised the code: collect once after building the inputs and discard a warm-up round.
+- An 8× size step cannot see N^1.5 growth (√8 ≈ 2.8, under any usable bound) — Codex review of
+  PR #121. The helper uses a 32× step (N^1.5 ≈ 5.7, quadratic 32) with the large input at the
+  size the test used before, so the test costs the same, and a bound of 3.5 (linear shapes
+  measured 0.8–1.9, one code-span shape 2.45; N^1.5 control 5.5–6.4).
 - A test that asserts outcomes rather than time still needs a named timeout when it does a lot
   of real work: an offset sweep over a file-backed database (20 ms alone) and a fake-git test
   spawning eight Node.js fakes (0.3 s alone) exceeded vitest's 5 s default under load.
