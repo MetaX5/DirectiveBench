@@ -1,7 +1,7 @@
 import { execFile, type ExecFileException } from 'node:child_process';
 import { access, constants, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 /**
  * Read-only status probes of agent CLIs (`--version`, `claude auth status`). A probe runs an
@@ -45,9 +45,13 @@ export function probeEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return result;
 }
 
-/** Finds `name` on `env.PATH` without a shell (honouring `PATHEXT` on Windows). */
+/**
+ * Finds `name` on `env.PATH` without a shell (honouring `PATHEXT` on Windows). Relative entries
+ * (`.`, `bin`) are skipped: they would resolve against the caller's working directory, so running
+ * `doctor` inside an untrusted repository could run that repository's own `claude`.
+ */
 export async function findExecutable(name: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-  const dirs = (env.PATH ?? '').split(delimiter).filter(Boolean);
+  const dirs = (env.PATH ?? '').split(delimiter).filter((dir) => isAbsolute(dir));
   const extensions =
     process.platform === 'win32' ? (env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
   for (const dir of dirs) {
@@ -91,13 +95,22 @@ function classify(error: ExecFileException | null, stdout: string): ProbeResult 
   return { exitCode: null, stdout: '', failure: 'failed' };
 }
 
-/** Runs one probe in a fresh empty directory that is removed afterwards. */
+/**
+ * Runs one probe in a fresh empty directory that is removed afterwards. It never rejects: a
+ * directory that cannot be created is reported as `failed`, and a failed removal of the empty
+ * directory does not change the result (detection must not crash `doctor` or a page).
+ */
 export async function runProbe(
   executablePath: string,
   args: readonly string[],
   options: ProbeOptions,
 ): Promise<ProbeResult> {
-  const cwd = await mkdtemp(join(tmpdir(), 'directivebench-probe-'));
+  let cwd: string;
+  try {
+    cwd = await mkdtemp(join(tmpdir(), 'directivebench-probe-'));
+  } catch {
+    return { exitCode: null, stdout: '', failure: 'failed' };
+  }
   try {
     return await new Promise<ProbeResult>((resolve) => {
       execFile(
@@ -121,7 +134,8 @@ export async function runProbe(
       );
     });
   } finally {
-    await rm(cwd, { recursive: true, force: true });
+    // Best effort: the directory is empty and lives in the OS temp directory.
+    await rm(cwd, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 

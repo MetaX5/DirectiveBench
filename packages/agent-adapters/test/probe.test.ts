@@ -1,8 +1,14 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { PROBE_ENV_ALLOWLIST, probeEnv, readVersionLine, runProbe } from '../src/probe';
+import { join, relative } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  PROBE_ENV_ALLOWLIST,
+  findExecutable,
+  probeEnv,
+  readVersionLine,
+  runProbe,
+} from '../src/probe';
 
 const posixOnly = describe.skipIf(process.platform === 'win32');
 
@@ -23,6 +29,7 @@ function writeScript(body: string, shebang = '#!/bin/sh'): string {
 const options = { env: { PATH: process.env.PATH }, timeoutMs: 5000, maxOutputBytes: 64 * 1024 };
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -84,22 +91,22 @@ posixOnly('runProbe', () => {
   });
 
   it('reports a timeout and kills a child that ignores SIGTERM', async () => {
-    const tool = writeScript("trap '' TERM\nsleep 10");
+    const tool = writeScript("trap '' TERM\nsleep 3");
     const started = Date.now();
     expect(await runProbe(tool, [], { ...options, timeoutMs: 100 })).toEqual({
       exitCode: null,
       stdout: '',
       failure: 'timeout',
     });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(2500);
   });
 
   it('does not wait for a grandchild that holds the output open', async () => {
-    const tool = writeScript('sleep 10 &\nsleep 10');
+    const tool = writeScript('sleep 3 &\nsleep 3');
     const started = Date.now();
     const probe = await runProbe(tool, [], { ...options, timeoutMs: 100 });
     expect(probe).toEqual({ exitCode: null, stdout: '', failure: 'timeout' });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(2500);
   });
 
   it('reports output above the limit without keeping it', async () => {
@@ -130,5 +137,39 @@ posixOnly('readVersionLine', () => {
   it('ignores the output of a failing version command', async () => {
     const tool = writeScript('echo "1.0.0"\nexit 2');
     expect(await readVersionLine(tool, ['--version'], { PATH: process.env.PATH })).toBeNull();
+  });
+});
+
+posixOnly('findExecutable', () => {
+  it('skips relative PATH entries, which resolve against the working directory', async () => {
+    const tool = writeScript('echo planted');
+    const dir = join(tool, '..');
+    expect(await findExecutable('tool', { PATH: relative(process.cwd(), dir) })).toBeNull();
+    expect(await findExecutable('tool', { PATH: `.:${dir}` })).toBe(tool);
+  });
+});
+
+posixOnly('runProbe without a usable temp directory', () => {
+  it('reports failed instead of rejecting when the working directory cannot be created', async () => {
+    const tool = writeScript('echo never');
+    vi.stubEnv('TMPDIR', join(tempDir('probe-tmp-'), 'missing', 'dir'));
+    expect(await runProbe(tool, [], options)).toEqual({
+      exitCode: null,
+      stdout: '',
+      failure: 'failed',
+    });
+  });
+
+  it('keeps the result when the working directory cannot be removed', async () => {
+    // The probe leaves a directory it cannot delete from (mode 0500) in its working directory.
+    const tool = writeScript('mkdir locked && touch locked/file && chmod 500 locked && echo done');
+    const tmp = tempDir('probe-tmp-');
+    vi.stubEnv('TMPDIR', tmp);
+    expect(await runProbe(tool, [], options)).toEqual({
+      exitCode: 0,
+      stdout: 'done\n',
+      failure: null,
+    });
+    for (const entry of readdirSync(tmp)) chmodSync(join(tmp, entry, 'locked'), 0o700);
   });
 });

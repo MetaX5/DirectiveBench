@@ -137,11 +137,13 @@ async function subscriptionReadiness(
       `Logged in (${status.authMethod ?? 'method not reported'}).`,
     );
   }
-  if (EXPIRED_LOGIN_PATTERN.test(probe.stdout)) {
-    return result('subscription', 'auth-expired', `The login has expired: ${LOGIN_HINT}.`);
-  }
   if (status?.loggedIn === false) {
     return result('subscription', 'auth-missing', `Not logged in: ${LOGIN_HINT}.`);
+  }
+  // Only output that is not a status object is searched for the expiry text, so no field of a
+  // parsed status (email, organisation) can trigger it.
+  if (!status && EXPIRED_LOGIN_PATTERN.test(probe.stdout)) {
+    return result('subscription', 'auth-expired', `The login has expired: ${LOGIN_HINT}.`);
   }
   return result(
     'subscription',

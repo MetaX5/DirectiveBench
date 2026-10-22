@@ -263,6 +263,13 @@ posixOnly('checkClaudeCodeReadiness', () => {
       });
     });
 
+    it('does not read the expiry text from fields of a parsed status', async () => {
+      const status = JSON.stringify({ loggedIn: false, orgName: 'Login expired Inc' });
+      const fake = fakeClaude({ auth: `echo '${status}'; exit 1` });
+      const report = await checkClaudeCodeReadiness('subscription', cliEnv(fake.bin));
+      expect(report).toMatchObject({ ready: false, code: 'auth-missing' });
+    });
+
     it('fails closed when a login is reported with a non-zero exit', async () => {
       const fake = fakeClaude({ auth: `echo '${LOGGED_IN}'; exit 2` });
       const report = await checkClaudeCodeReadiness('subscription', cliEnv(fake.bin));
