@@ -6,6 +6,7 @@ import {
   getBenchmarkRunDetail,
   importSuiteVersion,
   insertAgentRun,
+  listArtifactRuns,
   listBenchmarkRuns,
   schema,
   type AgentRunInput,
@@ -134,6 +135,11 @@ describe('A/B baseline on a run (SPEC-118 FR-118-13)', () => {
       baselineArtifactVersionId: targets.artifactVersionId,
     });
     expect(detail?.artifactVersion.version).toBe(2);
+    expect(detail?.baselineArtifactVersion).toEqual({
+      id: targets.artifactVersionId,
+      version: 1,
+      contentHash: expect.any(String),
+    });
     const [listed] = await listBenchmarkRuns(handle.db);
     expect(listed?.run.baselineArtifactVersionId).toBe(targets.artifactVersionId);
   });
@@ -203,6 +209,60 @@ describe('insertAgentRun', () => {
 describe('getBenchmarkRunDetail', () => {
   it('returns null for an unknown run', async () => {
     expect(await getBenchmarkRunDetail(getHandle().db, 'run_missing')).toBeNull();
+  });
+
+  it('returns no baseline version for baseline kind none', async () => {
+    const handle = getHandle();
+    const runId = await seedRun(handle, await seedTargets(handle));
+    expect((await getBenchmarkRunDetail(handle.db, runId))?.baselineArtifactVersion).toBeNull();
+  });
+});
+
+describe('listArtifactRuns (SPEC-118 FR-118-50)', () => {
+  it('lists one artifact’s runs newest version first, then newest run first, with baselines', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const handle = getHandle();
+    vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
+    const targets = await seedTargets(handle);
+    const v2 = await importArtifactVersion(handle, artifactInput('v2'));
+    const other = await importArtifactVersion(
+      handle,
+      artifactInput('other', { slug: 'other', path: 'skills/other' }),
+    );
+    const v1Run = await seedRun(handle, targets);
+    vi.setSystemTime(new Date('2026-03-02T00:00:00.000Z'));
+    const v2None = await seedRun(handle, { ...targets, artifactVersionId: v2.versionId });
+    vi.setSystemTime(new Date('2026-03-03T00:00:00.000Z'));
+    const v2Ab = await seedRun(
+      handle,
+      { ...targets, artifactVersionId: v2.versionId },
+      { baselineArtifactVersionId: targets.artifactVersionId, agentAdapterId: 'claude-code' },
+    );
+    // Same start time as v2Ab: the id decides, never the storage order.
+    const v2Tie = await seedRun(handle, { ...targets, artifactVersionId: v2.versionId });
+    await seedRun(handle, { ...targets, artifactVersionId: other.versionId });
+    await finishBenchmarkRun(handle.db, v2Ab, finished({ verdict: 'improved' }));
+
+    const runs = await listArtifactRuns(handle.db, targets.artifactId);
+    const tied = [v2Ab, v2Tie].sort().reverse();
+    expect(runs.map((r) => r.run.id)).toEqual([...tied, v2None, v1Run]);
+    const ab = runs.find((r) => r.run.id === v2Ab);
+    expect(ab).toEqual({
+      run: expect.objectContaining({
+        id: v2Ab,
+        status: 'completed',
+        verdict: 'improved',
+        agentAdapterId: 'claude-code',
+      }),
+      suite: { id: targets.suiteId, name: 'Suite', version: 1 },
+      artifactVersion: { id: v2.versionId, version: 2 },
+      baselineVersion: { id: targets.artifactVersionId, version: 1 },
+    });
+    expect(runs.find((r) => r.run.id === v1Run)).toMatchObject({
+      artifactVersion: { id: targets.artifactVersionId, version: 1 },
+      baselineVersion: null,
+    });
+    expect(await listArtifactRuns(handle.db, 'art_missing')).toEqual([]);
   });
 });
 

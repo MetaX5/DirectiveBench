@@ -108,3 +108,7 @@ fake CLI ignoring SIGINT/SIGTERM.
 
 - Compose `ClaudeCodeAdapter` (install + `runClaudeCode` + parser of #100) and register it for
   `benchmark run` only (FR-118-05, Phase 4).
+- CI flakes outside this change, both seen on `10448cf` (run 39788206397, attempts 1 and 2) and
+  passing locally on 2 cores: `packages/runner/test/hosted-git.test.ts` "fails the blob fetch…"
+  (a 200 ms fake-git timeout read as `timeout` instead of `git-failed`) and
+  `apps/web/test/markdown.test.ts` "parses pathological input in linear time" (ratio bound).

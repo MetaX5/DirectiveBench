@@ -95,7 +95,7 @@ export const ARTIFACT_TABS = [
   { id: 'metadata', label: 'Parsed metadata' },
   { id: 'versions', label: 'Versions' },
   { id: 'benchmarks', label: 'Benchmarks' },
-  { id: 'evaluations', label: 'Evaluation history' },
+  { id: 'evaluations', label: 'Results by version' },
 ] as const;
 
 export type ArtifactTab = (typeof ARTIFACT_TABS)[number]['id'];
