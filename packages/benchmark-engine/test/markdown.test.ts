@@ -7,6 +7,7 @@ import {
   scanMarkdown,
   splitTableRow,
 } from '../src/markdown';
+import { collectGarbage } from './helpers';
 
 describe('scanMarkdown headings', () => {
   it('finds ATX headings of every level with optional closing sequences', () => {
@@ -329,15 +330,45 @@ describe('parseFirstNumber', () => {
   });
 });
 
-/** Fastest of three runs, in milliseconds. */
-function fastest(run: () => void): number {
+/**
+ * Fastest of three runs, in milliseconds, each after a full garbage collection, so a collection
+ * left over from building the input cannot land inside one measurement (lesson 2026-10-21).
+ */
+async function fastest(run: () => void): Promise<number> {
   let best = Number.POSITIVE_INFINITY;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    await collectGarbage();
     const started = performance.now();
     run();
     best = Math.min(best, performance.now() - started);
   }
   return best;
+}
+
+/**
+ * Growth of `run` from a 1× to an 8× input, divided by the growth of a linear baseline (split
+ * into lines, collapse whitespace) on the same two inputs. Raw ratios depend on the machine:
+ * once strings outgrow the CPU caches even the baseline grows ~16× for 8× the input. Normalised,
+ * a linear scan measures ~1 and a quadratic one ~8; the bound sits between them.
+ */
+const SIZE_STEP = 8;
+const MAX_LINEAR_RATIO = 4;
+
+const baseline = (text: string) => () => {
+  text.split('\n');
+  text.replace(/\s+/g, ' ');
+};
+
+async function ratio(
+  build: (size: number) => string,
+  run: (text: string) => () => void,
+  size: number,
+): Promise<number> {
+  const small = build(size);
+  const large = build(size * SIZE_STEP);
+  const growth = async (measure: (text: string) => () => void) =>
+    (await fastest(measure(large))) / Math.max(await fastest(measure(small)), 0.05);
+  return (await growth(run)) / (await growth(baseline));
 }
 
 describe('linear time', () => {
@@ -359,29 +390,22 @@ describe('linear time', () => {
     'table body with breaks': (n) => `| a | b |\n|---|---|\n${'| 1 | 2 |\n* * *\n'.repeat(n)}`,
   };
 
-  it.each(Object.keys(shapes))('scans %s in linear time', (name) => {
-    const build = shapes[name] as (size: number) => string;
-    const small = build(20_000);
-    const large = build(80_000);
-    const ratio =
-      fastest(() => scanMarkdown(large)) /
-      Math.max(
-        fastest(() => scanMarkdown(small)),
-        1,
-      );
-    // 4× the input; a quadratic scan would be ~16×.
-    expect(ratio).toBeLessThan(10);
-  });
+  it.each(Object.keys(shapes))(
+    'scans %s in linear time',
+    async (name) => {
+      const build = shapes[name] as (size: number) => string;
+      const scan = (text: string) => () => scanMarkdown(text);
+      expect(await ratio(build, scan, 20_000)).toBeLessThan(MAX_LINEAR_RATIO);
+    },
+    60_000,
+  );
 
-  it('matches literals and parses numbers in linear time', () => {
-    const small = `${'word '.repeat(50_000)}QA`;
-    const large = `${'word '.repeat(200_000)}QA`;
+  it('matches literals and parses numbers in linear time', async () => {
+    const words = (size: number) => `${'word '.repeat(size)}QA`;
     const literal = (text: string) => () => containsLiteral(text, 'word   QA', false);
-    expect(fastest(literal(large)) / Math.max(fastest(literal(small)), 1)).toBeLessThan(10);
-    const digits = (n: number) => `${'1 000'.repeat(n)}`;
+    expect(await ratio(words, literal, 50_000)).toBeLessThan(MAX_LINEAR_RATIO);
+    const digits = (size: number) => '1 000'.repeat(size);
     const number = (text: string) => () => parseFirstNumber(text, '.');
-    expect(
-      fastest(number(digits(200_000))) / Math.max(fastest(number(digits(50_000))), 1),
-    ).toBeLessThan(10);
-  });
+    expect(await ratio(digits, number, 50_000)).toBeLessThan(MAX_LINEAR_RATIO);
+  }, 60_000);
 });

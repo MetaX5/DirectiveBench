@@ -150,6 +150,11 @@ source (a string, not instrumented — behaviour is tested end to end).
      GFM block boundary checked (blank line, ATX heading, fence, block quote, list item,
      thematic break).
    Gate after the fixes: 1 081 tests (engine 227), 100% coverage, build and verify:pack pass.
+   CI then failed once on `scans setext paragraphs in linear time` (ratio 10.6 vs bound 10).
+   Measured at four sizes, the scanner and plain `split`/`replace` scale the same way: per-unit
+   cost doubles once strings outgrow the caches. The test now forces a GC before each timed run
+   and divides the scan's 8× growth by a linear baseline's (idle ≤ 1.5, loaded ≤ 1.5, a quadratic
+   probe 6.3, bound 4). The timing lesson is updated.
 
 ## Verification
 
