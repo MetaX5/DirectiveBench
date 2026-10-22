@@ -188,8 +188,8 @@ export function runCommand(
     });
     // The leader exited: kill what it left in its group. This also closes output pipes a
     // background child inherited, so `close` follows instead of waiting for the timeout. A
-    // process that left the group can hold them forever: after the drain period they are closed
-    // and it is reported as a stray process.
+    // process that left the group (or, on Windows, any background child) can hold them forever:
+    // after the drain period they are closed and it is reported as a stray process.
     child.on('exit', () => {
       clearTimeout(timer);
       clearTimeout(forceKillTimer);

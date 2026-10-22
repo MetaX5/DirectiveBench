@@ -675,3 +675,84 @@ describe('assertRunnable', () => {
     );
   });
 });
+
+describe('assertions that cannot finish (SPEC-118 FR-118-46)', () => {
+  /** The candidate writes text on which `(a+)+$` backtracks for minutes. */
+  const writeAdversarial: RunHandler = async (request, variant) => {
+    writeFileSync(
+      join(request.workspace.path, 'out.txt'),
+      variant === 'candidate' ? `${'a'.repeat(32)}!` : 'b',
+    );
+    return completed({ usage: { inputTokens: 1, outputTokens: 1 } });
+  };
+  const adversarialCase = () =>
+    testCase({
+      verification: undefined,
+      assertions: [
+        { id: 'present', type: 'file-exists', path: 'out.txt' },
+        { id: 'pattern', type: 'file-contains', path: 'out.txt', pattern: '(a+)+$' },
+      ],
+    });
+
+  it('makes the agent run an infrastructure error and keeps the assertion results', async () => {
+    const input = await suite({ cases: [adversarialCase()] });
+    const outcome = await runBenchmark({
+      ...input,
+      adapter: new FakeAdapter(writeAdversarial),
+      signal: signal(),
+    });
+    const candidate = outcome.agentRuns.find((r) => r.variant === 'candidate');
+    expect(candidate).toMatchObject({
+      executionStatus: 'infrastructure-error',
+      score: null,
+      passed: null,
+      error:
+        'assertion-error: assertion "pattern" could not be evaluated: Pattern evaluation exceeded 2000 ms; simplify the regular expression',
+      changedFiles: [{ path: 'out.txt', change: 'added' }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    expect(candidate?.assertions.map((a) => [a.assertionId, a.passed, a.error?.code])).toEqual([
+      ['present', true, undefined],
+      ['pattern', false, 'pattern-timeout'],
+    ]);
+    expect(candidate?.assertions[1]?.details).toMatchObject({
+      error: { code: 'pattern-timeout' },
+      patterns: ['/(a+)+$/'],
+    });
+    const baseline = outcome.agentRuns.find((r) => r.variant === 'baseline');
+    expect(baseline).toMatchObject({ executionStatus: 'completed', score: 0.5 });
+    // Excluded from quality: the candidate has no valid run, so there is no verdict.
+    expect(outcome.summary.verdict).toBe('error');
+  }, 20_000);
+
+  it('terminates a running pattern on cancellation and records the run as cancelled', async () => {
+    const input = await suite({ cases: [adversarialCase()] });
+    const controller = new AbortController();
+    let agentFinished = 0;
+    const adapter = new FakeAdapter(async (request, variant) => {
+      const result = await writeAdversarial(request, variant);
+      if (variant === 'candidate') {
+        agentFinished = performance.now();
+        setTimeout(() => controller.abort(), 200);
+      }
+      return result;
+    });
+    const records: AgentRunRecord[] = [];
+    await expect(
+      runBenchmark({
+        ...input,
+        adapter,
+        signal: controller.signal,
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }),
+    ).rejects.toThrow(BenchmarkCancelledError);
+    expect(records.map((r) => [r.variant, r.executionStatus, r.error])).toEqual([
+      ['baseline', 'completed', null],
+      ['candidate', 'cancelled', 'Cancelled during assertions'],
+    ]);
+    // The worker stopped with the cancellation, well before the 2 s pattern deadline.
+    expect(performance.now() - agentFinished).toBeLessThan(1800);
+  }, 20_000);
+});

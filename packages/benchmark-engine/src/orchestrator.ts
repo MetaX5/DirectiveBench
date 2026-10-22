@@ -411,12 +411,29 @@ async function executeAgentRun(
         }),
       );
     }
+    // A bounded pattern terminated by cancellation must not read as an assertion error.
+    if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');
+    const usage = agentResult.usage ? { ...agentResult.usage } : null;
+    // An evaluation that could not finish is neither pass nor fail: the run is excluded from
+    // quality and keeps its assertion results as evidence (SPEC-118 FR-118-46, SPEC-111 §13).
+    const unfinished = assertions.find((assertion) => assertion.error);
+    if (unfinished) {
+      return {
+        ...fail(
+          'infrastructure-error',
+          `assertion-error: assertion "${unfinished.assertionId}" could not be evaluated: ${unfinished.message}`,
+        ),
+        changedFiles,
+        assertions,
+        usage,
+      };
+    }
     const { score, passed } = scoreRun(assertions, definition.scoring.passThreshold);
     return {
       ...base,
       changedFiles,
       assertions,
-      usage: agentResult.usage ? { ...agentResult.usage } : null,
+      usage,
       executionStatus: 'completed',
       score,
       passed,

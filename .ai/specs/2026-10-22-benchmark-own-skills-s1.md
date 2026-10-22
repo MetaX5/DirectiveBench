@@ -164,7 +164,7 @@ weights and `required` work as for every assertion (SPEC-111).
 | FR-118-43 | **`markdown-table-value`** `{ file, row: { pattern, flags? }, column, min?, max?, decimalSeparator?: '.' \| ',' }` scans the GFM tables of the file in order, takes the first body row whose first cell matches `row.pattern` in a table that has a header cell equal to `column` (case-insensitive, trimmed), parses the first number of that cell and passes iff `min ≤ value ≤ max` (at least one bound required; bounds inclusive). No matching row or column, or no number in the cell, fails with that reason. Details: table index, row text, cell text, parsed value. Selecting other row columns or checking every matching row is future work (§19). |
 | FR-118-44 | **Number parsing** for FR-118-43: the first token matching an optional sign, digits with optional grouping and an optional decimal part. `decimalSeparator: '.'` (default) treats `,`, spaces, no-break and thin spaces as grouping; `','` treats `.` and those spaces as grouping. A range such as `8–12` yields its first number (8); users who need the upper bound match a separate column or row. |
 | FR-118-45 | The three types SHALL be added to the format v1 union additively (no `schemaVersion` change): existing definitions validate and hash exactly as before ([SPEC-108](2026-10-14-benchmark-definition-format.md)). Regular expressions follow FR-108-10 (flags `i`, `m`, `s`, `u`; invalid patterns are validation errors at their path). |
-| FR-118-46 | **Bounded pattern evaluation.** A syntax check (FR-108-10) does not bound matching time, and a user pattern such as `(a+)+$` backtracks exponentially (≈ 4.5 s at 26 characters on Node 24, doubling per character). Every match of a **user-supplied** regular expression — in the three new types and in the existing `file-contains` — SHALL run in a `node:worker_threads` worker, never on the runner's event loop. The worker receives the patterns and the texts to match (file text, or heading and first-cell texts extracted by the line scans) and returns the match results; one worker serves one assertion evaluation. The engine waits for it with a named deadline `ASSERTION_REGEX_TIMEOUT_MS` (2 000 ms per assertion evaluation, all its patterns together) and terminates it (`worker.terminate()`) on the deadline or on the run's `AbortSignal`. A terminated or crashed evaluation SHALL yield an **assertion error** — neither pass nor fail — with the message "Pattern evaluation exceeded 2000 ms; simplify the regular expression" (or the crash reason) and `details.patterns`; the agent run becomes `infrastructure-error` code `assertion-error`, as for missing assertion results (SPEC-111 §13), so it is excluded from quality and counts toward the error rate. Literal strings (headings, phrases, the `column` header) are matched without a user regex, by linear scans on the runner thread. No new dependency (no RE2): the worker is in the platform and keeps JavaScript regex semantics. |
+| FR-118-46 | **Bounded pattern evaluation.** A syntax check (FR-108-10) does not bound matching time, and a user pattern such as `(a+)+$` backtracks exponentially (≈ 4.5 s at 26 characters on Node 24, doubling per character). Every match of a **user-supplied** regular expression — in the three new types and in the existing `file-contains` — SHALL run in a `node:worker_threads` worker, never on the runner's event loop. The worker receives the patterns and the texts to match (file text, or heading and first-cell texts extracted by the line scans) **once, shared by all patterns** of the evaluation, and returns compact results — per matcher the first matching text index and, for an ordered heading check, its greedy position — so the result is O(matchers), never O(matches); one worker serves one assertion evaluation. Named limits keep the copy bounded: `MAX_MATCHERS_PER_ASSERTION` (100 headings or phrases) and `MAX_PATTERN_LENGTH` (1 000 characters per pattern of the new types) are validation errors at their paths, and `MAX_PATTERN_INPUT_CHARS` (4 Mi characters of texts plus patterns, any regex-capable type) is checked before a worker is constructed — above it the evaluation is an assertion error (`pattern-worker-failed`), failing closed. The engine waits for it with a named deadline `ASSERTION_REGEX_TIMEOUT_MS` (2 000 ms per assertion evaluation, all its patterns together) and terminates it (`worker.terminate()`) on the deadline or on the run's `AbortSignal`. A terminated or crashed evaluation SHALL yield an **assertion error** — neither pass nor fail — with the message "Pattern evaluation exceeded 2000 ms; simplify the regular expression" (or the crash reason) and `details.patterns`; the agent run becomes `infrastructure-error` code `assertion-error`, as for missing assertion results (SPEC-111 §13), so it is excluded from quality and counts toward the error rate. Literal strings (headings, phrases, the `column` header) are matched without a user regex, by linear scans on the runner thread (literal headings of a `markdown-sections` assertion that also has patterns are compared in the same worker pass, still without a regex, so the ordered placement is computed once). No new dependency (no RE2): the worker is in the platform and keeps JavaScript regex semantics. |
 
 
 ### 6.6 Results per artifact version (web, read-only)
@@ -577,7 +577,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-3: With `--baseline v<n>` the baseline workspace contains exactly version n and the candidate exactly the chosen version; `benchmark_runs.baseline_artifact_version_id` is set; same-content, other-artifact and other-format baselines are rejected before a job exists.
 - [ ] AC-4: In subscription mode no `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_CODE_USE_*` variable reaches the agent and every run carries `ambient-user-config`; in api-key mode `HOME`/`CLAUDE_CONFIG_DIR` are run-local and the key appears in no argv, row, log, trace or CLI output (planted-key test).
 - [ ] AC-5: The comparability key of the bundled mock example is byte-identical before and after this change; two runs differing only in auth mode, isolation profile, permission profile or `hostId` get different keys; baseline choice does not change the key.
-- [ ] AC-6: The three new assertions behave as FR-118-40…44 on fixture documents, including the reference-scenario example of §8.4, and evaluate a 2 MiB document in < 200 ms.
+- [x] AC-6: The three new assertions behave as FR-118-40…44 on fixture documents, including the reference-scenario example of §8.4, and evaluate a 2 MiB document in < 200 ms.
 - [ ] AC-7: A suite with `command` assertions is refused without `--approve-commands`; with it, every argv is printed and approval source `user` is recorded on that suite version only.
 - [ ] AC-8: Without a TTY and without `--yes` the run is refused (exit 2); the plan lists the agent-run count and the cost, data-leaving and Not-sandboxed notices.
 - [ ] AC-9: A `serve` runner polling the same data directory never acquires a job created by `benchmark run`.
@@ -595,7 +595,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-21: For a `skill-md` artifact the argv contains `Skill` in `--tools` and only `Skill(<name>)`/`Skill(<name> *)` in `--allowedTools`; instruction types get no `Skill`; from recorded streams each agent run records `skillActivation`; a run without the skill loaded ends `artifact-not-loaded` and stops the run; a loaded but uninvoked candidate run is scored with `artifact-not-invoked` and the summary shows the invocation rate; a `none` baseline invoking `<name>` yields `not-comparable` (FR-118-08/09).
 - [ ] AC-22: The opt-in live check of §15 passes with the exact production argv in both auth modes, including denied outside-workspace reads and writes (FR-118-07) and a second installed skill that stays denied (FR-118-08), and its results (including the field names marked as assumptions) are recorded in SPEC-203 before Phase 4 ships.
 - [ ] AC-23: A candidate **or** baseline version with frontmatter `hooks`, a `` !` `` placeholder, any non-empty `allowed-tools` — including bare `Skill`, `Skill(other-name)` and bare `Edit`, all inside the profile's tool list — or a bundled configuration file is refused with `artifact-executes-code` before any database change, and no `claude` process starts (FR-118-26).
-- [ ] AC-24: An adversarial pattern in any regex-capable assertion ends as an assertion error within `ASSERTION_REGEX_TIMEOUT_MS` (+ margin), the agent run is `infrastructure-error` `assertion-error`, the runner thread stays responsive meanwhile, and cancellation terminates the worker (FR-118-46, NFR-118-02).
+- [x] AC-24: An adversarial pattern in any regex-capable assertion ends as an assertion error within `ASSERTION_REGEX_TIMEOUT_MS` (+ margin), the agent run is `infrastructure-error` `assertion-error`, the runner thread stays responsive meanwhile, and cancellation terminates the worker (FR-118-46, NFR-118-02).
 - [ ] AC-25: A candidate or baseline skill with `model` other than `inherit` or with `context: fork` is refused with `artifact-overrides-model`, before any process starts; an assistant message whose model differs from `executionModel` yields `not-comparable` (`execution-model-mismatch`) in both variants and across repetitions (FR-118-04/06/26).
 - [ ] AC-26: A fixture with `.claude/settings.local.json` containing `{"permissions":{"allow":["Skill"]}}`, and separately one with `.claude/commands/x.md` or `sub/.claude/skills/x/SKILL.md` and a prompt `/x`, is refused with `fixture-contains-claude-config` even with `--approve-commands`, and the fake `claude` never starts; an approved `setup` command that writes `.claude/settings.local.json` ends the first agent run `infrastructure-error` `workspace-contains-claude-config` before `claude` starts and stops the run; an artifact bundle containing a nested `.claude/` directory is refused with `artifact-executes-code` (FR-118-06/26).
 - [ ] AC-27: Adversarial import and link cases are refused with `workspace-imports-outside` and `claude` never starts: (a) fixture `CLAUDE.md` → `@docs/context.md`, which contains `@/etc/hostname` (or `@~/planted-host-file`); (b) a `CLAUDE.md` or other Markdown file bundled inside a skill artifact (candidate or baseline) importing a planted host file; (c) a `setup` command that creates a symlink to a host file (or directory) and a `CLAUDE.md` importing it; (d) an import inside a fenced code block. A token naming a non-existent outside path (`@/components/x`) and imports between workspace files pass; a workspace above `WORKSPACE_SCAN_MAX_FILES`/`WORKSPACE_SCAN_MAX_BYTES` is refused with `workspace-scan-limit`; the scan is linear in workspace size (FR-118-27).
@@ -689,6 +689,37 @@ changed before merge.
 
 ## 20. Implementation status
 
+- **Implemented — Phase 1 (issue #94, verified on 2026-10-22):** §6.5 FR-118-40…46 in
+  `packages/benchmark-engine`: the assertion plugin registry with the four existing types
+  (existing definitions and the three original examples hash unchanged), `file` target resolution
+  (path, or glob over added/modified files with exactly one match; `resolveInside`), bounded
+  pattern evaluation in a `node:worker_threads` worker with `ASSERTION_REGEX_TIMEOUT_MS` = 2 000 ms
+  for `file-contains` and the new types (terminated on the deadline or the run's `AbortSignal`; an
+  unfinished evaluation is an assertion error with `details.error` and `details.patterns`, and the
+  agent run becomes `infrastructure-error` with error `assertion-error: …`), `markdown-sections`,
+  `required-phrases`, `markdown-table-value` with number parsing, and the specification-only
+  example `examples/benchmarks/document-assertions/` (§8.4). Verified by
+  `test/document-assertions.test.ts`, `markdown.test.ts`, `pattern-worker.test.ts`,
+  `definition.test.ts` and `orchestrator.test.ts` (AC-6, AC-24). Agent-written table text in
+  messages and details is secret-redacted and cut to `MAX_EXCERPT_CHARS` (200) per FR-107-16.
+  Implementation details within the FRs: headings inside block quotes and list items count, HTML
+  comments and indented code do not; a minus is a sign only at the start or after whitespace or
+  `(` (`PM-5` → 5) and `.5` → 0.5 (FR-118-44); a glob mismatch names at most 20 files.
+  After the Codex review: the worker receives the texts once for all patterns, with the named
+  limits of FR-118-46; fences inside block quotes and list items hide their headings; a table
+  body ends at a list item, block quote or thematic break as in GFM. After Codex round 2: a fence
+  closes only in the container context it opened in (block-quote depth, list indentation), so
+  quoted or listed fence text inside an outer fence stays code; the worker returns O(matchers)
+  results. After Codex round 3 and a self-audit against the GFM container rules (§4.2 ATX, §4.3
+  setext, §4.5 fences, §5.1 block quotes, §5.2 list items): an unclosed fence or HTML comment
+  ends with its container (quote marker missing, list content less indented); setext headings
+  count inside block quotes and list items but never on a lazy line; list-item lines are read
+  relative to the item's content indentation; only `1.` or a bullet interrupts a paragraph.
+  Known limits, each failing safe (a heading or table is missed, never invented): tables inside
+  block quotes, and list items nested inside block quotes beyond their first line.
+  NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
+  development machine; the CI test bounds it at 5 s (plus linearity tests normalised by a linear
+  baseline) so a loaded runner cannot flake it.
 - **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**
   - FR-118-10/11: `RunBenchmarkInput.baselineArtifact`; every baseline workspace receives exactly
     the baseline version and every candidate workspace exactly the candidate, through the same
@@ -811,7 +842,9 @@ changed before merge.
     (engine integration test with the fake, which records every start).
   - Not verified here: the `permission-denied` record of an out-of-workspace edit (the fake's
     denial line reaches the parser's input unchanged; classifying it is #100), Windows (process
-    groups are not used there; only `claude` itself is signalled, best effort, NFR-118-04), macOS,
+    groups are not used there; only `claude` itself is signalled, best effort, NFR-118-04, and any
+    background child that keeps a command's output open is reported as stray, so such a `setup`
+    fails closed there), macOS,
     and the real CLI.
 - **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
   has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
@@ -822,9 +855,8 @@ changed before merge.
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 step 2 (Claude Code
-  stream parser) and the `ClaudeCodeAdapter` that composes installation, process control and the
-  parser,
+- **Not implemented:** Phase 3 step 2 (Claude Code stream parser) and the `ClaudeCodeAdapter`
+  that composes installation, process control and the parser,
   Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
   other requirement of §6 not listed above.
 
