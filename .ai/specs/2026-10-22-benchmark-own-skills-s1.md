@@ -5,7 +5,7 @@ status: draft
 created: 2026-10-22
 updated: 2026-10-22
 category: feature
-related: [SPEC-203, SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-009, SPEC-013, SPEC-103, ADR-0005, ADR-0006, ADR-0007, ADR-0008]
+related: [SPEC-203, SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-009, SPEC-013, SPEC-103, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0013]
 ---
 
 # SPEC-118 — Benchmark own skills with Claude Code against registry artifacts (S1)
@@ -159,9 +159,9 @@ weights and `required` work as for every assertion (SPEC-111).
 | ID | Requirement |
 | --- | --- |
 | FR-118-40 | **Target file.** Each new assertion has `file`: a workspace-relative POSIX path, or a glob (`*`, `**`, `?`, `[…]`). A glob matches only files the agent added or modified (`changedFiles`), and exactly one file must match; zero or several matches fail with the list of matches. Paths are confined to the workspace (`resolveInside`). |
-| FR-118-41 | **`markdown-sections`** `{ file, headings: (string \| { pattern, flags? })[], ordered?: false }` passes iff every listed heading occurs as an ATX or setext heading of any level. A string matches the heading text case-insensitively after trimming and collapsing whitespace; a `{ pattern }` is a regular expression as in `file-contains`. With `ordered: true` the headings must occur in the listed order. Headings inside fenced code blocks do not count. Details: found and missing headings. |
+| FR-118-41 | **`markdown-sections`** `{ file, headings: (string \| { pattern, flags? })[], ordered?: false }` passes iff every listed heading occurs as an ATX or setext heading of any level. A string matches the heading text case-insensitively after trimming and collapsing whitespace; a `{ pattern }` is a regular expression as in `file-contains`. With `ordered: true` the headings must occur in the listed order. Headings are read with the block structure GitHub's renderer (cmark-gfm) gives the file: headings inside fenced or indented code, HTML blocks and comments do not count; headings inside block quotes and list items do ([ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md)). Details: found and missing headings. |
 | FR-118-42 | **`required-phrases`** `{ file, phrases: (string \| { pattern, flags? })[], caseSensitive?: false }` passes iff every phrase occurs in the file text (alternatives are written as one pattern). A string is a literal (no regular expression); whitespace runs match any whitespace run. Details: found and missing phrases. |
-| FR-118-43 | **`markdown-table-value`** `{ file, row: { pattern, flags? }, column, min?, max?, decimalSeparator?: '.' \| ',' }` scans the GFM tables of the file in order, takes the first body row whose first cell matches `row.pattern` in a table that has a header cell equal to `column` (case-insensitive, trimmed), parses the first number of that cell and passes iff `min ≤ value ≤ max` (at least one bound required; bounds inclusive). No matching row or column, or no number in the cell, fails with that reason. Details: table index, row text, cell text, parsed value. Selecting other row columns or checking every matching row is future work (§19). |
+| FR-118-43 | **`markdown-table-value`** `{ file, row: { pattern, flags? }, column, min?, max?, decimalSeparator?: '.' \| ',' }` scans the GFM tables of the file in order (as cmark-gfm reads them, also inside block quotes and list items, ADR-0013), takes the first body row whose first cell matches `row.pattern` in a table that has a header cell equal to `column` (case-insensitive, trimmed), parses the first number of that cell and passes iff `min ≤ value ≤ max` (at least one bound required; bounds inclusive). No matching row or column, or no number in the cell, fails with that reason. Details: table index, row text, cell text, parsed value. Selecting other row columns or checking every matching row is future work (§19). |
 | FR-118-44 | **Number parsing** for FR-118-43: the first token matching an optional sign, digits with optional grouping and an optional decimal part. `decimalSeparator: '.'` (default) treats `,`, spaces, no-break and thin spaces as grouping; `','` treats `.` and those spaces as grouping. A range such as `8–12` yields its first number (8); users who need the upper bound match a separate column or row. |
 | FR-118-45 | The three types SHALL be added to the format v1 union additively (no `schemaVersion` change): existing definitions validate and hash exactly as before ([SPEC-108](2026-10-14-benchmark-definition-format.md)). Regular expressions follow FR-108-10 (flags `i`, `m`, `s`, `u`; invalid patterns are validation errors at their path). |
 | FR-118-46 | **Bounded pattern evaluation.** A syntax check (FR-108-10) does not bound matching time, and a user pattern such as `(a+)+$` backtracks exponentially (≈ 4.5 s at 26 characters on Node 24, doubling per character). Every match of a **user-supplied** regular expression — in the three new types and in the existing `file-contains` — SHALL run in a `node:worker_threads` worker, never on the runner's event loop. The worker receives the patterns and the texts to match (file text, or heading and first-cell texts extracted by the line scans) **once, shared by all patterns** of the evaluation, and returns compact results — per matcher the first matching text index and, for an ordered heading check, its greedy position — so the result is O(matchers), never O(matches); one worker serves one assertion evaluation. Named limits keep the copy bounded: `MAX_MATCHERS_PER_ASSERTION` (100 headings or phrases) and `MAX_PATTERN_LENGTH` (1 000 characters per pattern of the new types) are validation errors at their paths, and `MAX_PATTERN_INPUT_CHARS` (4 Mi characters of texts plus patterns, any regex-capable type) is checked before a worker is constructed — above it the evaluation is an assertion error (`pattern-worker-failed`), failing closed. The engine waits for it with a named deadline `ASSERTION_REGEX_TIMEOUT_MS` (2 000 ms per assertion evaluation, all its patterns together) and terminates it (`worker.terminate()`) on the deadline or on the run's `AbortSignal`. A terminated or crashed evaluation SHALL yield an **assertion error** — neither pass nor fail — with the message "Pattern evaluation exceeded 2000 ms; simplify the regular expression" (or the crash reason) and `details.patterns`; the agent run becomes `infrastructure-error` code `assertion-error`, as for missing assertion results (SPEC-111 §13), so it is excluded from quality and counts toward the error rate. Literal strings (headings, phrases, the `column` header) are matched without a user regex, by linear scans on the runner thread (literal headings of a `markdown-sections` assertion that also has patterns are compared in the same worker pass, still without a regex, so the ordered placement is computed once). No new dependency (no RE2): the worker is in the platform and keeps JavaScript regex semantics. |
@@ -183,7 +183,11 @@ weights and `required` work as for every assertion (SPEC-111).
 - NFR-118-02: The new assertions evaluate a 2 MiB Markdown file in < 200 ms (including worker
   start-up, for patterns without catastrophic backtracking); heading, table and literal matching
   are line-based linear scans without backtracking regular expressions over the whole file
-  (lessons 2026-10-21 on delimited spans and superlinear parses). User-supplied patterns cannot be
+  (lessons 2026-10-21 on delimited spans and superlinear parses). Markdown is read by a
+  hand-written GFM block scanner, O(input × `MAX_MARKDOWN_NESTING`) with
+  `MAX_MARKDOWN_NESTING` = 32; Markdown libraries were measured and rejected for this budget
+  (micromark: 9.3 s for 512 KiB, quadratic on documents with many block quotes or list items;
+  [ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md)). User-supplied patterns cannot be
   made linear, so they are bounded instead: they never run on the runner's event loop and stop
   after `ASSERTION_REGEX_TIMEOUT_MS` (FR-118-46); heartbeat and cancellation stay responsive
   while one runs.
@@ -709,11 +713,29 @@ changed before merge.
   ends with its container (quote marker missing, list content less indented); setext headings
   count inside block quotes and list items but never on a lazy line; list-item lines are read
   relative to the item's content indentation; only `1.` or a bullet interrupts a paragraph.
-  Known limits, each failing safe (a heading or table is missed, never invented): tables inside
-  block quotes, and list items nested inside block quotes beyond their first line.
   NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
   development machine; the CI test bounds it at 5 s (plus linearity tests normalised by a linear
   baseline) so a loaded runner cannot flake it.
+- **Issue #110 (verified on 2026-10-22):** the line heuristics were replaced by a hand-written GFM
+  block scanner following the CommonMark reference algorithm and cmark-gfm
+  ([ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md)): block quotes and list items
+  as a container stack (marker padding of 1–4 columns, 5+ meaning indented code after one, tab
+  stops, lazy continuation, an item opening with at most one blank line), fenced and indented
+  code, HTML blocks of kinds 1–7 (an HTML comment now ends a table, issue repro 2), and GFM tables
+  tried after every other block start (so `- | -` is a list item) — also inside block quotes and
+  list items, which removes the former known limits. No runtime dependency: micromark and
+  mdast-util-from-markdown were measured and rejected (quadratic; ADR-0013). Verified by
+  `test/markdown-reference.test.ts`, which compares 5 000 generated container-heavy documents with
+  their readings by cmark-gfm recorded in `test/fixtures/cmark-gfm-corpus.json` (all equal; the
+  previous scanner differed on 2 752 and reported extra headings or rows in 1 788), offline runs
+  on 40 000 more documents, the regression tests of both repros at scanner and assertion level,
+  and linearity tests for adversarial shapes. Known limits, each failing safe (reported less,
+  never more): a table without a pipe in its header or delimiter row is read but not reported; a
+  setext heading whose paragraph may start with a link reference definition is not reported; a
+  document nested deeper than `MAX_MARKDOWN_NESTING` (32) block quotes and list items is read only
+  up to that line. NFR-118-02 on 2 cores (`taskset -c 0,1`): 103 / 53 / 91 ms for the three
+  assertions on the 2 MiB test document including worker start-up; adversarial 2 MiB shapes scan
+  in at most about 300 ms.
 - **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**
   - FR-118-10/11: `RunBenchmarkInput.baselineArtifact`; every baseline workspace receives exactly
     the baseline version and every candidate workspace exactly the candidate, through the same
