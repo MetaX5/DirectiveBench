@@ -344,6 +344,18 @@ async function executeAgentRun(
     // checks compare the path with this identity, so a `setup` command that moves the workspace
     // away and leaves a link to another directory is refused (SPEC-118 §12).
     const workspace = await pinWorkspace(workspaceDir);
+    // Every step that runs untrusted code (setup, the agent, command assertions) is followed by this
+    // check, so the next step never runs in, copies into or reads a replacement (SPEC-118 §12).
+    const replacedAfter = async (step: string): Promise<AgentRunRecord | null> => {
+      const replaced = await workspacePinIssue(workspace);
+      return replaced === null
+        ? null
+        : fail(
+            'infrastructure-error',
+            `workspace-replaced: ${replaced} after ${step}.`,
+            'workspace-replaced',
+          );
+    };
 
     if (benchmarkCase.setup.length > 0) stage('setup');
     for (const command of benchmarkCase.setup) {
@@ -370,15 +382,8 @@ async function executeAgentRun(
           'stray-processes',
         );
       }
-      // Checked after every command: the next one must not run in a replacement (SPEC-118 §12).
-      const replaced = await workspacePinIssue(workspace);
-      if (replaced !== null) {
-        return fail(
-          'infrastructure-error',
-          `workspace-replaced: ${replaced} after setup.`,
-          'workspace-replaced',
-        );
-      }
+      const replaced = await replacedAfter('setup');
+      if (replaced) return replaced;
       if (result.exitCode !== 0) {
         return fail(
           'infrastructure-error',
@@ -445,6 +450,8 @@ async function executeAgentRun(
       );
     }
 
+    const replacedByAgent = await replacedAfter('the agent run');
+    if (replacedByAgent) return replacedByAgent;
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
 
@@ -481,6 +488,10 @@ async function executeAgentRun(
           changedFiles,
           assertions,
         };
+      }
+      if (assertion.type === 'command') {
+        const replaced = await replacedAfter(`assertion ${evaluated.assertionId}`);
+        if (replaced) return { ...replaced, changedFiles, assertions };
       }
     }
     // A bounded pattern terminated by cancellation must not read as an assertion error.

@@ -116,6 +116,13 @@ fake CLI ignoring SIGINT/SIGTERM.
   command, before the next one starts. Red first: the two-command regression (a marker the second
   command would write) fails on 5101f22.
 
+- Codex round 3, high: a command assertion could replace the workspace with a link, and the next
+  command assertion ran (and wrote) in the link's target. The pin is now checked after every
+  step that runs untrusted code: each setup command, the agent run (before the manifest and the
+  verification overlay copy, which would otherwise follow the link) and each command assertion.
+  Red first: the assertion and agent regressions (a victim directory must stay empty) fail on
+  cc93981.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.

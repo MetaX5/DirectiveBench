@@ -4,6 +4,8 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -565,6 +567,72 @@ describe('setup commands', () => {
     // The next assertion never ran.
     expect(records[0]?.assertions.map((a) => a.assertionId)).toEqual(['leaves']);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when a command assertion replaces the workspace; the next one never runs in it (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite({
+        cases: [
+          testCase({
+            assertions: [
+              {
+                id: 'replaces',
+                type: 'command',
+                command: [
+                  'sh',
+                  '-c',
+                  `mv "$PWD" "$PWD.saved" && ln -s ${JSON.stringify(victim)} "$PWD"`,
+                ],
+              },
+              { id: 'writes', type: 'command', command: ['sh', '-c', 'touch marker'] },
+            ],
+          }),
+        ],
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter: new FakeAdapter(),
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        executionStatus: 'infrastructure-error',
+        errorCode: 'workspace-replaced',
+        error: expect.stringMatching(
+          /^workspace-replaced: .* after assertion replaces\.$/,
+        ) as string,
+      });
+      expect(records[0]?.assertions.map((a) => a.assertionId)).toEqual(['replaces']);
+      expect(readdirSync(victim)).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when the agent replaces the workspace, before the overlay is copied (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        return completed();
+      });
+      const stopped = await runBenchmark({ ...input, adapter, signal: signal() }).catch(
+        (error: unknown) => error,
+      );
+      expect(stopped).toMatchObject({
+        code: 'workspace-replaced',
+        message: expect.stringContaining('after the agent run.') as string,
+      });
+      expect(readdirSync(victim)).toEqual([]);
+    },
+  );
 
   it('stops the benchmark when cancelled during setup', async () => {
     const input = await suite({
