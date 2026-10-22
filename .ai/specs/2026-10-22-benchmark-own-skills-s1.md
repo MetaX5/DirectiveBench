@@ -577,14 +577,14 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-9: A `serve` runner polling the same data directory never acquires a job created by `benchmark run`.
 - [ ] AC-10: Ctrl-C yields `cancelled` (exit 130) and no `claude` process remains after 10 s (fake CLI ignoring SIGINT).
 - [ ] AC-11: Exit codes follow FR-118-38 for passed, failed, regression, unstable, error and not-comparable fixtures, 130 on cancel and 2 on usage errors.
-- [ ] AC-12: The artifact page lists runs per version and comparability group with baseline, auth mode and isolation; the run detail names the baseline and shows the agent profile and the ambient-configuration warning; a non-mock suite has no Run button (Playwright).
+- [x] AC-12: The artifact page lists runs per version and comparability group with baseline, auth mode and isolation; the run detail names the baseline and shows the agent profile and the ambient-configuration warning; a non-mock suite has no Run button (Playwright).
 - [ ] AC-13: `pnpm test` keeps 100% coverage; no test needs a credential or network.
 - [ ] AC-14: An unknown or ambiguous artifact reference and an artifact format the adapter cannot install exit with code 2 before any database change; a slug with characters outside the suite-id pattern yields a confined folder name (FR-118-20/22/25).
 - [ ] AC-15: Running the same unchanged suite folder twice reuses one suite version; every refusal before the final transaction (readiness, declined confirmation, missing approval) leaves the database unchanged, including no approval record (FR-118-23/39).
 - [ ] AC-16: A fixture or overlay containing any of the FR-118-06 paths at any depth (e.g. `.claude/settings.json`, `.mcp.json`, `sub/.claude/rules/x.md`) is refused with `fixture-contains-claude-config` before any database change, with or without `--approve-commands`; a fixture with only `CLAUDE.md`/`AGENTS.md` and plain files runs; the argv has no bare `Read`/`Edit`/`Write`/`Glob`/`Grep` allow rule and sets `blockReadsOutsideWorkingDirectories`; an attempted read or edit outside the workspace is denied and recorded (FR-118-06/07; live: AC-22).
 - [ ] AC-17: With a fake `claude` returning `rate_limit` (or an expired login) on the first agent run, no further agent run starts and the benchmark run ends `error` (FR-118-15); `--max-budget-usd` without `--auth api-key` exits 2.
 - [ ] AC-18: The flags hash of two agent runs in different workspaces is equal; agent runs whose `system/init` models differ (baseline vs candidate, or between repetitions) yield `not-comparable` with `execution-model-mismatch`, never `improved`/`regressed`; runs that differ only in auxiliary `modelUsage` models stay comparable with warning `auxiliary-models`; two otherwise identical runs on different execution models get different comparability keys (FR-118-04, §8.3).
-- [ ] AC-19: The web server action refuses to enqueue a suite whose agent is not `mock` even when called directly (FR-118-05), and version regressions within a comparability group are highlighted on the artifact page (FR-118-51).
+- [x] AC-19: The web server action refuses to enqueue a suite whose agent is not `mock` even when called directly (FR-118-05), and version regressions within a comparability group are highlighted on the artifact page (FR-118-51).
 - [ ] AC-20: The summary and the `--json` object contain baseline, candidate, delta, verdict, confidence, display status, run id, warnings and tokens/cost as reported (FR-118-37).
 - [ ] AC-21: For a `skill-md` artifact the argv contains `Skill` in `--tools` and only `Skill(<name>)`/`Skill(<name> *)` in `--allowedTools`; instruction types get no `Skill`; from recorded streams each agent run records `skillActivation`; a run without the skill loaded ends `artifact-not-loaded` and stops the run; a loaded but uninvoked candidate run is scored with `artifact-not-invoked` and the summary shows the invocation rate; a `none` baseline invoking `<name>` yields `not-comparable` (FR-118-08/09).
 - [ ] AC-22: The opt-in live check of §15 passes with the exact production argv in both auth modes, including denied outside-workspace reads and writes (FR-118-07) and a second installed skill that stays denied (FR-118-08), and its results (including the field names marked as assumptions) are recorded in SPEC-203 before Phase 4 ships.
@@ -798,6 +798,52 @@ changed before merge.
   `packages/agent-adapters/test/`, `apps/cli/test/doctor.test.ts`; Playwright test in
   `apps/web/e2e/management.spec.ts`). Calling it before the job is created, with exit code 2, is
   `benchmark run` (Phase 4).
+- **Implemented — Phase 5 (issue #98, verified on 2026-10-22 with seeded runs, no agent):**
+  read-only results by artifact version.
+  - FR-118-50: `listArtifactRuns` (`packages/database/src/repositories/runs.ts`) returns every run
+    of one artifact with suite name and version, candidate version and baseline version (left join;
+    null = `none`), newest version first, then newest run, `id` breaking ties
+    (`packages/database/test/runs.test.ts`); `getBenchmarkRunDetail` also returns the baseline
+    version. The artifact page's "Results by version" tab ("Benchmark results by version")
+    replaces the flat history: every version newest first (an untested one says so), per run suite
+    and version, baseline ("no artifact" / "vN"), agent and version, auth mode · isolation profile
+    (with "May include user-level instructions" for `user-profile` or `ambient-user-config`),
+    requested → execution model, display status, delta, confidence, date and a link; runs that did
+    not complete are listed per version as links with their status. Empty state with the
+    `benchmark init` command, marked planned (Phase 4).
+  - FR-118-51: one table per comparability key per version, each labelled "not comparable with
+    other groups", plus a notice naming the number of groups "not comparable with each other";
+    a completed run without a key is a group of its own; numbers are only compared within a
+    group. Version regressions per SPEC-111 FR-111-50/51 (`resultsByVersion`/`compareVersions` in
+    `apps/web/lib/artifact-runs.ts`): the latest eligible run (completed, keyed, verdict not
+    `error`/`not-comparable`) of a version is compared with that of the previous tested version in
+    the same group — regression on a candidate-score drop ≥ `minDelta` or `passed` → `failed`,
+    "inconclusive" when either run is `unstable` or a score is missing; the row and the version
+    header are highlighted. Implementation detail within the FR: a version without an eligible run
+    in the group is skipped (v3 compares with v1).
+  - FR-118-52: run detail header "Baseline (vN|no artifact) vs Candidate (vM)", the same labels on
+    the variant cards and agent-run badges; "Agent profile" card (auth mode, isolation,
+    permission profile, requested and execution model, other reported models from the
+    `agent-metadata` trace events; for the mock agent a sentence that it reports none); "Skill
+    invoked in n/N runs" per variant from `summary.skillInvocation` and per agent run from
+    `skillActivation`; warnings with explanations, `ambient-user-config` as "May include
+    user-level instructions (Local Subscription Mode)…", added whenever the profile is
+    `user-profile`; "Real agent — results vary between runs" next to confidence; per agent run
+    tokens and cost as reported ("not reported" when absent, cost "estimated" or "n/a
+    (subscription)") and counts of tool calls, permission denials and retries; the new
+    assertions' details (evaluation error with code and patterns as an `error` result, glob
+    matches, found/missing/out-of-order headings and phrases, table, row, cell and value) as
+    escaped text (`apps/web/lib/run-detail.ts`). The stored JSON is read with Zod, so an unknown
+    or missing field reads as "not reported".
+  - Verified by `apps/web/test/artifact-runs.test.ts`, `apps/web/test/run-detail.test.ts` (100%
+    coverage) and `apps/web/e2e/results-by-version.spec.ts` (two versions with runs and one
+    without, A/B and `none`, two comparability groups, a version regression and a no-regression,
+    run detail, HTML in assertion details shown as text, no Run button for the seeded
+    `claude-code` suite, empty state), and by hand on the built app with the same seed. Not
+    verified: data written by the real adapter — the shapes read here (`agentProfile`,
+    `skillInvocation`, `agent-metadata`, `usage`) follow the Phase 3 step 2 branch (issue #100)
+    and the engine types; the dashboard's "recent regressions" does not list version regressions
+    yet (FR-111-52, FR-116-12).
 - **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
   has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
   direct calls of `comparabilityKey` exercise profile hashing; the adapter→engine wiring and
@@ -808,7 +854,7 @@ changed before merge.
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
 - **Not implemented:** Phase 3 steps 2–3 (Claude Code stream parser and process control),
-  Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
+  Phase 4 (`benchmark init` / `benchmark run`) and every
   other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan
