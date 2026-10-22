@@ -3,7 +3,7 @@ title: benchmark init / benchmark run in the CLI with the Claude Code adapter (i
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request — om-auto-fix-issue 97 (E06-S04, SPEC-118 Phase 4 steps 1–2)
-status: in-progress
+status: completed
 branch: feat/issue-97-benchmark-cli
 specs: [SPEC-118, SPEC-203, SPEC-009, SPEC-107, SPEC-114]
 ---
@@ -96,9 +96,9 @@ FR-118-20…39; Phase 4 steps 1–2).
 
 ### Phase 1: Database and runner
 
-- [x] 1.1 resolveArtifactRef — 42714d9
-- [x] 1.2 One-transaction suite import, approval and acquired job — d985ad6
-- [x] 1.3 Runner hostId and in-process cancel — e8e2b86
+- [x] 1.1 resolveArtifactRef — 458fadb
+- [x] 1.2 One-transaction suite import, approval and acquired job — 77405d2
+- [x] 1.3 Runner hostId and in-process cancel — b23f307
 
 ### Phase 2: CLI
 
@@ -110,21 +110,83 @@ FR-118-20…39; Phase 4 steps 1–2).
 
 ### Phase 3: Docs and verification
 
-- [ ] 3.1 Specs, README and lessons
-- [ ] 3.2 Real-app run and full gate
+- [x] 3.1 Specs, README and lessons — fc07724, 349fe66
+- [x] 3.2 Real-app run and full gate — this commit
 
 ## Decisions
 
 - 2026-10-22: the first two commits of this run built a `ClaudeCodeAdapter` too; PR #119 (issue
   #117, opened in parallel by the maintainer) builds it more completely. To avoid duplicate work
-  the branch was rebuilt on #119 and those commits dropped; #97 is claimed on the issue.
+  the branch was rebuilt on #119 and those commits dropped; #97 is claimed on the issue. After
+  #119 merged, the branch was rebased onto `main`.
+- The CLI chooses the adapter's options (auth mode, budget); the permission profile stays
+  `edit-only`, because S1 has no flag for `edit-and-shell` and #119 refuses any
+  `agentOptions['claude-code']`. `benchmark run` refuses a non-empty one at plan time.
+- `benchmark run` executes `claude-code` suites only; a mock suite is refused with a pointer to
+  `demo` and the web UI.
+- The artifact version flag is `--artifact-version`, not `--version` (Commander's program
+  `--version` takes it first; positional options would break `--data-dir` after a subcommand).
+  SPEC-118 FR-118-22/30 and §14 changed in this change set.
+- A declined confirmation exits 130 (treated as a cancellation) and stores nothing.
+- `importSuiteVersion` keeps its own transaction; its body is shared with the new
+  `createBenchmarkRunJob`, which wraps fixture versions, suite version, approval and the acquired
+  job in one `withTransaction` (FR-118-39).
+- With `--json` the plan goes to stderr, so stdout holds only the result object.
+- Plan-time inspection resolves `~` against the real `HOME` in subscription mode and against a
+  fresh empty directory in API Key Mode, as the adapter's run-local home is empty.
 
 ## Work performed
 
+1. Database: `resolveArtifactRef` (+ `ArtifactRefError` with closest slugs or versions),
+   `createBenchmarkRunJob`, `approveSuiteVersion`, `suiteVersionApproval`.
+2. Runner: `LocalRunnerOptions.hostId` → `RunBenchmarkInput.hostId`; `LocalRunner.cancel(jobId)`.
+3. CLI: `benchmark init` (`benchmark-init.ts`), `benchmark run` (`benchmark-plan.ts`,
+   `benchmark-run.ts`), both registered in `main.ts`; `doctor`, detection notes and three web
+   texts no longer call Claude Code execution planned.
+4. Tests: `packages/database/test/artifact-ref.test.ts`, `benchmark-run-job.test.ts`,
+   `packages/runner/test/runner-acquired.test.ts` (cancel, hostId),
+   `apps/cli/test/benchmark-init.test.ts`, `benchmark-run.test.ts` (fake `claude` on `PATH`,
+   `test/support/fake-claude.ts`, replaying the recorded-format streams of agent-adapters),
+   `benchmark-report.test.ts`, `main.test.ts`; e2e expectations for the changed texts.
+5. Docs: SPEC-118 §6.3/§6.4/§14/§16/§20, SPEC-009 §2 and status, README, AGENTS.md §4 (review
+   rule), two lessons.
+
 ## Verification
+
+| Check | Result |
+| --- | --- |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` (Linux, Docker `node:24`, 2 CPUs) | pass |
+| `pnpm test` (Linux, non-root) | core 266, database 149, agent-adapters 348, benchmark-engine 398, CLI 123 tests pass at 100% coverage; runner: only the hosted-git tests fail (the image's git 2.39 < 2.44, which they need; `runner-acquired.test.ts` passes); web: 1 linear-time test (#114) — CI on GitHub is authoritative |
+| `pnpm test` (macOS) | the new tests pass; the pre-existing macOS failures listed below |
+| `pnpm build && pnpm verify:pack` (Linux) | pass |
+| `pnpm test:e2e` (macOS) | 44/44 pass |
+| Real app: built CLI, fresh data dir, `demo` → `benchmark init --artifact validate-external-input` → `benchmark run … --yes` with a fake `claude` on `PATH` | 6 agent runs, `passed`, exit 0; without TTY and `--yes`: exit 2 |
+| Real app: Ctrl-C with a fake `claude` ignoring SIGINT/SIGTERM | exit 130 after 5 s, run `cancelled`, no `claude` process left |
+
+Not verified: a real `claude` session in either auth mode (#103), Windows.
 
 ## Problems and deviations
 
+- Plan deviation: Phase 1 of the first plan (the adapter) was dropped for #119 (see Decisions).
+- On this macOS machine, independent of this change and also failing on `main`:
+  `packages/agent-adapters` `process.test.ts` (2) and `run.test.ts` (1) — `setsid` missing and a
+  kill-grace race (issue #120); `packages/runner` `hosted-repository.test.ts` "rejects a file name
+  that is not valid UTF-8" (APFS refuses such names); `apps/cli` `cli.test.ts` "warns with a hint
+  when the data directory does not exist yet" — with a real `claude` installed and no auth mode
+  ready, `doctor` reports `warn` without a hint (a real, small defect; follow-up).
+- `pnpm build` needs `pnpm` on `PATH` for turbo; with pnpm only through corepack, a shim from
+  `corepack enable --install-directory <dir> pnpm` was used.
+
 ## Lessons recorded
 
+- `.ai/lessons/2026-10-22-review-prs-through-om-auto-review-pr.md` (human correction; also a rule
+  in AGENTS.md §4)
+- `.ai/lessons/2026-10-22-commander-version-flag-shadows-subcommands.md`
+
 ## Follow-ups
+
+- #103: the opt-in live check with a real `claude` in both auth modes (AC-22) before the slice
+  ships to users.
+- `doctor`: a Claude Code readiness `warn` (no auth mode ready) has no remediation hint, breaking
+  the "every non-ok check has a hint" rule of SPEC-009 §4.
+- #120: macOS and Windows CI gates (the macOS failures above).
