@@ -120,6 +120,43 @@ describe('scanMarkdown headings', () => {
     expect(headings).toEqual(['After quote', 'Last']);
   });
 
+  it('keeps quoted and list-prefixed fence lines inside an outer fence as code', () => {
+    const { headings } = scanMarkdown(
+      [
+        '```markdown',
+        '> ```',
+        '# Hidden after quoted fence text',
+        '> ```',
+        '- ```',
+        '# Hidden after listed fence text',
+        '- ```',
+        '```',
+        '# Visible',
+      ].join('\n'),
+    );
+    expect(headings).toEqual(['Visible']);
+  });
+
+  it('closes a fence only in the container it was opened in', () => {
+    const { headings } = scanMarkdown(
+      [
+        '> ```',
+        '```',
+        '# Hidden: unquoted fence line does not close a quoted fence',
+        '> > ```',
+        '# Hidden: deeper quote does not close it either',
+        '> ```',
+        '# Quote closed',
+        '- ```',
+        '```',
+        '# Hidden: less indented than the list content',
+        '  ```',
+        '# List closed',
+      ].join('\n'),
+    );
+    expect(headings).toEqual(['Quote closed', 'List closed']);
+  });
+
   it('ends a list item at an ATX heading or a fence', () => {
     const { headings } = scanMarkdown(
       ['- item', '# Risks', 'Title', '===', '- item', '```', 'code', '```', 'After', '---'].join(

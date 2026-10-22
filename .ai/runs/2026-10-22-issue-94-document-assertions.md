@@ -160,6 +160,16 @@ source (a string, not instrumented — behaviour is tested end to end).
    assertion-error handling. Gate after the merge: 1 126 tests, 100% coverage, build and
    verify:pack pass. CI then failed the 2 MiB timing test (1 166 ms against 1 s). The bound is
    now 5 s; the < 200 ms target stays a local measurement.
+8. Codex review round 2 (needs-attention, both findings valid), fixed:
+   - [high] fence closing ignored the container context: `> ```` inside a top-level fence was
+     stripped to a closing fence, so a heading after it inside the outer fence counted. A fence
+     now records its block-quote depth and list indentation and closes only in that context.
+   - [high] with `firstOnly: false` the worker returned every matching index per pattern
+     (50 000 headings × 100 patterns ≈ 5 M numbers). The worker now returns per matcher the
+     first index and, for an ordered heading check, the greedy placement (`placeMatchers`, one
+     self-contained function run on the runner thread for literals and from its source text in
+     the worker), so results are O(matchers); a dense-heading test bounds the result size.
+     No other path returns per-match data from the worker; glob lists are capped at 20.
 
 ## Verification
 

@@ -201,6 +201,18 @@ describe('markdown structure boundaries (Codex review)', () => {
     }
   });
 
+  it('does not accept a heading after quoted or listed fence text inside an outer fence', async () => {
+    for (const inner of ['> ```', '- ```']) {
+      const result = await evaluateAssertion(
+        assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Risks'] }),
+        workspace({
+          'doc.md': `# Estimate\n\n\`\`\`markdown\n${inner}\n# Risks\n${inner}\n\`\`\`\n`,
+        }),
+      );
+      expect(result).toMatchObject({ passed: false, message: 'Missing headings: Risks' });
+    }
+  });
+
   it('does not read numbers after a list or thematic break as table rows', async () => {
     for (const boundary of ['- no table anymore', '---', '* * *']) {
       const result = await evaluateAssertion(

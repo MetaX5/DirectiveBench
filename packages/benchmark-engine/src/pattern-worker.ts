@@ -12,17 +12,33 @@ export interface PatternSource {
   flags: string;
 }
 
-/** Every pattern is matched against the same texts, which are sent to the worker once. */
+/** A literal compared with each text lower-cased (texts arrive whitespace-collapsed). */
+export interface LiteralSource {
+  literal: string;
+}
+
+export type MatcherSource = PatternSource | LiteralSource;
+
+/** Every matcher is matched against the same texts, which are sent to the worker once. */
 export interface PatternRequest {
-  patterns: readonly PatternSource[];
+  matchers: readonly MatcherSource[];
   texts: readonly string[];
-  /** Stop each pattern at its first matching text. */
-  firstOnly: boolean;
+  /** Also place the matchers greedily in order (`placed`). */
+  ordered: boolean;
 }
 
 /**
- * Most characters (texts plus pattern sources) one worker receives. A document assertion reads
- * at most 2 MiB and its patterns are capped by the definition schema, so this only stops inputs
+ * Compact results, O(matchers) whatever the number of texts: per matcher the first matching
+ * text index, and with `ordered` its greedy position after the previous matcher's (-1: none).
+ */
+export interface Placement {
+  first: number[];
+  placed: number[] | null;
+}
+
+/**
+ * Most characters (texts plus matcher sources) one worker receives. A document assertion reads
+ * at most 2 MiB and its matchers are capped by the definition schema, so this only stops inputs
  * no definition can produce, before anything is copied to a worker.
  */
 export const MAX_PATTERN_INPUT_CHARS = 4 * 1024 * 1024;
@@ -32,10 +48,46 @@ export interface PatternError {
   message: string;
 }
 
-/** Per pattern, the indexes of the texts it matches, in ascending order. */
-export type PatternOutcome = { ok: true; matches: number[][] } | { ok: false; error: PatternError };
+export type PatternOutcome = ({ ok: true } & Placement) | { ok: false; error: PatternError };
 
 export const PATTERN_TIMEOUT_MESSAGE = `Pattern evaluation exceeded ${ASSERTION_REGEX_TIMEOUT_MS} ms; simplify the regular expression`;
+
+/**
+ * Matches `matchers` against `texts`: the first matching index of each, and with `ordered` the
+ * greedy placement (each takes its first match after the previous placed one; an unplaced one
+ * leaves the cursor). Runs on the runner thread for literals only, and in the worker — from its
+ * source text, so it must stay self-contained — whenever a user pattern is involved.
+ */
+export function placeMatchers(
+  matchers: readonly MatcherSource[],
+  texts: readonly string[],
+  ordered: boolean,
+): Placement {
+  let lowered: string[] | null = null;
+  const tests = matchers.map((matcher) => {
+    if ('literal' in matcher) {
+      return (index: number) => {
+        if (lowered === null) lowered = texts.map((text) => text.toLowerCase());
+        return lowered[index] === matcher.literal;
+      };
+    }
+    const regex = new RegExp(matcher.pattern, matcher.flags);
+    return (index: number) => regex.test(texts[index] as string);
+  });
+  const firstAfter = (test: (index: number) => boolean, after: number): number => {
+    for (let index = after + 1; index < texts.length; index += 1) if (test(index)) return index;
+    return -1;
+  };
+  const first = tests.map((test) => firstAfter(test, -1));
+  if (!ordered) return { first, placed: null };
+  let cursor = -1;
+  const placed = tests.map((test) => {
+    const position = firstAfter(test, cursor);
+    if (position >= 0) cursor = position;
+    return position;
+  });
+  return { first, placed };
+}
 
 /**
  * Worker body, evaluated from source so it runs the same from TypeScript sources, the bundled
@@ -43,38 +95,32 @@ export const PATTERN_TIMEOUT_MESSAGE = `Pattern evaluation exceeded ${ASSERTION_
  */
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads');
-const { patterns, texts, firstOnly } = workerData;
-parentPort.postMessage(
-  patterns.map(({ pattern, flags }) => {
-    const regex = new RegExp(pattern, flags);
-    const matches = [];
-    for (let index = 0; index < texts.length; index += 1) {
-      if (regex.test(texts[index])) {
-        matches.push(index);
-        if (firstOnly) break;
-      }
-    }
-    return matches;
-  }),
-);
+const placeMatchers = (${placeMatchers.toString()});
+parentPort.postMessage(placeMatchers(workerData.matchers, workerData.texts, workerData.ordered));
 `;
 
 /**
- * What the worker receives: the texts once, shared by every pattern, so the structured clone is
- * proportional to the document, not to the document times the number of patterns.
+ * What the worker receives: the texts once, shared by every matcher, so the structured clone is
+ * proportional to the document, not to the document times the number of matchers.
  */
 export function workerPayload(request: PatternRequest): PatternRequest {
   return {
-    patterns: request.patterns.map(({ pattern, flags }) => ({ pattern, flags })),
+    matchers: request.matchers.map((matcher) =>
+      'literal' in matcher
+        ? { literal: matcher.literal }
+        : { pattern: matcher.pattern, flags: matcher.flags },
+    ),
     texts: request.texts,
-    firstOnly: request.firstOnly,
+    ordered: request.ordered,
   };
 }
 
 function inputChars(request: PatternRequest): number {
   let total = 0;
   for (const text of request.texts) total += text.length;
-  for (const { pattern } of request.patterns) total += pattern.length;
+  for (const matcher of request.matchers) {
+    total += 'literal' in matcher ? matcher.literal.length : matcher.pattern.length;
+  }
   return total;
 }
 
@@ -87,7 +133,9 @@ export function matchPatterns(
   request: PatternRequest,
   signal: AbortSignal,
 ): Promise<PatternOutcome> {
-  if (request.patterns.length === 0) return Promise.resolve({ ok: true, matches: [] });
+  if (request.matchers.length === 0) {
+    return Promise.resolve({ ok: true, first: [], placed: request.ordered ? [] : null });
+  }
   const chars = inputChars(request);
   if (chars > MAX_PATTERN_INPUT_CHARS) {
     return Promise.resolve({
@@ -137,7 +185,7 @@ export function matchPatterns(
     );
     const onAbort = () => fail('pattern-worker-failed', 'Pattern evaluation cancelled');
     signal.addEventListener('abort', onAbort, { once: true });
-    worker.once('message', (matches: number[][]) => finish({ ok: true, matches }));
+    worker.once('message', (placement: Placement) => finish({ ok: true, ...placement }));
     worker.once('error', (error: Error) =>
       fail('pattern-worker-failed', `Pattern evaluation failed: ${error.message}`),
     );

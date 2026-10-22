@@ -56,10 +56,14 @@ function indentation(line: string): number {
 interface Fence {
   marker: string;
   length: number;
+  /** Block-quote depth of the opening line; a closing fence needs the same depth. */
+  quotes: number;
+  /** Indentation of the opening line's list-item content; a closing fence needs at least it. */
+  indent: number;
 }
 
 /** An opening code fence: up to three spaces, then three or more backticks or tildes. */
-function openingFence(line: string): Fence | null {
+function openingFence(line: string): Omit<Fence, 'quotes' | 'indent'> | null {
   const indent = indentation(line);
   if (indent > 3) return null;
   const marker = line[indent];
@@ -73,7 +77,7 @@ function openingFence(line: string): Fence | null {
   return { marker, length };
 }
 
-function closesFence(line: string, fence: Fence): boolean {
+function closesFence(line: string, fence: Omit<Fence, 'quotes' | 'indent'>): boolean {
   const indent = indentation(line);
   if (indent > 3) return false;
   const rest = line.slice(indent).trimEnd();
@@ -160,19 +164,55 @@ function isThematicBreak(line: string): boolean {
   );
 }
 
+const CONTAINER_MARKER = /^ {0,3}(?:>|[-+*](?=[ \t]|$)|\d{1,9}[.)](?=[ \t]|$))[ \t]?/;
+const QUOTE_MARKER = /^ {0,3}>[ \t]?/;
+
+interface Containers {
+  /** Leading block-quote markers. */
+  quotes: number;
+  /** Width of the list-item markers after them (content indentation). */
+  indent: number;
+  content: string;
+}
+
 /**
- * The content of a block-quote or list-item line (`> # Risks` → `# Risks`, `1. text` → `text`),
- * or null for any other line. Nested markers are stripped one at a time.
+ * Splits the block-quote and list-item markers off a line (`> # Risks` → `# Risks`,
+ * `1. text` → `text`); nested markers are stripped one at a time.
  */
-function containerContent(line: string): string | null {
-  let rest = line;
-  let stripped = false;
+function splitContainers(line: string): Containers {
+  const result: Containers = { quotes: 0, indent: 0, content: line };
   for (;;) {
-    const marker = /^ {0,3}(?:>|[-+*](?=[ \t]|$)|\d{1,9}[.)](?=[ \t]|$))[ \t]?/.exec(rest);
-    if (!marker) return stripped ? rest : null;
-    rest = rest.slice(marker[0].length);
-    stripped = true;
+    const marker = CONTAINER_MARKER.exec(result.content);
+    if (!marker) return result;
+    if (marker[0].trimStart().startsWith('>') && result.indent === 0) result.quotes += 1;
+    else result.indent += marker[0].length;
+    result.content = result.content.slice(marker[0].length);
   }
+}
+
+/** The content of a block-quote or list-item line, or null for any other line. */
+function containerContent(line: string): string | null {
+  const { quotes, indent, content } = splitContainers(line);
+  return quotes > 0 || indent > 0 ? content : null;
+}
+
+/**
+ * True when `line` closes `fence` in the container it was opened in: the same block-quote depth,
+ * list-item content indented at least as far. Any other prefix keeps the line inside the code
+ * block, so `> ```` inside a top-level fence is code, not a fence.
+ */
+function closesInContext(line: string, fence: Fence): boolean {
+  let rest = line;
+  for (let depth = 0; depth < fence.quotes; depth += 1) {
+    const marker = QUOTE_MARKER.exec(rest);
+    if (!marker) return false;
+    rest = rest.slice(marker[0].length);
+  }
+  if (fence.indent > 0) {
+    if (indentation(rest) < fence.indent) return false;
+    rest = rest.slice(fence.indent);
+  }
+  return closesFence(rest, fence);
 }
 
 /** An HTML comment opener at the start of a line; its content is never rendered. */
@@ -197,10 +237,8 @@ export function scanMarkdown(text: string): MarkdownScan {
   let container = false;
 
   for (const line of lines) {
-    // Fences also open and close inside block quotes and list items (`> ```` … `> ````).
-    const inner = containerContent(line);
     if (fence) {
-      if (closesFence(line, fence) || (inner !== null && closesFence(inner, fence))) fence = null;
+      if (closesInContext(line, fence)) fence = null;
       continue;
     }
     if (comment) {
@@ -214,9 +252,15 @@ export function scanMarkdown(text: string): MarkdownScan {
       }
       table = null;
     }
-    const opened = openingFence(line) ?? (inner === null ? null : openingFence(inner));
+    // Fences also open inside block quotes and list items (`> ```` … `> ````).
+    const containers = splitContainers(line);
+    const inner = containers.quotes > 0 || containers.indent > 0 ? containers.content : null;
+    const topLevel = openingFence(line);
+    const opened = topLevel ?? openingFence(containers.content);
     if (opened) {
-      fence = opened;
+      fence = topLevel
+        ? { ...topLevel, quotes: 0, indent: 0 }
+        : { ...opened, quotes: containers.quotes, indent: containers.indent };
       paragraph = [];
       container = inner !== null;
       continue;

@@ -3,6 +3,7 @@ import {
   ASSERTION_REGEX_TIMEOUT_MS,
   MAX_PATTERN_INPUT_CHARS,
   matchPatterns,
+  placeMatchers,
   PATTERN_TIMEOUT_MESSAGE,
   workerPayload,
   type PatternRequest,
@@ -15,13 +16,13 @@ const signal = () => new AbortController().signal;
 const MARGIN_MS = 3000;
 
 const one = (pattern: string, text: string): PatternRequest => ({
-  patterns: [{ pattern, flags: '' }],
+  matchers: [{ pattern, flags: '' }],
   texts: [text],
-  firstOnly: true,
+  ordered: false,
 });
 
 describe('matchPatterns', () => {
-  it('returns the same matches as evaluating the patterns on the main thread', async () => {
+  it('returns the first match of each pattern, as on the main thread', async () => {
     const texts = ['Backend API', 'backend api', 'Widget', 'PM review', 'x\ny', ''];
     const patterns = [
       { pattern: 'backend', flags: 'i' },
@@ -31,50 +32,89 @@ describe('matchPatterns', () => {
       { pattern: 'x.y', flags: 's' },
       { pattern: '\\p{Lu}', flags: 'u' },
       { pattern: '^$', flags: '' },
+      { pattern: 'absent', flags: '' },
     ];
     const expected = patterns.map(({ pattern, flags }) =>
-      texts.flatMap((text, index) => (new RegExp(pattern, flags).test(text) ? [index] : [])),
+      texts.findIndex((text) => new RegExp(pattern, flags).test(text)),
     );
-    expect(await matchPatterns({ patterns, texts, firstOnly: false }, signal())).toEqual({
+    expect(expected).toEqual([0, 1, 3, 4, 4, 0, 5, -1]);
+    expect(await matchPatterns({ matchers: patterns, texts, ordered: false }, signal())).toEqual({
       ok: true,
-      matches: expected,
+      first: expected,
+      placed: null,
     });
-    expect(expected[0]).toEqual([0, 1]);
+    // The same function on the runner thread gives the same placement.
+    expect(placeMatchers(patterns, texts, false)).toEqual({ first: expected, placed: null });
   });
 
-  it('stops at the first match when asked to', async () => {
-    const outcome = await matchPatterns(
-      { patterns: [{ pattern: 'a', flags: '' }], texts: ['b', 'a', 'a'], firstOnly: true },
-      signal(),
-    );
-    expect(outcome).toEqual({ ok: true, matches: [[1]] });
+  it('places literals and patterns greedily in order', async () => {
+    const texts = ['Step 1', 'Summary', 'Step 2', 'Risks'];
+    const matchers = [
+      { pattern: '^Step', flags: '' },
+      { literal: 'summary' },
+      { pattern: '^Step', flags: '' },
+      { literal: 'risks' },
+      { literal: 'summary' },
+    ];
+    const placement = { first: [0, 1, 0, 3, 1], placed: [0, 1, 2, 3, -1] };
+    expect(await matchPatterns({ matchers, texts, ordered: true }, signal())).toEqual({
+      ok: true,
+      ...placement,
+    });
+    expect(placeMatchers(matchers, texts, true)).toEqual(placement);
+    expect(placeMatchers([{ literal: 'risks' }], texts, false)).toEqual({
+      first: [3],
+      placed: null,
+    });
   });
 
-  it('starts no worker without patterns', async () => {
+  it('starts no worker without matchers', async () => {
     const controller = new AbortController();
     controller.abort();
     expect(
-      await matchPatterns({ patterns: [], texts: ['a'], firstOnly: true }, controller.signal),
-    ).toEqual({ ok: true, matches: [] });
+      await matchPatterns({ matchers: [], texts: ['a'], ordered: true }, controller.signal),
+    ).toEqual({ ok: true, first: [], placed: [] });
+    expect(
+      await matchPatterns({ matchers: [], texts: ['a'], ordered: false }, controller.signal),
+    ).toEqual({ ok: true, first: [], placed: null });
   });
 
-  it('sends the texts once, shared by every pattern', () => {
+  it('sends the texts once, shared by every matcher', () => {
     const texts = ['x'.repeat(1024)];
-    const patterns = Array.from({ length: 100 }, (_, i) => ({ pattern: `p${i}`, flags: 'i' }));
-    const payload = workerPayload({ patterns, texts, firstOnly: false });
-    // One reference to the document; patterns carry only their sources and flags.
+    const matchers = [
+      ...Array.from({ length: 99 }, (_, i) => ({ pattern: `p${i}`, flags: 'i', extra: 'dropped' })),
+      { literal: 'x' },
+    ];
+    const payload = workerPayload({ matchers, texts, ordered: false });
+    // One reference to the document; matchers carry only their sources.
     expect(payload.texts).toBe(texts);
-    expect(payload.patterns.every((p) => Object.keys(p).join() === 'pattern,flags')).toBe(true);
+    expect(payload.matchers.at(-1)).toEqual({ literal: 'x' });
+    expect(payload.matchers[0]).toEqual({ pattern: 'p0', flags: 'i' });
     expect(JSON.stringify(payload).length).toBeLessThan(1024 + 100 * 40);
   });
+
+  it('returns results proportional to the matchers, not to the matching texts', async () => {
+    // 50 000 headings that every pattern matches: per-match index lists would hold 5 000 000
+    // numbers; the compact result holds two per matcher.
+    const texts = Array.from({ length: 50_000 }, () => 'a');
+    const matchers = Array.from({ length: 100 }, () => ({ pattern: 'a', flags: '' }));
+    const outcome = await matchPatterns({ matchers, texts, ordered: true }, signal());
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.first).toHaveLength(100);
+    expect(outcome.placed).toHaveLength(100);
+    expect(outcome.first.every((index) => index === 0)).toBe(true);
+    expect(outcome.placed).toEqual(matchers.map((_, i) => i));
+    expect(JSON.stringify(outcome).length).toBeLessThan(2000);
+  }, 20_000);
 
   it('fails closed before copying an input above the limit to a worker', async () => {
     const started = performance.now();
     const outcome = await matchPatterns(
       {
-        patterns: [{ pattern: 'a', flags: '' }],
+        matchers: [{ pattern: 'a', flags: '' }],
         texts: ['x'.repeat(MAX_PATTERN_INPUT_CHARS)],
-        firstOnly: true,
+        ordered: false,
       },
       signal(),
     );
@@ -90,12 +130,12 @@ describe('matchPatterns', () => {
 
   it('evaluates many patterns over a 2 MiB text in one worker within the deadline', async () => {
     const text = `${'word '.repeat(400_000)}needle`;
-    const patterns = Array.from({ length: 100 }, (_, i) => ({
+    const matchers = Array.from({ length: 100 }, (_, i) => ({
       pattern: `needle|n${i}x`,
       flags: '',
     }));
-    const outcome = await matchPatterns({ patterns, texts: [text], firstOnly: true }, signal());
-    expect(outcome).toEqual({ ok: true, matches: patterns.map(() => [0]) });
+    const outcome = await matchPatterns({ matchers, texts: [text], ordered: false }, signal());
+    expect(outcome).toEqual({ ok: true, first: matchers.map(() => 0), placed: null });
   }, 20_000);
 
   it('ends adversarial patterns with a timeout error within the deadline', async () => {
@@ -164,7 +204,7 @@ describe('matchPatterns', () => {
     // started with `--permission` but without `--allow-worker`.
     const texts = [() => 'not cloneable'] as unknown as string[];
     const outcome = await matchPatterns(
-      { patterns: [{ pattern: 'a', flags: '' }], texts, firstOnly: true },
+      { matchers: [{ pattern: 'a', flags: '' }], texts, ordered: false },
       signal(),
     );
     expect(outcome).toMatchObject({ ok: false, error: { code: 'pattern-worker-failed' } });
