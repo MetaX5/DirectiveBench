@@ -3,7 +3,7 @@ title: Compose ClaudeCodeAdapter and prove #96 end to end with the fake claude
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request, issue #117 (parent #96)
-status: in-progress
+status: completed
 branch: feat/issue-117-claude-code-adapter
 specs: [SPEC-118, SPEC-203]
 ---
@@ -53,13 +53,24 @@ registration in `createExecutableAdapters()` (#97).
    `dd48ca0`), adapter unit tests with a `replay` mode of the fake `claude`.
 3. Engine end-to-end tests `packages/benchmark-engine/test/claude-code-adapter.test.ts`
    (commit `8405939`).
-4. SPEC-118 §8.2/§20/§21, SPEC-203 §4.2/§13, backlog row E06-S03-T05.
+4. SPEC-118 §8.2/§20/§21, SPEC-203 §4.2/§13, backlog row E06-S03-T05 (commit `77f68e1`);
+   PR #119.
+5. Codex adversarial review, each finding with an engine regression that failed before the fix:
+   | Round | Head | Finding (high) | Fix |
+   | --- | --- | --- | --- |
+   | 1 | `77f68e1` | setup could plant `../agent/home/.claude/settings.json` (API Key Mode `CLAUDE_CONFIG_DIR`) | `b55be2d`: engine creates `scratchDir` after setup, exclusively; adapter creates home/tmp exclusively, refuses a linked scratch dir |
+   | 2 | `b55be2d` | setup could plant `claude` earlier on `PATH` / replace it; `../CLAUDE.md` outside the scan; cancelled run probed first | `d413dd5`: executable pinned at `detect()`, canonical path spawned, `binary-replaced`; ancestor inspection; early cancellation |
+   | 3 | `d413dd5` | `#!/usr/bin/env node` launcher: planted `node` earlier on `PATH` | `ba65fae`: interpreter pinned and re-checked on the child `PATH` |
+   | 4 | `ba65fae` | `.`, relative or empty `PATH` entries resolve against the workspace | `44ce663`: child `PATH` keeps absolute entries only |
+   | 5 | `44ce663` | approve | — |
 
 ## Verification
 
-- `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` — pass, 100% coverage in every
-  package (agent-adapters 323 tests, benchmark-engine 388).
+- `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` — pass on the final head, 100%
+  coverage in every package (agent-adapters 348 tests, benchmark-engine 397).
 - `pnpm build && pnpm verify:pack` — pass.
+- Codex fixes: each regression test failed with the fix stashed (round 1: 2 engine + 3 adapter
+  tests; round 2: 3 engine; round 3: 1 engine; round 4: 3 engine + 1 env unit).
 - Red first (mutations of `adapter.ts`, reverted): without the bundle re-inspection in `run()`
   13 of 33 engine e2e tests fail; without the key as known secret 1 engine and 3 adapter tests fail
   (the planted key has no known token shape, so only exact-value redaction removes it).
@@ -82,6 +93,20 @@ registration in `createExecutableAdapters()` (#97).
 - The fake `claude` did not answer the readiness probe's `--setting-sources … auth status` form;
   added.
 
+- Real binary after the round-2 fixes: `detect()` pins `~/.local/bin/claude` (2.1.302); a
+  `../CLAUDE.md` next to the workspace ends `workspace-contains-claude-config` before any session.
+
 ## Lessons recorded
 
+- [Everything an untrusted setup command can reach outside the pinned workspace reaches the agent](../lessons/2026-10-22-everything-setup-can-reach-reaches-the-agent.md)
+
 ## Follow-ups
+
+- #97: register `ClaudeCodeAdapter` in the `benchmark run` runner, plan-time refusals
+  (`fixture-contains-claude-config`, bundles, imports), readiness before the job.
+- #103: live check with the production argv; replace the constructed fixtures with recordings;
+  confirm the ancestor names Claude Code loads.
+- Residual (SPEC-118 §20): approved `setup` is unsandboxed — nested interpreters, programs `claude`
+  starts through absolute `PATH` entries, in-place edits preserving size and mtime, user-level
+  configuration in subscription mode.
+- Detection still notes "Benchmark execution through this agent is not implemented yet" until #97.
