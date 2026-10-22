@@ -254,6 +254,14 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false, message: 'Missing headings: Risks' });
   });
 
+  it('does not accept a link definition with a multi-line label as a heading (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['[foo bar]: /url'] }),
+      workspace({ 'doc.md': '[foo\nbar]: /url\n---' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: [foo bar]: /url' });
+  });
+
   it('does not read a row hidden in an HTML comment after a table', async () => {
     const result = await evaluateAssertion(
       assertion({

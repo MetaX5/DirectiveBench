@@ -436,6 +436,10 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
       scan(['[a]: /url', '===', '', '  [b]:', '/url', '---', '', '[not a definition] text', '---'])
         .headings,
     ).toEqual(['[not a definition] text']);
+    // A multi-line label (CommonMark example 541; Codex review).
+    expect(scan(['[foo', 'bar]: /url', '---', '', '[foo', 'bar] text', '---']).headings).toEqual([
+      '[foo bar] text',
+    ]);
   });
 
   it(`follows ${MAX_MARKDOWN_NESTING} nested containers and stops the scan below them`, () => {

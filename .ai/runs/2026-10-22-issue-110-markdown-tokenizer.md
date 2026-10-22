@@ -135,6 +135,14 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
 
 ## Problems and deviations
 
+- Codex adversarial review (PR #115, round 1), high: a link reference definition with a multi-line
+  label (`[foo\nbar]: /url\n---`, CommonMark example 541) was reported as the heading
+  `[foo bar]: /url` — a false pass. The fail-safe guard now looks for `]:` on any line of a
+  paragraph that starts with `[`; regression tests at scanner and assertion level fail on the
+  previous code. Link definitions stay out of the differential corpus on purpose: the scanner does
+  not parse them and under-reports such headings (fail-safe), which an equality comparison with
+  cmark-gfm would flag.
+
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.
 - The Python HTML parser used for cmark-gfm readings swallowed everything after a raw `<!--`;

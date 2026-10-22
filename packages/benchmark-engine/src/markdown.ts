@@ -520,9 +520,10 @@ export function scanMarkdown(text: string): MarkdownScan {
           if (inParagraph && setextUnderline(line, start)) {
             const paragraph = current as Extract<Leaf, { kind: 'paragraph' }>;
             // A paragraph may start with link reference definitions, which are no heading text;
-            // they are not parsed, so such a heading is not reported (fail-safe).
+            // they are not parsed, so such a heading is not reported (fail-safe). A label may span
+            // lines, so `]:` counts on any line.
             const first = paragraph.lines[0] as string;
-            if (!(/^ {0,3}\[/.test(first) && first.includes(']:'))) {
+            if (!(/^ {0,3}\[/.test(first) && paragraph.lines.some((l) => l.includes(']:')))) {
               headings.push(collapseWhitespace(paragraph.lines.join(' ')));
             }
             leaf = null;
