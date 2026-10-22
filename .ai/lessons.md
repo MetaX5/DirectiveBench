@@ -18,6 +18,7 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-22] **`readline/promises` `question()` never settles on end of input** — race it against the interface's `close` event, and test prompts with an ended stream and Ctrl-D. → [lessons/2026-10-22-readline-question-never-settles-on-eof.md](lessons/2026-10-22-readline-question-never-settles-on-eof.md)
 - [2026-10-22] **A refusal guarantee covers the data directory** — read a migrated database read-only before consent and `initialize()` only after it; test refusals on a missing and an older data directory, and share one function between preflight and execution checks of the same input. → [lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md](lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md)
 - [2026-10-22] **Review PRs through `om-auto-review-pr`, and never hold its lock on a PR its author is still pushing** — a hand-briefed review skipped the skill's gate and format, and the claim blocked the author's own automation. → [lessons/2026-10-22-review-prs-through-om-auto-review-pr.md](lessons/2026-10-22-review-prs-through-om-auto-review-pr.md)
 - [2026-10-22] **A subcommand option named `--version` is taken by the program's `-V/--version`** — `benchmark run --version 2` printed the package version; the flag is `--artifact-version`. → [lessons/2026-10-22-commander-version-flag-shadows-subcommands.md](lessons/2026-10-22-commander-version-flag-shadows-subcommands.md)

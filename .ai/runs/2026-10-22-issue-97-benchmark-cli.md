@@ -207,12 +207,39 @@ a removed migration record in the real-app run), Windows.
 
 Lesson: `.ai/lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md`.
 
+## Codex adversarial review, round 2 (`om-auto-fix-pr`, 2026-10-22)
+
+Both medium findings on `2bb5932`
+([comment](https://github.com/MetaX5/DirectiveBench/pull/118#issuecomment-6350708456)) fixed:
+
+1. **Model validated only per run.** A suite whose `execution.model` was
+   `{ provider: openai, … }` or had an unsafe name was stored and approved, and its `setup` ran
+   for every run before the adapter refused. `checkSuite` now calls the adapter's own
+   `claudeModelArgs` (exported from `argv.ts`, the same code `buildClaudeArgv` uses), so both
+   cases exit 2 before anything is stored or any `setup` runs.
+2. **EOF at the confirmation hung.** `readline/promises` `question()` never settles when input
+   ends, so `askYesNo` now races it against the interface's `close` event: Ctrl-D or a closed
+   stdin is a no, exit 130, and the staged fixture copies are removed.
+
+| Check | Result |
+| --- | --- |
+| Red first: the 3 new tests (model provider and name, EOF/Ctrl-D in `askYesNo`, EOF end to end) on the old code | 3 fail (two by hanging until the 5 s timeout); pass with the fix |
+| `pnpm format:check && pnpm lint && pnpm typecheck` (macOS) | pass |
+| `pnpm test` CLI (macOS) | 131/132, 100% coverage; the one failure is the known `doctor` hint test |
+| `pnpm test` agent-adapters (macOS) | only the known #120 process tests fail |
+| `pnpm build && pnpm verify:pack` (macOS) | pass |
+| Real app, built CLI in a pty: Ctrl-D at "Start the benchmark run? [y/N]" | exit 130, "Not started; nothing was stored.", no new staging directory, no job |
+| Real app: the scaffolded suite with `model: { provider: openai, model: gpt-x }` | exit 2 `Refused (model-provider-unsupported)`, no job |
+
+Lesson: `.ai/lessons/2026-10-22-readline-question-never-settles-on-eof.md`.
+
 ## Lessons recorded
 
 - `.ai/lessons/2026-10-22-review-prs-through-om-auto-review-pr.md` (human correction; also a rule
   in AGENTS.md §4)
 - `.ai/lessons/2026-10-22-commander-version-flag-shadows-subcommands.md`
 - `.ai/lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md`
+- `.ai/lessons/2026-10-22-readline-question-never-settles-on-eof.md`
 
 ## Follow-ups
 
