@@ -204,6 +204,10 @@ posixOnly('detectCliAgent for Claude Code', () => {
       ],
     });
     expect(JSON.stringify(detection)).not.toContain('person@example.com');
+    expect(detection.notes).toEqual([
+      'Detected on PATH.',
+      'Runs benchmarks from the CLI: `directivebench benchmark run` (not from the web UI).',
+    ]);
   });
 
   it('reports ready through an API key alone, without revealing it', async () => {

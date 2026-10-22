@@ -1,6 +1,7 @@
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
+  CLAUDE_CODE_ADAPTER_ID,
   CLI_AGENTS,
   createExecutableAdapters,
   detectCliAgent,
@@ -185,7 +186,7 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
       `agent:${descriptor.id}`,
       'ok',
       detection.installed
-        ? `${descriptor.displayName} found (${detection.version ?? 'version unknown'}); benchmark execution not implemented yet`
+        ? `${descriptor.displayName} found (${detection.version ?? 'version unknown'}); ${descriptor.id === CLAUDE_CODE_ADAPTER_ID ? 'runs benchmarks with `directivebench benchmark run`' : 'benchmark execution not implemented yet'}`
         : `${descriptor.displayName} not found on PATH (optional)`,
     );
     if (!detection.installed) continue;
