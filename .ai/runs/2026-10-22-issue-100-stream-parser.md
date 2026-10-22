@@ -3,7 +3,7 @@ title: Claude Code stream parser, error normalisation and the engine's model/act
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request — om-auto-fix-issue 100 (E06-S03-T02, SPEC-118 Phase 3 step 2)
-status: in-progress
+status: completed
 branch: feat/issue-100-stream-parser
 specs: [SPEC-118, SPEC-203, SPEC-111, SPEC-112]
 ---
@@ -51,12 +51,80 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 
 ## Decisions
 
+- **Evidence from the binary, not a session.** Field names were taken from the stream schemas
+  compiled into the local `claude` 2.1.302 (read with `strings`; no session, no credential) and
+  recorded as SPEC-203 evidence L3: init `apiKeySource` (`none` for a claude.ai login,
+  `ANTHROPIC_API_KEY` for the key), init `skills`, assistant `error` categories, `Skill` input
+  `skill`, `forked-command-<name>`. The fixtures are constructed in that format and say so; AC-22
+  replaces them with recordings.
+- **Auth-source check fails closed:** a missing or unexpected `apiKeySource` is `auth-mismatch`
+  (a stop code). If the live check shows the field behaves differently, every run stops with a
+  clear message rather than running under the wrong credentials.
+- **Inline `/<name>` expansion signal** = a main-conversation user message before the first
+  assistant message containing `<command-name>/<name></command-name>` (Assumption, AC-22); the
+  forked signal is any `parent_tool_use_id` starting with `forked-command-` (spec + L3).
+- **Synthetic assistant messages** (`message.model` `<synthetic>`, CLI-written errors) are not
+  model output: they do not count as a model, their text is a failure text.
+- **A recovered retry does not classify a failure:** the last `api_retry` category counts only
+  when the run ended without a regular error subtype; the assistant `error` category always counts.
+- **Engine, not adapter, decides artifact-not-loaded / not-invoked** — only the engine knows the
+  variant and baseline kind (a `none` baseline is expected to have nothing loaded).
+- **Stop = exception after persisting:** `BenchmarkStoppedError` after `onAgentRun`, so the
+  failing agent run is stored and the runner's existing error path ends the benchmark run `error`
+  with the reason; no runner change was needed.
+- **Agent-profile key when runs disagree:** first reporting run's fields with the sorted set of
+  observed models as `executionModel`; `user-profile` without `hostId` → `not-comparable`
+  `host-id-missing` (fail closed) instead of an unkeyed profile.
+- **auxiliary-models** warns when the auxiliary sets differ between runs (AC-18 wording), not
+  whenever an auxiliary model exists; per-run sets stay in the `agent-metadata` trace event.
+- Cost is dropped in subscription mode ("n/a (subscription)"), kept (an estimate) in api-key mode.
+
 ## Work performed
+
+1. Contract extension (`contract.ts`): `AgentRunResult.errorCode/warnings/metadata/skillActivation`,
+   status `infrastructure-error`, trace events `tool-call`/`tool-result`/`permission-denied`/`retry`,
+   cache token fields.
+2. `claude-code/stream-parser.ts` and `normalize.ts` with 23 fixtures under
+   `packages/agent-adapters/test/fixtures/claude-code/2.1.302/` and their tests.
+3. `benchmark-engine/src/agent-conditions.ts`, hooks in `orchestrator.ts` (`agent-metadata` trace
+   event, activation rules, stop, condition issues/warnings, observed profile, `hostId` input,
+   `summary.skillInvocation`); runner test for the stop path.
+4. Self-review fix: every name from the stream (model, `apiKeySource`, categories, subtype) is
+   clipped to `CLAUDE_STREAM_NAME_MAX_CHARS`.
+5. Merged origin/main (PR #105, document assertions); resolved the SPEC-118 §20 conflict; its
+   `assertion-error` path now also sets `errorCode: 'assertion-error'`.
+6. SPEC-118 §20 and SPEC-203 §13 (+ evidence L3) updated for verified behaviour only.
 
 ## Verification
 
+- `pnpm format:check && pnpm lint && pnpm typecheck` — pass.
+- `taskset -c 0,1 pnpm test --force` (2-core CI emulation) on the merged head — pass, 100%
+  coverage in every package (agent-adapters 246, benchmark-engine 287, runner 232 tests).
+- Linear-time parser test 3× under `taskset -c 0,1` with two `yes > /dev/null` loads — pass.
+- `pnpm build && pnpm verify:pack` — pass.
+- Built CLI `directivebench demo` in a temp data dir: verdict `improved`, comparability key
+  `8212a3eb…0f9f` (byte-identical to the pinned mock key), no `agent-metadata` event in mock traces.
+- **Not verified:** any real `claude` stream (fixtures are constructed), the inline expansion
+  signal, that `apiKeySource` is emitted as read, the spawning adapter (#101), CLI surfaces of the
+  invocation rate (Phase 4/5).
+
 ## Problems and deviations
+
+- A first full test run overlapped a source edit; it was discarded and the gate rerun.
+- `grep -o` with context on the 285 MB binary failed ("exceeds complexity limits"); used `strings`
+  + Python instead.
+- Deviation in naming: other differing agent conditions use the issue text
+  `agent condition <field> differs …` (no separate code in the spec).
 
 ## Lessons recorded
 
+- `.ai/lessons/2026-10-22-read-a-cli-stream-schema-from-its-binary.md`
+
 ## Follow-ups
+
+- AC-22 live check: record real streams for these fixtures, confirm `apiKeySource`, `skills`,
+  `Skill.input.skill` and the inline `/<name>` expansion message.
+- #101: spawn `claude`, feed `ClaudeStreamParser.push` with stdout, call `claudeRunOutcome` with
+  the exit code/stderr and add `durationMs`; report pre-spawn inspection failures as
+  `infrastructure-error` with their code so the stop rule applies.
+- Phase 4: pass `installationId` as `RunBenchmarkInput.hostId`; show `summary.skillInvocation`.

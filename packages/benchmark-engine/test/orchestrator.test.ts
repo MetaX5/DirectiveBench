@@ -568,6 +568,7 @@ describe('assertions that cannot finish (SPEC-118 FR-118-46)', () => {
       executionStatus: 'infrastructure-error',
       score: null,
       passed: null,
+      errorCode: 'assertion-error',
       error:
         'assertion-error: assertion "pattern" could not be evaluated: Pattern evaluation exceeded 2000 ms; simplify the regular expression',
       changedFiles: [{ path: 'out.txt', change: 'added' }],

@@ -433,6 +433,7 @@ async function executeAgentRun(
           'infrastructure-error',
           `assertion-error: assertion "${unfinished.assertionId}" could not be evaluated: ${unfinished.message}`,
         ),
+        errorCode: 'assertion-error',
         changedFiles,
         assertions,
         usage,
