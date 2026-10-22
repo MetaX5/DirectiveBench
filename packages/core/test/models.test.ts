@@ -11,7 +11,11 @@ const candidate: BaselineIdentity = {
 describe('baselineArtifactIssue (SPEC-118 FR-118-12)', () => {
   it('accepts another version of the same artifact with other content and the same format', () => {
     expect(
-      baselineArtifactIssue(candidate, { ...candidate, versionId: 'artv_1', contentHash: 'hash-1' }),
+      baselineArtifactIssue(candidate, {
+        ...candidate,
+        versionId: 'artv_1',
+        contentHash: 'hash-1',
+      }),
     ).toBeNull();
   });
 
