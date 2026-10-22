@@ -1,3 +1,4 @@
+import { delimiter } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeEnv, claudeAuthProfile, ClaudeCodeError } from '../../src/claude-code';
 
@@ -88,8 +89,32 @@ describe('buildClaudeEnv', () => {
     });
   });
 
-  it('refuses an empty or multi-line key', () => {
-    for (const apiKey of ['', '   ', 'a\nb', 'a\rb', 'a\0b']) {
+  it('keeps only absolute PATH entries, which never resolve against the workspace (Codex round 4)', () => {
+    const env = buildClaudeEnv({
+      authMode: 'subscription',
+      baseEnv: { ...hostEnv, PATH: ['.', '/usr/local/bin', '', 'bin', '/usr/bin'].join(delimiter) },
+      tempDir: '/run/tmp',
+    });
+    expect(env.PATH).toBe(['/usr/local/bin', '/usr/bin'].join(delimiter));
+    expect(
+      buildClaudeEnv({
+        authMode: 'subscription',
+        baseEnv: { HOME: '/h', PATH: '.' },
+        tempDir: '/t',
+      }).PATH,
+    ).toBe('');
+  });
+
+  it('refuses an empty, multi-line or unredactably short key', () => {
+    for (const apiKey of [
+      '',
+      '   ',
+      'a\nbcdefghi',
+      'a\rbcdefghi',
+      'a\0bcdefghi',
+      'short12',
+      '  short12  ',
+    ]) {
       expect(
         codeOf(() =>
           buildClaudeEnv({
@@ -115,7 +140,7 @@ describe('buildClaudeEnv', () => {
         baseEnv: hostEnv,
         tempDir: '/t',
         isolatedHome: 'home',
-        apiKey: 'k',
+        apiKey: 'long-enough-key',
       }),
     ).toThrow(/isolated home directory must be an absolute path/);
   });

@@ -28,6 +28,7 @@ describe('FR-118-15 stop codes', () => {
       'workspace-scan-limit',
       'workspace-replaced',
       'stray-processes',
+      'binary-replaced',
     ]);
     for (const code of ['output-limit', 'spawn-failed', 'agent-failed', 'provider-error']) {
       expect(STOP_CODES).not.toContain(code);

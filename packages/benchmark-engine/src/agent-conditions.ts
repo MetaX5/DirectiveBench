@@ -30,6 +30,9 @@ export const STOP_CODES: readonly string[] = [
   // `output-limit` and `spawn-failed` stay per-run failures.
   'workspace-replaced',
   'stray-processes',
+  // §12 (maintainer decision 2026-10-22): the pinned `claude` or its interpreter was replaced
+  // (e.g. by a `setup` command); every further run would be refused the same way.
+  'binary-replaced',
 ];
 
 /** The agent-run facts these rules read. */

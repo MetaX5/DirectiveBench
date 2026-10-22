@@ -79,6 +79,15 @@ export interface AgentRunRequest {
    * files, such as an isolated home or temporary directory. Removed with the run.
    */
   scratchDir: string;
+  /**
+   * The artifact version the benchmark run measures (the candidate), in every agent run of both
+   * variants, whether or not this run installed it: an adapter whose argv depends on it (Claude
+   * Code's `Skill(<name>)` rule, SPEC-118 FR-118-08) builds one argv for both variants, and checks
+   * that must hold before any agent starts see it (FR-118-26).
+   */
+  artifact: ArtifactBundle;
+  /** The A/B baseline version (FR-118-10/11), or null for baseline kind `none`. */
+  baselineArtifact: ArtifactBundle | null;
   prompt: string;
   timeoutMs: number;
   signal: AbortSignal;

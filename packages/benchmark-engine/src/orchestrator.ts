@@ -334,7 +334,6 @@ async function executeAgentRun(
   try {
     stage('prepare');
     await mkdir(homeDir, { recursive: true });
-    await mkdir(scratchDir, { recursive: true });
     await copyTree(join(input.fixtureStore, caseFixtures.fixture), workspaceDir);
     // The workspace must be byte-identical to the immutable snapshot (FR-110-02).
     const copiedHash = hashManifest(await buildManifest(workspaceDir));
@@ -411,6 +410,18 @@ async function executeAgentRun(
 
     // Snapshot after installation so only the agent's own changes are tracked.
     const before = await buildManifest(workspaceDir);
+    // The adapter's private directory (an isolated home, temporary files) is created only now and
+    // exclusively: `setup` runs in the workspace and can reach its parent, so a directory created
+    // before it could hold planted configuration or be a link to a host directory. The pin check
+    // after `setup` showed the run directory is still the run's own.
+    try {
+      await mkdir(scratchDir, { mode: 0o700 });
+    } catch (error) {
+      return fail(
+        'infrastructure-error',
+        `The run-local agent directory could not be created fresh (${(error as NodeJS.ErrnoException).code}); a setup command may have created it.`,
+      );
+    }
     // Never start the agent after cancellation; also a precondition of agentAbortSignal.
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     stage('agent');
@@ -422,6 +433,8 @@ async function executeAgentRun(
           workspace,
           installedPaths,
           scratchDir,
+          artifact: input.artifact,
+          baselineArtifact: input.baselineArtifact ?? null,
           prompt: benchmarkCase.prompt,
           timeoutMs,
           signal: agentAbort.signal,

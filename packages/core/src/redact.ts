@@ -1,6 +1,12 @@
 /** What `redactSecrets` puts in place of a secret. */
 export const REDACTION_MARKER = '[REDACTED]';
 
+/**
+ * Shortest known secret `redactSecrets` removes by its exact value; a shorter one would also match
+ * ordinary text. Callers that must keep a secret out of every output refuse shorter values.
+ */
+export const MIN_KNOWN_SECRET_LENGTH = 8;
+
 /** Token shapes of common providers. Patterns are intentionally conservative. */
 const SECRET_PATTERNS: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{16,}/g,
@@ -45,7 +51,8 @@ function redactPrivateKeys(text: string): string {
 export function redactSecrets(text: string, knownSecrets: readonly string[] = []): string {
   let result = text;
   for (const secret of knownSecrets) {
-    if (secret.length >= 8) result = result.split(secret).join(REDACTION_MARKER);
+    if (secret.length >= MIN_KNOWN_SECRET_LENGTH)
+      result = result.split(secret).join(REDACTION_MARKER);
   }
   for (const pattern of SECRET_PATTERNS) {
     result = result.replace(pattern, (match, ...groups: unknown[]) => {
