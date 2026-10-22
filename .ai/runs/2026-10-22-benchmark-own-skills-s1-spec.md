@@ -128,6 +128,18 @@ fail-closed option was taken each time.
 Additional assumptions for the live check: `message.model` on assistant stream messages, and
 `--settings` taking effect alongside `--setting-sources project,local`.
 
+## Review round: Codex adversarial review, round 3 (2026-10-22)
+
+One HIGH finding; everything else passed. **`allowed-tools` inside the profile still widened
+it.** Confirmed: FR-118-26 refused only grants of tools outside the profile, but `Skill` is inside
+the `skill-md` profile, so `allowed-tools: Skill` or `Skill(other-name)` would let ambient skills
+run (against FR-118-08) and bare `Edit` would approve edits outside the workspace (against
+FR-118-07). Resolved fail-closed: any non-empty `allowed-tools` is refused in candidate and
+baseline versions (FR-118-26, `artifact-executes-code`) and in fixture skills, commands and
+subagents (FR-118-06, new code `fixture-grants-tools`; previously these only needed approval,
+which does not cover widening the profile). AC-23 lists the three cases; Q18 added; §19 gains
+scoped-grant validation; SPEC-203 §8 and AC-12 synced.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
