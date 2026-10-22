@@ -2,10 +2,10 @@ import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
 import {
   ConfigError,
   dataDirLayout,
+  ensureInstallationId,
   isLoopbackHost,
   loadConfig,
   resolveDataDir,
-  saveConfig,
   type DataDirLayout,
   type DirectiveBenchConfig,
 } from '@directivebench/core';
@@ -25,18 +25,24 @@ export interface Workspace {
   appliedMigrations: number;
 }
 
-export function readConfig(layout: DataDirLayout): DirectiveBenchConfig {
+/** Runs a config read, turning an invalid `config.json` into a usage error. */
+function withConfigErrors(read: () => DirectiveBenchConfig): DirectiveBenchConfig {
   try {
-    return loadConfig(layout.config);
+    return read();
   } catch (error) {
     if (error instanceof ConfigError) throw new CliError(error.message, ExitCode.Usage);
     throw error;
   }
 }
 
+export function readConfig(layout: DataDirLayout): DirectiveBenchConfig {
+  return withConfigErrors(() => loadConfig(layout.config));
+}
+
 /**
- * Creates the data directory layout, writes a default config.json, applies migrations and
- * seeds predefined categories. Idempotent.
+ * Creates the data directory layout, writes a default config.json (or adds a missing
+ * `installationId` to an existing one, SPEC-115 FR-115-15), applies migrations and seeds
+ * predefined categories. Idempotent.
  */
 export async function initialize(
   dataDirFlag: string | undefined,
@@ -55,8 +61,7 @@ export async function initialize(
     );
   }
   const createdConfig = !existsSync(layout.config);
-  const config = readConfig(layout);
-  if (createdConfig) saveConfig(layout.config, config);
+  const config = withConfigErrors(() => ensureInstallationId(layout.config));
 
   let handle: DatabaseHandle;
   let appliedMigrations: number;

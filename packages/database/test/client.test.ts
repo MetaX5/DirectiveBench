@@ -60,7 +60,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(2);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(3);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -402,7 +402,7 @@ describe('withTransaction isolation on a shared connection', () => {
   });
 });
 
-describe('migration 0001_add_job_result', () => {
+describe('additive migrations', () => {
   /** A migrations folder holding only the first `count` entries of the real journal. */
   function partialMigrations(dir: string, count: number): string {
     const journal = JSON.parse(
@@ -418,12 +418,13 @@ describe('migration 0001_add_job_result', () => {
     return folder;
   }
 
-  function jobColumns(handle: DatabaseHandle): string[] {
+  function columns(handle: DatabaseHandle, table: string): string[] {
     return handle.sqlite
-      .prepare('pragma table_info(jobs)')
+      .prepare(`pragma table_info(${table})`)
       .all()
       .map((row) => String(row.name));
   }
+  const jobColumns = (handle: DatabaseHandle) => columns(handle, 'jobs');
 
   it('adds a nullable jobs.result to an existing database and can be rolled back', async () => {
     const temp = makeTempDir();
@@ -438,7 +439,7 @@ describe('migration 0001_add_job_result', () => {
       );
 
       // Up: the existing row survives with a null result.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 2))).applied).toBe(1);
       expect(jobColumns(handle)).toEqual([...jobColumns(before), 'result']);
       expect(
         handle.sqlite.prepare("select payload, result from jobs where id = 'job_old'").get(),
@@ -454,8 +455,63 @@ describe('migration 0001_add_job_result', () => {
       expect(handle.sqlite.prepare("select payload from jobs where id = 'job_old'").get()).toEqual({
         payload: '{"a":1}',
       });
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 2))).applied).toBe(1);
       expect(jobColumns(handle)).toContain('result');
+    } finally {
+      before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds a nullable benchmark_runs.baseline_artifact_version_id: existing runs read as baseline none (SPEC-118 §8.1)', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const runColumns = (h: DatabaseHandle) => columns(h, 'benchmark_runs');
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 2));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 2));
+      handle.sqlite.exec(`
+        insert into artifacts (id, slug, name, type, created_at, updated_at)
+          values ('art_1', 'a', 'A', 'skill', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+          values ('artv_1', 'art_1', 1, 'h', 'skill-md', 'SKILL.md', '[]', '{}', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suites (id, slug, name, created_at, updated_at)
+          values ('suite_1', 's', 'S', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suite_versions (id, suite_id, version, schema_version, definition, fixtures, content_hash, created_at)
+          values ('suitev_1', 'suite_1', 1, 1, '{}', '{}', 'h', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_runs (id, suite_version_id, artifact_version_id, agent_adapter_id, environment, status, started_at)
+          values ('run_old', 'suitev_1', 'artv_1', 'mock', '{}', 'completed', '2026-01-01T00:00:00.000Z');
+      `);
+
+      // Up: the existing run survives with a null baseline, i.e. baseline kind `none`.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(runColumns(handle)).toEqual([...runColumns(before), 'baseline_artifact_version_id']);
+      expect(
+        handle.sqlite
+          .prepare(
+            "select artifact_version_id, baseline_artifact_version_id from benchmark_runs where id = 'run_old'",
+          )
+          .get(),
+      ).toEqual({ artifact_version_id: 'artv_1', baseline_artifact_version_id: null });
+      // The new column references artifact_versions.
+      expect(() =>
+        handle.sqlite.exec(
+          "update benchmark_runs set baseline_artifact_version_id = 'artv_missing' where id = 'run_old'",
+        ),
+      ).toThrow(/FOREIGN KEY/);
+
+      // Down (the rollback plan in the PR): drop the index and the column and forget the
+      // migration; the table returns to the 0001 shape with its data.
+      handle.sqlite.exec('drop index benchmark_runs_artifact_baseline_idx');
+      handle.sqlite.exec('alter table benchmark_runs drop column baseline_artifact_version_id');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(runColumns(handle)).toEqual(runColumns(before));
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(runColumns(handle)).toContain('baseline_artifact_version_id');
     } finally {
       before.close();
       handle.close();

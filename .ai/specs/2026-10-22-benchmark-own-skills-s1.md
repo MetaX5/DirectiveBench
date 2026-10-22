@@ -660,7 +660,7 @@ changed before merge.
 
 ## 20. Implementation status
 
-- **Implemented (Phase 1, 2026-10-22, issue #94):** §6.5 FR-118-40…46 in
+- **Implemented — Phase 1 (issue #94, verified on 2026-10-22):** §6.5 FR-118-40…46 in
   `packages/benchmark-engine`: the assertion plugin registry with the four existing types
   (existing definitions and the three original examples hash unchanged), `file` target resolution
   (path, or glob over added/modified files with exactly one match; `resolveInside`), bounded
@@ -680,12 +680,52 @@ changed before merge.
   limits of FR-118-46; fences inside block quotes and list items hide their headings; a table
   body ends at a list item, block quote or thematic break as in GFM.
   NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
-  development machine; the CI test bounds it at 1 s (plus size-ratio linearity tests) so a loaded
-  runner cannot flake it.
-- **Partially implemented:** none. Existing pieces it builds on: Claude Code detection
-  (SPEC-203 §13), RED/GREEN orchestration with the mock agent, suite import, the
-  `artifact_benchmark_assignments` table and the artifact detail history (flat list, SPEC-113 §20).
-- **Not implemented:** everything else in §6 (§6.1–§6.4, §6.6; Phases 2–5).
+  development machine; the CI test bounds it at 1 s (plus linearity tests normalised by a linear
+  baseline) so a loaded runner cannot flake it.
+- **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**
+  - FR-118-10/11: `RunBenchmarkInput.baselineArtifact`; every baseline workspace receives exactly
+    the baseline version and every candidate workspace exactly the candidate, through the same
+    adapter install call, paths and stages (`packages/benchmark-engine/test/baseline.test.ts`,
+    kept workspaces compared file by file; runner: `packages/runner/test/runner-acquired.test.ts`).
+  - FR-118-12 (the version part): a baseline of another artifact, the candidate version itself,
+    the same content hash or another format is rejected by `assertRunnable` before any work, by
+    the job repository before a job exists (`InvalidBaselineError`) and again by the runner when it
+    loads the job (failed job, no benchmark run); one shared rule, `baselineArtifactIssue` in
+    `packages/core`. The `/`-prompt refusal and `baseline-skill-name-differs` belong to Phases 3–4.
+  - FR-118-13 / §8.1: migration `0002_add_baseline_artifact_version` adds the nullable
+    `benchmark_runs.baseline_artifact_version_id` (references `artifact_versions`, index with
+    `artifact_version_id`); runs without a baseline and every run stored before store null —
+    checked on a database created by the previous version (`directivebench init` applied the
+    migration; its run reads null). The `benchmark-run` job payload gains optional
+    `baselineArtifactVersionId`, `auth.mode` and `maxBudgetUsd` (API Key Mode only); it stays
+    strict, so no other field — and no secret — can be stored in it.
+  - §8.2/§8.3 (AC-5): the `AgentProfile` type, the optional `EnvironmentMetadata.agentProfile`
+    field and the comparability key, which hashes a profile only when one is given, so the bundled mock example key is
+    byte-identical (`8212a3eb…0f9f` from `demo` on `main` before the change, pinned in a test, and
+    the same key from `demo` after it); keys differ in auth mode, isolation, permission profile,
+    flags hash, execution model and `hostId`; the baseline choice does not change the key.
+  - SPEC-115 FR-115-15: `config.json` carries a generated `installationId` (`ensureInstallationId`,
+    called by `init`, `serve` and `demo`).
+  - FR-118-34 (mechanism): `createAcquiredBenchmarkJob` (one INSERT of a `running` row) and
+    `LocalRunner.runAcquiredJob`; a `serve`-style runner polling the same database through another
+    connection never acquires such a job, and a dead creator's job is recovered as `interrupted`
+    (AC-9 mechanism; also checked against a live `directivebench serve`).
+  - FR-118-05/53 (guard): the web server action refuses a non-mock suite even when called
+    directly, and the benchmark page shows "Run from the CLI" with the planned command (marked not
+    implemented) instead of **Run** (`apps/web/test/actions.test.ts`, Playwright test in
+    `apps/web/e2e/management.spec.ts`).
+- **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
+  has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
+  direct calls of `comparabilityKey` exercise profile hashing; the adapter→engine wiring and
+  feeding `installationId` into a `user-profile` profile as `hostId` (enforced by the type: only
+  that variant has it) wait for the Claude Code adapter (Phase 3). AC-3, AC-5 and AC-9 are verified at the engine, repository and
+  runner level; their `benchmark run --baseline` / CLI parts wait for Phase 4. Existing pieces this
+  slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
+  agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
+  (flat list, SPEC-113 §20).
+- **Not implemented:** Phase 3 (Claude Code adapter),
+  Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
+  other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan
 

@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  baselineArtifactIssue,
   createId,
   hostedRepositoryLocationSchema,
   nowIso,
@@ -21,12 +22,31 @@ import {
   type JobType,
 } from '../schema';
 
+/**
+ * Input of a `benchmark-run` job (SPEC-118 §8.1). Strict, so a payload can never carry a field
+ * that is not listed here — and none of these holds a secret value: `auth` names the mode, never
+ * a key (the API key reaches only the agent's environment, FR-118-02).
+ */
 export const benchmarkJobPayloadSchema = z
   .object({
     suiteVersionId: z.string().min(1),
+    /** The candidate. */
     artifactVersionId: z.string().min(1),
+    /** The A/B baseline: another version of the same artifact; absent = baseline kind `none`. */
+    baselineArtifactVersionId: z.string().min(1).optional(),
+    /** How a real agent authenticates (SPEC-118 FR-118-02); absent for the mock agent. */
+    auth: z
+      .object({ mode: z.enum(['subscription', 'api-key']) })
+      .strict()
+      .optional(),
+    /** Budget per agent session in USD, enforced by the agent only in API Key Mode (FR-118-30). */
+    maxBudgetUsd: z.number().positive().finite().optional(),
   })
-  .strict();
+  .strict()
+  .refine((payload) => payload.maxBudgetUsd === undefined || payload.auth?.mode === 'api-key', {
+    message: 'maxBudgetUsd is accepted only with auth mode api-key',
+    path: ['maxBudgetUsd'],
+  });
 export type BenchmarkJobPayload = z.infer<typeof benchmarkJobPayloadSchema>;
 
 /**
@@ -208,11 +228,36 @@ export class JobNoLongerRunningError extends Error {
   override name = 'JobNoLongerRunningError';
 }
 
-/** Validates references and enqueues a benchmark run. The web process only ever enqueues. */
-export async function enqueueBenchmarkJob(
+/** The A/B baseline of a benchmark job breaks SPEC-118 FR-118-12. */
+export class InvalidBaselineError extends Error {
+  override name = 'InvalidBaselineError';
+}
+
+async function artifactVersionIdentity(db: Database, versionId: string) {
+  const row = await db
+    .select({
+      artifactId: artifactVersions.artifactId,
+      versionId: artifactVersions.id,
+      format: artifactVersions.format,
+      contentHash: artifactVersions.contentHash,
+    })
+    .from(artifactVersions)
+    .where(eq(artifactVersions.id, versionId))
+    .get();
+  if (!row) throw new NotFoundError(`Artifact version ${versionId} not found`);
+  return row;
+}
+
+/**
+ * Parses a benchmark job payload and checks what it references: the suite version, the
+ * candidate and, when given, a baseline that is another version of the same artifact with other
+ * content and the same format (SPEC-118 FR-118-12). Run it in the transaction that inserts the
+ * job when the references could change meanwhile.
+ */
+async function checkedBenchmarkPayload(
   db: Database,
   payload: BenchmarkJobPayload,
-): Promise<JobRecord> {
+): Promise<BenchmarkJobPayload> {
   const parsed = benchmarkJobPayloadSchema.parse(payload);
   const suiteVersion = await db
     .select({ id: benchmarkSuiteVersions.id })
@@ -220,14 +265,26 @@ export async function enqueueBenchmarkJob(
     .where(eq(benchmarkSuiteVersions.id, parsed.suiteVersionId))
     .get();
   if (!suiteVersion) throw new NotFoundError(`Suite version ${parsed.suiteVersionId} not found`);
-  const artifactVersion = await db
-    .select({ id: artifactVersions.id })
-    .from(artifactVersions)
-    .where(eq(artifactVersions.id, parsed.artifactVersionId))
-    .get();
-  if (!artifactVersion) {
-    throw new NotFoundError(`Artifact version ${parsed.artifactVersionId} not found`);
+  const candidate = await artifactVersionIdentity(db, parsed.artifactVersionId);
+  if (parsed.baselineArtifactVersionId !== undefined) {
+    const baseline = await artifactVersionIdentity(db, parsed.baselineArtifactVersionId);
+    const issue = baselineArtifactIssue(candidate, baseline);
+    if (issue) throw new InvalidBaselineError(issue);
   }
+  return parsed;
+}
+
+/**
+ * Validates references and enqueues a benchmark run. The web process only ever enqueues. The
+ * check and the insert are separate statements: the referenced suite and artifact versions are
+ * immutable and no repository function deletes them, and the runner checks them again
+ * when it loads the job, so no transaction is needed here (SPEC-014 check-then-act).
+ */
+export async function enqueueBenchmarkJob(
+  db: Database,
+  payload: BenchmarkJobPayload,
+): Promise<JobRecord> {
+  const parsed = await checkedBenchmarkPayload(db, payload);
   const [job] = await db
     .insert(jobs)
     .values({
@@ -239,6 +296,40 @@ export async function enqueueBenchmarkJob(
     })
     .returning();
   if (!job) throw new Error('Failed to enqueue job');
+  return job;
+}
+
+/**
+ * Creates a benchmark job already acquired by `runnerId` (SPEC-118 FR-118-34): one INSERT of a
+ * `running` row with its runner, start and heartbeat, so the job is never `pending` and no other
+ * runner — e.g. `serve` polling the same data directory — can ever acquire it. The caller runs it
+ * in-process (`LocalRunner.runAcquiredJob`) and keeps its heartbeat fresh; if the caller dies,
+ * the stale-heartbeat recovery marks it `interrupted` (SPEC-114 FR-114-06). References are
+ * checked first; `benchmark run` calls this inside the transaction that also imports the suite
+ * version (FR-118-39), which makes check and insert atomic.
+ */
+export async function createAcquiredBenchmarkJob(
+  db: Database,
+  payload: BenchmarkJobPayload,
+  runnerId: string,
+  now: string,
+): Promise<JobRecord> {
+  const parsed = await checkedBenchmarkPayload(db, payload);
+  const [job] = await db
+    .insert(jobs)
+    .values({
+      id: createId('job'),
+      type: 'benchmark-run',
+      status: 'running',
+      payload: parsed,
+      runnerId,
+      attempts: 1,
+      createdAt: now,
+      startedAt: now,
+      heartbeatAt: now,
+    })
+    .returning();
+  if (!job) throw new Error('Failed to create job');
   return job;
 }
 

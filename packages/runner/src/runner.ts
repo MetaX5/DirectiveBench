@@ -3,6 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter } from '@directivebench/agent-adapters';
+import { baselineArtifactIssue, type ArtifactBundle } from '@directivebench/core';
 import {
   BenchmarkCancelledError,
   BenchmarkConfigurationError,
@@ -18,6 +19,7 @@ import {
   finishBenchmarkRun,
   finishJob,
   getArtifactBundle,
+  getJob,
   getRepository,
   getSuiteVersion,
   HOSTED_PROVIDERS,
@@ -105,6 +107,11 @@ export interface JobExecutionResult {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted';
   benchmarkRunId: string | null;
   error: string | null;
+}
+
+/** `runAcquiredJob` was given a job this runner does not own or already runs. */
+export class JobNotAcquiredError extends Error {
+  override name = 'JobNotAcquiredError';
 }
 
 const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefined };
@@ -204,17 +211,46 @@ export class LocalRunner {
       });
       if (!job) return;
       this.options.logger.info(`Job ${job.id} acquired`, { event: 'acquired', jobId: job.id });
-      const controller = new AbortController();
-      // Claimed after `stop()` gave up waiting for this poll: interrupt it instead of running it.
-      if (this.stopping) controller.abort('shutdown');
-      const done = this.execute(job, controller)
-        .then((result) => {
-          for (const results of this.finished) results.push(result);
-          return result;
-        })
-        .finally(() => this.active.delete(job.id));
-      this.active.set(job.id, { lane, controller, done });
+      void this.track(job, lane);
     }
+  }
+
+  /** Runs a job this runner owns as an active job of `lane`, so `stop()` and heartbeats see it. */
+  private track(job: JobRecord, lane: Lane): Promise<JobExecutionResult> {
+    const controller = new AbortController();
+    // Claimed after `stop()` gave up waiting for this poll: interrupt it instead of running it.
+    if (this.stopping) controller.abort('shutdown');
+    const done = this.execute(job, controller)
+      .then((result) => {
+        for (const results of this.finished) results.push(result);
+        return result;
+      })
+      .finally(() => this.active.delete(job.id));
+    this.active.set(job.id, { lane, controller, done });
+    return done;
+  }
+
+  /**
+   * Executes a job created already acquired by this runner (`createAcquiredBenchmarkJob`,
+   * SPEC-118 FR-118-34): `benchmark run` creates and runs its job in-process, so a `serve`
+   * runner polling the same data directory never picks it up. Heartbeat, cancellation requests
+   * and `stop()` apply as to polled jobs. The job counts toward the long lane, which it may push
+   * past `concurrency` (the caller decided to run it), so a polling runner fills fewer long slots
+   * meanwhile. Refuses a job that is not `running` for this runner or is already executing here.
+   */
+  async runAcquiredJob(jobId: string): Promise<JobExecutionResult> {
+    const job = await getJob(this.options.handle.db, jobId);
+    if (job?.status !== 'running' || job.runnerId !== this.runnerId) {
+      throw new JobNotAcquiredError(`Job ${jobId} is not running for runner ${this.runnerId}`);
+    }
+    if (this.active.has(jobId)) {
+      throw new JobNotAcquiredError(`Job ${jobId} is already executing in this runner`);
+    }
+    this.options.logger.info(`Job ${jobId} started by its creator`, {
+      event: 'acquired',
+      jobId,
+    });
+    return this.track(job, 'long');
   }
 
   /** Processes the queue until no job is pending or running. Used by `directivebench demo` and tests. */
@@ -420,6 +456,17 @@ export class LocalRunner {
       const artifact = await getArtifactBundle(db, payload.artifactVersionId);
       if (!suiteVersion || !artifact)
         return await finishAs('failed', 'Suite or artifact version no longer exists');
+      // The A/B baseline is checked when the job is created and again here (SPEC-118 FR-118-12).
+      let baselineArtifact: ArtifactBundle | undefined;
+      if (payload.baselineArtifactVersionId !== undefined) {
+        baselineArtifact =
+          (await getArtifactBundle(db, payload.baselineArtifactVersionId)) ?? undefined;
+        if (!baselineArtifact) {
+          return await finishAs('failed', 'Baseline artifact version no longer exists');
+        }
+        const issue = baselineArtifactIssue(artifact, baselineArtifact);
+        if (issue) return await finishAs('failed', `Invalid baseline: ${issue}`);
+      }
 
       const validation = validateDefinition(suiteVersion.version.definition);
       if (!validation.success) {
@@ -441,6 +488,7 @@ export class LocalRunner {
         jobId: job.id,
         suiteVersionId: suiteVersion.version.id,
         artifactVersionId: artifact.versionId,
+        baselineArtifactVersionId: baselineArtifact?.versionId ?? null,
         agentAdapterId: adapter.id,
         agentVersion: detection.version,
         model: definition.execution.model,
@@ -454,6 +502,7 @@ export class LocalRunner {
           fixtures: suiteVersion.version.fixtures,
           fixtureStore: this.options.fixtureStore,
           artifact,
+          baselineArtifact,
           adapter,
           workRoot: join(this.options.workspaceRoot, runId),
           keepWorkspaces: this.options.keepWorkspaces,

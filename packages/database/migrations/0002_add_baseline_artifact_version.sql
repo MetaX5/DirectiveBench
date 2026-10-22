@@ -1,0 +1,2 @@
+ALTER TABLE `benchmark_runs` ADD `baseline_artifact_version_id` text REFERENCES artifact_versions(id);--> statement-breakpoint
+CREATE INDEX `benchmark_runs_artifact_baseline_idx` ON `benchmark_runs` (`artifact_version_id`,`baseline_artifact_version_id`);

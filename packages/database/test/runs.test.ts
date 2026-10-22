@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   countRunsByVerdict,
+  importArtifactVersion,
   finishBenchmarkRun,
   getBenchmarkRunDetail,
   importSuiteVersion,
@@ -10,7 +11,7 @@ import {
   type AgentRunInput,
   type FinishBenchmarkRunInput,
 } from '../src/index';
-import { seedRun, seedTargets, suiteInput } from './support/fixtures';
+import { artifactInput, seedRun, seedTargets, suiteInput } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -87,6 +88,7 @@ describe('createBenchmarkRun and finishBenchmarkRun', () => {
       model: { provider: 'mock', model: 'm' },
       environment: { os: 'linux' },
       warnings: [],
+      baselineArtifactVersionId: null,
     });
     expect(started?.agentRuns).toEqual([]);
     expect(started?.suite.id).toBe(targets.suiteId);
@@ -112,6 +114,36 @@ describe('createBenchmarkRun and finishBenchmarkRun', () => {
       warnings: ['w'],
       finishedAt: '2026-03-01T00:05:00.000Z',
     });
+  });
+});
+
+describe('A/B baseline on a run (SPEC-118 FR-118-13)', () => {
+  it('stores the baseline version and returns it with the run', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const v2 = await importArtifactVersion(handle, artifactInput('v2'));
+    expect(v2.artifactId).toBe(targets.artifactId);
+    const runId = await seedRun(
+      handle,
+      { ...targets, artifactVersionId: v2.versionId },
+      { baselineArtifactVersionId: targets.artifactVersionId },
+    );
+    const detail = await getBenchmarkRunDetail(handle.db, runId);
+    expect(detail?.run).toMatchObject({
+      artifactVersionId: v2.versionId,
+      baselineArtifactVersionId: targets.artifactVersionId,
+    });
+    expect(detail?.artifactVersion.version).toBe(2);
+    const [listed] = await listBenchmarkRuns(handle.db);
+    expect(listed?.run.baselineArtifactVersionId).toBe(targets.artifactVersionId);
+  });
+
+  it('refuses a baseline id that is not an artifact version', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    await expect(
+      seedRun(handle, targets, { baselineArtifactVersionId: 'artv_missing' }),
+    ).rejects.toThrow();
   });
 });
 
