@@ -35,11 +35,16 @@ export interface ArtifactBundle {
   files: ArtifactFile[];
 }
 
-/** The fields that decide whether one artifact version may be the A/B baseline of another. */
-export type BaselineIdentity = Pick<
-  ArtifactBundle,
-  'artifactId' | 'versionId' | 'format' | 'contentHash'
->;
+/**
+ * The fields that decide whether one artifact version may be the A/B baseline of another. The
+ * format is a plain string so stored rows (`artifact_versions.format`) can be checked directly.
+ */
+export interface BaselineIdentity {
+  artifactId: string;
+  versionId: string;
+  format: string;
+  contentHash: string;
+}
 
 /**
  * Why `baseline` cannot be the A/B baseline of `candidate`, or null when it can (SPEC-118
