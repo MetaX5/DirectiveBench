@@ -96,9 +96,9 @@ FR-118-20…39; Phase 4 steps 1–2).
 
 ### Phase 1: Database and runner
 
-- [ ] 1.1 resolveArtifactRef
-- [ ] 1.2 One-transaction suite import, approval and acquired job
-- [ ] 1.3 Runner hostId and in-process cancel
+- [x] 1.1 resolveArtifactRef — 42714d9
+- [x] 1.2 One-transaction suite import, approval and acquired job — d985ad6
+- [x] 1.3 Runner hostId and in-process cancel — e8e2b86
 
 ### Phase 2: CLI
 
