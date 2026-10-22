@@ -86,6 +86,14 @@ fake CLI ignoring SIGINT/SIGTERM.
   #111's `agent-conditions.ts` when it merges), SPEC-118 FR-118-15 and SPEC-203 §9; orchestrator
   tests show that each stops the run after the first agent run.
 
+- After PR #111 merged: merged `origin/main` and folded `stop.ts` into #111's
+  `agent-conditions.ts` (one `STOP_CODES` list with `workspace-replaced` and `stray-processes`,
+  one `assertNotStopped`, one `BenchmarkStoppedError`); `stop.test.ts` became
+  `stop-codes.test.ts`. Conflicts resolved in SPEC-203 §13, SPEC-118 FR-118-15 and §20 (both
+  maintainer decisions kept: the two new stop codes and `overloaded` → `provider-error`),
+  `contract.ts`, `orchestrator.ts`, `.ai/lessons.md` and `hosted-git.test.ts` (main's version of the
+  same timeout fix).
+
 ## Work performed
 
 1. `process-group.ts` (signal, kill-and-wait); `runCommand` kills the group on exit.

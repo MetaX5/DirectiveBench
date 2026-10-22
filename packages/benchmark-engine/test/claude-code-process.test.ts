@@ -15,7 +15,7 @@ import { hashManifest, sha256, type ArtifactBundle } from '@directivebench/core'
 import type { BenchmarkDefinitionInput } from '../src/definition';
 import { prepareSuiteImport } from '../src/import';
 import { runBenchmark, type AgentRunRecord } from '../src/orchestrator';
-import { BenchmarkStoppedError } from '../src/stop';
+import { BenchmarkStoppedError } from '../src/agent-conditions';
 import { useTempDirs } from './helpers';
 
 /**

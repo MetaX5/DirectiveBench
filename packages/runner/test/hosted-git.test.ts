@@ -557,13 +557,12 @@ describePosix('hosted git steps with a fake git', () => {
     ];
     for (const [answers, code, limit] of cases) {
       rmSync(join(dir, 'bin'), { recursive: true, force: true });
+      // Short timeouts only where a timeout is expected: a fake git that starts slowly on a
+      // loaded runner must not turn the other cases into timeouts.
       const { context } = fakeContext(answers, {
-        // Short timeouts only where a timeout is expected: a fake git that should answer can take
-        // longer than 200 ms to start on a loaded 2-core runner (lesson 2026-10-21).
-        timeouts:
-          code === 'timeout'
-            ? { ...HOSTED_GIT_TIMEOUTS, read: 200, fetch: 200 }
-            : HOSTED_GIT_TIMEOUTS,
+        ...(code === 'timeout'
+          ? { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200, fetch: 200 } }
+          : {}),
         ...(limit === undefined ? {} : { cacheLimitBytes: limit }),
       });
       expect(await fetchBlobs(context, target, [OID_A])).toMatchObject({ ok: false, code });

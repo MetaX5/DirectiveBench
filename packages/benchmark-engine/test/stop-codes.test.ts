@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { assertNotStopped, BenchmarkStoppedError, isStopCode, STOP_CODES } from '../src/stop';
+import { assertNotStopped, BenchmarkStoppedError, STOP_CODES } from '../src/agent-conditions';
 
 const record = (errorCode: string | null, error: string | null = 'detail') => ({
   caseId: 'c',
   variant: 'candidate' as const,
   repetition: 2,
   executionStatus: 'agent-error' as const,
+  score: null,
+  passed: null,
   error,
   errorCode,
+  warnings: [],
 });
 
 describe('FR-118-15 stop codes', () => {
@@ -26,11 +29,9 @@ describe('FR-118-15 stop codes', () => {
       'workspace-replaced',
       'stray-processes',
     ]);
-    expect(isStopCode('output-limit')).toBe(false);
-    expect(isStopCode('spawn-failed')).toBe(false);
-    expect(isStopCode('rate-limited')).toBe(true);
-    expect(isStopCode('agent-failed')).toBe(false);
-    expect(isStopCode(null)).toBe(false);
+    for (const code of ['output-limit', 'spawn-failed', 'agent-failed', 'provider-error']) {
+      expect(STOP_CODES).not.toContain(code);
+    }
   });
 
   it('lets other runs pass and stops on a stop code with the run named', () => {
