@@ -273,6 +273,7 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | Timeout | DirectiveBench timer | `timeout` | — |
 | Cancel | `AbortSignal` | `cancelled` | — (exit 143 after SIGTERM expected) |
 | Spawn failure (EACCES, ENOENT after detection) | spawn error | `infrastructure-error` | `spawn-failed` |
+| The `claude` located before the first `setup` (pinned by the adapter's first detection: canonical path, device, inode, size, modification time) no longer resolves to the same file before an agent run | adapter, before each spawn | `infrastructure-error` | `binary-replaced` |
 | stdout above `CLAUDE_STDOUT_MAX_BYTES` (32 MiB) | process layer; run stopped (SIGTERM, then SIGKILL) | `agent-error` | `output-limit` |
 | Processes of `claude`'s group still alive after it exited and the group was killed, a process outside the group still holding its output after `PROCESS_OUTPUT_DRAIN_MS`, or `claude` itself not exiting within `PROCESS_KILL_CONFIRM_MS` (2 s) after SIGKILL (e.g. the signal is refused with `EPERM`; it is then no longer waited for); stops the benchmark run (SPEC-118 FR-118-15, maintainer decision 2026-10-22) | process layer | `infrastructure-error` | `stray-processes` |
 

@@ -6,7 +6,6 @@ import {
   CLAUDE_API_KEY_VARIABLE,
   CLAUDE_AUTH_MODES,
   CLAUDE_EXECUTABLE,
-  checkClaudeBinary,
 } from '../claude-code-readiness';
 import type {
   AgentAdapter,
@@ -23,9 +22,14 @@ import { buildClaudeArgv, claudeFlagsHash, type ClaudePermissionProfile } from '
 import { artifactRefusalCode, inspectArtifactVersions } from './bundle-inspection';
 import { buildClaudeEnv, claudeAuthProfile, type ClaudeEnvInput } from './env';
 import { ClaudeCodeError } from './errors';
+import {
+  claudeExecutablePinIssue,
+  pinClaudeExecutable,
+  type ClaudeExecutableLookup,
+} from './executable-pin';
 import { claudeArtifactProfile, installClaudeArtifact } from './install';
 import { claudeRunOutcome } from './normalize';
-import { runClaudeCode } from './run';
+import { notStartedEnd, runClaudeCode } from './run';
 import { baselineSkillNameIssue } from './skill-name';
 import { ClaudeStreamParser, redactStreamText } from './stream-parser';
 
@@ -99,6 +103,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     deterministic: false,
   };
   private readonly options: z.output<typeof claudeCodeAdapterOptionsSchema>;
+  private executable: Promise<ClaudeExecutableLookup> | undefined;
 
   /**
    * @param options validated with {@link claudeCodeAdapterOptionsSchema}; throws when invalid.
@@ -116,8 +121,34 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     this.options = parsed.data;
   }
 
-  detect(): Promise<AgentDetection> {
-    return detectCliAgent(CLAUDE_CODE_AGENT, this.env);
+  /**
+   * Detection with per-mode readiness. The first call also pins the located `claude` for every
+   * later agent run (`runBenchmark` calls it before any `setup` command runs).
+   */
+  async detect(): Promise<AgentDetection> {
+    const detection = await detectCliAgent(CLAUDE_CODE_AGENT, this.env);
+    await this.locate(detection);
+    return detection;
+  }
+
+  /**
+   * The pinned executable: from the first detection, or — when `run()` comes first — located on
+   * the CLI `PATH` at that moment. Located once per adapter, i.e. per benchmark run.
+   */
+  private locate(detection?: AgentDetection): Promise<ClaudeExecutableLookup> {
+    this.executable ??= detection
+      ? pinClaudeExecutable({
+          executablePath: detection.executablePath,
+          versionLine: detection.version,
+        })
+      : (async () => {
+          const executablePath = await findExecutable(CLAUDE_EXECUTABLE, this.env);
+          const versionLine = executablePath
+            ? await readVersionLine(executablePath, CLAUDE_CODE_AGENT.versionArgs, this.env)
+            : null;
+          return pinClaudeExecutable({ executablePath, versionLine });
+        })();
+    return this.executable;
   }
 
   installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact> {
@@ -140,7 +171,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const refused = (
       status: AgentRunResult['status'],
       error: string,
-      errorCode?: string,
+      errorCode?: string | null,
     ): AgentRunResult =>
       finish({
         status,
@@ -148,11 +179,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         trace: [],
         usage: null,
         error,
-        ...(errorCode === undefined ? {} : { errorCode }),
+        ...(errorCode == null ? {} : { errorCode }),
         warnings: [...authWarnings],
       });
 
     try {
+      // Nothing — not even locating claude — happens after a cancellation or timeout.
+      if (request.signal.aborted) {
+        const end = notStartedEnd(request.signal);
+        return refused(end.status, end.message);
+      }
       const caseOptions = claudeCodeCaseOptionsSchema.safeParse(request.options);
       if (!caseOptions.success) {
         return refused(
@@ -178,12 +214,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           return refused('infrastructure-error', issue, 'baseline-skill-name-differs');
       }
 
-      const executablePath = await findExecutable(CLAUDE_EXECUTABLE, this.env);
-      const versionLine = executablePath
-        ? await readVersionLine(executablePath, CLAUDE_CODE_AGENT.versionArgs, this.env)
-        : null;
-      const binary = checkClaudeBinary({ executablePath, versionLine });
-      if (!binary.ok) return refused('infrastructure-error', binary.detail, binary.code);
+      const located = await this.locate();
+      if (!located.ok) return refused('infrastructure-error', located.detail, located.code);
+      const { pin } = located;
+      const replaced = await claudeExecutablePinIssue(pin);
+      if (replaced !== null)
+        return refused('infrastructure-error', `${replaced}.`, 'binary-replaced');
 
       const argv = buildClaudeArgv({
         authMode,
@@ -220,7 +256,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         ],
       });
       const outcome = await runClaudeCode({
-        executable: binary.executablePath,
+        executable: pin.canonical,
         argv,
         env,
         workspace: request.workspace,
@@ -232,7 +268,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       if (outcome.process === null) {
         // Refused by the pre-spawn inspection, or cancelled or timed out before the spawn.
         const { status, message: reason, errorCode } = outcome.ended;
-        return refused(status, reason, errorCode ?? undefined);
+        return refused(status, reason, errorCode);
       }
 
       // The output is fed line by line; the parser keeps at most one line and bounded state.
@@ -246,7 +282,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         parser.end(),
         { exitCode: outcome.process.exitCode, stderr: outcome.process.stderr },
         {
-          adapterVersion: versionLine,
+          adapterVersion: pin.versionLine,
           authMode,
           permissionProfile,
           requestedModel: request.model?.model ?? null,

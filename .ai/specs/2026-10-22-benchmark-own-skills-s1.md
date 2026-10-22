@@ -983,7 +983,23 @@ changed before merge.
   reached first only through directories and other non-file entries. In an A/B run a fixture with
   a root `.claude` fails the baseline's and the candidate's installation
   (`artifact-install-conflict`, not a stop code) before the pre-spawn check; a `none` run stops at
-  it. Both are refused at plan time with `fixture-contains-claude-config` by Phase 4. Not
+  it. Both are refused at plan time with `fixture-contains-claude-config` by Phase 4.
+  After the Codex review (§12, each with a regression test that failed before the fix): the engine
+  creates the adapter's `scratchDir` only after `setup`, installation and the pin check, with an
+  exclusive `mkdir` (a `setup` command could plant `../agent/home/.claude/settings.json`, which
+  API Key Mode loads as `CLAUDE_CONFIG_DIR`, or link `../agent` to a host directory), and the
+  adapter creates its home and temporary directories exclusively and refuses a `scratchDir` that
+  is not a real directory; the pre-spawn inspection also checks every **ancestor** of the
+  workspace for `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.claude`, `.claude-plugin`,
+  `.mcp.json`, `.worktreeinclude` and `.claude.json` (`workspace-contains-claude-config`, a stop
+  code; exempt only the agent `HOME`'s own `.claude` and `.claude.json`), since Claude Code loads
+  them from above the working directory and a `setup` command can write `../CLAUDE.md`; and the
+  adapter pins the `claude` its first detection located (before any `setup`), spawns its canonical
+  path without a `PATH` lookup and refuses a run whose file was replaced (`binary-replaced`).
+  Residual (not sandboxed, §12): an approved `setup` command runs with the user's permissions and
+  can still change other user-writable files the CLI uses — the interpreter a script-installed
+  `claude` finds on `PATH`, the installation's own files in place with the same size and
+  modification time, or user-level configuration in subscription mode. Not
   verified: a real `claude` (AC-22, issue #103), the CLI wiring and plan-time refusals (Phase 4).
 - **Implemented — Phase 5 (issue #98, verified on 2026-10-22 with seeded runs, no agent):**
   read-only results by artifact version.

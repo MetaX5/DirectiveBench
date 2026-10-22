@@ -190,7 +190,7 @@ function apiKeyReadiness(env: NodeJS.ProcessEnv): ClaudeCodeReadiness {
 
 /** Whether a located binary can run a benchmark, whatever the auth mode. */
 export type ClaudeBinaryCheck =
-  | { ok: true; executablePath: string; version: string }
+  | { ok: true; executablePath: string; versionLine: string; version: string }
   | { ok: false; code: 'binary-not-found' | 'version-unsupported'; detail: string };
 
 /**
@@ -206,8 +206,9 @@ export function checkClaudeBinary(target: ClaudeCodeTarget): ClaudeBinaryCheck {
       detail: `\`${CLAUDE_EXECUTABLE}\` was not found on PATH.`,
     };
   }
-  const version = parseClaudeCodeVersion(target.versionLine);
-  if (!version) {
+  const { versionLine } = target;
+  const version = versionLine === null ? null : parseClaudeCodeVersion(versionLine);
+  if (versionLine === null || !version) {
     return {
       ok: false,
       code: 'version-unsupported',
@@ -221,7 +222,12 @@ export function checkClaudeBinary(target: ClaudeCodeTarget): ClaudeBinaryCheck {
       detail: `Claude Code ${version} is older than the minimum ${CLAUDE_CODE_MIN_VERSION}; update it.`,
     };
   }
-  return { ok: true, executablePath: target.executablePath, version };
+  return {
+    ok: true,
+    executablePath: target.executablePath,
+    versionLine,
+    version,
+  };
 }
 
 /** Readiness of one auth mode for a binary detection already located. */

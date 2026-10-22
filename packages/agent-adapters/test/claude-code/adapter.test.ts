@@ -1,4 +1,13 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -391,6 +400,61 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     });
     expect(result.metadata).toBeUndefined();
     expect(h.fake.invoked()).toBe(false);
+  });
+
+  it('reports a cancellation first, before locating claude (Codex round 2)', async () => {
+    const h = harness();
+    const controller = new AbortController();
+    controller.abort();
+    const result = await h
+      .adapter({}, { ...h.env, PATH: '/nonexistent' })
+      .run(await h.request({ signal: controller.signal }));
+    expect(result).toMatchObject({ status: 'cancelled' });
+    expect(result.errorCode).toBeUndefined();
+  });
+
+  it('reports a timeout that fired before the run as a timeout', async () => {
+    const h = harness();
+    const controller = new AbortController();
+    controller.abort(new DOMException('timed out', 'TimeoutError'));
+    const result = await h.adapter().run(await h.request({ signal: controller.signal }));
+    expect(result).toMatchObject({ status: 'timeout' });
+    expect(h.fake.invoked()).toBe(false);
+  });
+
+  it('pins claude at detect() and refuses a replaced executable (Codex round 2)', async () => {
+    const h = harness();
+    h.fake.setStream(fixture('skill-invoked'));
+    const adapter = h.adapter();
+    await adapter.detect();
+    // An earlier PATH entry planted after detection is not used.
+    const early = join(h.root, 'early');
+    mkdirSync(early);
+    writeFileSync(join(early, 'claude'), '#!/bin/sh\nexit 9\n', { mode: 0o755 });
+    const planted = new ClaudeCodeAdapter({}, { ...h.env, PATH: `${early}:${h.env.PATH}` });
+    expect((await planted.detect()).executablePath).toBe(join(early, 'claude'));
+    expect((await adapter.run(await h.request())).status).toBe('completed');
+    // The pinned file replaced (a new inode at its path): refused before any start.
+    const replacement = join(h.root, 'replacement');
+    copyFileSync(h.fake.executable, replacement);
+    renameSync(replacement, h.fake.executable);
+    rmSync(join(h.root, 'records', 'invoked'));
+    const replaced = await adapter.run(await h.request());
+    expect(replaced).toMatchObject({
+      status: 'infrastructure-error',
+      errorCode: 'binary-replaced',
+    });
+    expect(h.fake.invoked()).toBe(false);
+  });
+
+  it('refuses a pinned executable that disappeared', async () => {
+    const h = harness();
+    const adapter = h.adapter();
+    await adapter.detect();
+    rmSync(h.fake.executable);
+    const result = await adapter.run(await h.request());
+    expect(result).toMatchObject({ status: 'infrastructure-error', errorCode: 'binary-replaced' });
+    expect(result.error).toMatch(/ENOENT/);
   });
 
   it('does not start claude after cancellation', async () => {

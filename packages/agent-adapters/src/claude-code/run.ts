@@ -1,4 +1,5 @@
 import type { WorkspacePin } from '../workspace-pin';
+import { inspectWorkspaceAncestors } from './ancestor-inspection';
 import {
   abortedByTimeout,
   runClaudeProcess,
@@ -63,6 +64,15 @@ function refusalMessage(findings: readonly WorkspaceFinding[]): string {
   ].join(' ');
 }
 
+/** The end of a run whose signal fired before `claude` started: a timeout or a cancellation. */
+export function notStartedEnd(signal: AbortSignal): ClaudeRunEnd & {
+  status: 'timeout' | 'cancelled';
+} {
+  return abortedByTimeout(signal)
+    ? { status: 'timeout', errorCode: null, message: 'Timed out before claude started' }
+    : { status: 'cancelled', errorCode: null, message: 'Cancelled before claude started' };
+}
+
 /** Maps a process result to the end the process layer decides, or null for the parser. */
 export function claudeProcessEnd(result: ClaudeProcessResult): ClaudeRunEnd | null {
   // First: survivors can change the workspace whatever else happened, and the code stops the run.
@@ -96,8 +106,8 @@ export function claudeProcessEnd(result: ClaudeProcessResult): ClaudeRunEnd | nu
 
 /**
  * One agent run of `claude` in a pinned workspace (SPEC-118 FR-118-01): no process is started
- * after cancellation; the workspace is inspected right before the spawn (FR-118-06 configuration
- * written by `setup`, FR-118-27 imports and links, a replaced workspace), with `~` resolved
+ * after cancellation; the workspace and its ancestors are inspected right before the spawn
+ * (FR-118-06 configuration written by `setup`, FR-118-27 imports and links, a replaced workspace), with `~` resolved
  * against the agent's own `HOME`, and any finding ends the run `infrastructure-error` with the
  * finding's code, which stops the benchmark run (FR-118-15); otherwise `claude` runs under
  * {@link runClaudeProcess}. `ended` is set when the outcome needs no stream parsing.
@@ -106,17 +116,19 @@ export async function runClaudeCode(input: ClaudeRunInput): Promise<ClaudeRunOut
   const home = input.env.HOME;
   if (home === undefined) throw new Error('The claude environment must set HOME.');
   const notStarted = (): ClaudeRunOutcome => ({
-    ended: abortedByTimeout(input.signal)
-      ? { status: 'timeout', errorCode: null, message: 'Timed out before claude started' }
-      : { status: 'cancelled', errorCode: null, message: 'Cancelled before claude started' },
+    ended: notStartedEnd(input.signal),
     findings: [],
     process: null,
   });
   if (input.signal.aborted) return notStarted();
-  const findings = await inspectWorkspace(input.workspace, {
-    homeDir: home,
-    installedPaths: input.installedPaths,
-  });
+  const findings = [
+    ...(await inspectWorkspace(input.workspace, {
+      homeDir: home,
+      installedPaths: input.installedPaths,
+    })),
+    // What Claude Code loads from above the working directory (`../CLAUDE.md` a setup wrote).
+    ...(await inspectWorkspaceAncestors(input.workspace, home)),
+  ];
   const [first] = findings;
   if (first) {
     return {
