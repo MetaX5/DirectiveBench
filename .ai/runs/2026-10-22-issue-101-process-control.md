@@ -128,6 +128,11 @@ fake CLI ignoring SIGINT/SIGTERM.
   runs after every agent run (after the cancellation check; an existing stop code keeps
   precedence). Red first: the agent-error and timeout regressions fail on 5405b08.
 
+- Codex round 5, high: an adapter that replaced the workspace and then threw reached the generic
+  `catch` without a pin check. The `catch` now checks the pin whenever the workspace was already
+  pinned (an existing stop code keeps precedence), so every exit path after pinning is covered —
+  not only the paths Codex named. Red first: the rejecting-adapter regression fails on 5552abd.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.

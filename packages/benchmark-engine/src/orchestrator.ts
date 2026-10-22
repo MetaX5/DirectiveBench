@@ -10,6 +10,7 @@ import {
   type AgentRunResult,
   type SkillActivation,
   type TraceEvent,
+  type WorkspacePin,
 } from '@directivebench/agent-adapters';
 import {
   baselineArtifactIssue,
@@ -328,6 +329,8 @@ async function executeAgentRun(
     errorCode,
   });
 
+  // Set once the workspace is pinned; a step that throws after that is checked too.
+  let pinned: WorkspacePin | null = null;
   try {
     stage('prepare');
     await mkdir(homeDir, { recursive: true });
@@ -345,6 +348,7 @@ async function executeAgentRun(
     // checks compare the path with this identity, so a `setup` command that moves the workspace
     // away and leaves a link to another directory is refused (SPEC-118 §12).
     const workspace = await pinWorkspace(workspaceDir);
+    pinned = workspace;
     // Every step that runs untrusted code (setup, the agent, command assertions) is followed by this
     // check, so the next step never runs in, copies into or reads a replacement (SPEC-118 §12).
     const replacedAfter = async (step: string): Promise<AgentRunRecord | null> => {
@@ -530,11 +534,21 @@ async function executeAgentRun(
     };
   } catch (error) {
     // An adapter's refusal (e.g. an installation that finds executable code) keeps its code.
-    return fail(
-      'infrastructure-error',
-      error instanceof Error ? error.message : String(error),
-      error instanceof ClaudeCodeError ? error.code : null,
-    );
+    const code = error instanceof ClaudeCodeError ? error.code : null;
+    const message = error instanceof Error ? error.message : String(error);
+    // A step that replaced the workspace and then threw (e.g. a rejecting adapter) must still stop
+    // the benchmark run; a code that already stops it keeps precedence.
+    if (pinned !== null && (code === null || !STOP_CODES.includes(code))) {
+      const replaced = await workspacePinIssue(pinned);
+      if (replaced !== null) {
+        return fail(
+          'infrastructure-error',
+          `workspace-replaced: ${replaced} after an error (${message}).`,
+          'workspace-replaced',
+        );
+      }
+    }
+    return fail('infrastructure-error', message, code);
   } finally {
     if (!input.keepWorkspaces) await rm(runDir, { recursive: true, force: true });
   }

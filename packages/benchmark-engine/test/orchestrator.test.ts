@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type * as AgentAdapters from '@directivebench/agent-adapters';
+import { ClaudeCodeError } from '@directivebench/agent-adapters';
 import type {
   AgentAdapter,
   AgentCapabilities,
@@ -661,6 +662,58 @@ describe('setup commands', () => {
       expect(stopped).toMatchObject({ code: stopCode });
       expect(records).toHaveLength(1);
       expect(adapter.requests).toHaveLength(1);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'stops when the adapter replaced the workspace and then threw (Codex review)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        throw new Error('adapter crashed');
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records[0]?.error).toMatch(
+        /^workspace-replaced: .* after an error \(adapter crashed\)\.$/,
+      );
+      expect(adapter.requests).toHaveLength(1);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    "keeps an installation's own stop code when it replaced the workspace and threw",
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter();
+      adapter.install = async (workspaceDir) => {
+        renameSync(workspaceDir, `${workspaceDir}.saved`);
+        symlinkSync(victim, workspaceDir);
+        throw new ClaudeCodeError('workspace-replaced', 'refused by the installation');
+      };
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records.at(-1)?.error).toBe('refused by the installation');
     },
   );
 
