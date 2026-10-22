@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, mkdirSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import {
   ConfigError,
   dataDirLayout,
@@ -76,6 +76,71 @@ export async function initialize(
     );
   }
   return { layout, config, handle, createdConfig, appliedMigrations };
+}
+
+/** Migrations applied to `handle` and shipped in `migrationsDir`; read-only. */
+export function migrationStatus(
+  handle: DatabaseHandle,
+  migrationsDir: string,
+): { applied: number; expected: number } {
+  const expected = readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).length;
+  const table = handle.sqlite
+    .prepare(
+      "select count(*) as n from sqlite_master where type = 'table' and name = '__drizzle_migrations'",
+    )
+    .get() as { n: number };
+  const applied = table.n
+    ? (
+        handle.sqlite.prepare('select count(*) as n from __drizzle_migrations').get() as {
+          n: number;
+        }
+      ).n
+    : 0;
+  return { applied, expected };
+}
+
+/**
+ * Opens an initialised, fully migrated database read-only, for a command that must not change
+ * the data directory before the user agrees (SPEC-118 FR-118-39). A missing database, or one with
+ * pending migrations, is a usage error naming `directivebench init`; nothing is created, migrated
+ * or seeded.
+ */
+export function openInitializedDatabase(
+  dataDirFlag: string | undefined,
+  migrationsDir: string,
+): { layout: DataDirLayout; handle: DatabaseHandle } {
+  const layout = dataDirLayout(resolveDataDir({ flag: dataDirFlag }));
+  if (!existsSync(layout.database)) {
+    throw new CliError(
+      `No database at ${layout.database}: run \`directivebench init\` first.`,
+      ExitCode.Usage,
+    );
+  }
+  let handle: DatabaseHandle;
+  let status: { applied: number; expected: number };
+  try {
+    handle = openDatabase(layout.database, { readOnly: true });
+    try {
+      status = migrationStatus(handle, migrationsDir);
+    } catch (error) {
+      handle.close();
+      throw error;
+    }
+  } catch (error) {
+    throw new CliError(
+      `The database at ${layout.database} cannot be read: ${(error as Error).message}`,
+      ExitCode.DataDir,
+    );
+  }
+  const { applied, expected } = status;
+  if (applied < expected) {
+    handle.close();
+    throw new CliError(
+      `The database at ${layout.database} has ${applied}/${expected} migrations applied: run \`directivebench init\` to apply the pending ones.`,
+      ExitCode.Usage,
+    );
+  }
+  return { layout, handle };
 }
 
 export interface ServerOptions {

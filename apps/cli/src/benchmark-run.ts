@@ -35,7 +35,7 @@ import {
   type RunOptions,
 } from './benchmark-plan';
 import { CliError, ExitCode, resolveAssets } from './runtime';
-import { initialize } from './setup';
+import { initialize, openInitializedDatabase, readConfig } from './setup';
 
 /** What `benchmark run` needs from the terminal and the process; replaced in tests. */
 export interface RunTerminal {
@@ -268,7 +268,9 @@ export function exitCodeFor(report: RunReport): number {
  * suite validation and fixture snapshot → artifact and baseline, bundle inspection and the
  * plan-time import scan → readiness → plan and confirmation → one transaction (suite version,
  * approval, acquired job) → the job in-process with the Claude Code adapter → summary. Every
- * refusal before the transaction leaves the database unchanged.
+ * refusal before the transaction leaves the data directory unchanged: the checks read an
+ * initialised, fully migrated database read-only, and the data directory is opened for writing
+ * only after the confirmation.
  */
 export async function benchmarkRunCommand(
   flags: BenchmarkRunFlags,
@@ -278,11 +280,15 @@ export async function benchmarkRunCommand(
   const path = definitionPath(options.suitePath);
   // With --json, stdout carries only the result object.
   const say = options.json ? console.error : console.log;
-  const { layout, config, handle } = await initialize(flags.dataDir, resolveAssets().migrationsDir);
+  const { migrationsDir } = resolveAssets();
+  const preflight = openInitializedDatabase(flags.dataDir, migrationsDir);
+  let handle = preflight.handle;
   // Fixture snapshots go to a temporary store first and reach `<dataDir>/fixtures` only once
   // the run is confirmed, so a refused or declined run leaves nothing behind (FR-118-39).
   const staging = await mkdtemp(join(tmpdir(), 'directivebench-suite-'));
   try {
+    // An invalid config.json is refused now, not after the confirmation.
+    readConfig(preflight.layout);
     const prepared = await loadSuite(path, staging);
     const resolved = await resolveVersions(handle.db, options);
     const { runsCommands, alreadyApproved } = await checkSuite(
@@ -329,6 +335,12 @@ export async function benchmarkRunCommand(
       }
     }
 
+    // Confirmed: reopen for writing. The database is already migrated, so this only ensures the
+    // data directory layout and config (`installationId`) the runner needs.
+    handle.close();
+    const workspace = await initialize(flags.dataDir, migrationsDir);
+    const { layout, config } = workspace;
+    handle = workspace.handle;
     for (const snapshot of prepared.snapshots) {
       // Content-addressed and idempotent: the same files give the same hash in the data store.
       await snapshotDirectory(join(staging, snapshot.hash), layout.fixtures);

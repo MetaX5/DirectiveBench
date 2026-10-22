@@ -1,6 +1,16 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { sha256 } from '@directivebench/core';
@@ -9,6 +19,7 @@ import {
   getBenchmarkRunDetail,
   getJob,
   importArtifactVersion,
+  migrateDatabase,
   openDatabase,
   schema,
   type ImportArtifactInput,
@@ -669,8 +680,105 @@ posix(
       expect(noHome).toMatchObject({ message: expect.stringMatching(/needs HOME/) });
       expect(await s.counts()).toEqual(NOTHING);
     });
+
+    it('refuses a short or multi-line API key at readiness, before anything is stored', async () => {
+      const s = await setup();
+      for (const key of ['abc', 'sk-first-line\nsk-second-line']) {
+        const error = await benchmarkRunCommand(
+          { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir, yes: true, auth: 'api-key' },
+          { ...s.terminal, env: { ...s.terminal.env, ANTHROPIC_API_KEY: key } },
+        ).catch((reason: unknown) => reason);
+        expect(error, JSON.stringify(key)).toMatchObject({
+          exitCode: ExitCode.Usage,
+          message: expect.stringMatching(/not ready \(auth-missing\): .*at least 8 characters/),
+        });
+      }
+      expect(s.fake.started()).toBe(false);
+      expect(await s.counts()).toEqual(NOTHING);
+    });
   },
 );
+
+posix('benchmark run data directory (FR-118-39)', () => {
+  const migrationsDir = resolveAssets().migrationsDir;
+
+  /** The migrations folder of an older release: only the first `count` migrations. */
+  function olderMigrations(count: number): string {
+    const dir = join(tempDir(), 'migrations');
+    mkdirSync(join(dir, 'meta'), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(migrationsDir, 'meta', '_journal.json'), 'utf8'));
+    journal.entries = journal.entries.slice(0, count);
+    writeFileSync(join(dir, 'meta', '_journal.json'), JSON.stringify(journal));
+    for (const entry of journal.entries as { tag: string }[]) {
+      copyFileSync(join(migrationsDir, `${entry.tag}.sql`), join(dir, `${entry.tag}.sql`));
+    }
+    return dir;
+  }
+
+  async function run(dataDir: string, suite = join(tempDir(), 'benchmark.yaml')) {
+    writeFileSync(suite, 'schemaVersion: 1\n');
+    return benchmarkRunCommand({ suite, artifact: 'pdf', dataDir, yes: true }).catch(
+      (reason: unknown) => reason,
+    );
+  }
+
+  it('refuses a fresh data directory without creating it', async () => {
+    const dataDir = join(tempDir(), 'data');
+    expect(await run(dataDir)).toMatchObject({
+      exitCode: ExitCode.Usage,
+      message: expect.stringMatching(/No database at .*run `directivebench init` first/),
+    });
+    expect(existsSync(dataDir)).toBe(false);
+  });
+
+  it('refuses an older database without migrating or seeding it', async () => {
+    const dataDir = join(tempDir(), 'data');
+    mkdirSync(dataDir);
+    const path = join(dataDir, 'directivebench.db');
+    const older = openDatabase(path);
+    await migrateDatabase(older, olderMigrations(1));
+    older.close();
+    const state = () => {
+      const db = new DatabaseSync(path, { readOnly: true });
+      try {
+        return db
+          .prepare(
+            'select (select count(*) from __drizzle_migrations) as migrations, (select count(*) from categories) as categories',
+          )
+          .get();
+      } finally {
+        db.close();
+      }
+    };
+    const before = state();
+    expect(before).toEqual({ migrations: 1, categories: 0 });
+    expect(await run(dataDir)).toMatchObject({
+      exitCode: ExitCode.Usage,
+      message: expect.stringMatching(/has 1\/\d+ migrations applied: run `directivebench init`/),
+    });
+    expect(state()).toEqual(before);
+    expect(readdirSync(dataDir).filter((name) => !name.startsWith('directivebench.db'))).toEqual(
+      [],
+    );
+  });
+
+  it('reports a database file it cannot read as a data-directory error', async () => {
+    const dataDir = join(tempDir(), 'data');
+    mkdirSync(dataDir);
+    writeFileSync(join(dataDir, 'directivebench.db'), 'not a database, just text\n'.repeat(200));
+    expect(await run(dataDir)).toMatchObject({
+      exitCode: ExitCode.DataDir,
+      message: expect.stringMatching(/cannot be read/),
+    });
+  });
+
+  it('refuses an invalid config.json before the plan', async () => {
+    const s = await setup();
+    writeFileSync(join(s.dataDir, 'config.json'), '{ "server": { "port": "nope" } }');
+    expect(await refused(s, {})).toMatch(/config/i);
+    expect(s.output()).not.toMatch(/Suite:/);
+  });
+});
 
 posix('benchmark run edge paths', () => {
   it('turns a baseline that became invalid before the transaction into a usage error', async () => {

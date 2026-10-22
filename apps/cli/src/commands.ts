@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   CLAUDE_CODE_ADAPTER_ID,
@@ -11,7 +11,7 @@ import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@direc
 import { LocalRunner, importBundledExample } from '@directivebench/runner';
 import { checkPortFree } from './serve';
 import { CliError, ExitCode, checkNodeVersion, checkSqlite, resolveAssets } from './runtime';
-import { initialize, readConfig, resolveServerOptions } from './setup';
+import { initialize, migrationStatus, readConfig, resolveServerOptions } from './setup';
 
 export async function initCommand(flags: { dataDir?: string }): Promise<number> {
   const assets = resolveAssets();
@@ -126,19 +126,7 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
     if (existsSync(layout.database)) {
       const handle = openDatabase(layout.database, { readOnly: true });
       try {
-        const expected = readdirSync(assets.migrationsDir).filter((f) => f.endsWith('.sql')).length;
-        const row = handle.sqlite
-          .prepare(
-            "select count(*) as n from sqlite_master where type = 'table' and name = '__drizzle_migrations'",
-          )
-          .get() as { n: number };
-        const applied = row.n
-          ? (
-              handle.sqlite.prepare('select count(*) as n from __drizzle_migrations').get() as {
-                n: number;
-              }
-            ).n
-          : 0;
+        const { applied, expected } = migrationStatus(handle, assets.migrationsDir);
         add(
           'database',
           applied === expected ? 'ok' : 'warn',
