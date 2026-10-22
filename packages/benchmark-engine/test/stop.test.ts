@@ -23,7 +23,11 @@ describe('FR-118-15 stop codes', () => {
       'workspace-contains-claude-config',
       'workspace-imports-outside',
       'workspace-scan-limit',
+      'workspace-replaced',
+      'stray-processes',
     ]);
+    expect(isStopCode('output-limit')).toBe(false);
+    expect(isStopCode('spawn-failed')).toBe(false);
     expect(isStopCode('rate-limited')).toBe(true);
     expect(isStopCode('agent-failed')).toBe(false);
     expect(isStopCode(null)).toBe(false);

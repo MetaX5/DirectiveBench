@@ -29,6 +29,7 @@ import {
   type AgentRunRecord,
   type RunBenchmarkInput,
 } from '../src/orchestrator';
+import { BenchmarkStoppedError } from '../src/stop';
 import { collectGarbage, nodeScript, useTempDirs } from './helpers';
 
 /** When set, the process-group kill after a command reports a survivor (`strayProcesses`). */
@@ -429,14 +430,22 @@ describe('setup commands', () => {
         installs += 1;
         return { paths: [] };
       };
-      const outcome = await runBenchmark({ ...input, adapter, signal: signal() });
-      expect(outcome.agentRuns.map((run) => [run.executionStatus, run.error])).toEqual([
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      // A stop code (FR-118-15): the second agent run never starts.
+      expect(stopped).toBeInstanceOf(BenchmarkStoppedError);
+      expect(stopped).toMatchObject({ code: 'workspace-replaced' });
+      expect(records.map((run) => [run.executionStatus, run.errorCode, run.error])).toEqual([
         [
           'infrastructure-error',
-          'workspace-replaced: the workspace path is no longer a directory after setup.',
-        ],
-        [
-          'infrastructure-error',
+          'workspace-replaced',
           'workspace-replaced: the workspace path is no longer a directory after setup.',
         ],
       ]);
@@ -475,20 +484,35 @@ describe('setup commands', () => {
     20_000,
   );
 
-  it('fails the run when a setup command leaves processes that cannot be stopped', async () => {
+  it('stops the benchmark when a setup command leaves processes that cannot be stopped (FR-118-15)', async () => {
     const input = await suite({
       cases: [testCase({ setup: [nodeScript('process.exit(0)')] })],
     });
     const adapter = new FakeAdapter();
+    const records: AgentRunRecord[] = [];
     strayGroup.survives = true;
-    let outcome: Awaited<ReturnType<typeof runBenchmark>>;
+    let stopped: unknown;
     try {
-      outcome = await runBenchmark({ ...input, adapter, signal: signal() });
+      await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      });
+    } catch (error) {
+      stopped = error;
     } finally {
       strayGroup.survives = false;
     }
-    expect(outcome.agentRuns[0]).toMatchObject({
+    expect(stopped).toBeInstanceOf(BenchmarkStoppedError);
+    expect(stopped).toMatchObject({ code: 'stray-processes' });
+    // Only the first agent run's setup ran; nothing after it.
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
       executionStatus: 'infrastructure-error',
+      errorCode: 'stray-processes',
       error: expect.stringMatching(
         /^Setup command left processes that could not be stopped: /,
       ) as string,

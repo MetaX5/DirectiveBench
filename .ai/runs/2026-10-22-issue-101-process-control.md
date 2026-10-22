@@ -80,6 +80,12 @@ fake CLI ignoring SIGINT/SIGTERM.
   referenced pipe handle remains (fails without the fix: 4 pipes vs 3). `runCommand` spawns with
   stdin `ignore`, so it has no such handle.
 
+- Maintainer decision 2026-10-22 (relayed by the coordinator): `workspace-replaced` and
+  `stray-processes` join the FR-118-15 stop codes; `output-limit` and `spawn-failed` stay per-run
+  failures. Added to the single `STOP_CODES` set (`benchmark-engine/src/stop.ts`, to be folded into
+  #111's `agent-conditions.ts` when it merges), SPEC-118 FR-118-15 and SPEC-203 §9; orchestrator
+  tests show that each stops the run after the first agent run.
+
 ## Work performed
 
 1. `process-group.ts` (signal, kill-and-wait); `runCommand` kills the group on exit.
