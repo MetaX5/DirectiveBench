@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { createId, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
@@ -182,8 +182,39 @@ export async function getBenchmarkRunDetail(db: Database, runId: string) {
 
 export type BenchmarkRunDetail = NonNullable<Awaited<ReturnType<typeof getBenchmarkRunDetail>>>;
 
+/**
+ * Most runs the artifact page loads (SPEC-118 FR-118-50): newest version first, then newest run.
+ * Older runs are counted by `countArtifactRuns` and named in a notice, never loaded.
+ */
+export const ARTIFACT_RUNS_PAGE_LIMIT = 200;
+
+/**
+ * Most (version, comparability key) representatives `listVersionComparisonRuns` loads, newest
+ * version first. A version regression needs one run per pair, not the whole history.
+ */
+export const ARTIFACT_VERSION_COMPARISON_LIMIT = 1000;
+
+/** The parts of a run the results by version render (a lean projection; no traces, no cases). */
+export interface ArtifactRunSummary {
+  id: string;
+  status: BenchmarkRunRecord['status'];
+  verdict: string | null;
+  comparabilityKey: string | null;
+  agentAdapterId: string;
+  agentVersion: string | null;
+  model: BenchmarkRunRecord['model'];
+  warnings: string[];
+  startedAt: string;
+  /**
+   * Only `delta`, `verdict`, `candidateOutcome`, `candidate.meanScore`, `confidence.level`,
+   * `scoring.minDelta` and `environment.agentProfile` of the stored summary (missing ones are
+   * null); null when the run has no summary.
+   */
+  summary: Record<string, unknown> | null;
+}
+
 export interface ArtifactRunItem {
-  run: BenchmarkRunRecord;
+  run: ArtifactRunSummary;
   suite: { id: string; name: string; version: number };
   /** The candidate: the artifact version the run tested. */
   artifactVersion: { id: string; version: number };
@@ -191,10 +222,24 @@ export interface ArtifactRunItem {
   baselineVersion: { id: string; version: number } | null;
 }
 
+/** The lean summary: SQLite builds it, so the full summary JSON never leaves the database. */
+const leanSummary = sql<Record<
+  string,
+  unknown
+> | null>`case when ${benchmarkRuns.summary} is null then null else json_object(
+  'delta', ${benchmarkRuns.summary} -> '$.delta',
+  'verdict', ${benchmarkRuns.summary} -> '$.verdict',
+  'candidateOutcome', ${benchmarkRuns.summary} -> '$.candidateOutcome',
+  'candidate', json_object('meanScore', ${benchmarkRuns.summary} -> '$.candidate.meanScore'),
+  'confidence', json_object('level', ${benchmarkRuns.summary} -> '$.confidence.level'),
+  'scoring', json_object('minDelta', ${benchmarkRuns.summary} -> '$.scoring.minDelta'),
+  'environment', json_object('agentProfile', ${benchmarkRuns.summary} -> '$.environment.agentProfile')
+) end`.mapWith((value: string) => JSON.parse(value) as Record<string, unknown>);
+
 /**
- * Every benchmark run of one artifact, of any status, for the results by version (SPEC-118
- * FR-118-50): newest candidate version first, then newest run first (`id` breaks ties, so the
- * order never depends on the storage order).
+ * The newest `ARTIFACT_RUNS_PAGE_LIMIT` runs of one artifact, of any status, for the results by
+ * version (SPEC-118 FR-118-50): newest candidate version first, then newest run first (`id` breaks
+ * ties, so the order never depends on the storage order), with a lean projection.
  */
 export async function listArtifactRuns(
   db: Database,
@@ -202,7 +247,18 @@ export async function listArtifactRuns(
 ): Promise<ArtifactRunItem[]> {
   const rows = await db
     .select({
-      run: benchmarkRuns,
+      run: {
+        id: benchmarkRuns.id,
+        status: benchmarkRuns.status,
+        verdict: benchmarkRuns.verdict,
+        comparabilityKey: benchmarkRuns.comparabilityKey,
+        agentAdapterId: benchmarkRuns.agentAdapterId,
+        agentVersion: benchmarkRuns.agentVersion,
+        model: benchmarkRuns.model,
+        warnings: benchmarkRuns.warnings,
+        startedAt: benchmarkRuns.startedAt,
+        summary: leanSummary,
+      },
       suiteId: benchmarkSuites.id,
       suiteName: benchmarkSuites.name,
       suiteVersion: benchmarkSuiteVersions.version,
@@ -216,13 +272,109 @@ export async function listArtifactRuns(
     .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
     .leftJoin(baselineVersions, eq(benchmarkRuns.baselineArtifactVersionId, baselineVersions.id))
     .where(eq(artifactVersions.artifactId, artifactId))
-    .orderBy(desc(artifactVersions.version), desc(benchmarkRuns.startedAt), desc(benchmarkRuns.id));
+    .orderBy(desc(artifactVersions.version), desc(benchmarkRuns.startedAt), desc(benchmarkRuns.id))
+    .limit(ARTIFACT_RUNS_PAGE_LIMIT);
   return rows.map((r) => ({
     run: r.run,
     suite: { id: r.suiteId, name: r.suiteName, version: r.suiteVersion },
     artifactVersion: { id: r.versionId, version: r.version },
     baselineVersion: r.baselineVersion,
   }));
+}
+
+/** How many runs one artifact has, of any status (for "showing the latest N of M"). */
+export async function countArtifactRuns(db: Database, artifactId: string): Promise<number> {
+  const row = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(benchmarkRuns)
+    .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
+    .where(eq(artifactVersions.artifactId, artifactId))
+    .get();
+  // An aggregate without GROUP BY always returns exactly one row.
+  return Number((row as { count: number }).count);
+}
+
+/** The run a version regression compares for one (version, comparability key) pair. */
+export interface VersionComparisonRun {
+  runId: string;
+  artifactVersionId: string;
+  version: number;
+  comparabilityKey: string;
+  verdict: string | null;
+  agentAdapterId: string;
+  candidateMeanScore: number | null;
+  candidateOutcome: string | null;
+  minDelta: number;
+}
+
+/**
+ * Per artifact version and comparability key, the latest run a version regression may use
+ * (SPEC-111 FR-111-50): completed, keyed, verdict neither `error` nor `not-comparable`, with a
+ * stored candidate aggregate and `scoring.minDelta`. Independent of the page window of
+ * `listArtifactRuns`; bounded by `ARTIFACT_VERSION_COMPARISON_LIMIT` pairs, newest version first
+ * (`truncated` when more exist, so the oldest versions lose their comparison, never a wrong one).
+ */
+export async function listVersionComparisonRuns(
+  db: Database,
+  artifactId: string,
+): Promise<{ runs: VersionComparisonRun[]; truncated: boolean }> {
+  // Rank ids and ordering columns only (the filters read the summary but nothing carries it),
+  // keep the representatives, then read their summary fields: no sorter holds a summary (Codex
+  // review of PR #113).
+  const ranked = db
+    .select({
+      runId: sql<string>`${benchmarkRuns.id}`.as('run_id'),
+      artifactVersionId: sql<string>`${artifactVersions.id}`.as('version_id'),
+      version: sql<number>`${artifactVersions.version}`.as('version_number'),
+      comparabilityKey: sql<string>`${benchmarkRuns.comparabilityKey}`.as('key'),
+      rank: sql<number>`row_number() over (partition by ${benchmarkRuns.artifactVersionId}, ${benchmarkRuns.comparabilityKey} order by ${benchmarkRuns.startedAt} desc, ${benchmarkRuns.id} desc)`.as(
+        'rank',
+      ),
+    })
+    .from(benchmarkRuns)
+    .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
+    .where(
+      and(
+        eq(artifactVersions.artifactId, artifactId),
+        eq(benchmarkRuns.status, 'completed'),
+        isNotNull(benchmarkRuns.comparabilityKey),
+        sql`coalesce(${benchmarkRuns.verdict}, '') not in ('error', 'not-comparable')`,
+        sql`json_type(${benchmarkRuns.summary}, '$.candidate') = 'object'`,
+        sql`json_type(${benchmarkRuns.summary}, '$.scoring.minDelta') in ('integer', 'real')`,
+      ),
+    )
+    .as('ranked');
+  const representatives = db
+    .select({
+      runId: ranked.runId,
+      artifactVersionId: ranked.artifactVersionId,
+      version: ranked.version,
+      comparabilityKey: ranked.comparabilityKey,
+    })
+    .from(ranked)
+    .where(eq(ranked.rank, 1))
+    .orderBy(desc(ranked.version), asc(ranked.comparabilityKey))
+    .limit(ARTIFACT_VERSION_COMPARISON_LIMIT + 1)
+    .as('representatives');
+  const rows = await db
+    .select({
+      runId: representatives.runId,
+      artifactVersionId: representatives.artifactVersionId,
+      version: representatives.version,
+      comparabilityKey: representatives.comparabilityKey,
+      verdict: benchmarkRuns.verdict,
+      agentAdapterId: benchmarkRuns.agentAdapterId,
+      candidateMeanScore: sql<number | null>`${benchmarkRuns.summary} ->> '$.candidate.meanScore'`,
+      candidateOutcome: sql<string | null>`${benchmarkRuns.summary} ->> '$.candidateOutcome'`,
+      minDelta: sql<number>`${benchmarkRuns.summary} ->> '$.scoring.minDelta'`,
+    })
+    .from(representatives)
+    .innerJoin(benchmarkRuns, eq(benchmarkRuns.id, representatives.runId))
+    .orderBy(desc(representatives.version), asc(representatives.comparabilityKey));
+  return {
+    runs: rows.slice(0, ARTIFACT_VERSION_COMPARISON_LIMIT),
+    truncated: rows.length > ARTIFACT_VERSION_COMPARISON_LIMIT,
+  };
 }
 
 export async function countRunsByVerdict(db: Database): Promise<Record<string, number>> {
