@@ -811,6 +811,14 @@ changed before merge.
     requested → execution model, display status, delta, confidence, date and a link; runs that did
     not complete are listed per version as links with their status. Empty state with the
     `benchmark init` command, marked planned (Phase 4).
+  - Bounded history (after the Codex review of PR #112, verified on 2026-10-22): the page
+    loads at most `ARTIFACT_RUNS_PAGE_LIMIT` (200) runs, newest version first, with a lean
+    projection (the summary fields it renders, built in SQLite) and says "Showing the latest N of
+    M runs" when more exist (`countArtifactRuns`). Version regressions do not depend on that
+    window: `listVersionComparisonRuns` loads, per version and comparability key, the latest
+    eligible run (a window function), at most `ARTIFACT_VERSION_COMPARISON_LIMIT` (1 000) pairs
+    newest version first — beyond that the oldest versions show no comparison and a notice says
+    so, never a wrong one. Grouping is linear (keys in a map).
   - FR-118-51: one table per comparability key per version, each labelled "not comparable with
     other groups", plus a notice naming the number of groups "not comparable with each other";
     a completed run without a key is a group of its own; numbers are only compared within a
