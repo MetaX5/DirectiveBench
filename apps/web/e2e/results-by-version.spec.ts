@@ -1,5 +1,15 @@
 import { expect, test } from '@playwright/test';
-import { ARTIFACT, cleanUp, deleteRuns, reseed, RUN, SUITE } from './results-seed';
+import {
+  ARTIFACT,
+  cleanUp,
+  deleteRuns,
+  NEWER_RUNS,
+  PAGE_LIMIT,
+  reseed,
+  RUN,
+  SUITE,
+  seedNewerRuns,
+} from './results-seed';
 import { MOCK_LABEL, withDatabase } from './support';
 
 /**
@@ -150,6 +160,27 @@ test('the suite of the seeded runs has no Run button and shows the CLI command (
   await page.goto(`/benchmarks/${SUITE}`);
   await expect(page.getByTestId('run-from-cli')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+});
+
+test('a long history shows the newest runs with a notice, and regressions outside the window (Codex review of PR #112)', async ({
+  page,
+}) => {
+  await withDatabase(seedNewerRuns);
+  try {
+    await page.goto(`/artifacts/${ARTIFACT}?tab=evaluations`);
+    const total = PAGE_LIMIT + Object.keys(RUN).length;
+    await expect(page.getByTestId('history-notice').first()).toHaveText(
+      `Showing the latest ${PAGE_LIMIT} of ${total} runs (newest versions first). Older runs are not listed; version regressions still compare the latest run of every version and group.`,
+    );
+    await expect(page.getByTestId('version-run')).toHaveCount(PAGE_LIMIT);
+    await expect(page.locator(`[data-run-id="${NEWER_RUNS.at(-1)}"]`)).toBeVisible();
+    await expect(page.locator(`[data-run-id="${RUN.v2Ab}"]`)).toHaveCount(0);
+    // v2's regression comes from runs outside the window and is still flagged.
+    const v2 = page.getByRole('region', { name: 'Version 2' });
+    await expect(v2.getByText('Version regression', { exact: true })).toBeVisible();
+  } finally {
+    await withDatabase(reseed);
+  }
 });
 
 test('an artifact without runs shows the planned benchmark init command', async ({ page }) => {
