@@ -85,6 +85,8 @@ export interface ScoringSummary {
   cases: CaseSummary[];
   scoring: BenchmarkDefinition['scoring'];
   repetitions: number;
+  /** Skill invocations per variant, for `skill-md` runs of a real agent (SPEC-118 FR-118-09). */
+  skillInvocation?: Record<Variant, { invoked: number; runs: number }>;
 }
 
 function mean(values: readonly number[]): number | null {

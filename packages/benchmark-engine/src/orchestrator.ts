@@ -1,7 +1,13 @@
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
-import type { AgentAdapter, AgentRunResult, TraceEvent } from '@directivebench/agent-adapters';
+import type {
+  AgentAdapter,
+  AgentRunMetadata,
+  AgentRunResult,
+  SkillActivation,
+  TraceEvent,
+} from '@directivebench/agent-adapters';
 import {
   baselineArtifactIssue,
   canonicalJson,
@@ -9,6 +15,15 @@ import {
   sha256,
   type ArtifactBundle,
 } from '@directivebench/core';
+import {
+  addAgentMetadataEvent,
+  agentConditionIssues,
+  agentConditionWarnings,
+  applySkillActivationRules,
+  assertNotStopped,
+  observedAgentProfile,
+  skillInvocationRates,
+} from './agent-conditions';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
 import {
@@ -45,6 +60,14 @@ export interface AgentRunRecord extends RunOutcome {
   trace: (TraceEvent | EngineTraceEvent)[];
   usage: Record<string, number> | null;
   error: string | null;
+  /** SPEC-203 §9 / SPEC-118 code of a failed agent run, when known. */
+  errorCode: string | null;
+  /** Warning codes of this agent run (adapter warnings and `artifact-not-invoked`). */
+  warnings: string[];
+  /** Reported by real-agent adapters (FR-118-04); absent for the mock agent. */
+  metadata?: AgentRunMetadata;
+  /** `skill-md` runs of real-agent adapters (FR-118-09). */
+  skillActivation?: SkillActivation;
   assertions: AssertionResult[];
 }
 
@@ -55,7 +78,15 @@ export type EngineTraceEvent =
       stage: 'prepare' | 'setup' | 'install' | 'agent' | 'verification' | 'assertions';
       at: string;
     }
-  | { type: 'setup'; command: string[]; exitCode: number | null; durationMs: number };
+  | { type: 'setup'; command: string[]; exitCode: number | null; durationMs: number }
+  /** First event of a real-agent run: its conditions and skill activation (SPEC-118 §8.1). */
+  | {
+      type: 'agent-metadata';
+      metadata: AgentRunMetadata;
+      skillActivation?: SkillActivation;
+      errorCode: string | null;
+      warnings: string[];
+    };
 
 /**
  * The agent conditions a real-agent adapter reports (SPEC-118 §8.2, SPEC-203 §4.2). `hostId`
@@ -102,6 +133,11 @@ export interface RunBenchmarkInput {
    */
   baselineArtifact?: ArtifactBundle;
   adapter: AgentAdapter;
+  /**
+   * The installation's id (`config.json` `installationId`), required in the comparability key of
+   * runs whose isolation profile is `user-profile` (SPEC-118 §8.3).
+   */
+  hostId?: string;
   /** Directory for temporary workspaces of this run; removed afterwards unless `keepWorkspaces`. */
   workRoot: string;
   keepWorkspaces?: boolean;
@@ -246,15 +282,20 @@ async function executeAgentRun(
     trace.push({ type: 'stage', stage: name, at: new Date().toISOString() });
   const timeoutMs = definition.execution.timeoutSeconds * 1000;
   const commandEnv = buildCommandEnv(homeDir);
-  const base = {
+  const base: Omit<
+    AgentRunRecord,
+    'executionStatus' | 'score' | 'passed' | 'durationMs' | 'error'
+  > = {
     caseId: benchmarkCase.id,
     variant,
     repetition,
     fixtureHash: caseFixtures.fixture,
-    changedFiles: [] as FileChange[],
+    changedFiles: [],
     trace,
     usage: null,
-    assertions: [] as AssertionResult[],
+    errorCode: null,
+    warnings: [],
+    assertions: [],
   };
   const fail = (executionStatus: ExecutionStatus, error: string): AgentRunRecord => ({
     ...base,
@@ -345,6 +386,10 @@ async function executeAgentRun(
       agentAbort.dispose();
     }
     trace.push(...agentResult.trace);
+    base.errorCode = agentResult.errorCode ?? null;
+    base.warnings = [...(agentResult.warnings ?? [])];
+    if (agentResult.metadata) base.metadata = agentResult.metadata;
+    if (agentResult.skillActivation) base.skillActivation = agentResult.skillActivation;
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     if (agentResult.status !== 'completed') {
       return fail(agentResult.status, agentResult.error ?? agentResult.summary);
@@ -462,6 +507,7 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
   }
 
   await mkdir(input.workRoot, { recursive: true });
+  const abBaseline = input.baselineArtifact !== undefined;
   const agentRuns: AgentRunRecord[] = [];
   try {
     for (const benchmarkCase of definition.cases) {
@@ -470,10 +516,16 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
           repetition % 2 === 1 ? ['baseline', 'candidate'] : ['candidate', 'baseline'];
         for (const variant of order) {
           if (input.signal.aborted) throw new BenchmarkCancelledError();
-          const record = await executeAgentRun(input, benchmarkCase, variant, repetition);
+          const record = applySkillActivationRules(
+            await executeAgentRun(input, benchmarkCase, variant, repetition),
+            abBaseline,
+          );
+          addAgentMetadataEvent(record);
           agentRuns.push(record);
           await input.onAgentRun?.(record);
           if (record.executionStatus === 'cancelled') throw new BenchmarkCancelledError();
+          // A systematic failure (login, quota, skill not loaded, …) ends the run (FR-118-15).
+          assertNotStopped(record);
         }
       }
     }
@@ -488,7 +540,12 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
     detection.version,
     finalDetection.version,
   );
-  warnings.push(...comparabilityIssues);
+  // Real agents: identical conditions and execution model for every agent run (FR-118-04/09).
+  comparabilityIssues.push(...agentConditionIssues(agentRuns, abBaseline));
+  const observed = observedAgentProfile(agentRuns, input.hostId);
+  if (observed.issue) comparabilityIssues.push(observed.issue);
+  if (observed.profile) environment.agentProfile = observed.profile;
+  warnings.push(...comparabilityIssues, ...agentConditionWarnings(agentRuns, abBaseline));
 
   const summary = summarize(agentRuns, {
     caseIds: definition.cases.map((c) => c.id),
@@ -501,6 +558,8 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
       c.assertions.some((a) => !isDeterministicAssertion(a)),
     ),
   });
+  const invocation = skillInvocationRates(agentRuns);
+  if (invocation) summary.skillInvocation = invocation;
   if (!summary.conclusive) {
     warnings.push('Single repetition of a nondeterministic run: the result is not conclusive.');
   }
