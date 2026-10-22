@@ -196,11 +196,26 @@ describe('version regressions within a comparability group (SPEC-111 FR-111-50â€
       reasons: ['candidate score fell by at least minDelta (0.05)'],
     });
     expect(rowOf(results, v1.run.id).comparison).toBeNull();
-    expect(results.map((b) => [b.version, b.regressed])).toEqual([
-      [3, false],
-      [2, true],
-      [1, false],
+    expect(results.map((b) => [b.version, b.regressed, b.regressionMockOnly])).toEqual([
+      [3, false, false],
+      [2, true, false],
+      [1, false, false],
     ]);
+  });
+
+  it('marks a version whose only regressions come from the mock agent', () => {
+    const mockRuns = [
+      item(2, { agent: 'mock', key: 'm', score: 0.2 }),
+      item(1, { agent: 'mock', key: 'm', score: 1 }),
+    ];
+    const [, v2] = resultsByVersion(versions, mockRuns);
+    expect([v2?.regressed, v2?.regressionMockOnly]).toEqual([true, true]);
+    const mixed = resultsByVersion(versions, [
+      ...mockRuns,
+      item(2, { key: 'r', score: 0.2 }),
+      item(1, { key: 'r', score: 1 }),
+    ]);
+    expect([mixed[1]?.regressed, mixed[1]?.regressionMockOnly]).toEqual([true, false]);
   });
 
   it('compares the latest eligible run of each version and skips untested versions', () => {

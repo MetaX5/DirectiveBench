@@ -444,7 +444,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                     Tokens: {usage.tokens} · Cost: {usage.cost}
                     {mock
                       ? null
-                      : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
+                      : !agentRunMetadata(agentRun.trace)
+                        ? ' · Tool calls, permission denials, retries: not reported'
+                        : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
                   </p>
                   <details>
                     <summary className="cursor-pointer text-xs text-muted-foreground">

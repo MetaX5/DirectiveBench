@@ -275,21 +275,27 @@ function BenchmarksTab({ detail }: { detail: ArtifactDetail }) {
 function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
   if (comparison.kind === 'regression') {
     return (
-      <Badge
-        variant="destructive"
-        data-testid="version-regression"
-        title={comparison.reasons.join('; ')}
-      >
-        Version regression vs v{comparison.previousVersion}
-        {comparison.versionDelta === null ? '' : ` (${formatDelta(comparison.versionDelta)})`}
-      </Badge>
+      <span className="flex flex-col items-start gap-0.5">
+        <Badge variant="destructive" data-testid="version-regression">
+          Version regression vs v{comparison.previousVersion}
+          {comparison.versionDelta === null ? '' : ` (${formatDelta(comparison.versionDelta)})`}
+        </Badge>
+        <span className="text-xs text-muted-foreground" data-testid="comparison-reason">
+          {comparison.reasons.join('; ')}
+        </span>
+      </span>
     );
   }
   if (comparison.kind === 'inconclusive') {
     return (
-      <Badge variant="warning" title={comparison.reason} data-testid="version-comparison">
-        Inconclusive vs v{comparison.previousVersion}
-      </Badge>
+      <span className="flex flex-col items-start gap-0.5">
+        <Badge variant="warning" data-testid="version-comparison">
+          Inconclusive vs v{comparison.previousVersion}
+        </Badge>
+        <span className="text-xs text-muted-foreground" data-testid="comparison-reason">
+          {comparison.reason}
+        </span>
+      </span>
     );
   }
   return (
@@ -299,14 +305,16 @@ function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
   );
 }
 
-function GroupTable({ group }: { group: ComparabilityGroup }) {
+function GroupTable({ group, several }: { group: ComparabilityGroup; several: boolean }) {
   return (
     <div className="space-y-2" data-testid="comparability-group" data-key={group.key ?? ''}>
       <p className="text-xs font-medium">
         <span className="font-mono">{groupLabel(group.key)}</span>
-        <span className="text-muted-foreground"> · not comparable with other groups</span>
+        {several ? (
+          <span className="text-muted-foreground"> · not comparable with other groups</span>
+        ) : null}
       </p>
-      <Table>
+      <Table aria-label={`${groupLabel(group.key)} runs`}>
         <THead>
           <TR>
             <TH>Run</TH>
@@ -424,7 +432,13 @@ function ResultsByVersionTab({ slug, results }: { slug: string; results: Version
               >
                 <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
                   v{block.version}
-                  {block.regressed ? <Badge variant="destructive">Version regression</Badge> : null}
+                  {block.regressed ? (
+                    <Badge variant="destructive">
+                      {block.regressionMockOnly
+                        ? 'Version regression (mock agent — not an AI evaluation)'
+                        : 'Version regression'}
+                    </Badge>
+                  ) : null}
                 </h3>
                 {block.groups.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
@@ -432,7 +446,11 @@ function ResultsByVersionTab({ slug, results }: { slug: string; results: Version
                   </p>
                 ) : (
                   block.groups.map((group, index) => (
-                    <GroupTable key={group.key ?? `unkeyed-${index}`} group={group} />
+                    <GroupTable
+                      key={group.key ?? `unkeyed-${index}`}
+                      group={group}
+                      several={groups > 1}
+                    />
                   ))
                 )}
                 {block.otherRuns.length > 0 ? (

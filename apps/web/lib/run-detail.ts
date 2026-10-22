@@ -108,7 +108,14 @@ export function runWarnings(
 ): RunWarning[] {
   const result = warnings.map((text) => {
     const code = CODE.exec(text)?.[1] ?? null;
-    return { code, text, explanation: (code && WARNING_EXPLANATIONS[code]) ?? null };
+    return {
+      code,
+      text,
+      explanation:
+        code !== null && Object.hasOwn(WARNING_EXPLANATIONS, code)
+          ? (WARNING_EXPLANATIONS[code] as string)
+          : null,
+    };
   });
   if (
     profile?.isolationProfile === 'user-profile' &&
@@ -172,7 +179,8 @@ export function otherReportedModels(
   for (const trace of traces) {
     for (const model of agentRunMetadata(trace)?.metadata.reportedModels ?? []) models.add(model);
   }
-  if (profile) models.delete(profile.executionModel);
+  // A run whose agent runs disagreed stores the distinct models joined with " | " (FR-118-04).
+  for (const model of profile?.executionModel.split(' | ') ?? []) models.delete(model);
   return [...models].sort();
 }
 

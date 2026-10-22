@@ -59,6 +59,8 @@ export interface VersionResults {
   otherRuns: { runId: string; status: string; startedAt: string }[];
   /** At least one group flags a version regression for this version. */
   regressed: boolean;
+  /** Every flagged regression of this version comes from mock-agent runs (label them so). */
+  regressionMockOnly: boolean;
 }
 
 /** A run that may enter a version comparison: completed, comparable, not an error (FR-111-50). */
@@ -146,7 +148,14 @@ export function resultsByVersion(
   const blocks = new Map<string, VersionResults>(
     versions.map((v) => [
       v.id,
-      { versionId: v.id, version: v.version, groups: [], otherRuns: [], regressed: false },
+      {
+        versionId: v.id,
+        version: v.version,
+        groups: [],
+        otherRuns: [],
+        regressed: false,
+        regressionMockOnly: false,
+      },
     ]),
   );
   // Latest eligible run per group and version; the input order puts the latest first.
@@ -184,9 +193,11 @@ export function resultsByVersion(
   }
   const results = versions.map((v) => blocks.get(v.id) as VersionResults);
   for (const block of results) {
-    block.regressed = block.groups.some((g) =>
-      g.runs.some((r) => r.comparison?.kind === 'regression'),
+    const regressions = block.groups.flatMap((g) =>
+      g.runs.filter((r) => r.comparison?.kind === 'regression'),
     );
+    block.regressed = regressions.length > 0;
+    block.regressionMockOnly = block.regressed && regressions.every((r) => r.mock);
   }
   return results;
 }

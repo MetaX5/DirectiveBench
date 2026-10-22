@@ -285,10 +285,16 @@ function seed(db: DatabaseSync): void {
   );
 }
 
+/** Deletes the seeded runs by id (their agent runs and assertion results cascade). */
+export function deleteRuns(db: DatabaseSync): void {
+  const remove = db.prepare('delete from benchmark_runs where id = ?');
+  for (const id of Object.values(RUN)) remove.run(id);
+}
+
 export function cleanUp(db: DatabaseSync): void {
   // Runs first: they reference artifact versions without a cascade; agent runs and assertion
   // results cascade from them, suite versions from the suite, versions from the artifact.
-  db.prepare(`delete from benchmark_runs where id like 'run_e2e98_%'`).run();
+  deleteRuns(db);
   db.prepare('delete from benchmark_suites where id = ?').run(SUITE);
   db.prepare('delete from artifacts where id = ?').run(ARTIFACT);
 }

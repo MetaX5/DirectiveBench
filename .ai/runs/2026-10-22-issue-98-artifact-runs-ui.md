@@ -71,6 +71,14 @@ Read-only; Playwright tests on seeded runs, no real agent.
   touched.
 - Not verified: data written by the real Claude Code adapter (not wired yet).
 
+- Review round 1 (independent subagent, head 56524d4): approve with 5 minor, 4 nit findings.
+  Fixed: prototype-key warning lookup (`Object.hasOwn`), regression/inconclusive reasons shown as
+  visible text, mock-only version regressions labelled, `executionModel` joined with " | " split
+  before listing other models, SPEC-113 rows no longer say planned, the group suffix only with
+  several groups and an `aria-label` per table, trace counts "not reported" without an
+  `agent-metadata` event, seeded runs deleted by id. Deferred: the Overview card's "Baseline
+  (RED)" wording for A/B runs. Gate rerun after the fixes: all pass, e2e 43/43.
+
 ## Problems and deviations
 
 - `pkill -f` matching the server's command line also killed the shell running it (known lesson
@@ -84,4 +92,5 @@ None new; the `pkill -f` pitfall is already in lessons/2026-10-14-testing-proces
 
 - Move `compareVersions` into `benchmark-engine/scoring` as `versionRegression` and list version
   regressions in the dashboard's "recent regressions" (FR-111-52, FR-116-12).
+- Overview "Latest RED/GREEN comparison" card: name the baseline (vN / no artifact) for A/B runs.
 - Re-check the parsed shapes once #100 merges and the adapter writes real runs (AC-22 live check).

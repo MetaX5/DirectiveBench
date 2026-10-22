@@ -138,6 +138,12 @@ describe('runWarnings and hasAmbientConfig', () => {
     ]);
   });
 
+  it('never explains a code from the object prototype', () => {
+    expect(runWarnings(['constructor: x'], null)).toEqual([
+      { code: 'constructor', text: 'constructor: x', explanation: null },
+    ]);
+  });
+
   it('always shows the ambient-configuration warning for the user-profile isolation', () => {
     const [first] = runWarnings([], profile);
     expect(first).toMatchObject({ code: 'ambient-user-config' });
@@ -177,6 +183,10 @@ describe('agent-run metadata from the trace (SPEC-118 §8.1)', () => {
       [{ type: 'message' }],
     ];
     expect(otherReportedModels(traces, profile)).toEqual(['claude-a', 'claude-haiku-4-5']);
+    // Agent runs that disagreed: the profile joins the execution models with " | ".
+    expect(
+      otherReportedModels(traces, { ...profile, executionModel: 'claude-sonnet-4-6 | claude-a' }),
+    ).toEqual(['claude-haiku-4-5']);
     expect(otherReportedModels(traces, null)).toEqual([
       'claude-a',
       'claude-haiku-4-5',

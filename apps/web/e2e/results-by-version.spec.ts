@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ARTIFACT, cleanUp, reseed, RUN, SUITE } from './results-seed';
+import { ARTIFACT, cleanUp, deleteRuns, reseed, RUN, SUITE } from './results-seed';
 import { MOCK_LABEL, withDatabase } from './support';
 
 /**
@@ -49,6 +49,9 @@ test('the artifact page lists runs per version and comparability group and highl
   await expect(ab.locator('[data-status]')).toHaveAttribute('data-status', 'failed');
   await expect(ab.getByTestId('version-regression')).toHaveText(
     'Version regression vs v1 (-40 pts)',
+  );
+  await expect(ab.getByTestId('comparison-reason')).toHaveText(
+    'candidate score fell by at least minDelta (0.05); candidate outcome changed from passed to failed',
   );
   await expect(ab).toContainText('low');
   await expect(v2.getByText('Version regression', { exact: true })).toBeVisible();
@@ -150,9 +153,7 @@ test('the suite of the seeded runs has no Run button and shows the CLI command (
 });
 
 test('an artifact without runs shows the planned benchmark init command', async ({ page }) => {
-  await withDatabase((db) =>
-    db.prepare(`delete from benchmark_runs where id like 'run_e2e98_%'`).run(),
-  );
+  await withDatabase((db) => deleteRuns(db));
   try {
     await page.goto(`/artifacts/${ARTIFACT}?tab=evaluations`);
     const empty = page.getByTestId('no-runs');
