@@ -460,16 +460,28 @@ async function executeAgentRun(
     const assertions: AssertionResult[] = [];
     for (const assertion of benchmarkCase.assertions) {
       if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');
-      assertions.push(
-        await evaluateAssertion(assertion, {
-          workspaceDir,
+      const evaluated = await evaluateAssertion(assertion, {
+        workspaceDir,
+        changedFiles,
+        commandEnv,
+        defaultTimeoutMs: timeoutMs,
+        maxOutputBytes: definition.execution.maxOutputBytes,
+        signal: input.signal,
+      });
+      assertions.push(evaluated);
+      // A command assertion left processes that could not be stopped: they could change the
+      // workspace under the next assertions and runs, so none runs (SPEC-118 §12, FR-118-15).
+      if (evaluated.details?.strayProcesses === true) {
+        return {
+          ...fail(
+            'infrastructure-error',
+            `Assertion command left processes that could not be stopped: ${evaluated.assertionId}`,
+            'stray-processes',
+          ),
           changedFiles,
-          commandEnv,
-          defaultTimeoutMs: timeoutMs,
-          maxOutputBytes: definition.execution.maxOutputBytes,
-          signal: input.signal,
-        }),
-      );
+          assertions,
+        };
+      }
     }
     // A bounded pattern terminated by cancellation must not read as an assertion error.
     if (input.signal.aborted) return fail('cancelled', 'Cancelled during assertions');

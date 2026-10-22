@@ -520,6 +520,48 @@ describe('setup commands', () => {
     expect(adapter.requests).toHaveLength(0);
   });
 
+  it('stops the benchmark when an assertion command leaves processes that cannot be stopped (Codex review)', async () => {
+    const input = await suite({
+      cases: [
+        testCase({
+          assertions: [
+            { id: 'leaves', type: 'command', command: nodeScript('process.exit(0)') },
+            { id: 'next', type: 'file-exists', path: 'hidden.txt' },
+          ],
+        }),
+      ],
+    });
+    const adapter = new FakeAdapter();
+    const records: AgentRunRecord[] = [];
+    strayGroup.survives = true;
+    let stopped: unknown;
+    try {
+      await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      });
+    } catch (error) {
+      stopped = error;
+    } finally {
+      strayGroup.survives = false;
+    }
+    expect(stopped).toMatchObject({ code: 'stray-processes' });
+    expect(adapter.requests).toHaveLength(1);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      executionStatus: 'infrastructure-error',
+      errorCode: 'stray-processes',
+      error: 'Assertion command left processes that could not be stopped: leaves',
+      score: null,
+    });
+    // The next assertion never ran.
+    expect(records[0]?.assertions.map((a) => a.assertionId)).toEqual(['leaves']);
+  });
+
   it('stops the benchmark when cancelled during setup', async () => {
     const input = await suite({
       cases: [testCase({ setup: [nodeScript('setTimeout(() => {}, 30000)')] })],

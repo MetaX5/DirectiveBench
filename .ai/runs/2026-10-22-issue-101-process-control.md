@@ -103,6 +103,14 @@ fake CLI ignoring SIGINT/SIGTERM.
    real install/inspection/process functions and a fake `claude`.
 5. SPEC-118 §12/§20, SPEC-203 §9/§13, lesson.
 
+- Codex adversarial review after the merge, high: an assertion command that left survivors was
+  an ordinary failed assertion, so later assertions ran, the agent run counted as completed and
+  the next runs started — the survivors could change files under them. Now `evaluateCommand`
+  reports survivors before a timeout, and the engine ends the agent run as `infrastructure-error`
+  `stray-processes` right after that assertion (no further assertion), which stops the benchmark
+  run (FR-118-15 updated). Red first: the orchestrator and timeout-plus-survivor tests fail on
+  ae4c0bc.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
