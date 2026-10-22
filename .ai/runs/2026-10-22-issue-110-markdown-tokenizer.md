@@ -174,6 +174,11 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   whitespace (`cmark_isspace`: space, tab, LF, VT, FF, CR), and an ATX closing sequence ends only
   before spaces and tabs; every case was checked with cmarkgfm 2025.10.22. Heading-text
   comparison (`collapseWhitespace`) still folds Unicode spaces on both sides. Red first on aef16eb.
+- Codex review round 6, high: a body line that is only a pipe (`|`, with optional whitespace)
+  has no cell, so cmark-gfm's `row_from_string` returns no row and the table ends; the scanner
+  read `[""]` and kept the table, so a later row was reported. Such a line now ends the table and
+  starts a paragraph (checked with cmarkgfm 2025.10.22, also in block quotes and list items;
+  `||` and `| |` stay rows). Red first on c9ace69.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.

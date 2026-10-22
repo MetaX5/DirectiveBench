@@ -285,6 +285,24 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false });
   });
 
+  it('does not read a row after a body line that is only a pipe (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend' },
+        column: 'Hours',
+        min: 24,
+        max: 24,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\n|---|---|\n|\n| Backend | 24 |' }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
+
   it('does not accept a heading in a fence after a byte order mark (Codex review)', async () => {
     const result = await evaluateAssertion(
       assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),

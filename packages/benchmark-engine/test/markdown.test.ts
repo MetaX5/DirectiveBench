@@ -451,6 +451,16 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     expect(scanMarkdown('<x>\f\n# y\n\n<x a\fb>\n# z').headings).toEqual([]);
   });
 
+  it('ends a table at a body line that is only a pipe, as cmark-gfm does (Codex review)', () => {
+    const rows = (line: string) =>
+      scanMarkdown(`| R | H |\n|---|---|\n${line}\n| B | 24 |`).tables[0]?.rows.length;
+    for (const lone of ['|', ' | ', '|\t', '|\f', '  |']) expect(rows(lone)).toBe(0);
+    expect(rows('||')).toBe(2);
+    expect(rows('| |')).toBe(2);
+    expect(scanMarkdown('> | R | H |\n> |---|---|\n> |\n> | B | 24 |').tables[0]?.rows).toEqual([]);
+    expect(scanMarkdown('- | R | H |\n  |---|---|\n  |\n  | B | 24 |').tables[0]?.rows).toEqual([]);
+  });
+
   it('ignores one byte order mark at the start, as cmark-gfm does (Codex review)', () => {
     expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
       headings: [],

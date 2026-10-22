@@ -651,6 +651,8 @@ export function scanMarkdown(text: string): MarkdownScan {
     } else if (open?.kind === 'table') {
       const cells = splitTableRow(cursor.rest());
       if (
+        // A lone pipe has no cell, so cmark-gfm reads no row: the table ends.
+        trimWith(cursor.rest(), isMarkdownSpace) === '|' ||
         cells.length > MAX_TABLE_ROW_CELLS ||
         open.autocompleted > MAX_TABLE_AUTOCOMPLETED_CELLS
       ) {
