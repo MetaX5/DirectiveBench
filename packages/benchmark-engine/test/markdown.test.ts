@@ -433,22 +433,18 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     ]);
   });
 
-  it('does not report a setext heading whose paragraph may start with a link definition', () => {
-    expect(
-      scan(['[a]: /url', '===', '', '  [b]:', '/url', '---', '', '[not a definition] text', '---'])
-        .headings,
-    ).toEqual(['[not a definition] text']);
-    // A multi-line label (CommonMark example 541; Codex review).
-    expect(scan(['[foo', 'bar]: /url', '---', '', '[foo', 'bar] text', '---']).headings).toEqual([
-      '[foo bar] text',
+  it('stops the scan at a setext underline below a possible link definition (fail-safe)', () => {
+    expect(scan(['# Before', '[a]: /url', '===', '# After']).headings).toEqual(['Before']);
+    expect(scan(['[not a definition] text', '---', '# After']).headings).toEqual([
+      '[not a definition] text',
+      'After',
     ]);
-  });
-
-  it('keeps the paragraph open after an underline below a possible link definition (Codex review)', () => {
+    // A multi-line label (CommonMark example 541; Codex review).
+    expect(scan(['[foo', 'bar]: /url', '---']).headings).toEqual([]);
     // cmark-gfm: `---` is paragraph text after definitions only, so `2. # Fake` cannot interrupt it.
     expect(scan(['[foo', 'bar]: /url', '---', '2. # Fake']).headings).toEqual([]);
-    expect(scan(['[foo]: /url', '===', '# Real']).headings).toEqual(['Real']);
-    // No table in that paragraph either, which cmark-gfm may already have ended with a heading.
+    // cmark-gfm: the heading `text`, then an HTML block hiding `# Fake` (Codex review).
+    expect(scan(['[foo]: /url', 'text', '---', '<x>', '# Fake']).headings).toEqual([]);
     expect(scan(['[foo]: /url', 'text', '---', 'a | b', '- | -']).tables).toEqual([]);
   });
 
@@ -719,6 +715,9 @@ describe('linear time', () => {
     'one long tag line': (n) => `<a${' b="c"'.repeat(n * 2)}>\n`,
     'tag lines in a paragraph': (n) => `Para\n${'<my-tag>\n'.repeat(n)}`,
     'one unclosed attribute': (n) => `<a b="${'x'.repeat(n * 12)}\n`,
+    'underlines below a possible link definition': (n) =>
+      `[x\n${'a\n'.repeat(n)}]: /url\n${'=\n'.repeat(n)}`,
+    'underlines below bracketed paragraphs': (n) => `${'[x\na\n=\n'.repeat(n)}`,
   };
 
   it.each(Object.keys(shapes))(

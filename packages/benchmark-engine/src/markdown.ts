@@ -530,18 +530,14 @@ export function scanMarkdown(text: string): MarkdownScan {
           }
           if (inParagraph && setextUnderline(line, start)) {
             const paragraph = current as Extract<Leaf, { kind: 'paragraph' }>;
-            // A paragraph may start with link reference definitions, which are no heading text;
-            // they are not parsed, so such a heading is not reported (fail-safe). A label may span
-            // lines, so `]:` counts on any line. cmark-gfm reads the underline as paragraph text
-            // when only definitions precede it, and as a heading of the text after them otherwise;
-            // keeping the paragraph open (without tables) reports no block that either reading
-            // lacks: a line that interrupts a paragraph starts a block in both.
+            // A paragraph may start with link reference definitions, which are no heading text. They
+            // are not parsed, and cmark-gfm reads the underline as paragraph text when only
+            // definitions precede it, or as a heading of the text after them otherwise; the blocks
+            // that may follow differ between the two. The scan stops here (fail-safe): nothing
+            // below is reported. A label may span lines, so `]:` counts on any line.
             const first = paragraph.lines[0] as string;
             if (/^ {0,3}\[/.test(first) && paragraph.lines.some((l) => l.includes(']:'))) {
-              paragraph.lines.push(cursor.rest());
-              paragraph.noTable = true;
-              lineDone = true;
-              break;
+              return { headings, tables };
             }
             headings.push(collapseWhitespace(paragraph.lines.join(' ')));
             leaf = null;

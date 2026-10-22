@@ -31,8 +31,8 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
 2. **Fail safe where readers disagree.** Where GFM readers differ or the scanner does not model a
    construct, it reports less, never more: a table without a pipe in its header or delimiter row is
    read (its lines are no paragraph) but not reported; a setext heading whose paragraph may start
-   with a link reference definition is not reported, and that paragraph stays open without
-   tables; a document nested deeper than
+   with a link reference definition ends the scan (nothing below it is reported); a document
+   nested deeper than
    `MAX_MARKDOWN_NESTING` (32) ends the scan there.
 3. **Verified differentially against cmark-gfm.** A seeded generator builds container-heavy
    documents (nested block quotes and list items with varied marker padding, tabs and lazy lines;

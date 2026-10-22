@@ -270,6 +270,14 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
   });
 
+  it('does not accept a heading hidden in an HTML block after a definition paragraph (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+      workspace({ 'doc.md': '[foo]: /url\ntext\n---\n<x>\n# Fake' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+  });
+
   it('does not read a row after a table filled in its cell budget (Codex review)', async () => {
     const columns = 1000;
     const doc = [

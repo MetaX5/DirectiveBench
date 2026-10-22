@@ -731,8 +731,8 @@ changed before merge.
   on 40 000 more documents, the regression tests of both repros at scanner and assertion level,
   and linearity tests for adversarial shapes. Known limits, each failing safe (reported less,
   never more): a table without a pipe in its header or delimiter row is read but not reported; a
-  setext heading whose paragraph may start with a link reference definition is not reported, and
-  that paragraph stays open without tables (so a list cannot interrupt it); a
+  setext heading whose paragraph may start with a link reference definition ends the scan: neither
+  it nor anything below it is reported (cmark-gfm's two readings differ in what may follow); a
   document nested deeper than `MAX_MARKDOWN_NESTING` (32) block quotes and list items is read only
   up to that line. cmark-gfm's table limits are mirrored: a row of more than 65 535 cells, or any
   row once a table has filled in more than 524 288 cells for short rows, ends the table and starts

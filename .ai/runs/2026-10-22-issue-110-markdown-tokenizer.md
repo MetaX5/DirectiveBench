@@ -157,6 +157,13 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   - Neither case went into the recorded corpus: link definitions are deliberately not compared
     (fail-safe under-reporting), and the limit cases need documents of hundreds of KiB that the
     generator does not produce; both are pinned by direct tests instead.
+- Codex review round 3, two high findings, both caused by keeping the paragraph open: a heading
+  hidden in a kind-7 HTML block after `[foo]: /url\ntext\n---` was reported (cmark-gfm closes the
+  paragraph with the heading `text`), and repeated suppressed underlines rescanned the paragraph
+  (quadratic: 5.6 s at 256 KiB). Replaced by a fail-safe: a setext underline below a paragraph
+  that may start with a link definition ends the scan, so nothing below it is reported. Red first:
+  the scanner, assertion and linear-time tests fail on fb9fe45 (the timing runs also slowed an
+  unrelated timing test under that load).
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.
