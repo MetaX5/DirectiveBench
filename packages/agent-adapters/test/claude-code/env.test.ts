@@ -1,3 +1,4 @@
+import { delimiter } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeEnv, claudeAuthProfile, ClaudeCodeError } from '../../src/claude-code';
 
@@ -86,6 +87,22 @@ describe('buildClaudeEnv', () => {
       TMP: '/run/tmp',
       ANTHROPIC_API_KEY: 'sk-ant-run-key',
     });
+  });
+
+  it('keeps only absolute PATH entries, which never resolve against the workspace (Codex round 4)', () => {
+    const env = buildClaudeEnv({
+      authMode: 'subscription',
+      baseEnv: { ...hostEnv, PATH: ['.', '/usr/local/bin', '', 'bin', '/usr/bin'].join(delimiter) },
+      tempDir: '/run/tmp',
+    });
+    expect(env.PATH).toBe(['/usr/local/bin', '/usr/bin'].join(delimiter));
+    expect(
+      buildClaudeEnv({
+        authMode: 'subscription',
+        baseEnv: { HOME: '/h', PATH: '.' },
+        tempDir: '/t',
+      }).PATH,
+    ).toBe('');
   });
 
   it('refuses an empty, multi-line or unredactably short key', () => {

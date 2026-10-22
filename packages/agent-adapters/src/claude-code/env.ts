@@ -1,4 +1,4 @@
-import { isAbsolute, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import { MIN_KNOWN_SECRET_LENGTH } from '@directivebench/core';
 import type { ClaudeAuthMode } from '../claude-code-readiness';
 import { ClaudeCodeError } from './errors';
@@ -45,7 +45,8 @@ function absolute(path: string, what: string): string {
 /**
  * The complete environment of one `claude` agent process (SPEC-118 FR-118-02/03, SPEC-203 §3, §8).
  * Nothing is inherited beyond {@link CLAUDE_ENV_ALLOWLIST}, so `ANTHROPIC_*`,
- * `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CODE_USE_*` never reach the child unless set here.
+ * `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CODE_USE_*` never reach the child unless set here; `PATH`
+ * keeps only its absolute entries.
  *
  * - Local Subscription Mode: the real `HOME` (the declared exception of SPEC-203 §3.2, needed for
  *   the CLI's own login; `USERPROFILE` is kept for the same reason), no `CLAUDE_CONFIG_DIR` (as the
@@ -59,6 +60,14 @@ export function buildClaudeEnv(input: ClaudeEnvInput): Record<string, string> {
   for (const name of CLAUDE_ENV_ALLOWLIST) {
     const value = input.baseEnv[name];
     if (value !== undefined) env[name] = value;
+  }
+  // Only absolute entries: a relative or empty one resolves against the working directory, the
+  // workspace, where a fixture or `setup` command could put a `node` (or any program `claude`
+  // starts) ahead of the pinned one (Codex review of issue #117). `findExecutable` skips them too.
+  if (env.PATH !== undefined) {
+    env.PATH = env.PATH.split(delimiter)
+      .filter((entry) => isAbsolute(entry))
+      .join(delimiter);
   }
   const tempDir = absolute(input.tempDir, 'temporary directory');
   env.TMPDIR = tempDir;

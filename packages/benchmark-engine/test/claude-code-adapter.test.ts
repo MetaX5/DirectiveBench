@@ -416,6 +416,37 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(readFileSync(marker, 'utf8')).not.toContain(' -p');
   });
 
+  it.each([
+    ['.', '.'],
+    ['a relative directory', 'tools'],
+    ['an empty component', ''],
+  ])(
+    'never lets the launcher find a workspace interpreter through %s on PATH (Codex round 4)',
+    async (_name, entry) => {
+      const root = realpathSync(tmp('cc-relative-path'));
+      const interp = join(root, 'interp-bin');
+      mkdirSync(interp);
+      symlinkSync('/bin/sh', join(interp, 'fake-sh'));
+      const marker = join(root, 'planted-ran');
+      const dir = entry === '' ? '.' : entry;
+      const plant = `mkdir -p ${dir} && printf '#!/bin/sh\\necho "$*" >> ${marker}\\n' > ${dir}/fake-sh && chmod +x ${dir}/fake-sh`;
+      const { fake, result } = await scenario('cc-relative-plant', {
+        streams: { default: stream('api-key-success') },
+        shebang: '#!/usr/bin/env fake-sh',
+        suite: { setup: [['sh', '-c', plant]] },
+        adapter: { authMode: 'api-key' },
+        env: { PATH: `${entry}:${interp}:PLACEHOLDER`, ANTHROPIC_API_KEY: KEY },
+      });
+      outcomeOf(result);
+      // The pinned interpreter ran both sessions; the workspace's never did.
+      expect(fake.starts()).toHaveLength(2);
+      for (const start of fake.starts()) {
+        expect(start.env.PATH?.split(':')[0]).toBe(interp);
+      }
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
+
   it('refuses a claude executable that a setup command replaced (Codex round 2)', async () => {
     const { fake, records, result } = await scenario('cc-replace-binary', {
       setupFor: (binDir) => [

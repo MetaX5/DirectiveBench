@@ -997,7 +997,9 @@ changed before merge.
   adapter pins the `claude` its first detection located (before any `setup`), spawns its canonical
   path without a `PATH` lookup and refuses a run whose file was replaced (`binary-replaced`); for
   a script launcher it also pins the interpreter of its `#!` line (`#!/usr/bin/env node` looked up
-  on the child's `PATH`), so a `node` planted earlier on `PATH` is refused too.
+  on the child's `PATH`), so a `node` planted earlier on `PATH` is refused too; and the child's
+  `PATH` keeps only absolute entries (a `.`, relative or empty entry would resolve against the
+  workspace, where a fixture or `setup` command can put a program).
   Residual (not sandboxed, §12): an approved `setup` command runs with the user's permissions and
   can still change other user-writable files the CLI uses — an interpreter that is itself a
   launcher, programs `claude` starts through `PATH`, the installation's own files in place with
