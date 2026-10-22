@@ -165,11 +165,15 @@ posixOnly('runProbe without a usable temp directory', () => {
     const tool = writeScript('mkdir locked && touch locked/file && chmod 500 locked && echo done');
     const tmp = tempDir('probe-tmp-');
     vi.stubEnv('TMPDIR', tmp);
-    expect(await runProbe(tool, [], options)).toEqual({
-      exitCode: 0,
-      stdout: 'done\n',
-      failure: null,
-    });
-    for (const entry of readdirSync(tmp)) chmodSync(join(tmp, entry, 'locked'), 0o700);
+    try {
+      expect(await runProbe(tool, [], options)).toEqual({
+        exitCode: 0,
+        stdout: 'done\n',
+        failure: null,
+      });
+    } finally {
+      // Restore write access so afterEach can delete the leftover directory.
+      for (const entry of readdirSync(tmp)) chmodSync(join(tmp, entry, 'locked'), 0o700);
+    }
   });
 });
