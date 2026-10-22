@@ -146,6 +146,18 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
       event held another model could still be `completed` and comparable. A dropped line now makes
       the run `output-parse-error` (fail closed); SPEC-203 §9 says so.
 
+12. Codex re-review (round 4) found two more redaction bypasses, both reproduced red first (the
+    two new tests failed on b2fde53) and fixed:
+    - high: a tool input was serialised before known secrets were matched, so a secret with a
+      quote, backslash or newline survived in its JSON-escaped form. Every string of the input
+      (keys included) is now redacted before serialisation.
+    - high: tool-result text blocks were collected only up to the kept prefix plus margin, before
+      redaction, so a private key's END marker in a later block was lost and key material
+      survived. All blocks are now joined (bounded by the 8 MiB line limit) and redacted before
+      the cut. The other cuts (messages, result text, errors, malformed-line tails) already
+      redact the whole text first; a dropped line's head keeps a 4 KiB redaction margin past the
+      kept 256 characters.
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck` — pass.

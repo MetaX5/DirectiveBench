@@ -522,7 +522,9 @@ export class ClaudeStreamParser {
         type: 'tool-call',
         tool: this.clip(name, CLAUDE_STREAM_NAME_MAX_CHARS),
         callId: this.clip(id, CLAUDE_STREAM_NAME_MAX_CHARS),
-        input: this.clip(JSON.stringify(input)),
+        // Redacted value by value first: JSON escaping would hide a secret with a quote, a
+        // backslash or a newline from the match on the serialised text.
+        input: this.clip(JSON.stringify(redactValue(input, this.secrets))),
       });
       if (name === 'Skill') this.noteSkillCall(id, input);
     }
@@ -636,6 +638,22 @@ function exceedsDepth(value: unknown, max: number): boolean {
   return false;
 }
 
+/**
+ * `value` with every string (keys included) redacted by {@link redactStreamText}; its depth is
+ * already bounded by {@link exceedsDepth}.
+ */
+function redactValue(value: unknown, secrets: readonly string[]): unknown {
+  if (typeof value === 'string') return redactStreamText(value, secrets);
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, secrets));
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      redactStreamText(key, secrets),
+      redactValue(item, secrets),
+    ]),
+  );
+}
+
 const KEY_MARKER = /-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----/g;
 
 /**
@@ -666,14 +684,12 @@ function toolResultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   const texts: string[] = [];
-  let length = 0;
   for (const block of content) {
     const text = textBlock.safeParse(block);
     if (!text.success) continue;
+    // All blocks: a key's END marker may come far after the kept prefix, and redaction must see it
+    // (the line limit bounds the total).
     texts.push(text.data.text);
-    length += text.data.text.length;
-    // Enough to fill the kept prefix; the rest would be cut anyway.
-    if (length > CLAUDE_TRACE_TEXT_MAX_CHARS + CLAUDE_REDACTION_MARGIN_CHARS) break;
   }
   return texts.join('\n');
 }

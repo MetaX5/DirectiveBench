@@ -600,6 +600,57 @@ describe('private keys and other secrets (Codex review)', () => {
     expect(parsed.rawTail).toBe(`x${BEGIN}[REDACTED]${END}zzzzzzzzzz`);
   });
 
+  it('redacts known secrets in tool inputs before they are serialised (Codex review)', () => {
+    const secrets = ['pa"ss-word-1234', 'back\\slash-secret-1234', 'multi\nline-secret-1234'];
+    const parsed = parseClaudeStream(
+      lines(
+        assistant(
+          secrets.map((secret, i) => ({
+            type: 'tool_use',
+            id: `t${i}`,
+            name: 'Write',
+            input: { content: `before ${secret} after`, [secret]: 1, nested: [{ deep: secret }] },
+          })),
+        ),
+      ),
+      { ...SKILL, knownSecrets: secrets },
+    );
+    expect(parsed.trace).toHaveLength(3);
+    for (const event of parsed.trace) {
+      const input = (event as { input: string }).input;
+      const decoded = JSON.stringify(JSON.parse(input));
+      for (const secret of secrets) {
+        expect(input).not.toContain(secret);
+        expect(JSON.parse(input).content).not.toContain(secret);
+        expect(decoded.includes(JSON.stringify(secret).slice(1, -1))).toBe(false);
+      }
+      expect(JSON.parse(input)).toEqual({
+        content: 'before [REDACTED] after',
+        '[REDACTED]': 1,
+        nested: [{ deep: '[REDACTED]' }],
+      });
+    }
+  });
+
+  it('redacts a key whose END is in a tool-result block far after the kept prefix (Codex review)', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        user([
+          {
+            type: 'tool_result',
+            tool_use_id: 't1',
+            content: [
+              { type: 'text', text: body },
+              { type: 'text', text: `${END} done` },
+            ],
+          },
+        ]),
+      ),
+      SKILL,
+    );
+    expect(JSON.stringify(parsed.trace)).not.toContain('QQQQ');
+  });
+
   it('redacts a key whose BEGIN is in the head of a dropped line', () => {
     const parser = new ClaudeStreamParser(SKILL);
     parser.push(`${'a'.repeat(100)}${BEGIN}${body}`);
