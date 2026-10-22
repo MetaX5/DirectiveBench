@@ -1,10 +1,9 @@
-import { redactSecrets } from '@directivebench/core';
 import type { ClaudeAuthMode } from '../claude-code-readiness';
 import type { AgentRunMetadata, AgentRunResult, SkillActivation } from '../contract';
 import type { ClaudePermissionProfile } from './argv';
 import {
-  CLAUDE_REDACTION_MARGIN_CHARS,
   CLAUDE_TRACE_TEXT_MAX_CHARS,
+  redactStreamText,
   type ParsedClaudeStream,
 } from './stream-parser';
 
@@ -113,13 +112,9 @@ function failed(parsed: ParsedClaudeStream, exitCode: number | null): boolean {
   return result === null || result.isError || result.subtype !== 'success' || exitCode !== 0;
 }
 
-/** The redacted end of `text`; redacted before it is cut, so a straddling secret is matched whole. */
+/** The redacted end of `text`; the whole text is redacted before the cut. */
 function tail(text: string, secrets: readonly string[]): string {
-  const redacted = redactSecrets(
-    text.slice(-(CLAUDE_TRACE_TEXT_MAX_CHARS + CLAUDE_REDACTION_MARGIN_CHARS)),
-    secrets,
-  );
-  return redacted.slice(-CLAUDE_TRACE_TEXT_MAX_CHARS).trim();
+  return redactStreamText(text, secrets).slice(-CLAUDE_TRACE_TEXT_MAX_CHARS).trim();
 }
 
 /**
@@ -209,6 +204,14 @@ export function classifyClaudeRun(
     );
   }
 
+  // Without the session start nothing says which credentials or model ran, or whether the
+  // skill loaded: such a run never counts as completed (failures above keep their codes).
+  if (parsed.init === null) {
+    return agentError(
+      'output-parse-error',
+      'Claude Code output could not be read: the stream has no session start (system/init).',
+    );
+  }
   if (result.subtype !== 'success') {
     return agentError(
       'agent-failed',

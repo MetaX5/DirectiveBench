@@ -3,7 +3,9 @@ import {
   CLAUDE_STREAM_MAX_EVENTS,
   CLAUDE_STREAM_MAX_LINE_BYTES,
   CLAUDE_STREAM_MAX_NAMES,
+  CLAUDE_STREAM_MAX_CALL_ID_CHARS,
   CLAUDE_STREAM_MAX_SKILL_CALLS,
+  CLAUDE_TRACE_INPUT_MAX_DEPTH,
   CLAUDE_STREAM_NAME_MAX_CHARS,
   CLAUDE_STREAM_RAW_TAIL_CHARS,
   CLAUDE_TRACE_MAX_EVENTS,
@@ -11,6 +13,7 @@ import {
   ClaudeStreamParser,
   parseClaudeStream,
   promptInvokesSkill,
+  redactStreamText,
   type ClaudeStreamOptions,
 } from '../../src/claude-code';
 import { fixture } from './helpers';
@@ -535,6 +538,130 @@ describe('names from the stream', () => {
     expect(parsed.apiError).toBe(clipped);
     expect(parsed.messageModels).toEqual([clipped]);
     expect(parsed.reportedModels).toEqual([clipped]);
+  });
+});
+
+describe('private keys and other secrets (Codex review)', () => {
+  const BEGIN = '-----BEGIN RSA PRIVATE KEY-----';
+  const END = '-----END RSA PRIVATE KEY-----';
+  const body = 'Q'.repeat(8_000);
+
+  it('redactStreamText removes every key fragment, failing closed on a missing marker', () => {
+    expect(redactStreamText(`a ${BEGIN}${body}${END} b`, [])).toBe(`a ${BEGIN}[REDACTED]${END} b`);
+    expect(redactStreamText(`a ${BEGIN}${body}`, [])).toBe(`a ${BEGIN}[REDACTED]`);
+    expect(redactStreamText(`${body}${END} b`, [])).toBe(`[REDACTED]${END} b`);
+    expect(redactStreamText(`${END} kept ${BEGIN}${body}`, [])).toBe(
+      `[REDACTED]${END} kept ${BEGIN}[REDACTED]`,
+    );
+    expect(redactStreamText(`${BEGIN}${body}${END}${body}${END}`, [])).toBe(
+      `${BEGIN}[REDACTED]${END}[REDACTED]${END}`,
+    );
+    expect(redactStreamText('plain dummy-run-secret-1234', ['dummy-run-secret-1234'])).toBe(
+      'plain [REDACTED]',
+    );
+  });
+
+  it('keeps no key material of a long, partial or split key in the trace', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        assistant([{ type: 'text', text: `see ${BEGIN}${body}${END}` }]),
+        assistant([{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'id_rsa' } }]),
+        user([{ type: 'tool_result', tool_use_id: 't1', content: `${BEGIN}${body}` }]),
+        user([
+          {
+            type: 'tool_result',
+            tool_use_id: 't2',
+            content: [{ type: 'text', text: `${body}${END}` }],
+          },
+        ]),
+      ),
+      SKILL,
+    );
+    expect(JSON.stringify(parsed.trace)).not.toContain('QQQQ');
+  });
+
+  it('redacts a whole malformed line before keeping its tail', () => {
+    const parsed = parseClaudeStream(`x${BEGIN}${body}${body}${END}${'z'.repeat(10)}\n`, SKILL);
+    expect(parsed.rawTail).not.toContain('QQQQ');
+    expect(parsed.rawTail).toBe(`x${BEGIN}[REDACTED]${END}zzzzzzzzzz`);
+  });
+
+  it('redacts a key whose BEGIN is in the head of a dropped line', () => {
+    const parser = new ClaudeStreamParser(SKILL);
+    parser.push(`${'a'.repeat(100)}${BEGIN}${body}`);
+    parser.push(Buffer.alloc(CLAUDE_STREAM_MAX_LINE_BYTES, 0x51));
+    const parsed = parser.end();
+    expect(parsed.rawTail).toBe(`[line over 8388608 bytes] ${'a'.repeat(100)}${BEGIN}[REDACTED]`);
+  });
+});
+
+describe('untrusted shapes (Codex review)', () => {
+  it('rejects over-long call ids instead of retaining them', () => {
+    const id = 'i'.repeat(1024 * 1024);
+    const events = Array.from({ length: 8 }, (_, i) =>
+      i % 2 === 0
+        ? assistant([{ type: 'tool_use', id: `${id}${i}`, name: 'Skill', input: { skill: 'pdf' } }])
+        : user([{ type: 'tool_result', tool_use_id: `${id}${i}`, content: 'x' }]),
+    );
+    const parsed = parseClaudeStream(
+      lines(
+        ...events,
+        result({ permission_denials: [{ tool_name: 'Skill', tool_use_id: id, tool_input: {} }] }),
+      ),
+      SKILL,
+    );
+    expect(parsed.malformedLines).toBe(9);
+    expect(parsed.result).toBeNull();
+    expect(parsed.skillInvocations).toBe(0);
+    // Nothing of the ids is kept: the whole parse result stays small.
+    expect(JSON.stringify(parsed).length).toBeLessThan(10_000);
+    const ok = 'k'.repeat(CLAUDE_STREAM_MAX_CALL_ID_CHARS);
+    const accepted = parseClaudeStream(
+      lines(
+        assistant([{ type: 'tool_use', id: ok, name: 'Skill', input: { skill: 'pdf' } }]),
+        user([{ type: 'tool_result', tool_use_id: ok, content: 'x' }]),
+      ),
+      SKILL,
+    );
+    expect(accepted.skillInvocations).toBe(1);
+  });
+
+  it('treats a deeply nested tool input as malformed instead of throwing', () => {
+    const deep = `${'['.repeat(10_000)}${']'.repeat(10_000)}`;
+    const line = `{"type":"assistant","message":{"model":"m1","content":[{"type":"tool_use","id":"t","name":"Read","input":${deep}}]},"parent_tool_use_id":null}`;
+    const parsed = parseClaudeStream(`${line}\n`, SKILL);
+    expect(parsed.malformedLines).toBe(1);
+    expect(parsed.trace).toEqual([]);
+    const nested = (depth: number): unknown => (depth === 0 ? 'leaf' : { a: nested(depth - 1) });
+    const ok = parseClaudeStream(
+      lines(
+        assistant([
+          { type: 'tool_use', id: 't', name: 'Read', input: nested(CLAUDE_TRACE_INPUT_MAX_DEPTH) },
+        ]),
+      ),
+      SKILL,
+    );
+    expect(ok.malformedLines).toBe(0);
+    const tooDeep = parseClaudeStream(
+      lines(
+        assistant([
+          {
+            type: 'tool_use',
+            id: 't',
+            name: 'Read',
+            input: nested(CLAUDE_TRACE_INPUT_MAX_DEPTH + 1),
+          },
+        ]),
+      ),
+      SKILL,
+    );
+    expect(tooDeep.malformedLines).toBe(1);
+  });
+
+  it('skips content blocks that are not objects', () => {
+    const parsed = parseClaudeStream(lines(assistant(['x', 3]), user(['x', null])), SKILL);
+    expect(parsed.malformedLines).toBe(0);
+    expect(parsed.trace).toEqual([]);
   });
 });
 

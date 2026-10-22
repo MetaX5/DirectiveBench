@@ -122,8 +122,8 @@ function variantModels(runs: readonly AgentRunFacts[], variant: Variant): string
 /**
  * Comparability issues of FR-118-04 and FR-118-09 (c); each makes the run `not-comparable`:
  * a differing agent condition, more than one execution model across all agent runs (including a
- * main-conversation message on another model), and a `none` baseline that invoked the tested
- * skill.
+ * main-conversation message on another model), a completed run without a reported execution
+ * model, and a `none` baseline that invoked the tested skill.
  */
 export function agentConditionIssues(
   runs: readonly AgentRunFacts[],
@@ -144,6 +144,16 @@ export function agentConditionIssues(
   if (models.length > 1) {
     issues.push(
       `execution-model-mismatch: agent runs used different execution models (baseline: ${variantModels(runs, 'baseline').join(', ') || 'none reported'}; candidate: ${variantModels(runs, 'candidate').join(', ') || 'none reported'})`,
+    );
+  }
+  // A scored run without a session model cannot show it ran on the same model (fail closed).
+  const unknown = runs.filter(
+    (run) =>
+      run.executionStatus === 'completed' && run.metadata && run.metadata.executionModel === null,
+  ).length;
+  if (unknown > 0) {
+    issues.push(
+      `execution-model-unknown: ${unknown} completed agent run(s) did not report the model they ran on`,
     );
   }
   if (!abBaseline) {

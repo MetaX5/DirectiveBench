@@ -806,7 +806,8 @@ changed before merge.
     `baseline-invoked-tested-skill`; FR-118-04 — differing `adapterVersion`, `authMode`,
     `isolationProfile`, `permissionProfile`, `requestedModel` or `flagsHash` → `not-comparable`,
     more than one execution model across all agent runs (including a mismatching message model)
-    → `not-comparable` `execution-model-mismatch` listing the models per variant, differing
+    → `not-comparable` `execution-model-mismatch` listing the models per variant, a completed run
+    that reported no execution model → `not-comparable` `execution-model-unknown`, differing
     auxiliary models only → warning `auxiliary-models`, `requestedModel` null or not equal to the
     execution model → warning `unpinned-model`; `environment.agentProfile` (and so the
     comparability key) carries the sorted set of observed models; a `user-profile` run needs

@@ -1,8 +1,11 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   MockAgentAdapter,
+  claudeRunOutcome,
+  parseClaudeStream,
   type AgentRunMetadata,
   type AgentRunRequest,
   type AgentRunResult,
@@ -440,6 +443,55 @@ describe('execution model and agent conditions (FR-118-04, AC-18, AC-25)', () =>
   }, 60_000);
 });
 
+describe('parser to engine (Codex review)', () => {
+  const streams = fileURLToPath(
+    new URL('../../agent-adapters/test/fixtures/claude-code/2.1.302/', import.meta.url),
+  );
+  const outcome = (stream: string, prompt: string) =>
+    claudeRunOutcome(
+      parseClaudeStream(stream, { skillName: 'validate-external-input', prompt }),
+      { exitCode: 0 },
+      {
+        adapterVersion: '2.1.302',
+        authMode: 'api-key',
+        permissionProfile: 'edit-only',
+        requestedModel: MODEL,
+        flagsHash: 'a'.repeat(64),
+        skill: true,
+      },
+    );
+
+  it('a candidate stream without a session start is not a completed run', async () => {
+    const valid = readFileSync(join(streams, 'api-key-success.ndjson'), 'utf8');
+    const resultOnly = `${valid.trim().split('\n').at(-1)}\n`;
+    const { run } = await input((variant) => {
+      const { trace: _trace, ...rest } = outcome(variant === 'candidate' ? resultOnly : valid, 'x');
+      return rest;
+    });
+    const result = await runBenchmark(run);
+    const candidate = result.agentRuns.filter((r) => r.variant === 'candidate');
+    expect(candidate.map((r) => [r.executionStatus, r.errorCode])).toEqual([
+      ['agent-error', 'output-parse-error'],
+      ['agent-error', 'output-parse-error'],
+      ['agent-error', 'output-parse-error'],
+    ]);
+    expect(result.summary.verdict).toBe('error');
+  }, 60_000);
+
+  it('a completed run that reports no execution model is not comparable', async () => {
+    const { run } = await input((variant, repetition) => ({
+      metadata: metadata(
+        variant === 'candidate' && repetition === 2 ? { executionModel: null } : {},
+      ),
+    }));
+    const result = await runBenchmark(run);
+    expect(result.summary.verdict).toBe('not-comparable');
+    expect(result.summary.reasons).toContain(
+      'execution-model-unknown: 1 completed agent run(s) did not report the model they ran on',
+    );
+  }, 60_000);
+});
+
 describe('pure helpers', () => {
   it('report nothing for runs without metadata (the mock agent)', () => {
     const mock = [
@@ -454,7 +506,11 @@ describe('pure helpers', () => {
 
   it('list a variant without reported models as none reported', () => {
     const runs = [
-      facts({ variant: 'baseline', metadata: metadata({ executionModel: null }) }),
+      facts({
+        variant: 'baseline',
+        executionStatus: 'agent-error',
+        metadata: metadata({ executionModel: null }),
+      }),
       facts({ metadata: metadata({ executionModel: 'x' }) }),
       facts({ metadata: metadata({ executionModel: 'y' }) }),
     ];

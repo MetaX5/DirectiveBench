@@ -264,6 +264,36 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     );
   });
 
+  it('never completes a stream without a session start (Codex review)', () => {
+    const resultOnly = parseClaudeStream(
+      `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })}\n`,
+      SKILL,
+    );
+    expect(classifyClaudeRun(resultOnly, OK, 'subscription')).toMatchObject({
+      status: 'agent-error',
+      errorCode: 'output-parse-error',
+      error: 'Claude Code output could not be read: the stream has no session start (system/init).',
+    });
+    // An early failure keeps its code.
+    const expired = parseClaudeStream(
+      `${JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'x', errors: [] })}\n${JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Login expired · Please run /login' }] }, parent_tool_use_id: null })}\n`,
+      SKILL,
+    );
+    expect(classifyClaudeRun(expired, { exitCode: 1 }, 'subscription').errorCode).toBe(
+      'auth-expired',
+    );
+  });
+
+  it('redacts a private key that straddles the kept end of stderr (Codex review)', () => {
+    const stderr = `-----BEGIN PRIVATE KEY-----${'Q'.repeat(8_000)}-----END PRIVATE KEY-----\ndone`;
+    const error = classifyClaudeRun(
+      parseClaudeStream('', SKILL),
+      { exitCode: 2, stderr },
+      'subscription',
+    ).error;
+    expect(error).not.toContain('QQQQ');
+  });
+
   it('redacts a secret that straddles the kept end of stderr (review M3)', () => {
     const key = `sk-ant-test-${'k'.repeat(60)}`;
     const stderr = `${'x'.repeat(100)} ${key} ${'y'.repeat(1_990)}`;

@@ -1,4 +1,4 @@
-import { redactSecrets } from '@directivebench/core';
+import { REDACTION_MARKER, redactSecrets } from '@directivebench/core';
 import { z } from 'zod';
 import type { AgentUsage, TraceEvent } from '../contract';
 
@@ -47,6 +47,19 @@ export const CLAUDE_REDACTION_MARGIN_CHARS = 4_096;
 
 /** The prefix of the `parent_tool_use_id` of a forked skill's messages, `forked-command-<name>` (C1, L3). */
 export const FORKED_SKILL_PARENT_PREFIX = 'forked-command-';
+
+/**
+ * Longest tool-call id kept (`toolu_…` ids are about 30 characters). A block with a longer id is
+ * malformed, so the pending `Skill` calls hold at most
+ * {@link CLAUDE_STREAM_MAX_SKILL_CALLS} × {@link CLAUDE_STREAM_MAX_CALL_ID_CHARS} characters.
+ */
+export const CLAUDE_STREAM_MAX_CALL_ID_CHARS = 256;
+
+/**
+ * Deepest nesting of a tool input that is serialised for the trace; deeper input makes the line
+ * malformed instead of overflowing the stack in `JSON.stringify`.
+ */
+export const CLAUDE_TRACE_INPUT_MAX_DEPTH = 64;
 
 /** Characters kept of a name from the stream (model, skill, tool, call id, category). */
 export const CLAUDE_STREAM_NAME_MAX_CHARS = 200;
@@ -158,15 +171,17 @@ const assistantExtras = z.looseObject({
   error: z.string().optional(),
 });
 const textBlock = z.looseObject({ type: z.literal('text'), text: z.string() });
+const blockType = z.looseObject({ type: z.string() });
+const callId = z.string().max(CLAUDE_STREAM_MAX_CALL_ID_CHARS);
 const toolUseBlock = z.looseObject({
   type: z.literal('tool_use'),
-  id: z.string(),
+  id: callId,
   name: z.string(),
   input: z.unknown(),
 });
 const toolResultBlock = z.looseObject({
   type: z.literal('tool_result'),
-  tool_use_id: z.string(),
+  tool_use_id: callId,
   is_error: z.boolean().optional(),
   content: z.unknown(),
 });
@@ -201,7 +216,7 @@ const resultEvent = z.looseObject({
     .array(
       z.looseObject({
         tool_name: z.string(),
-        tool_use_id: z.string().optional(),
+        tool_use_id: callId.optional(),
         tool_input: z.unknown(),
       }),
     )
@@ -248,7 +263,8 @@ export class ClaudeStreamParser {
   private readonly messageModels = new BoundedNames();
   private readonly reportedModels = new BoundedNames();
   private readonly otherSkills = new BoundedNames();
-  private readonly skillCalls = new Map<string, string>();
+  /** Pending `Skill` calls of the installed skill, by call id (bounded, see the id limit). */
+  private readonly skillCalls = new Set<string>();
   private readonly state: Omit<
     ParsedClaudeStream,
     'messageModels' | 'reportedModels' | 'modelsOverflow' | 'otherSkills' | 'usage'
@@ -326,7 +342,7 @@ export class ClaudeStreamParser {
     this.skippingLine = true;
     this.state.oversizedLines += 1;
     // Redacted before it is cut, so a secret that starts in the kept head is matched whole.
-    const text = redactSecrets(head.toString('utf8'), this.secrets);
+    const text = redactStreamText(head.toString('utf8'), this.secrets);
     this.state.rawTail = `[line over ${CLAUDE_STREAM_MAX_LINE_BYTES} bytes] ${text.slice(0, DROPPED_LINE_HEAD_CHARS)}`;
   }
 
@@ -352,23 +368,17 @@ export class ClaudeStreamParser {
 
   private malformed(line: string): void {
     this.state.malformedLines += 1;
-    // The end of the line says where it broke off; only a bounded suffix is ever redacted.
-    const redacted = redactSecrets(
-      line.slice(-(CLAUDE_STREAM_RAW_TAIL_CHARS + CLAUDE_REDACTION_MARGIN_CHARS)),
-      this.secrets,
-    );
+    // The end of the line says where it broke off; the whole line is redacted before the cut.
+    const redacted = redactStreamText(line, this.secrets);
     this.state.rawTail =
       redacted.length > CLAUDE_STREAM_RAW_TAIL_CHARS
         ? `…${redacted.slice(-CLAUDE_STREAM_RAW_TAIL_CHARS)}`
         : redacted;
   }
 
-  /** Redacts, then truncates; only a bounded prefix is ever redacted. */
+  /** Redacts the whole text, then truncates (texts are bounded by the line limit). */
   private clip(text: string, max = CLAUDE_TRACE_TEXT_MAX_CHARS): string {
-    const redacted = redactSecrets(
-      text.slice(0, max + CLAUDE_REDACTION_MARGIN_CHARS),
-      this.secrets,
-    );
+    const redacted = redactStreamText(text, this.secrets);
     return redacted.length > max ? `${redacted.slice(0, max)}… [truncated]` : redacted;
   }
 
@@ -497,8 +507,13 @@ export class ClaudeStreamParser {
         continue;
       }
       const toolUse = toolUseBlock.safeParse(block);
-      if (!toolUse.success) continue;
+      // Other block kinds (thinking, …) are skipped; a tool call that breaks the limits is not.
+      if (!toolUse.success) {
+        if (isBlock(block, 'tool_use')) return false;
+        continue;
+      }
       const { id, name, input } = toolUse.data;
+      if (exceedsDepth(input, CLAUDE_TRACE_INPUT_MAX_DEPTH)) return false;
       this.record({
         type: 'tool-call',
         tool: this.clip(name, CLAUDE_STREAM_NAME_MAX_CHARS),
@@ -517,7 +532,7 @@ export class ClaudeStreamParser {
       this.otherSkills.add(this.clip(skill, CLAUDE_STREAM_NAME_MAX_CHARS));
       return;
     }
-    if (this.skillCalls.size < CLAUDE_STREAM_MAX_SKILL_CALLS) this.skillCalls.set(callId, skill);
+    if (this.skillCalls.size < CLAUDE_STREAM_MAX_SKILL_CALLS) this.skillCalls.add(callId);
   }
 
   private handleUser(event: Record<string, unknown>): boolean {
@@ -533,7 +548,10 @@ export class ClaudeStreamParser {
         continue;
       }
       const result = toolResultBlock.safeParse(block);
-      if (!result.success) continue;
+      if (!result.success) {
+        if (isBlock(block, 'tool_result')) return false;
+        continue;
+      }
       const ok = result.data.is_error !== true;
       const output = toolResultText(result.data.content);
       this.record({
@@ -594,6 +612,49 @@ export class ClaudeStreamParser {
     }
     return true;
   }
+}
+
+/** Whether `block` claims to be a content block of `type`. */
+function isBlock(block: unknown, type: string): boolean {
+  const parsed = blockType.safeParse(block);
+  return parsed.success && parsed.data.type === type;
+}
+
+/** Whether `value` nests arrays or objects deeper than `max` (iterative, so it cannot overflow). */
+function exceedsDepth(value: unknown, max: number): boolean {
+  const stack: [unknown, number][] = [[value, 0]];
+  for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
+    const [node, depth] = item;
+    if (node === null || typeof node !== 'object') continue;
+    if (depth >= max) return true;
+    for (const child of Object.values(node)) stack.push([child, depth + 1]);
+  }
+  return false;
+}
+
+const KEY_MARKER = /-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----/g;
+
+/**
+ * Redacts `text` for the trace: the core patterns and known secrets, then every private-key
+ * fragment, failing closed. A text cut from a longer one (a tool result, a line head) can hold a
+ * key block's BEGIN without its END, or an END whose BEGIN was elsewhere: every segment that
+ * follows a BEGIN marker or precedes an END marker is replaced, so no key material survives
+ * whichever end is missing. One linear pass; redact the whole text before cutting it.
+ */
+export function redactStreamText(text: string, secrets: readonly string[]): string {
+  const redacted = redactSecrets(text, secrets);
+  let result = '';
+  let from = 0;
+  let previous: string | undefined;
+  KEY_MARKER.lastIndex = 0;
+  for (let match = KEY_MARKER.exec(redacted); match; match = KEY_MARKER.exec(redacted)) {
+    const segment = redacted.slice(from, match.index);
+    result += previous === 'BEGIN' || match[1] === 'END' ? REDACTION_MARKER : segment;
+    result += match[0];
+    from = KEY_MARKER.lastIndex;
+    previous = match[1];
+  }
+  return result + (previous === 'BEGIN' ? REDACTION_MARKER : redacted.slice(from));
 }
 
 /** Text of a `tool_result` content: a string, or the text blocks of an array. */

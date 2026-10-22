@@ -38,3 +38,9 @@ short identifiers, gets a named length bound before it is stored or hashed.
   assumption until a live check records it.
 - Clip every name from untrusted output with a named limit (`CLAUDE_STREAM_NAME_MAX_CHARS`), and
   test the bound for each place the name is kept.
+- (Updated after the Codex review of PR #111.) Redact the whole text before cutting it, never a
+  window: core's private-key redactor needs both markers, so a block whose END lies past the
+  window — or a key split across events — leaked. Fail closed on fragments (replace anything after
+  a BEGIN or before an END marker). Every identifier kept as state (call ids in a pending map), not
+  only what goes to the trace, needs a named limit, and arbitrary JSON must not reach recursive
+  `JSON.stringify` without a depth check.

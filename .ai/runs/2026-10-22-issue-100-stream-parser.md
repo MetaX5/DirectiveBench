@@ -112,6 +112,26 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
    fixed in `a50bcdc`) and once on #99's `import-tokens` ratio test (13 > 12), which passed on
    the next run.
 
+9. Codex adversarial review (relayed by the coordinator; 3 HIGH, 1 MEDIUM, all reproduced) fixed
+   on `feat/issue-100-stream-parser` in a fresh worktree:
+   - HIGH — `clip` cut before redacting, so a private-key block whose END lay past the window
+     leaked (core's redactor needs both markers). Every kept text is now redacted whole before
+     any cut (`clip`, the malformed-line tail, the dropped-line head, the stderr tail) by
+     `redactStreamText`, which also fails closed on key fragments: any segment after a BEGIN or
+     before an END marker is replaced. Tests: long complete key, BEGIN without END, END without
+     BEGIN, key split across events, malformed-line tail, dropped-line head, stderr.
+   - HIGH — pending `Skill` calls kept the raw, unbounded call id (1 000 × 8 MiB). Call ids are
+     limited to `CLAUDE_STREAM_MAX_CALL_ID_CHARS` (256) by the schema; a `tool_use`/`tool_result`
+     block (or a permission denial) breaking it makes the line malformed; pending calls are a
+     `Set` of at most 1 000 such ids. Test: 8 events with 1 MiB ids keep nothing of them.
+   - HIGH — a stream with only a successful `result` (no `system/init`) completed, skipping the
+     credential check and carrying no model. Such a stream is now `output-parse-error` (early
+     failure codes kept), and the engine marks a completed run without an execution model
+     `not-comparable` (`execution-model-unknown`). Tests include the parser → engine path.
+   - MEDIUM — `JSON.stringify` of a deeply nested tool input threw `RangeError`. An iterative
+     depth check (`CLAUDE_TRACE_INPUT_MAX_DEPTH` 64) makes such a line malformed first. Test:
+     10 000 nested arrays.
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck` — pass.
