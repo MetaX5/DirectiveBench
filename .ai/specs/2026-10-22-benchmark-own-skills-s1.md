@@ -748,6 +748,44 @@ changed before merge.
     `--allowedTools` value), its exact `@` token grammar, and every behaviour marked as an
     assumption — all for the AC-22 live check. The engine and CLI wiring (plan-time and pre-spawn
     calls, codes as exit 2 / `infrastructure-error`) is Phase 3 steps 2–3 and Phase 4.
+- **Implemented — Phase 3 step 2 (issue #100, verified on 2026-10-22 by unit tests against
+  constructed stream fixtures and engine tests with a reporting mock adapter; no `claude`
+  process is started):**
+  - Stream parser and error normalisation in `packages/agent-adapters/src/claude-code/`
+    (`stream-parser.ts`, `normalize.ts`; details and limits in SPEC-203 §13): FR-118-04 metadata
+    (`executionModel` from `system/init`, `reportedModels` = `modelUsage` keys, auxiliary models,
+    main-conversation messages on another model), FR-118-09 `skillActivation` (loaded from the
+    `Skill` tool and the init `skills` list; invoked by a `Skill` call for `<name>` whose result is
+    not an error, or by a `/<name>` prompt with expansion evidence; other skills attempted), the
+    FR-118-06 auth-source check (`apiKeySource`, fail closed when missing) and the SPEC-203 §9
+    codes. Fixtures in `packages/agent-adapters/test/fixtures/claude-code/2.1.302/` were built
+    from the documented format and the schemas in the local 2.1.302 binary (SPEC-203 L3), not
+    recorded — the live check (AC-22) replaces them.
+  - Engine (`packages/benchmark-engine/src/agent-conditions.ts`, wired in `runBenchmark`):
+    FR-118-15 — an agent run ending with any listed code (`STOP_CODES`) is persisted and then
+    `BenchmarkStoppedError` ends the run, which the runner stores as benchmark run `error` with the
+    reason (`packages/runner/test/runner-acquired.test.ts`); FR-118-09 (a) a candidate run, or a
+    baseline run of an A/B run, with `loaded = false` becomes `infrastructure-error`
+    `artifact-not-loaded` and stops the run (a `none` baseline is exempt); (b) loaded but not
+    invoked → scored with warning `artifact-not-invoked`; the invocation rate per variant is in
+    `summary.skillInvocation` and the warnings ("Skill invoked in 1/3 candidate runs", plus the
+    never-used notice at 0); (c) a `none` baseline invoking `<name>` → `not-comparable`
+    `baseline-invoked-tested-skill`; FR-118-04 — differing `adapterVersion`, `authMode`,
+    `isolationProfile`, `permissionProfile`, `requestedModel` or `flagsHash` → `not-comparable`,
+    more than one execution model across all agent runs (including a mismatching message model)
+    → `not-comparable` `execution-model-mismatch` listing the models per variant, differing
+    auxiliary models only → warning `auxiliary-models`, `requestedModel` null or not equal to the
+    execution model → warning `unpinned-model`; `environment.agentProfile` (and so the
+    comparability key) carries the sorted set of observed models; a `user-profile` run needs
+    `RunBenchmarkInput.hostId` (else `not-comparable` `host-id-missing`). Every reporting agent
+    run's trace starts with an `agent-metadata` event (§8.1). Mock-agent runs report no metadata,
+    so their results and the mock example key are unchanged.
+  - Covers AC-17 (stop on `rate_limit` / expired login at the engine and runner level; the
+    `--max-budget-usd` part was Phase 3 step 1), AC-18 (except the flags-hash part, Phase 3 step
+    1), AC-21 and AC-25 for the recorded-stream and engine parts, and the stream part of AC-28.
+    Not verified: a real `claude` stream (AC-22), the inline `/<name>` expansion signal
+    (Assumption), and the adapter that spawns `claude` and feeds the parser (Phase 3 step 3,
+    issue #101).
 - **Implemented — Phase 3 step 4 (issue #102, verified on 2026-10-22 with a fake `claude` and
   read-only against the real `claude` 2.1.302 on the maintainer's machine):** the readiness half
   of FR-118-35 and the API-key source of FR-118-02 as a library function,
@@ -767,17 +805,16 @@ changed before merge.
   `packages/agent-adapters/test/`, `apps/cli/test/doctor.test.ts`; Playwright test in
   `apps/web/e2e/management.spec.ts`). Calling it before the job is created, with exit code 2, is
   `benchmark run` (Phase 4).
-- **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
-  has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
-  direct calls of `comparabilityKey` exercise profile hashing; the adapter→engine wiring and
-  feeding `installationId` into a `user-profile` profile as `hostId` (enforced by the type: only
-  that variant has it) wait for the Claude Code adapter (Phase 3). AC-3, AC-5 and AC-9 are verified at the engine, repository and
+- **Partially implemented:** the adapter contract now carries per-run metadata and
+  `runBenchmark` derives `EnvironmentMetadata.agentProfile` from it (Phase 3 step 2), but no
+  executable adapter reports it yet, and no caller passes `installationId` as
+  `RunBenchmarkInput.hostId` (Phase 4, `benchmark run`). AC-3, AC-5 and AC-9 are verified at the engine, repository and
   runner level; their `benchmark run --baseline` / CLI parts wait for Phase 4. Existing pieces this
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 steps 2–3 (Claude Code
-  stream parser and process control),
+- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 step 3 (process
+  control, issue #101),
   Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
   other requirement of §6 not listed above.
 
