@@ -3,7 +3,7 @@ title: Document assertions (SPEC-118 Phase 1, issue #94)
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: om-auto-fix-issue 94 (maintainer request, feature route via om-auto-implement-spec)
-status: in-progress
+status: completed
 branch: feat/issue-94-document-assertions
 specs: [SPEC-118, SPEC-107, SPEC-108]
 ---
@@ -124,11 +124,20 @@ source (a string, not instrumented — behaviour is tested end to end).
    schemas and traits in `definition.ts`, assertion-error handling in `orchestrator.ts`; tests
    `pattern-worker`, `markdown`, `document-assertions`, `definition`, `orchestrator` — ae59f03.
 3. Example `examples/benchmarks/document-assertions/` — 9618119.
-5. Review round 1 (independent subagent, request changes: 1 major, 4 minor, nits): worker
-   construction fails closed, Markdown container/comment handling, number parsing, named option,
-   shared literal search, capped glob list, traits-based `deterministic` — see the next commit.
 4. SPEC-118 §20 and AC-6/AC-24, SPEC-107 §8.3/§20, SPEC-108 FR-108-10/§8.1/§19/§20, lesson,
    runner integration test, this log.
+
+5. Review (independent subagent, read-only, three rounds):
+   - Round 1 at 13e799d — request changes: 1 major (worker construction could reject → scored
+     fail instead of assertion error), 4 minor (literal boolean argument, setext false positives
+     in quotes/lists/indented code/HTML comments, number-parsing edge cases, run-log status),
+     nits. Fixed in 5f424f1 (glob list cap, shared `literalSearch`, traits-based `deterministic`,
+     cast comment included).
+   - Round 2 — 1 minor regression (list-item handling hid GFM tables). Fixed in f337ec9.
+   - Round 3 — approve; nit (container flag not reset at an ATX heading or fence) fixed in the
+     following commit. Deferred nits: worker `exit` without message (covered by the deadline),
+     `resourceLimits`, a row-count cap, a structured error code (Phase 3), cancellation-test
+     timing, list lines inside a table body, tables inside block quotes (not detected).
 
 ## Verification
 
@@ -137,7 +146,7 @@ source (a string, not instrumented — behaviour is tested end to end).
 | `pnpm format:check` | pass |
 | `pnpm lint` | pass |
 | `pnpm typecheck` | pass |
-| `pnpm test` | pass — 1 050 tests (engine 196, runner 225, core 247, database 120, web 153, cli 75, adapters 34); 100% statements/branches/functions/lines in every package |
+| `pnpm test` | pass — engine 217 after review fixes (196 before), runner 225, core 247, database 120, web 153, cli 75, adapters 34); 100% statements/branches/functions/lines in every package |
 | `pnpm build && pnpm verify:pack` | pass — tarball installs, demo "improved", serve smoke checks |
 | runner `test/document-assertions.test.ts` | 2 passed |
 
