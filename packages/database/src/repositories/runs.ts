@@ -318,21 +318,15 @@ export async function listVersionComparisonRuns(
   db: Database,
   artifactId: string,
 ): Promise<{ runs: VersionComparisonRun[]; truncated: boolean }> {
+  // Rank ids and ordering columns only (the filters read the summary but nothing carries it),
+  // keep the representatives, then read their summary fields: no sorter holds a summary (Codex
+  // review of PR #113).
   const ranked = db
     .select({
       runId: sql<string>`${benchmarkRuns.id}`.as('run_id'),
       artifactVersionId: sql<string>`${artifactVersions.id}`.as('version_id'),
       version: sql<number>`${artifactVersions.version}`.as('version_number'),
       comparabilityKey: sql<string>`${benchmarkRuns.comparabilityKey}`.as('key'),
-      verdict: sql<string | null>`${benchmarkRuns.verdict}`.as('run_verdict'),
-      agentAdapterId: sql<string>`${benchmarkRuns.agentAdapterId}`.as('adapter_id'),
-      candidateMeanScore: sql<
-        number | null
-      >`${benchmarkRuns.summary} ->> '$.candidate.meanScore'`.as('mean_score'),
-      candidateOutcome: sql<string | null>`${benchmarkRuns.summary} ->> '$.candidateOutcome'`.as(
-        'outcome',
-      ),
-      minDelta: sql<number>`${benchmarkRuns.summary} ->> '$.scoring.minDelta'`.as('min_delta'),
       rank: sql<number>`row_number() over (partition by ${benchmarkRuns.artifactVersionId}, ${benchmarkRuns.comparabilityKey} order by ${benchmarkRuns.startedAt} desc, ${benchmarkRuns.id} desc)`.as(
         'rank',
       ),
@@ -350,22 +344,33 @@ export async function listVersionComparisonRuns(
       ),
     )
     .as('ranked');
-  const rows = await db
+  const representatives = db
     .select({
       runId: ranked.runId,
       artifactVersionId: ranked.artifactVersionId,
       version: ranked.version,
       comparabilityKey: ranked.comparabilityKey,
-      verdict: ranked.verdict,
-      agentAdapterId: ranked.agentAdapterId,
-      candidateMeanScore: ranked.candidateMeanScore,
-      candidateOutcome: ranked.candidateOutcome,
-      minDelta: ranked.minDelta,
     })
     .from(ranked)
     .where(eq(ranked.rank, 1))
     .orderBy(desc(ranked.version), asc(ranked.comparabilityKey))
-    .limit(ARTIFACT_VERSION_COMPARISON_LIMIT + 1);
+    .limit(ARTIFACT_VERSION_COMPARISON_LIMIT + 1)
+    .as('representatives');
+  const rows = await db
+    .select({
+      runId: representatives.runId,
+      artifactVersionId: representatives.artifactVersionId,
+      version: representatives.version,
+      comparabilityKey: representatives.comparabilityKey,
+      verdict: benchmarkRuns.verdict,
+      agentAdapterId: benchmarkRuns.agentAdapterId,
+      candidateMeanScore: sql<number | null>`${benchmarkRuns.summary} ->> '$.candidate.meanScore'`,
+      candidateOutcome: sql<string | null>`${benchmarkRuns.summary} ->> '$.candidateOutcome'`,
+      minDelta: sql<number>`${benchmarkRuns.summary} ->> '$.scoring.minDelta'`,
+    })
+    .from(representatives)
+    .innerJoin(benchmarkRuns, eq(benchmarkRuns.id, representatives.runId))
+    .orderBy(desc(representatives.version), asc(representatives.comparabilityKey));
   return {
     runs: rows.slice(0, ARTIFACT_VERSION_COMPARISON_LIMIT),
     truncated: rows.length > ARTIFACT_VERSION_COMPARISON_LIMIT,
