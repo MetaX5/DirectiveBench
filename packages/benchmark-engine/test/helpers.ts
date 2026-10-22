@@ -37,3 +37,11 @@ export async function collectGarbage(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
   gc();
 }
+
+/** Catastrophic-backtracking inputs of SPEC-118 §15; each runs for minutes on one thread. */
+export const ADVERSARIAL: readonly { pattern: string; text: string }[] = [
+  { pattern: '(a+)+$', text: `${'a'.repeat(32)}!` },
+  { pattern: '(a|a)*b', text: 'a'.repeat(40) },
+  // A long line with only 19 "a": every split of it is tried before the match fails.
+  { pattern: '(.*a){20}', text: `${'x'.repeat(100)}a`.repeat(19) },
+];

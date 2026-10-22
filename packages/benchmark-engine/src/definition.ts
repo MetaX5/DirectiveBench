@@ -54,31 +54,38 @@ export const fileExistsAssertionSchema = z
   })
   .strict();
 
+/** Regular-expression flags allowed in definitions (FR-108-10); `g` and `y` would make matching stateful. */
+const regexFlags = z
+  .string()
+  .regex(/^[imsu]*$/, 'only the regex flags i, m, s and u are allowed')
+  .default('');
+
+/** Adds a validation issue at `path` when `pattern` is not a valid regular expression. */
+function checkRegex(
+  pattern: string,
+  flags: string,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): void {
+  try {
+    new RegExp(pattern, flags);
+  } catch (error) {
+    ctx.addIssue({ code: 'custom', path, message: `invalid regex: ${(error as Error).message}` });
+  }
+}
+
 export const fileContainsAssertionSchema = z
   .object({
     ...assertionBase,
     type: z.literal('file-contains'),
     path: relativePath,
     pattern: z.string().min(1),
-    flags: z
-      .string()
-      .regex(/^[imsu]*$/, 'only the regex flags i, m, s and u are allowed')
-      .default(''),
+    flags: regexFlags,
     /** Pass when the pattern does NOT match. */
     negate: z.boolean().default(false),
   })
   .strict()
-  .superRefine((value, ctx) => {
-    try {
-      new RegExp(value.pattern, value.flags);
-    } catch (error) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['pattern'],
-        message: `invalid regex: ${(error as Error).message}`,
-      });
-    }
-  });
+  .superRefine((value, ctx) => checkRegex(value.pattern, value.flags, ctx, ['pattern']));
 
 export const changedFilesAssertionSchema = z
   .object({
@@ -94,14 +101,106 @@ export const changedFilesAssertionSchema = z
     message: 'changed-files needs `allowed` and/or `forbidden`',
   });
 
+/** Longest regular expression a document assertion accepts (SPEC-118 FR-118-46). */
+export const MAX_PATTERN_LENGTH = 1000;
+
+/** Most headings or phrases one document assertion lists (SPEC-118 FR-118-46). */
+export const MAX_MATCHERS_PER_ASSERTION = 100;
+
+/** A user regular expression, e.g. `{ pattern: "project manag|PM\\b", flags: i }`. */
+export const patternMatcherSchema = z
+  .object({ pattern: z.string().min(1).max(MAX_PATTERN_LENGTH), flags: regexFlags })
+  .strict()
+  .superRefine((value, ctx) => checkRegex(value.pattern, value.flags, ctx, ['pattern']));
+export type PatternMatcher = z.infer<typeof patternMatcherSchema>;
+
+const nonBlank = z.string().regex(/\S/, 'must not be blank');
+
+/** A literal string (never a regular expression) or a `{ pattern, flags }` regular expression. */
+export const textMatcherSchema = z.union([nonBlank, patternMatcherSchema]);
+export type TextMatcher = z.infer<typeof textMatcherSchema>;
+
+export const markdownSectionsAssertionSchema = z
+  .object({
+    ...assertionBase,
+    type: z.literal('markdown-sections'),
+    /** Workspace-relative path, or a glob matching exactly one agent-changed file (FR-118-40). */
+    file: relativePath,
+    /** ATX or setext headings of any level; strings match case-insensitively, whitespace folded. */
+    headings: z.array(textMatcherSchema).min(1).max(MAX_MATCHERS_PER_ASSERTION),
+    /** The headings must occur in the listed order. */
+    ordered: z.boolean().default(false),
+  })
+  .strict();
+
+export const requiredPhrasesAssertionSchema = z
+  .object({
+    ...assertionBase,
+    type: z.literal('required-phrases'),
+    /** Workspace-relative path, or a glob matching exactly one agent-changed file (FR-118-40). */
+    file: relativePath,
+    /** Every phrase must occur; a string is a literal whose whitespace runs match any run. */
+    phrases: z.array(textMatcherSchema).min(1).max(MAX_MATCHERS_PER_ASSERTION),
+    /** Applies to literal phrases; a pattern uses its own flags. */
+    caseSensitive: z.boolean().default(false),
+  })
+  .strict();
+
+export const markdownTableValueAssertionSchema = z
+  .object({
+    ...assertionBase,
+    type: z.literal('markdown-table-value'),
+    /** Workspace-relative path, or a glob matching exactly one agent-changed file (FR-118-40). */
+    file: relativePath,
+    /** Selects the first body row whose first cell matches. */
+    row: patternMatcherSchema,
+    /** Header cell of the value column, compared case-insensitively after trimming. */
+    column: nonBlank,
+    min: z.number().optional(),
+    max: z.number().optional(),
+    decimalSeparator: z.enum(['.', ',']).default('.'),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.min === undefined && value.max === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'markdown-table-value needs `min` and/or `max`',
+      });
+    } else if (value.min !== undefined && value.max !== undefined && value.min > value.max) {
+      ctx.addIssue({ code: 'custom', path: ['min'], message: '`min` must not exceed `max`' });
+    }
+  });
+
 export const assertionSchema = z.discriminatedUnion('type', [
   commandAssertionSchema,
   fileExistsAssertionSchema,
   fileContainsAssertionSchema,
   changedFilesAssertionSchema,
+  markdownSectionsAssertionSchema,
+  requiredPhrasesAssertionSchema,
+  markdownTableValueAssertionSchema,
 ]);
 export type AssertionDefinition = z.infer<typeof assertionSchema>;
 export type AssertionType = AssertionDefinition['type'];
+
+/**
+ * Static traits of every assertion type (SPEC-107 §8.3). Kept here, free of evaluator code,
+ * because the web app imports this module; the evaluators live in the plugin registry
+ * (`assertions.ts`), which reuses these traits.
+ */
+export const ASSERTION_TYPE_TRAITS: Readonly<
+  Record<AssertionType, { deterministic: boolean; executesCommands: boolean }>
+> = {
+  command: { deterministic: true, executesCommands: true },
+  'file-exists': { deterministic: true, executesCommands: false },
+  'file-contains': { deterministic: true, executesCommands: false },
+  'changed-files': { deterministic: true, executesCommands: false },
+  'markdown-sections': { deterministic: true, executesCommands: false },
+  'required-phrases': { deterministic: true, executesCommands: false },
+  'markdown-table-value': { deterministic: true, executesCommands: false },
+};
 
 export const benchmarkCaseSchema = z
   .object({
@@ -217,7 +316,9 @@ export type BenchmarkDefinitionInput = z.input<typeof benchmarkDefinitionSchema>
 /** True when running the suite executes commands (setup or command assertions). */
 export function definitionRunsCommands(definition: BenchmarkDefinition): boolean {
   return definition.cases.some(
-    (c) => c.setup.length > 0 || c.assertions.some((a) => a.type === 'command'),
+    (c) =>
+      c.setup.length > 0 ||
+      c.assertions.some((a) => ASSERTION_TYPE_TRAITS[a.type].executesCommands),
   );
 }
 
@@ -248,14 +349,8 @@ export function executionBlockers(
 
 /**
  * All assertion types of format v1 are deterministic. Nondeterministic types (e.g. a future
- * `llm-judge`) must be added here so results are flagged (SPEC-111 FR-111-42).
+ * `llm-judge`) are marked in `ASSERTION_TYPE_TRAITS` so results are flagged (SPEC-111 FR-111-42).
  */
 export function isDeterministicAssertion(assertion: AssertionDefinition): boolean {
-  switch (assertion.type) {
-    case 'command':
-    case 'file-exists':
-    case 'file-contains':
-    case 'changed-files':
-      return true;
-  }
+  return ASSERTION_TYPE_TRAITS[assertion.type].deterministic;
 }

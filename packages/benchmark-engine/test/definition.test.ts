@@ -1,11 +1,15 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { canonicalJson, sha256 } from '@directivebench/core';
 import {
   benchmarkDefinitionSchema,
   definitionRunsCommands,
   executionBlockers,
   isDeterministicAssertion,
+  MAX_MATCHERS_PER_ASSERTION,
+  MAX_PATTERN_LENGTH,
   type BenchmarkDefinitionInput,
 } from '../src/definition';
 import {
@@ -211,5 +215,184 @@ describe('loading definitions', () => {
       expect.arrayContaining(['id', 'name', 'execution', 'cases']),
     );
     expect(error.message).toContain(`Invalid benchmark definition ${json}:\n  - id: `);
+  });
+});
+
+describe('document assertion definitions (SPEC-118 FR-118-40…45)', () => {
+  const withAssertions = (assertions: unknown[]) =>
+    validateDefinition(
+      document({
+        cases: [
+          {
+            id: 'c',
+            name: 'C',
+            prompt: 'p',
+            fixture: { path: 'fixture' },
+            assertions: assertions as never,
+          },
+        ],
+      }),
+    );
+  const issuePaths = (result: ReturnType<typeof validateDefinition>) =>
+    result.success ? [] : result.issues.map((issue) => `${issue.path}: ${issue.message}`);
+
+  it('applies defaults to the three new types', () => {
+    const result = withAssertions([
+      { id: 's', type: 'markdown-sections', file: '**/*.md', headings: ['A', { pattern: 'b' }] },
+      { id: 'p', type: 'required-phrases', file: 'out.md', phrases: ['QA'] },
+      {
+        id: 't',
+        type: 'markdown-table-value',
+        file: 'out.md',
+        row: { pattern: 'x' },
+        column: 'Hours',
+        min: 1,
+      },
+    ]);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.definition.cases[0]?.assertions).toEqual([
+      {
+        id: 's',
+        type: 'markdown-sections',
+        file: '**/*.md',
+        headings: ['A', { pattern: 'b', flags: '' }],
+        ordered: false,
+        weight: 1,
+        required: false,
+      },
+      {
+        id: 'p',
+        type: 'required-phrases',
+        file: 'out.md',
+        phrases: ['QA'],
+        caseSensitive: false,
+        weight: 1,
+        required: false,
+      },
+      {
+        id: 't',
+        type: 'markdown-table-value',
+        file: 'out.md',
+        row: { pattern: 'x', flags: '' },
+        column: 'Hours',
+        min: 1,
+        decimalSeparator: '.',
+        weight: 1,
+        required: false,
+      },
+    ]);
+  });
+
+  it('reports invalid patterns and flags at their dotted paths', () => {
+    const result = withAssertions([
+      { id: 's', type: 'markdown-sections', file: 'a.md', headings: ['A', { pattern: '(' }] },
+      { id: 'p', type: 'required-phrases', file: 'a.md', phrases: [{ pattern: 'x', flags: 'g' }] },
+      {
+        id: 't',
+        type: 'markdown-table-value',
+        file: 'a.md',
+        row: { pattern: '[' },
+        column: 'H',
+        max: 1,
+      },
+    ]);
+    expect(issuePaths(result)).toEqual([
+      expect.stringMatching(/^cases\.0\.assertions\.0\.headings\.1\.pattern: invalid regex: /),
+      'cases.0.assertions.1.phrases.0.flags: only the regex flags i, m, s and u are allowed',
+      expect.stringMatching(/^cases\.0\.assertions\.2\.row\.pattern: invalid regex: /),
+    ]);
+  });
+
+  it('rejects blank literals, empty lists, unbounded ranges, inverted ranges and unsafe files', () => {
+    const result = withAssertions([
+      { id: 's', type: 'markdown-sections', file: '../a.md', headings: [] },
+      { id: 'p', type: 'required-phrases', file: '/abs.md', phrases: ['  '] },
+      { id: 't', type: 'markdown-table-value', file: 'a.md', row: { pattern: 'x' }, column: ' ' },
+      {
+        id: 'u',
+        type: 'markdown-table-value',
+        file: 'a.md',
+        row: { pattern: 'x' },
+        column: 'H',
+        min: 2,
+        max: 1,
+        decimalSeparator: ';',
+      },
+    ]);
+    const issues = issuePaths(result);
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        'cases.0.assertions.0.file: must be a relative path that does not leave its base directory',
+        expect.stringMatching(/^cases\.0\.assertions\.0\.headings: /),
+        'cases.0.assertions.1.file: must be a relative path that does not leave its base directory',
+        expect.stringMatching(/^cases\.0\.assertions\.1\.phrases\.0: /),
+        'cases.0.assertions.2.column: must not be blank',
+        expect.stringMatching(/^cases\.0\.assertions\.3\.decimalSeparator: /),
+      ]),
+    );
+    const bounds = withAssertions([
+      { id: 't', type: 'markdown-table-value', file: 'a.md', row: { pattern: 'x' }, column: 'H' },
+      {
+        id: 'u',
+        type: 'markdown-table-value',
+        file: 'a.md',
+        row: { pattern: 'x' },
+        column: 'H',
+        min: 2,
+        max: 1,
+      },
+    ]);
+    expect(issuePaths(bounds)).toEqual([
+      'cases.0.assertions.0: markdown-table-value needs `min` and/or `max`',
+      'cases.0.assertions.1.min: `min` must not exceed `max`',
+    ]);
+  });
+
+  it('caps the number of headings or phrases and the length of patterns', () => {
+    const many = Array.from({ length: MAX_MATCHERS_PER_ASSERTION + 1 }, (_, i) => `h${i}`);
+    const result = withAssertions([
+      { id: 's', type: 'markdown-sections', file: 'a.md', headings: many },
+      { id: 'p', type: 'required-phrases', file: 'a.md', phrases: many },
+      {
+        id: 't',
+        type: 'markdown-table-value',
+        file: 'a.md',
+        row: { pattern: 'x'.repeat(MAX_PATTERN_LENGTH + 1) },
+        column: 'H',
+        min: 1,
+      },
+    ]);
+    expect(issuePaths(result)).toEqual([
+      expect.stringMatching(/^cases\.0\.assertions\.0\.headings: /),
+      expect.stringMatching(/^cases\.0\.assertions\.1\.phrases: /),
+      expect.stringMatching(/^cases\.0\.assertions\.2\.row\.pattern: /),
+    ]);
+    const atLimit = withAssertions([
+      {
+        id: 's',
+        type: 'markdown-sections',
+        file: 'a.md',
+        headings: many
+          .slice(1)
+          .map((pattern) => ({ pattern: pattern.padEnd(MAX_PATTERN_LENGTH, 'x') })),
+      },
+    ]);
+    expect(atLimit.success).toBe(true);
+  });
+
+  it('keeps every existing example definition byte-identical (no schemaVersion change)', async () => {
+    const examples = fileURLToPath(new URL('../../../examples/benchmarks', import.meta.url));
+    // Hashes of the parsed definitions recorded on main before the new types were added.
+    const before: Record<string, string> = {
+      'mock-input-validation': 'ab0fc6049d46e0e2c827392c0530b90d7fa2b9df00645c0532b83d4fe8231946',
+      'nextjs-component-quality':
+        'ea051fd007ad1992bd11b8f3551bc79ab049890170565ad15bd87de042159ccf',
+      'wordpress-ajax-security': '4014cc64840e5b36eaecb6e4ec9f875ce845beef9e02b506401ffe03de104d49',
+    };
+    for (const [name, hash] of Object.entries(before)) {
+      const definition = await loadDefinitionFile(join(examples, name, 'benchmark.yaml'));
+      expect([name, sha256(canonicalJson(definition))]).toEqual([name, hash]);
+    }
   });
 });
