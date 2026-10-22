@@ -14,7 +14,7 @@ import {
   scanMarkdown,
   type MarkdownTableRow,
 } from './markdown';
-import { matchPatterns, type PatternJob } from './pattern-worker';
+import { matchPatterns } from './pattern-worker';
 
 type Of<T extends AssertionDefinition['type']> = Extract<AssertionDefinition, { type: T }>;
 
@@ -37,12 +37,6 @@ export function matcherLabel(matcher: TextMatcher): string {
   return typeof matcher === 'string' ? matcher : `/${matcher.pattern}/${matcher.flags}`;
 }
 
-const patternJob = (
-  matcher: PatternMatcher,
-  texts: readonly string[],
-  options: { firstOnly: boolean },
-): PatternJob => ({ pattern: matcher.pattern, flags: matcher.flags, texts, ...options });
-
 /**
  * For each matcher, the indexes of the `texts` it matches: literals by normalised equality on
  * this thread, patterns in one bounded worker (FR-118-46). Returns the assertion error instead
@@ -55,10 +49,7 @@ async function matchTexts(
   context: AssertionContext,
 ): Promise<{ ok: true; matches: number[][] } | { ok: false; result: AssertionResult }> {
   const patterns = matchers.filter((m): m is PatternMatcher => typeof m !== 'string');
-  const outcome = await matchPatterns(
-    patterns.map((m) => patternJob(m, texts, { firstOnly: false })),
-    context.signal,
-  );
+  const outcome = await matchPatterns({ patterns, texts, firstOnly: false }, context.signal);
   if (!outcome.ok) {
     return {
       ok: false,
@@ -127,7 +118,7 @@ async function evaluateRequiredPhrases(
   if (!target.ok) return assertionResult(assertion, false, target.message, target.details);
   const patterns = assertion.phrases.filter((m): m is PatternMatcher => typeof m !== 'string');
   const outcome = await matchPatterns(
-    patterns.map((m) => patternJob(m, [target.text], { firstOnly: true })),
+    { patterns, texts: [target.text], firstOnly: true },
     context.signal,
   );
   if (!outcome.ok) return assertionError(assertion, outcome.error, patterns.map(matcherLabel));
@@ -182,13 +173,11 @@ async function evaluateMarkdownTableValue(
   let first: number | undefined;
   if (candidates.length > 0) {
     const outcome = await matchPatterns(
-      [
-        patternJob(
-          assertion.row,
-          candidates.map((c) => c.row.cells[0] as string),
-          { firstOnly: true },
-        ),
-      ],
+      {
+        patterns: [assertion.row],
+        texts: candidates.map((c) => c.row.cells[0] as string),
+        firstOnly: true,
+      },
       context.signal,
     );
     if (!outcome.ok) return assertionError(assertion, outcome.error, [rowLabel]);

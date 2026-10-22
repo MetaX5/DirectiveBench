@@ -86,7 +86,7 @@ async function evaluateFileContains(
   if (!read.ok) return result(assertion, false, read.message);
   const label = `/${assertion.pattern}/${assertion.flags}`;
   const outcome = await matchPatterns(
-    [{ pattern: assertion.pattern, flags: assertion.flags, texts: [read.text], firstOnly: true }],
+    { patterns: [assertion], texts: [read.text], firstOnly: true },
     context.signal,
   );
   if (!outcome.ok) return assertionError(assertion, outcome.error, [label]);

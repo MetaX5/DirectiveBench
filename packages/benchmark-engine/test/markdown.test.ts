@@ -98,6 +98,27 @@ describe('scanMarkdown headings', () => {
     expect(headings).toEqual(['Quoted', 'Nested quote', 'Listed', 'Numbered', '-not a list']);
   });
 
+  it('does not count headings in fenced code inside block quotes and list items', () => {
+    const { headings } = scanMarkdown(
+      [
+        '> ```markdown',
+        '> # Quoted fence',
+        '> ```',
+        '# After quote',
+        '- ```markdown',
+        '  # Listed fence',
+        '  ```',
+        '',
+        '1. ~~~',
+        '   # Numbered fence',
+        '   ~~~',
+        '',
+        '# Last',
+      ].join('\n'),
+    );
+    expect(headings).toEqual(['After quote', 'Last']);
+  });
+
   it('ends a list item at an ATX heading or a fence', () => {
     const { headings } = scanMarkdown(
       ['- item', '# Risks', 'Title', '===', '- item', '```', 'code', '```', 'After', '---'].join(
@@ -171,6 +192,19 @@ describe('scanMarkdown tables', () => {
       { header: ['x', 'y'], rows: [] },
       { header: ['p', 'q'], rows: [] },
     ]);
+  });
+
+  it('ends a table body at a list item, thematic break or block quote', () => {
+    const body = (boundary: string) =>
+      scanMarkdown(
+        ['| Role | Hours |', '|---|---|', '| Dev | 5 |', boundary, 'PM | 10'].join('\n'),
+      ).tables[0]?.rows.map((row) => row.cells[0]);
+    for (const boundary of ['- no table anymore', '1. step', '* * *', '___', '> quote']) {
+      expect([boundary, body(boundary)]).toEqual([boundary, ['Dev']]);
+    }
+    expect(body('| QA | 3 |')).toEqual(['Dev', 'QA', 'PM']);
+    // Indented four spaces, `---` is not a thematic break.
+    expect(body('    ---')).toEqual(['Dev', '---', 'PM']);
   });
 
   it('finds tables with single-dash delimiters and tables inside list items', () => {
@@ -321,6 +355,8 @@ describe('linear time', () => {
     'nested quote markers': (n) => `${'> '.repeat(n * 12)}# x\n`,
     'nested list markers': (n) => `${'- 1. '.repeat(n * 5)}x\n`,
     'html comments': (n) => '<!-- x\n'.repeat(n) + '-->\n',
+    'quoted fences': (n) => '> ```\n> # x\n'.repeat(n),
+    'table body with breaks': (n) => `| a | b |\n|---|---|\n${'| 1 | 2 |\n* * *\n'.repeat(n)}`,
   };
 
   it.each(Object.keys(shapes))('scans %s in linear time', (name) => {

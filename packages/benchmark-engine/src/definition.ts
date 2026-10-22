@@ -101,9 +101,15 @@ export const changedFilesAssertionSchema = z
     message: 'changed-files needs `allowed` and/or `forbidden`',
   });
 
+/** Longest regular expression a document assertion accepts (SPEC-118 FR-118-46). */
+export const MAX_PATTERN_LENGTH = 1000;
+
+/** Most headings or phrases one document assertion lists (SPEC-118 FR-118-46). */
+export const MAX_MATCHERS_PER_ASSERTION = 100;
+
 /** A user regular expression, e.g. `{ pattern: "project manag|PM\\b", flags: i }`. */
 export const patternMatcherSchema = z
-  .object({ pattern: z.string().min(1), flags: regexFlags })
+  .object({ pattern: z.string().min(1).max(MAX_PATTERN_LENGTH), flags: regexFlags })
   .strict()
   .superRefine((value, ctx) => checkRegex(value.pattern, value.flags, ctx, ['pattern']));
 export type PatternMatcher = z.infer<typeof patternMatcherSchema>;
@@ -121,7 +127,7 @@ export const markdownSectionsAssertionSchema = z
     /** Workspace-relative path, or a glob matching exactly one agent-changed file (FR-118-40). */
     file: relativePath,
     /** ATX or setext headings of any level; strings match case-insensitively, whitespace folded. */
-    headings: z.array(textMatcherSchema).min(1),
+    headings: z.array(textMatcherSchema).min(1).max(MAX_MATCHERS_PER_ASSERTION),
     /** The headings must occur in the listed order. */
     ordered: z.boolean().default(false),
   })
@@ -134,7 +140,7 @@ export const requiredPhrasesAssertionSchema = z
     /** Workspace-relative path, or a glob matching exactly one agent-changed file (FR-118-40). */
     file: relativePath,
     /** Every phrase must occur; a string is a literal whose whitespace runs match any run. */
-    phrases: z.array(textMatcherSchema).min(1),
+    phrases: z.array(textMatcherSchema).min(1).max(MAX_MATCHERS_PER_ASSERTION),
     /** Applies to literal phrases; a pattern uses its own flags. */
     caseSensitive: z.boolean().default(false),
   })

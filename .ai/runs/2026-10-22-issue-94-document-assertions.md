@@ -137,7 +137,19 @@ source (a string, not instrumented — behaviour is tested end to end).
    - Round 3 — approve; nit (container flag not reset at an ATX heading or fence) fixed in the
      following commit. Deferred nits: worker `exit` without message (covered by the deadline),
      `resourceLimits`, a row-count cap, a structured error code (Phase 3), cancellation-test
-     timing, list lines inside a table body, tables inside block quotes (not detected).
+     timing, tables inside block quotes (not detected).
+6. Codex adversarial review (needs-attention, triaged valid by the coordinator), fixed:
+   - [high] each pattern carried its own copy of the texts, so structured cloning copied the
+     document per pattern (120 × 2 MiB ≈ 332 MiB RSS) with no cap. Now `PatternRequest` sends
+     the texts once (`workerPayload`), with named limits `MAX_MATCHERS_PER_ASSERTION` (100) and
+     `MAX_PATTERN_LENGTH` (1 000) in the schema and `MAX_PATTERN_INPUT_CHARS` (4 Mi) checked
+     before a worker is constructed (fails closed as `pattern-worker-failed`).
+   - [medium] fences inside block quotes and list items did not hide their headings; fences now
+     open and close on container content.
+   - [medium] a table body did not end at a list item or thematic break; it now ends at every
+     GFM block boundary checked (blank line, ATX heading, fence, block quote, list item,
+     thematic break).
+   Gate after the fixes: 1 081 tests (engine 227), 100% coverage, build and verify:pack pass.
 
 ## Verification
 

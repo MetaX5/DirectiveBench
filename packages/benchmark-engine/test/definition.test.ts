@@ -8,6 +8,8 @@ import {
   definitionRunsCommands,
   executionBlockers,
   isDeterministicAssertion,
+  MAX_MATCHERS_PER_ASSERTION,
+  MAX_PATTERN_LENGTH,
   type BenchmarkDefinitionInput,
 } from '../src/definition';
 import {
@@ -345,6 +347,38 @@ describe('document assertion definitions (SPEC-118 FR-118-40…45)', () => {
       'cases.0.assertions.0: markdown-table-value needs `min` and/or `max`',
       'cases.0.assertions.1.min: `min` must not exceed `max`',
     ]);
+  });
+
+  it('caps the number of headings or phrases and the length of patterns', () => {
+    const many = Array.from({ length: MAX_MATCHERS_PER_ASSERTION + 1 }, (_, i) => `h${i}`);
+    const result = withAssertions([
+      { id: 's', type: 'markdown-sections', file: 'a.md', headings: many },
+      { id: 'p', type: 'required-phrases', file: 'a.md', phrases: many },
+      {
+        id: 't',
+        type: 'markdown-table-value',
+        file: 'a.md',
+        row: { pattern: 'x'.repeat(MAX_PATTERN_LENGTH + 1) },
+        column: 'H',
+        min: 1,
+      },
+    ]);
+    expect(issuePaths(result)).toEqual([
+      expect.stringMatching(/^cases\.0\.assertions\.0\.headings: /),
+      expect.stringMatching(/^cases\.0\.assertions\.1\.phrases: /),
+      expect.stringMatching(/^cases\.0\.assertions\.2\.row\.pattern: /),
+    ]);
+    const atLimit = withAssertions([
+      {
+        id: 's',
+        type: 'markdown-sections',
+        file: 'a.md',
+        headings: many
+          .slice(1)
+          .map((pattern) => ({ pattern: pattern.padEnd(MAX_PATTERN_LENGTH, 'x') })),
+      },
+    ]);
+    expect(atLimit.success).toBe(true);
   });
 
   it('keeps every existing example definition byte-identical (no schemaVersion change)', async () => {

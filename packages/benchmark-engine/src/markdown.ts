@@ -143,7 +143,20 @@ function endsTable(line: string): boolean {
     line.trim() === '' ||
     atxHeading(line) !== null ||
     openingFence(line) !== null ||
-    line.trimStart().startsWith('>')
+    containerContent(line) !== null ||
+    isThematicBreak(line)
+  );
+}
+
+/** Three or more `-`, `*` or `_` (spaces allowed between), indented at most three spaces. */
+function isThematicBreak(line: string): boolean {
+  if (indentation(line) > 3) return false;
+  const marks = line.replace(/[ \t]/g, '');
+  const marker = marks[0];
+  return (
+    marks.length >= 3 &&
+    (marker === '-' || marker === '*' || marker === '_') &&
+    [...marks].every((c) => c === marker)
   );
 }
 
@@ -184,8 +197,10 @@ export function scanMarkdown(text: string): MarkdownScan {
   let container = false;
 
   for (const line of lines) {
+    // Fences also open and close inside block quotes and list items (`> ```` … `> ````).
+    const inner = containerContent(line);
     if (fence) {
-      if (closesFence(line, fence)) fence = null;
+      if (closesFence(line, fence) || (inner !== null && closesFence(inner, fence))) fence = null;
       continue;
     }
     if (comment) {
@@ -199,11 +214,11 @@ export function scanMarkdown(text: string): MarkdownScan {
       }
       table = null;
     }
-    const opened = openingFence(line);
+    const opened = openingFence(line) ?? (inner === null ? null : openingFence(inner));
     if (opened) {
       fence = opened;
       paragraph = [];
-      container = false;
+      container = inner !== null;
       continue;
     }
     if (opensComment(line)) {
@@ -235,7 +250,6 @@ export function scanMarkdown(text: string): MarkdownScan {
         continue;
       }
     }
-    const inner = containerContent(line);
     if (inner !== null) {
       const nested = atxHeading(inner);
       container = true;

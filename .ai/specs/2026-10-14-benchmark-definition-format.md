@@ -121,7 +121,8 @@ type AssertionDefinition =
   | { type: 'markdown-table-value'; file: string; row: { pattern: string; flags: string /*''*/ }; column: string;
       min?: number; max?: number /* at least one, min ≤ max */; decimalSeparator: '.' | ',' /*'.'*/ } & Common;
 
-type TextMatcher = string /* literal, not blank */ | { pattern: string; flags: string /*'' ⊆ imsu*/ };
+type TextMatcher = string /* literal, not blank */ | { pattern: string /* ≤ MAX_PATTERN_LENGTH (1000) */; flags: string /*'' ⊆ imsu*/ };
+// headings / phrases: at most MAX_MATCHERS_PER_ASSERTION (100) entries; row.pattern ≤ 1000 characters.
 
 interface Common { id: string; description?: string; weight: number /*1, 0..1000*/; required: boolean /*false*/ }
 ```
@@ -402,6 +403,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` "benchmark definition format" and "fixtures and workspaces"):** `benchmarkDefinitionSchema` v1 with all fields/defaults in §8.2 (`timeoutSeconds` 300, `repetitions` 3, `maxOutputBytes` 65536, `passThreshold` 1, `minDelta` 0.05, `stabilityThreshold` 0.1, assertion `weight` 1, `required` false), strict objects, slug/path/regex/weight/duplicate validation; YAML/JSON loading with dotted-path issues; `migrateDefinitionDocument` (no migrations yet; rejects newer versions and malformed YAML); `prepareSuiteImport` with fixture/overlay snapshots and `suiteContentHash`; Mock Agent playbook; executable example `examples/benchmarks/mock-input-validation/` (verified end-to-end by `engine.test.ts`, `runner.test.ts` and `directivebench demo`); specification-only examples validate against the schema.
-- **Implemented (2026-10-22, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1):** the additive assertion types `markdown-sections`, `required-phrases` and `markdown-table-value` with their defaults and validation (invalid patterns and flags at their dotted paths, at least one of `min`/`max`); existing definitions parse and hash exactly as before (pinned hashes of the three original examples in `test/definition.test.ts`); the specification-only example `examples/benchmarks/document-assertions/` validates and its sample documents are graded in `test/document-assertions.test.ts`.
+- **Implemented (2026-10-22, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1):** the additive assertion types `markdown-sections`, `required-phrases` and `markdown-table-value` with their defaults and validation (invalid patterns and flags at their dotted paths, at least one of `min`/`max`, at most `MAX_MATCHERS_PER_ASSERTION` = 100 headings or phrases, patterns of at most `MAX_PATTERN_LENGTH` = 1 000 characters); existing definitions parse and hash exactly as before (pinned hashes of the three original examples in `test/definition.test.ts`); the specification-only example `examples/benchmarks/document-assertions/` validates and its sample documents are graded in `test/document-assertions.test.ts`.
 - **Partially implemented:** import UI/CLI (only `demo` imports the bundled example).
 - **Not implemented:** export bundles, `benchmark validate`/`import` CLI commands, JSON Schema publication, import-time validation of `agentOptions`, YAML source positions in errors, any v2 migration, docker execution.

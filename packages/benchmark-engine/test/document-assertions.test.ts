@@ -187,6 +187,40 @@ describe('markdown-sections', () => {
   });
 });
 
+describe('markdown structure boundaries (Codex review)', () => {
+  it('does not accept a heading that only appears in a fenced example inside a container', async () => {
+    for (const example of [
+      '> ```markdown\n> # Risks\n> ```\n',
+      '- ```markdown\n  # Risks\n  ```\n',
+    ]) {
+      const result = await evaluateAssertion(
+        assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Risks'] }),
+        workspace({ 'doc.md': `# Estimate\n\n${example}` }),
+      );
+      expect(result).toMatchObject({ passed: false, message: 'Missing headings: Risks' });
+    }
+  });
+
+  it('does not read numbers after a list or thematic break as table rows', async () => {
+    for (const boundary of ['- no table anymore', '---', '* * *']) {
+      const result = await evaluateAssertion(
+        assertion({
+          type: 'markdown-table-value',
+          file: 'doc.md',
+          row: { pattern: '^PM$' },
+          column: 'Hours',
+          min: 1,
+        }),
+        workspace({ 'doc.md': `| Role | Hours |\n|---|---|\n| Dev | 5 |\n${boundary}\nPM | 10\n` }),
+      );
+      expect(result).toMatchObject({
+        passed: false,
+        message: expect.stringMatching(/^No row whose/),
+      });
+    }
+  });
+});
+
 describe('required-phrases', () => {
   it('passes when every literal and pattern occurs', async () => {
     const result = await evaluateAssertion(
