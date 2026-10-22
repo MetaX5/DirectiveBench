@@ -203,6 +203,7 @@ export function scanMarkdown(text: string): MarkdownScan {
     if (opened) {
       fence = opened;
       paragraph = [];
+      container = false;
       continue;
     }
     if (opensComment(line)) {
@@ -219,6 +220,7 @@ export function scanMarkdown(text: string): MarkdownScan {
     if (atx !== null) {
       headings.push(atx);
       paragraph = [];
+      container = false;
       continue;
     }
     const header = paragraph.at(-1);

@@ -98,6 +98,15 @@ describe('scanMarkdown headings', () => {
     expect(headings).toEqual(['Quoted', 'Nested quote', 'Listed', 'Numbered', '-not a list']);
   });
 
+  it('ends a list item at an ATX heading or a fence', () => {
+    const { headings } = scanMarkdown(
+      ['- item', '# Risks', 'Title', '===', '- item', '```', 'code', '```', 'After', '---'].join(
+        '\n',
+      ),
+    );
+    expect(headings).toEqual(['Risks', 'Title', 'After']);
+  });
+
   it('does not count headings inside HTML comments', () => {
     const { headings } = scanMarkdown(
       [
