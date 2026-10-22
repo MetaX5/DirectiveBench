@@ -1075,8 +1075,8 @@ changed before merge.
     unknown version → the newest version numbers, exit 2. The version flag is `--artifact-version`:
     the program's own `-V`/`--version` takes `--version` before the subcommand sees it.
   - FR-118-23/39 `benchmark run` (`benchmark-plan.ts`, `benchmark-run.ts`) in the order of
-    FR-118-39: suite validated and fixtures snapshotted into the content-addressed store (files,
-    not the database) → candidate and baseline (`--baseline v<n>`; one-version artifact, same
+    FR-118-39: suite validated and fixtures snapshotted into a temporary store, copied into the
+    content-addressed `<dataDir>/fixtures` only after the confirmation → candidate and baseline (`--baseline v<n>`; one-version artifact, same
     content or the candidate itself refused) → agent `claude-code` only, environment, empty
     `agentOptions`, type in `artifactTypes`, installable format (FR-118-25), bundle inspection of
     both versions (FR-118-26), one skill name (FR-118-08), `/` prompt only with an A/B baseline
@@ -1091,13 +1091,17 @@ changed before merge.
     version, auth mode and isolation, model ("CLI default — unpinned"), agent-run count, budget,
     `disable-model-invocation`, the cost, data-leaving, Not-sandboxed and (subscription)
     ambient-configuration notices and, for a suite that runs commands, every `setup` and `command`
-    argv; a TTY asks, `--yes` skips, no TTY without `--yes` exits 2; a declined confirmation stores
-    nothing and exits 130 (implementation choice: treated as a cancellation) (AC-8).
+    argv; a TTY asks, `--yes` skips, no TTY without `--yes` exits 2; a declined confirmation, or
+    Ctrl-C at the prompt, stores nothing and exits 130 (implementation choice: treated as a
+    cancellation) (AC-8).
   - FR-118-33/34 one transaction, `createBenchmarkRunJob`: fixture versions, the suite version
     (reused when unchanged, FR-118-23), approval source `user` (`approveSuiteVersion`, one
     conditional UPDATE) and the job created already acquired by the CLI's runner; a failure rolls
-    all of it back (AC-7, AC-15). The runner gets `ClaudeCodeAdapter` and the mock (FR-118-05; `serve`
-    stays mock-only), `hostId` = `installationId` (§8.3).
+    all of it back (AC-7, AC-15). The runner gets only `ClaudeCodeAdapter` (FR-118-05; `serve`
+    stays mock-only), `hostId` = `installationId` (§8.3). Like every command, `benchmark run`
+    first runs the idempotent bootstrap (`initialize`: data directory, `installationId` in
+    `config.json`, pending migrations, predefined categories); "database unchanged" means no
+    benchmark data — suites, versions, fixtures, approvals, jobs, runs, assignments.
   - FR-118-36 Ctrl-C: `LocalRunner.cancel` aborts the job's signal at once; with a fake `claude`
     that ignores SIGINT and SIGTERM the built CLI exited 130 after 5 s (the kill grace) and no
     `claude` process remained (AC-10).

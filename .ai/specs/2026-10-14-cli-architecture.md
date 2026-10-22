@@ -107,7 +107,8 @@ Before spawning the web server the CLI checks the port on the target host. If it
 | 3 | Unsupported runtime (Node.js older than 22.16.0). A missing `node:sqlite` is reported by `doctor` as a failing check (exit 6). |
 | 4 | Port in use |
 | 5 | Data directory or migration failure |
-| 6 | `doctor` found at least one failing check / `demo` benchmark did not produce the expected result |
+| 6 | `doctor` found at least one failing check / `demo` benchmark did not produce the expected result / `benchmark run` ended with a display status other than `passed` |
+| 130 | `benchmark run` was cancelled (Ctrl-C) or its confirmation declined ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-38) |
 
 The implementation (`ExitCode` in `apps/cli/src/runtime.ts`) matches this table; changes must update both.
 
