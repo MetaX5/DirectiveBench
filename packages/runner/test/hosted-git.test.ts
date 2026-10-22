@@ -344,7 +344,14 @@ function fakeContext(
   return { git, context };
 }
 
-describePosix('hosted git steps with a fake git', () => {
+/**
+ * Timeout for each fake-git test. Every test spawns one Node.js fake per git call, several per
+ * test; the blob-fetch test (eight fake sequences) took ~0.3 s alone but exceeded vitest's 5 s
+ * default under `taskset -c 0,1` with load (issue #114). The tests assert outcomes, never time.
+ */
+const FAKE_GIT_TEST_TIMEOUT_MS = 60_000;
+
+describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEOUT_MS }, () => {
   it('checks the version: newer majors pass, garbage and old versions do not', async () => {
     for (const [stdout, ok] of [
       ['git version 3.0.0\n', true],

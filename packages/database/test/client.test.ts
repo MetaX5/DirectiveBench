@@ -239,6 +239,13 @@ describe('withTransaction', () => {
   });
 });
 
+/**
+ * Timeout for the offset sweeps below: ~20 ms alone, but they run over a hundred statements
+ * against a database file on disk, and on the 2-core CI runner shared with every package one sweep
+ * exceeded vitest's 5 s default (issue #114). They assert ordering, never time.
+ */
+const OFFSET_SWEEP_TIMEOUT_MS = 60_000;
+
 describe('withTransaction isolation on a shared connection', () => {
   const getHandle = useTestDatabase();
 
@@ -310,53 +317,61 @@ describe('withTransaction isolation on a shared connection', () => {
   // swallowed the outside statement, which was then rolled back with it. Every offset is tried,
   // because only some of them hit the gap: with the old proxy, "transaction-first, offset 0" (a
   // statement issued in the same synchronous step that queued the transaction) lost its row.
-  it('never lets an outside statement join a transaction that begins right next to it', async () => {
-    const handle = getHandle();
-    for (let offset = 0; offset <= 30; offset += 1) {
-      for (const order of ['outside-first', 'transaction-first'] as const) {
-        handle.sqlite.exec('delete from categories');
-        const outsideSlug = `outside-${order}-${offset}`;
-        let transaction: Promise<void>;
-        let outside: Promise<unknown>;
-        if (order === 'outside-first') {
-          outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
-          await microtasks(offset);
-          transaction = rolledBack(handle, `inside-${offset}`);
-        } else {
-          transaction = rolledBack(handle, `inside-${offset}`);
-          await microtasks(offset);
-          outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
+  it(
+    'never lets an outside statement join a transaction that begins right next to it',
+    async () => {
+      const handle = getHandle();
+      for (let offset = 0; offset <= 30; offset += 1) {
+        for (const order of ['outside-first', 'transaction-first'] as const) {
+          handle.sqlite.exec('delete from categories');
+          const outsideSlug = `outside-${order}-${offset}`;
+          let transaction: Promise<void>;
+          let outside: Promise<unknown>;
+          if (order === 'outside-first') {
+            outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
+            await microtasks(offset);
+            transaction = rolledBack(handle, `inside-${offset}`);
+          } else {
+            transaction = rolledBack(handle, `inside-${offset}`);
+            await microtasks(offset);
+            outside = run(handle.db.insert(categories).values(categoryRow(outsideSlug)));
+          }
+          await expect(transaction).rejects.toThrow('rolled back');
+          await outside;
+          expect(await storedSlugs(handle), `${order}, offset ${offset}`).toEqual([outsideSlug]);
         }
-        await expect(transaction).rejects.toThrow('rolled back');
-        await outside;
-        expect(await storedSlugs(handle), `${order}, offset ${offset}`).toEqual([outsideSlug]);
       }
-    }
-  });
+    },
+    OFFSET_SWEEP_TIMEOUT_MS,
+  );
 
-  it('keeps a waiting statement out of the transaction queued behind the one it waited for', async () => {
-    const handle = getHandle();
-    for (let offset = 0; offset <= 30; offset += 1) {
-      handle.sqlite.exec('delete from categories');
-      let release = (): void => undefined;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const first = withTransaction(handle, async (db) => {
-        await db.insert(categories).values(categoryRow('first'));
-        await gate;
-      });
-      await new Promise((resolve) => setImmediate(resolve));
-      const outside = run(handle.db.insert(categories).values(categoryRow('outside')));
-      await microtasks(offset);
-      const second = rolledBack(handle, 'second');
-      release();
-      await first;
-      await expect(second).rejects.toThrow('rolled back');
-      await outside;
-      expect(await storedSlugs(handle), `offset ${offset}`).toEqual(['first', 'outside']);
-    }
-  });
+  it(
+    'keeps a waiting statement out of the transaction queued behind the one it waited for',
+    async () => {
+      const handle = getHandle();
+      for (let offset = 0; offset <= 30; offset += 1) {
+        handle.sqlite.exec('delete from categories');
+        let release = (): void => undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const first = withTransaction(handle, async (db) => {
+          await db.insert(categories).values(categoryRow('first'));
+          await gate;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        const outside = run(handle.db.insert(categories).values(categoryRow('outside')));
+        await microtasks(offset);
+        const second = rolledBack(handle, 'second');
+        release();
+        await first;
+        await expect(second).rejects.toThrow('rolled back');
+        await outside;
+        expect(await storedSlugs(handle), `offset ${offset}`).toEqual(['first', 'outside']);
+      }
+    },
+    OFFSET_SWEEP_TIMEOUT_MS,
+  );
 
   it('treats a callback continuation that outlives its transaction as outside code', async () => {
     const handle = getHandle();
