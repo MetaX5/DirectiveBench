@@ -54,7 +54,15 @@ export type TraceEvent =
   | { type: 'step-skipped'; stepId: string; description: string; reason: string }
   | { type: 'file-written'; path: string; bytes: number }
   | { type: 'message'; text: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  /** A tool call of a real agent (SPEC-203 §4.2); `input` is truncated, redacted JSON. */
+  | { type: 'tool-call'; tool: string; callId: string; input?: string }
+  /** The result of a tool call; `output` is truncated and redacted. */
+  | { type: 'tool-result'; callId: string; ok: boolean; output?: string }
+  /** A tool use the permission rules denied; part of the measured behaviour, not an error. */
+  | { type: 'permission-denied'; tool: string; callId?: string }
+  /** The agent retried an API request (`category` as reported, e.g. `rate_limit`). */
+  | { type: 'retry'; attempt: number; category: string; httpStatus?: number };
 
 export interface AgentRunRequest {
   workspaceDir: string;
@@ -66,12 +74,52 @@ export interface AgentRunRequest {
   options: unknown;
 }
 
-export type AgentExecutionStatus = 'completed' | 'agent-error' | 'timeout' | 'cancelled';
+export type AgentExecutionStatus =
+  'completed' | 'agent-error' | 'timeout' | 'cancelled' | 'infrastructure-error';
 
 export interface AgentUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Input tokens read from the prompt cache. */
+  cachedInputTokens?: number;
+  /** Input tokens written to the prompt cache. */
+  cacheCreationInputTokens?: number;
+  /** As reported by the harness; for Claude Code a client-side estimate (SPEC-203 §4). */
   costUsd?: number;
+}
+
+/**
+ * The conditions one agent run of a real harness ran under (SPEC-203 §4.2, SPEC-118 FR-118-04).
+ * The engine requires every field except the model lists to be equal for all agent runs of a
+ * benchmark run, and the execution model to be the only main-conversation model.
+ */
+export interface AgentRunMetadata {
+  adapterVersion: string | null;
+  authMode: 'subscription' | 'api-key';
+  isolationProfile: 'isolated' | 'user-profile';
+  permissionProfile: 'edit-only' | 'edit-and-shell';
+  /** `execution.model` as requested; null = the harness default. */
+  requestedModel: string | null;
+  /** The session model the harness resolved; null when the run ended before reporting it. */
+  executionModel: string | null;
+  /** Every model the harness reported usage for, sorted. */
+  reportedModels: string[];
+  /** Reported models no main-conversation message used (internal harness work), sorted. */
+  auxiliaryModels: string[];
+  /** Main-conversation message models other than `executionModel`, sorted; non-empty = mismatch. */
+  mismatchedMessageModels: string[];
+  /** sha256 of the normalised argv (FR-118-04). */
+  flagsHash: string;
+}
+
+/** Whether the installed skill was loaded and used in one agent run (SPEC-118 FR-118-09). */
+export interface SkillActivation {
+  loaded: boolean;
+  invoked: boolean;
+  /** Successful invocations of the installed skill, + 1 for an expanded `/<name>` prompt. */
+  invocations: number;
+  /** Other skill names the agent attempted, sorted (all denied by the profile). */
+  otherSkills: string[];
 }
 
 export interface AgentRunResult {
@@ -81,6 +129,14 @@ export interface AgentRunResult {
   trace: TraceEvent[];
   usage: AgentUsage | null;
   error: string | null;
+  /** Machine-readable failure code (SPEC-203 §9), when the adapter has one. */
+  errorCode?: string;
+  /** Warning codes of this agent run (e.g. `ambient-user-config`, `permission-denied`). */
+  warnings?: string[];
+  /** Reported by real-harness adapters; absent for the mock agent. */
+  metadata?: AgentRunMetadata;
+  /** For `skill-md` artifacts, when the harness reported its session start. */
+  skillActivation?: SkillActivation;
 }
 
 export interface InstalledArtifact {

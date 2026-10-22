@@ -373,3 +373,38 @@ describe('jobs created already acquired (SPEC-118 FR-118-34, AC-9)', () => {
     expect(await first).toMatchObject({ status: 'interrupted' });
   }, 60_000);
 });
+
+describe('systematic agent failures (SPEC-118 FR-118-15, AC-17)', () => {
+  it('a rate-limited first agent run ends the benchmark run as error without further runs', async () => {
+    const handle = connect();
+    const example = await importBundledExample(handle, examples, join(dataDir, 'fixtures'));
+    const limited = new (class extends MockAgentAdapter {
+      calls = 0;
+      override async run(): Promise<AgentRunResult> {
+        this.calls += 1;
+        return {
+          status: 'agent-error',
+          durationMs: 1,
+          summary: 'rate limited',
+          trace: [],
+          usage: null,
+          error: 'Claude Code failed (rate-limited): API Error: Rate limit reached',
+          errorCode: 'rate-limited',
+        };
+      }
+    })();
+    const job = await enqueueBenchmarkJob(handle.db, {
+      suiteVersionId: example.suite.versionId,
+      artifactVersionId: example.artifact.versionId,
+    });
+    const [result] = await createRunner(handle, {
+      adapters: new Map<string, AgentAdapter>([['mock', limited]]),
+    }).runUntilIdle();
+    expect(result).toMatchObject({ jobId: job.id, status: 'failed' });
+    expect(limited.calls).toBe(1);
+    const detail = await getBenchmarkRunDetail(handle.db, result?.benchmarkRunId as string);
+    expect(detail?.run).toMatchObject({ status: 'error', verdict: 'error' });
+    expect(detail?.run.error).toMatch(/^Stopped after case .+ \(rate-limited\): /);
+    expect(detail?.agentRuns).toHaveLength(1);
+  }, 60_000);
+});
