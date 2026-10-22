@@ -1,4 +1,6 @@
-import { basename, dirname } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import {
   CLAUDE_CODE_ADAPTER_ID,
@@ -6,7 +8,11 @@ import {
   type AgentAdapter,
   type ClaudeAuthMode,
 } from '@directivebench/agent-adapters';
-import type { PreparedSuite, ScoringSummary } from '@directivebench/benchmark-engine';
+import {
+  snapshotDirectory,
+  type PreparedSuite,
+  type ScoringSummary,
+} from '@directivebench/benchmark-engine';
 import {
   InvalidBaselineError,
   assignBenchmarkSuite,
@@ -31,9 +37,6 @@ import {
 import { CliError, ExitCode, resolveAssets } from './runtime';
 import { initialize } from './setup';
 
-/** Exit code of a run the user cancelled (Ctrl-C or a declined confirmation), FR-118-38. */
-export const EXIT_CANCELLED = 130;
-
 /** What `benchmark run` needs from the terminal and the process; replaced in tests. */
 export interface RunTerminal {
   env: NodeJS.ProcessEnv;
@@ -45,7 +48,11 @@ export interface RunTerminal {
   onInterrupt(handler: () => void): () => void;
 }
 
-/** Asks on `output` and reads one line from `input`; `y` or `yes` (any case) is a yes. */
+/**
+ * Asks on `output` and reads one line from `input`; `y` or `yes` (any case) is a yes. An answer
+ * that cannot be read — Ctrl-C at the prompt rejects with `AbortError`, a closed input — is a no:
+ * nothing starts without an explicit yes.
+ */
 export async function askYesNo(
   question: string,
   input: NodeJS.ReadableStream = process.stdin,
@@ -53,7 +60,8 @@ export async function askYesNo(
 ): Promise<boolean> {
   const prompt = createInterface({ input, output });
   try {
-    return /^y(es)?$/i.test((await prompt.question(`${question} [y/N] `)).trim());
+    const answer = await prompt.question(`${question} [y/N] `).catch(() => '');
+    return /^y(es)?$/i.test(answer.trim());
   } finally {
     prompt.close();
   }
@@ -251,7 +259,7 @@ export function reportText(report: RunReport): string[] {
 
 /** FR-118-38: 0 only for `passed`, 130 for a cancelled run, 6 for everything else. */
 export function exitCodeFor(report: RunReport): number {
-  if (report.status === 'cancelled') return EXIT_CANCELLED;
+  if (report.status === 'cancelled') return ExitCode.Cancelled;
   return report.displayStatus === 'passed' ? ExitCode.Ok : ExitCode.CheckFailed;
 }
 
@@ -271,8 +279,11 @@ export async function benchmarkRunCommand(
   // With --json, stdout carries only the result object.
   const say = options.json ? console.error : console.log;
   const { layout, config, handle } = await initialize(flags.dataDir, resolveAssets().migrationsDir);
+  // Fixture snapshots go to a temporary store first and reach `<dataDir>/fixtures` only once
+  // the run is confirmed, so a refused or declined run leaves nothing behind (FR-118-39).
+  const staging = await mkdtemp(join(tmpdir(), 'directivebench-suite-'));
   try {
-    const prepared = await loadSuite(path, layout.fixtures);
+    const prepared = await loadSuite(path, staging);
     const resolved = await resolveVersions(handle.db, options);
     const { runsCommands, alreadyApproved } = await checkSuite(
       handle.db,
@@ -292,7 +303,7 @@ export async function benchmarkRunCommand(
         );
       }
     }
-    await inspectWorkspaces(prepared, resolved, layout.fixtures, home);
+    await inspectWorkspaces(prepared, resolved, staging, home);
     const readiness = await checkReadiness(options.authMode, terminal.env);
 
     for (const line of planText({
@@ -314,11 +325,15 @@ export async function benchmarkRunCommand(
       }
       if (!(await terminal.confirm('Start the benchmark run?'))) {
         say('Not started; nothing was stored.');
-        return EXIT_CANCELLED;
+        return ExitCode.Cancelled;
       }
     }
 
     // Only the adapter this suite needs; `serve` stays mock-only (FR-118-05).
+    for (const snapshot of prepared.snapshots) {
+      // Content-addressed and idempotent: the same files give the same hash in the data store.
+      await snapshotDirectory(join(staging, snapshot.hash), layout.fixtures);
+    }
     const adapters = new Map<string, AgentAdapter>([
       [
         CLAUDE_CODE_ADAPTER_ID,
@@ -408,6 +423,7 @@ export async function benchmarkRunCommand(
     }
     return exitCodeFor(report);
   } finally {
+    await rm(staging, { recursive: true, force: true });
     handle.close();
   }
 }

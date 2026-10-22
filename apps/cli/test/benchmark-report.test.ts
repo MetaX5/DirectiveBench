@@ -4,7 +4,6 @@ import type { ArtifactBundle } from '@directivebench/core';
 import type { BenchmarkRunDetail } from '@directivebench/database';
 import type { Resolved, RunOptions } from '../src/benchmark-plan';
 import {
-  EXIT_CANCELLED,
   exitCodeFor,
   isInteractive,
   planText,
@@ -168,7 +167,7 @@ describe('exitCodeFor (FR-118-38, AC-11)', () => {
   });
 
   it('a cancelled run exits 130', () => {
-    expect(exitCodeFor(report('cancelled', 'cancelled'))).toBe(EXIT_CANCELLED);
+    expect(exitCodeFor(report('cancelled', 'cancelled'))).toBe(ExitCode.Cancelled);
   });
 });
 

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,7 +77,7 @@ interface Setup {
   dataDir: string;
   suite: string;
   fake: ReturnType<typeof writeFakeClaude>;
-  terminal: RunTerminal & { interrupt: () => void };
+  terminal: RunTerminal & { interrupt: () => void; listening: () => boolean };
   output: () => string;
   errors: () => string;
   counts: () => Promise<Record<string, number>>;
@@ -152,6 +152,7 @@ async function setup(
       };
     },
     interrupt: () => handler?.(),
+    listening: () => handler !== null,
   };
   const counts = async () => {
     const db = openDatabase(join(dataDir, 'directivebench.db'), { readOnly: true });
@@ -194,6 +195,8 @@ async function refused(s: Setup, flags: Partial<Parameters<typeof benchmarkRunCo
   expect(error).toBeInstanceOf(CliError);
   expect((error as CliError).exitCode).toBe(ExitCode.Usage);
   expect(await s.counts()).toEqual(NOTHING);
+  // Fixture snapshots stay in a temporary store until the run is confirmed (FR-118-39).
+  expect(readdirSync(join(s.dataDir, 'fixtures'))).toEqual([]);
   return (error as CliError).message;
 }
 
@@ -365,7 +368,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     expect(s.output()).toContain('Cancelling…');
     expect(s.output()).toMatch(/Result: +cancelled/);
     // The handler is removed once the run is over.
-    s.terminal.interrupt();
+    expect(s.terminal.listening()).toBe(false);
   }, 60_000);
 
   it('asks for confirmation on a terminal and stores nothing when declined', async () => {
@@ -379,6 +382,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     expect(declined.terminal.confirm).toHaveBeenCalledWith('Start the benchmark run?');
     expect(declined.output()).toContain('Not started; nothing was stored.');
     expect(await declined.counts()).toEqual(NOTHING);
+    expect(readdirSync(join(declined.dataDir, 'fixtures'))).toEqual([]);
     expect(declined.fake.starts()).toBe(0);
 
     const accepted = await setup({ interactive: true, confirm: true });
@@ -426,6 +430,19 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     } finally {
       db.close();
     }
+    // A declined confirmation records no approval, also for a stored unapproved version (AC-15).
+    const unapproved = await setup({ definition, interactive: true, confirm: false });
+    await benchmarkRunCommand(
+      {
+        suite: unapproved.suite,
+        artifact: 'pdf',
+        dataDir: unapproved.dataDir,
+        approveCommands: true,
+      },
+      unapproved.terminal,
+    );
+    expect(await unapproved.counts()).toEqual(NOTHING);
+
     // Approved once: the next run needs no flag and says so.
     expect(
       await benchmarkRunCommand(
@@ -659,7 +676,13 @@ posix('benchmark run edge paths', () => {
     const s = await setup();
     const { InvalidBaselineError } = await import('@directivebench/database');
     transaction.failure = new InvalidBaselineError('the baseline changed');
-    expect(await refused(s, {})).toBe('the baseline changed');
+    const error = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    ).catch((reason: unknown) => reason);
+    expect(error).toMatchObject({ exitCode: ExitCode.Usage, message: 'the baseline changed' });
+    // The transaction rolled back; the confirmed run's fixture snapshots stay content-addressed.
+    expect(await s.counts()).toEqual(NOTHING);
   });
 
   it('propagates other errors of the final transaction', async () => {
@@ -727,6 +750,17 @@ describe('benchmark run terminal helpers', () => {
       expect(await asked).toBe(expected);
       expect(String(output.read())).toContain('Start? [y/N] ');
     }
+  });
+
+  it('treats Ctrl-C at the prompt as a no', async () => {
+    const { PassThrough } = await import('node:stream');
+    const { askYesNo } = await import('../src/benchmark-run');
+    const input = new PassThrough();
+    // A terminal output makes readline handle Ctrl-C itself, as on a real TTY.
+    const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+    const asked = askYesNo('Start?', input, output);
+    input.write('\x03');
+    expect(await asked).toBe(false);
   });
 
   it('listens for SIGINT until the run is over', async () => {
