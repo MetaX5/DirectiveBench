@@ -1,4 +1,5 @@
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { createId, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import {
@@ -133,6 +134,9 @@ export async function listBenchmarkRuns(
   }));
 }
 
+/** The A/B baseline version of a run, joined beside the candidate version (SPEC-118 FR-118-13). */
+const baselineVersions = alias(artifactVersions, 'baseline_versions');
+
 export async function getBenchmarkRunDetail(db: Database, runId: string) {
   const row = await db
     .select({
@@ -141,12 +145,19 @@ export async function getBenchmarkRunDetail(db: Database, runId: string) {
       suite: benchmarkSuites,
       artifactVersion: artifactVersions,
       artifact: artifacts,
+      /** Null for baseline kind `none` (no artifact in the baseline workspaces). */
+      baselineArtifactVersion: {
+        id: baselineVersions.id,
+        version: baselineVersions.version,
+        contentHash: baselineVersions.contentHash,
+      },
     })
     .from(benchmarkRuns)
     .innerJoin(benchmarkSuiteVersions, eq(benchmarkRuns.suiteVersionId, benchmarkSuiteVersions.id))
     .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
     .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
     .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
+    .leftJoin(baselineVersions, eq(benchmarkRuns.baselineArtifactVersionId, baselineVersions.id))
     .where(eq(benchmarkRuns.id, runId))
     .get();
   if (!row) return null;
@@ -170,6 +181,49 @@ export async function getBenchmarkRunDetail(db: Database, runId: string) {
 }
 
 export type BenchmarkRunDetail = NonNullable<Awaited<ReturnType<typeof getBenchmarkRunDetail>>>;
+
+export interface ArtifactRunItem {
+  run: BenchmarkRunRecord;
+  suite: { id: string; name: string; version: number };
+  /** The candidate: the artifact version the run tested. */
+  artifactVersion: { id: string; version: number };
+  /** The A/B baseline version, or null for baseline kind `none` (SPEC-118 FR-118-13). */
+  baselineVersion: { id: string; version: number } | null;
+}
+
+/**
+ * Every benchmark run of one artifact, of any status, for the results by version (SPEC-118
+ * FR-118-50): newest candidate version first, then newest run first (`id` breaks ties, so the
+ * order never depends on the storage order).
+ */
+export async function listArtifactRuns(
+  db: Database,
+  artifactId: string,
+): Promise<ArtifactRunItem[]> {
+  const rows = await db
+    .select({
+      run: benchmarkRuns,
+      suiteId: benchmarkSuites.id,
+      suiteName: benchmarkSuites.name,
+      suiteVersion: benchmarkSuiteVersions.version,
+      versionId: artifactVersions.id,
+      version: artifactVersions.version,
+      baselineVersion: { id: baselineVersions.id, version: baselineVersions.version },
+    })
+    .from(benchmarkRuns)
+    .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
+    .innerJoin(benchmarkSuiteVersions, eq(benchmarkRuns.suiteVersionId, benchmarkSuiteVersions.id))
+    .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
+    .leftJoin(baselineVersions, eq(benchmarkRuns.baselineArtifactVersionId, baselineVersions.id))
+    .where(eq(artifactVersions.artifactId, artifactId))
+    .orderBy(desc(artifactVersions.version), desc(benchmarkRuns.startedAt), desc(benchmarkRuns.id));
+  return rows.map((r) => ({
+    run: r.run,
+    suite: { id: r.suiteId, name: r.suiteName, version: r.suiteVersion },
+    artifactVersion: { id: r.versionId, version: r.version },
+    baselineVersion: r.baselineVersion,
+  }));
+}
 
 export async function countRunsByVerdict(db: Database): Promise<Record<string, number>> {
   const rows = await db

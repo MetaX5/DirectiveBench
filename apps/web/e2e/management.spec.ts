@@ -60,7 +60,7 @@ test.describe('artifacts', () => {
       'href',
       /^\/benchmarks\//,
     );
-    await sections.getByRole('link', { name: 'Evaluation history' }).click();
+    await sections.getByRole('link', { name: 'Results by version' }).click();
     await expect(page.getByText(MOCK_LABEL).first()).toBeVisible();
 
     await sections.getByRole('link', { name: 'Overview' }).click();
