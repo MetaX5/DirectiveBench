@@ -4,6 +4,8 @@ export * from './env';
 export * from './errors';
 export * from './import-tokens';
 export * from './install';
+export * from './normalize';
 export * from './skill-name';
+export * from './stream-parser';
 export * from './workspace-inspection';
 export { pinWorkspace, workspacePinIssue, type WorkspacePin } from './workspace-pin';
