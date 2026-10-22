@@ -600,6 +600,34 @@ describe('private keys and other secrets (Codex review)', () => {
     expect(parsed.rawTail).toBe(`x${BEGIN}[REDACTED]${END}zzzzzzzzzz`);
   });
 
+  it('redacts escaped known secrets in rejected, malformed and dropped lines (Codex review)', () => {
+    const secrets = ['pa"ss-word-1234', 'back\\slash-secret-1234', 'multi\nline-secret-1234'];
+    for (const secret of secrets) {
+      const options = { ...SKILL, knownSecrets: [secret] };
+      // Valid JSON, rejected as an event (a call id over the name limit).
+      const rejected = parseClaudeStream(
+        lines(
+          assistant([{ type: 'tool_use', id: 'i'.repeat(257), name: 'Read', input: { secret } }]),
+        ),
+        options,
+      );
+      expect(rejected.malformedLines).toBe(1);
+      // Not JSON: the secret inside a JSON document inside a string, cut off.
+      const nested = JSON.stringify({ text: JSON.stringify({ secret }) });
+      const broken = parseClaudeStream(`${nested.slice(0, -1)}\n`, options);
+      // Dropped: the escaped secret in the kept head.
+      const parser = new ClaudeStreamParser(options);
+      parser.push(`{"a":${JSON.stringify(secret)}`);
+      parser.push(Buffer.alloc(CLAUDE_STREAM_MAX_LINE_BYTES, 0x61));
+      const dropped = parser.end();
+      for (const tail of [rejected.rawTail, broken.rawTail, dropped.rawTail]) {
+        expect(tail).toContain('[REDACTED]');
+        expect(tail).not.toContain(JSON.stringify(secret).slice(1, -1));
+        expect(tail).not.toContain(secret);
+      }
+    }
+  });
+
   it('redacts known secrets in tool inputs before they are serialised (Codex review)', () => {
     const secrets = ['pa"ss-word-1234', 'back\\slash-secret-1234', 'multi\nline-secret-1234'];
     const parsed = parseClaudeStream(

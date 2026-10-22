@@ -158,6 +158,13 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
       redact the whole text first; a dropped line's head keeps a 4 KiB redaction margin past the
       kept 256 characters.
 
+13. Codex round 5 (high): a line that parses but is rejected as an event, a malformed line and a
+    dropped line's head are redacted as raw JSON text, where a known secret holding a quote,
+    backslash or newline appears escaped and was not matched. Instead of fixing each path, the
+    parser now redacts every known secret also in its once- and twice-JSON-escaped forms (the CLI
+    writes with `JSON.stringify`), so every raw-text path is covered. Red first: the new test
+    (three secrets × rejected / malformed / dropped) fails on 21107aa.
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck` — pass.

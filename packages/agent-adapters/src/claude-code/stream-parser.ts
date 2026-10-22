@@ -290,7 +290,7 @@ export class ClaudeStreamParser {
   };
 
   constructor(private readonly options: ClaudeStreamOptions) {
-    this.secrets = options.knownSecrets ?? [];
+    this.secrets = withJsonForms(options.knownSecrets ?? []);
     this.slashPrompt =
       options.skillName !== undefined && promptInvokesSkill(options.prompt, options.skillName);
   }
@@ -652,6 +652,22 @@ function redactValue(value: unknown, secrets: readonly string[]): unknown {
       redactValue(item, secrets),
     ]),
   );
+}
+
+/**
+ * Known secrets plus the forms they take in JSON text, escaped once (a string value) and twice (a
+ * JSON document inside a string): a malformed or dropped line is redacted before, or without, being
+ * decoded, so a secret holding a quote, backslash or control character must match there too. The
+ * CLI writes its stream with `JSON.stringify`, whose escaping this reproduces. Longest first, so a
+ * form is replaced before a shorter one inside it.
+ */
+function withJsonForms(secrets: readonly string[]): string[] {
+  const forms = new Set<string>();
+  for (const secret of secrets) {
+    const once = JSON.stringify(secret).slice(1, -1);
+    forms.add(secret).add(once).add(JSON.stringify(once).slice(1, -1));
+  }
+  return [...forms].sort((a, b) => b.length - a.length);
 }
 
 const KEY_MARKER = /-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----/g;
