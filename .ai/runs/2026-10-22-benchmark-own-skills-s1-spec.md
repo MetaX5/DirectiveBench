@@ -140,6 +140,31 @@ subagents (FR-118-06, new code `fixture-grants-tools`; previously these only nee
 which does not cover widening the profile). AC-23 lists the three cases; Q18 added; §19 gains
 scoped-grant validation; SPEC-203 §8 and AC-12 synced.
 
+## Review round: Codex adversarial review, round 4 (2026-10-22)
+
+One HIGH finding: **fixture `.claude/settings.local.json` survived command approval.** Confirmed:
+FR-118-06 inspected only frontmatter and a few settings keys, while local
+`permissions.allow: ["Skill"]` or `additionalDirectories` merge with the CLI allow list
+(permissions docs) and widen the profile, contradicting FR-118-08/07. Because rounds 2–4 kept
+finding new keys and locations, the whole class is closed instead of enumerating keys:
+FR-118-06 now refuses (`fixture-contains-claude-config`, independent of `--approve-commands`,
+before any process starts) any `.claude`/`.claude-plugin` segment at any depth, `.mcp.json`,
+`CLAUDE.local.md`, `.worktreeinclude` and `.claude.json` in fixtures and overlays (list checked
+against the claude-directory docs, SPEC-203 C12). `CLAUDE.md`/`AGENTS.md` stay allowed as text,
+but an `@` import resolving outside the workspace is refused (imports load file contents, memory
+docs). Found while fixing: approved `setup` commands could create configuration after the import
+check, so the workspace is re-checked before spawn (`workspace-contains-claude-config`, stops the
+run). The fixture approval path, per-key settings checks, `fixture-overrides-auth`,
+`fixture-overrides-model` and `fixture-grants-tools` were removed (simplified, not layered).
+AC-16 and AC-26 rewritten (bare `Skill` in fixture local settings → refused, fake `claude` never
+starts); AC-22 now asserts a second installed skill stays denied. Q19 added, superseding the
+fixture parts of Q17/Q18; §19 gains vetted fixture configuration. SPEC-203 §1/§8, SPEC-108
+FR-108-16 and SPEC-110 FR-110-05a synced.
+
+Capability removed: S1 suites cannot run a skill inside an existing Claude Code project setup
+(project settings, MCP servers, other project skills/commands/agents, rules, output styles) or
+with `CLAUDE.local.md`.
+
 ## Verification
 
 - `prettier --check .` (repository config; Markdown and `.ai/` are prettier-ignored): passed.
