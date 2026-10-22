@@ -30,7 +30,7 @@ generic design as a lesson.
 - Thirteen autonomous defaults for what the brief left open, listed in SPEC-118 "Resolved
   assumptions"; Q5 (`--approve-commands` as a CLI approval channel) is marked
   `⚠ NEEDS HUMAN CONFIRMATION` because roadmap M3 says approval happens in the UI, so the PR
-  stays draft.
+  stayed draft until the maintainer confirmed Q5 on 2026-10-22.
 - The brief's choices that change approved-looking defaults were applied as the maintainer's
   decisions: SPEC-203 §7 `authMode` default becomes `subscription` (was "user must choose").
 - The design-genericity correction is a rule for all future work, so it went into `AGENTS.md` §7
@@ -78,7 +78,6 @@ generic design as a lesson.
 
 ## Follow-ups
 
-- Maintainer: confirm or replace SPEC-118 Q5 (CLI command approval).
 - Maintainer: the terms review of SPEC-203 §3.2 before a release with subscription as default.
 - Tracker: close or annotate #30 (D07 answered) and #26 (A04 skipped), and park #20/#21/#22.
 - Decide whether `AGENTS.md` §1 should list `specs/briefs/`.

@@ -116,7 +116,7 @@ Applies to every milestone:
 **Deliverables:** completion of [SPEC-107](2026-10-14-benchmark-engine.md), [SPEC-110](2026-10-14-benchmark-execution.md), [SPEC-111](2026-10-14-benchmark-scoring.md), [SPEC-112](2026-10-14-red-green-evaluation.md): assigning benchmarks to registry artifacts, execution approval UX for imported suites, comparability key enforcement in results, results history per artifact ([SPEC-113](2026-10-14-results-and-reporting.md)), `benchmark run|list` CLI, Docker environment (`environment.kind: docker`).
 **First slice:** S1 ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)) delivers from M3 the assignment of suites to registry artifacts, `benchmark run` (plus `benchmark init`), results history per artifact version and A/B against another artifact version; from M4 only the Claude Code adapter. Docker, `benchmark list` and the UI approval flow are not in S1.
 **Acceptance criteria:**
-- A user-imported suite cannot execute commands until approved in the UI; approval is recorded with its source. (S1 proposes an explicit CLI approval, `--approve-commands`, as well — pending maintainer confirmation, SPEC-118 Q5.)
+- A user-imported suite cannot execute commands until approved in the UI; approval is recorded with its source. (S1 adds an explicit CLI approval, `--approve-commands`, as well — confirmed by the maintainer on 2026-10-22, SPEC-118 Q5.)
 - Results with different comparability keys are never aggregated (verified by test).
 - `directivebench benchmark run <suite> --artifact <id>` runs headless and exits non-zero on `regressed`/`failed`.
 - The `wordpress-ajax-security` example runs in Docker when Docker is available and reports a clear error otherwise.
