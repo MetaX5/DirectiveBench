@@ -3,7 +3,7 @@ id: SPEC-115
 title: Settings and Configuration
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
 related: [SPEC-009, SPEC-010, SPEC-007, SPEC-114, SPEC-110, SPEC-116, SPEC-011]
 ---
@@ -73,6 +73,11 @@ A tool distributed via `npx` must never store data inside the npm cache or insta
 | `server.openBrowser` | boolean | `true` | `--no-open` overrides |
 | `runner.concurrency` | int 1–16 | `1` | [SPEC-114](2026-10-14-runner-management.md) |
 | `runner.keepWorkspaces` | boolean | `false` | Keep temp workspaces for debugging |
+| `installationId` | UUID string, optional | generated (FR-115-15) | Identifies this data directory; not a secret |
+
+| ID | Requirement |
+|---|---|
+| FR-115-15 | `installationId` SHALL be a random UUID generated once per data directory: when `config.json` is created it carries one, and an existing file without one gains it at the next initialisation (`init`, `serve`, `demo`) with its other keys kept exactly as written (defaults are not written into it). It is never regenerated while present; an invalid value is a `ConfigError` (FR-115-11). It is the `hostId` of the comparability key for runs in the `user-profile` isolation profile, so results that may include one machine's user-level agent configuration never share a key with another machine's ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.3). Copying a data directory copies the identifier; export/import of it is future work. |
 
 Candidate future keys (not in schema v1; adding them requires a schema change): `logging.level`, `runner.pollIntervalMs`, `fixtures.maxBytes`, `ui.theme`, `ui.density`, `secrets` (reference definitions).
 
@@ -124,12 +129,14 @@ type DirectiveBenchConfig = {
   configVersion: 1;
   server: { host: string; port: number; openBrowser: boolean };
   runner: { concurrency: number; keepWorkspaces: boolean };
+  installationId?: string; // UUID, FR-115-15
 };
 
 function resolveDataDir(o?: { flag?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; home?: string }): string;
 function dataDirLayout(root: string): { root; database; config; fixtures; logs; cache: string };
 function loadConfig(path: string): DirectiveBenchConfig;      // throws ConfigError
 function saveConfig(path: string, c: DirectiveBenchConfig): void; // atomic
+function ensureInstallationId(path: string): DirectiveBenchConfig; // FR-115-15, atomic
 function isLoopbackHost(host: string): boolean;
 
 // future

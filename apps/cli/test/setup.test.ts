@@ -39,7 +39,9 @@ describe('initialize', () => {
         expect(existsSync(join(root, dir))).toBe(true);
       expect(JSON.parse(readFileSync(join(root, 'config.json'), 'utf8'))).toMatchObject({
         server: { host: '127.0.0.1', port: 4280 },
+        installationId: first.config.installationId,
       });
+      expect(first.config.installationId).toMatch(/^[0-9a-f-]{36}$/);
       const categories = first.handle.sqlite
         .prepare('select count(*) as n from categories')
         .get() as {
@@ -54,9 +56,10 @@ describe('initialize', () => {
     second.handle.close();
     expect(second.createdConfig).toBe(false);
     expect(second.appliedMigrations).toBe(0);
+    expect(second.config.installationId).toBe(first.config.installationId);
   });
 
-  it('keeps an existing config.json', async () => {
+  it('keeps an existing config.json, adding only a missing installationId', async () => {
     const root = tempDir();
     writeFileSync(join(root, 'config.json'), JSON.stringify({ server: { port: 5123 } }));
     const workspace = await initialize(root, migrationsDir);
@@ -65,6 +68,7 @@ describe('initialize', () => {
     expect(workspace.config.server.port).toBe(5123);
     expect(JSON.parse(readFileSync(join(root, 'config.json'), 'utf8'))).toEqual({
       server: { port: 5123 },
+      installationId: workspace.config.installationId,
     });
   });
 

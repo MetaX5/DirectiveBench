@@ -3,7 +3,7 @@ id: SPEC-010
 title: Local Installation
 status: draft
 created: 2026-10-14
-updated: 2026-10-21
+updated: 2026-10-22
 category: foundation
 related: [SPEC-004, SPEC-006, SPEC-007, SPEC-009, SPEC-115, ADR-0001, ADR-0002, ADR-0004, ADR-0008]
 ---
@@ -68,7 +68,7 @@ Temporary benchmark workspaces live outside the data directory in `<os tmpdir>/d
 
 ## 6. Configuration
 
-`config.json` holds non-secret settings: `configVersion` (`1`), `server.host` (`127.0.0.1`), `server.port` (`4280`), `server.openBrowser` (`true`), `runner.concurrency` (`1`, max 16), `runner.keepWorkspaces` (`false`). Unknown keys are rejected (strict schema in `packages/core/src/config.ts`; full reference in [SPEC-115](2026-10-14-settings-and-configuration.md)). Precedence: CLI option > environment variable > `config.json` > default. An invalid file stops startup with exit code 2 and the Zod error path; it is never silently overwritten. Secrets are never written to `config.json` or the database in plaintext; OS keychain storage is planned ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). No secrets exist in bootstrap.
+`config.json` holds non-secret settings: `configVersion` (`1`), `server.host` (`127.0.0.1`), `server.port` (`4280`), `server.openBrowser` (`true`), `runner.concurrency` (`1`, max 16), `runner.keepWorkspaces` (`false`), and a generated `installationId` (a UUID identifying the data directory, SPEC-115 FR-115-15). Unknown keys are rejected (strict schema in `packages/core/src/config.ts`; full reference in [SPEC-115](2026-10-14-settings-and-configuration.md)). Precedence: CLI option > environment variable > `config.json` > default. An invalid file stops startup with exit code 2 and the Zod error path; it is never silently overwritten. Secrets are never written to `config.json` or the database in plaintext; OS keychain storage is planned ([ADR-0008](../decisions/0008-secret-storage-and-authentication.md)). No secrets exist in bootstrap.
 
 ## 7. Upgrades and migrations
 

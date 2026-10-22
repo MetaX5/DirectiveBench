@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ConfigError,
   dataDirLayout,
+  ensureInstallationId,
   isLoopbackHost,
   loadConfig,
   resolveDataDir,
@@ -140,5 +141,54 @@ describe('config', () => {
     expect(isLoopbackHost('0.0.0.0')).toBe(false);
     expect(isLoopbackHost('192.168.1.2')).toBe(false);
     expect(isLoopbackHost('127.0.0.1.evil.com')).toBe(false);
+  });
+});
+
+describe('ensureInstallationId (SPEC-115 FR-115-15)', () => {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('creates a missing file with every default and a generated identifier', () => {
+    const path = join(tempDir(), 'config.json');
+    const config = ensureInstallationId(path);
+    expect(config.installationId).toMatch(uuid);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+      configVersion: 1,
+      server: { host: '127.0.0.1', port: 4280, openBrowser: true },
+      runner: { concurrency: 1, keepWorkspaces: false },
+      installationId: config.installationId,
+    });
+    if (process.platform !== 'win32') expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Created once: later calls return the stored identifier and leave the file alone.
+    const written = readFileSync(path, 'utf8');
+    expect(ensureInstallationId(path).installationId).toBe(config.installationId);
+    expect(readFileSync(path, 'utf8')).toBe(written);
+    expect(loadConfig(path).installationId).toBe(config.installationId);
+  });
+
+  it('adds the identifier to an existing file and keeps its keys as written', () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, JSON.stringify({ runner: { concurrency: 2 } }));
+    const config = ensureInstallationId(path);
+    expect(config.runner).toEqual({ concurrency: 2, keepWorkspaces: false });
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
+      runner: { concurrency: 2 },
+      installationId: config.installationId,
+    });
+  });
+
+  it('gives every data directory its own identifier', () => {
+    const a = ensureInstallationId(join(tempDir(), 'config.json')).installationId;
+    const b = ensureInstallationId(join(tempDir(), 'config.json')).installationId;
+    expect(a).not.toBe(b);
+  });
+
+  it('never rewrites an invalid file and rejects an identifier that is not a UUID', () => {
+    const path = join(tempDir(), 'config.json');
+    writeFileSync(path, '{ broken');
+    expect(() => ensureInstallationId(path)).toThrow(/not valid JSON/);
+    expect(readFileSync(path, 'utf8')).toBe('{ broken');
+    writeFileSync(path, JSON.stringify({ installationId: 'host-1' }));
+    expect(() => ensureInstallationId(path)).toThrow(ConfigError);
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ installationId: 'host-1' });
   });
 });
