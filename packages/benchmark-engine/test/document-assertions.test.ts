@@ -244,6 +244,33 @@ describe('markdown structure boundaries (Codex review)', () => {
       });
     }
   });
+
+  // Issue #110: two false passes found by the fourth Codex review of PR #105.
+  it('does not accept a heading that a list marker padding puts inside a fence', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Risks'] }),
+      workspace({ 'doc.md': '-   ```\n  ```\n# Risks\n```' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Risks' });
+  });
+
+  it('does not read a row hidden in an HTML comment after a table', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend API' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '| Role | Hours |\n|---|---|\n<!--\n| Backend API | 24 |\n-->' }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
 });
 
 describe('required-phrases', () => {
