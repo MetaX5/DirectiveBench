@@ -78,6 +78,8 @@ describe('isClaudeConfigPath (FR-118-06)', () => {
       '.claude.json',
       '.Claude/commands/x.md',
       '.claude./x',
+      '.mcp.jſon',
+      '.claude.jſon',
     ]) {
       expect(isClaudeConfigPath(path), path).toBe(true);
     }
@@ -235,6 +237,16 @@ describe('inspectWorkspace: imports and links (FR-118-27, AC-27)', () => {
     const findings = await inspectWorkspace(join(scratch, 'links', 'ws'), { homeDir: home });
     expect(summary(findings)).toEqual(['workspace-imports-outside CLAUDE.md ../planted.md']);
     expect(findings[0]?.target).toBe(join(scratch, 'links', 'planted.md'));
+  });
+
+  it('refuses a host file named before a Markdown boundary in the same word', async () => {
+    await put('CLAUDE.md', `See @${hostFile}*x* and [@${hostFile}](x)\n`);
+    expect(summary(await inspect())).toEqual([`workspace-imports-outside CLAUDE.md ${hostFile}`]);
+  });
+
+  it('passes an import of an existing outside directory, which discloses nothing', async () => {
+    await put('src/app.ts', `import { cn } from '@${host}';\nconst root = '@/';\n`);
+    expect(await inspect()).toEqual([]);
   });
 
   it('passes non-existent outside targets and inside imports', async () => {

@@ -140,6 +140,34 @@ describe('inspectArtifactBundle (FR-118-26)', () => {
     expect(inspectArtifactBundle(skill('context: 3'), 'candidate')).toEqual([]);
   });
 
+  it('reads frontmatter whose opening line has trailing blanks, as Claude Code does', () => {
+    for (const opening of ['--- ', '---\t', '---  \t', '\uFEFF--- ']) {
+      const findings = inspectArtifactBundle(
+        bundle('skill-md', {
+          'SKILL.md': `${opening}\nhooks:\n  Stop: []\nmodel: opus\n---\nbody`,
+        }),
+        'candidate',
+      );
+      expect(
+        findings.map((finding) => finding.code),
+        JSON.stringify(opening),
+      ).toEqual(['artifact-executes-code', 'artifact-overrides-model']);
+    }
+    const crlf = bundle('skill-md', { 'SKILL.md': '--- \r\nallowed-tools: Bash\r\n---\r\nbody' });
+    expect(inspectArtifactBundle(crlf, 'candidate')).toHaveLength(1);
+    expect(
+      claudeSkillName(bundle('skill-md', { 'SKILL.md': '--- \nname: real-name\n---\n' })),
+    ).toBe('real-name');
+  });
+
+  it('fails closed on a SKILL.md that opens frontmatter but never closes it', () => {
+    const open = bundle('skill-md', { 'SKILL.md': '---\nhooks: {}\nbody without a closing line' });
+    expect(inspectArtifactBundle(open, 'candidate')).toEqual([
+      expect.objectContaining({ detail: expect.stringMatching(/no closed frontmatter block/) }),
+    ]);
+    expect(codeOf(() => claudeSkillName(open))).toBe('skill-name-unsupported');
+  });
+
   it('fails closed on frontmatter it cannot parse', () => {
     expect(inspectArtifactBundle(skill('name: [unclosed'), 'candidate')).toEqual([
       expect.objectContaining({
@@ -225,5 +253,6 @@ describe('canonicalSegment', () => {
     expect(canonicalSegment('..')).toBe('..');
     expect(canonicalSegment('.')).toBe('.');
     expect(canonicalSegment('Notes')).toBe('notes');
+    expect(canonicalSegment('.mcp.jſon')).toBe('.mcp.json');
   });
 });

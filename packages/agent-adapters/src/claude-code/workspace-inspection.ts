@@ -1,5 +1,5 @@
 import { constants, type Stats } from 'node:fs';
-import { lstat, open, readdir, readlink, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { canonicalSegment } from './bundle-inspection';
 import { importCandidates, IMPORT_TOKEN_MAX_LENGTH } from './import-tokens';
@@ -228,7 +228,7 @@ async function readEntry(root: string, entry: Entry): Promise<Buffer> {
 
 type Resolution =
   | { state: 'inside' | 'missing' }
-  | { state: 'outside'; target: string }
+  | { state: 'outside'; target: string; directory: boolean }
   | { state: 'unknown'; error: string };
 
 class Resolver {
@@ -242,7 +242,9 @@ class Resolver {
     let result: Resolution;
     try {
       const target = await realpath(path);
-      result = isInside(this.root, target) ? { state: 'inside' } : { state: 'outside', target };
+      result = isInside(this.root, target)
+        ? { state: 'inside' }
+        : { state: 'outside', target, directory: (await stat(target)).isDirectory() };
     } catch (error) {
       const code = errorCode(error);
       // These mean no file is there; anything else (EACCES, ELOOP, …) leaves existence unknown.
@@ -270,8 +272,10 @@ function shown(token: string): string {
  *   cannot be resolved, a regular file with more than one hard link, and any other special file.
  * - **Imports** (FR-118-27): every file is read and every `@` token resolved as Claude Code would
  *   — relative to the file, `~` to {@link WorkspaceInspectionOptions.homeDir}, absolute as is —
- *   lexically (from the canonical and from the given workspace path) and physically (`realpath`). A target outside the workspace that exists, or
- *   whose existence cannot be determined, is a finding; a missing one is not. When the workspace
+ *   lexically (from the canonical and from the given workspace path) and physically (`realpath`),
+ *   also cut where a Markdown lexer may end the path. An existing file outside the workspace, or a
+ *   target whose existence cannot be determined, is a finding; a missing target or an outside
+ *   directory (nothing to read) is not. When the workspace
  *   contains a symbolic link, a relative token that climbs above its own directory is a finding
  *   too: through a link the file can be read from a shallower place, where the same `..` leads
  *   out.
@@ -385,7 +389,9 @@ export async function inspectWorkspace(
       }
       for (const path of new Set([lexical, givenLexical, physical])) {
         const resolution = await resolver.resolve(path);
-        if (resolution.state === 'outside') {
+        // An import of a directory discloses nothing (Claude Code cannot read it as a file), so
+        // `@/lib` in ordinary code passes; a link to an outside directory is still refused above.
+        if (resolution.state === 'outside' && !resolution.directory) {
           reported.add(token);
           outside(
             entry.path,

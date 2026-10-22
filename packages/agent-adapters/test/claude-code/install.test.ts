@@ -141,6 +141,17 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     expect((await lstat(join(host, 'pdf')).catch(() => null)) === null).toBe(true);
   });
 
+  it('refuses a nested rule path, which could pass through a planted link', async () => {
+    await mkdir(join(workspace, '.claude/rules'), { recursive: true });
+    await symlink(host, join(workspace, '.claude/rules/sub'));
+    expect(
+      await codeOf(() =>
+        installClaudeArtifact(workspace, bundle('claude-rule', { 'sub/r.md': 'x' })),
+      ),
+    ).toBe('artifact-install-conflict');
+    expect((await lstat(join(host, 'r.md')).catch(() => null)) === null).toBe(true);
+  });
+
   it('refuses a .claude entry that is a file', async () => {
     await writeFile(join(workspace, '.claude'), 'file');
     expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
@@ -160,9 +171,13 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     const claudeMd = bundle('claude-md', { 'CLAUDE.md': 'x' });
     expect(await codeOf(() => installClaudeArtifact(file, claudeMd))).toMatch(/ENOTDIR/);
     expect(await codeOf(() => installClaudeArtifact(file, skill))).toMatch(/ENOTDIR/);
-    const escaping = bundle('claude-rule', { '../../outside.md': 'x' });
-    expect(await codeOf(() => installClaudeArtifact(workspace, escaping))).toMatch(
+    const escapingSkill = bundle('skill-md', { 'SKILL.md': 'x', '../../evil.md': 'x' });
+    expect(await codeOf(() => installClaudeArtifact(workspace, escapingSkill))).toMatch(
       /PathEscapeError/,
+    );
+    const escaping = bundle('claude-rule', { '../../outside.md': 'x' });
+    expect(await codeOf(() => installClaudeArtifact(workspace, escaping))).toBe(
+      'artifact-install-conflict',
     );
   });
 });

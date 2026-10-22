@@ -34,4 +34,9 @@ links and hard links themselves, not rely on a later check.
   refuse relative tokens that climb above their own directory.
 - In any writer that runs after untrusted commands: `lstat` every existing path component, create
   with `wx`, append only to a regular file with `nlink === 1` and compare `fstat` with `lstat`.
+- Model the consumer's parser, not a regex in isolation: Claude Code lexes memory files as
+  Markdown and matches imports per text piece (so `@/etc/hostname*x*` imports `/etc/hostname`),
+  and accepts `--- ` as a frontmatter opener that the core parser ignores. Review round 1 of PR
+  #108 found both by reading the installed binary's patterns; check prefixes at every lexer split
+  character and fail closed when a file starts a block the parser did not read.
 - Test linear time with a size ratio on adversarial inputs (lesson 2026-10-21 on timing tests).

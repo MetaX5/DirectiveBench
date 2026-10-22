@@ -33,6 +33,44 @@ const TRAILING_PUNCTUATION = new Set(
   ['.', ',', ';', ':', '!', '?', ')', ']', '}', '>', "'", '"', '`'].map((c) => c.charCodeAt(0)),
 );
 
+/**
+ * Characters at which a Markdown lexer may split a word into separate text pieces (emphasis, code
+ * spans, links, inline HTML, escapes, fragments, entities). Claude Code runs its import pattern on
+ * each piece, so a path can end at any of them; every prefix ending before one is a candidate too.
+ */
+const MARKDOWN_CUTS = new Set(
+  [
+    '*',
+    '_',
+    '`',
+    '[',
+    ']',
+    '<',
+    '>',
+    '!',
+    '#',
+    '&',
+    '(',
+    ')',
+    "'",
+    '"',
+    '\\',
+    '~',
+    '|',
+    '{',
+    '}',
+  ].map((c) => c.charCodeAt(0)),
+);
+
+/** The token followed by each of its prefixes that ends before a {@link MARKDOWN_CUTS} character. */
+function withMarkdownCuts(token: string): string[] {
+  const variants = [token];
+  for (let index = token.length - 1; index > 0; index -= 1) {
+    if (MARKDOWN_CUTS.has(token.charCodeAt(index))) variants.push(token.slice(0, index));
+  }
+  return variants;
+}
+
 /** JavaScript's `\s`: what a regular expression in Claude Code would treat as whitespace. */
 function isWhitespace(code: number): boolean {
   return (
@@ -151,7 +189,8 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
         continue;
       }
       const raw = text.slice(tokenStart, stop);
-      for (const token of raw.includes('\\ ') ? [raw.replaceAll('\\ ', ' '), raw] : [raw]) {
+      const spellings = raw.includes('\\ ') ? [raw.replaceAll('\\ ', ' '), raw] : [raw];
+      for (const token of spellings.flatMap(withMarkdownCuts)) {
         // A `~` followed only by punctuation is home only once the punctuation is stripped.
         if (yielded.has(token) || (kind === 'home' && token !== '~' && !token.startsWith('~/'))) {
           continue;

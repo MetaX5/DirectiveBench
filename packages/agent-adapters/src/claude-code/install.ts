@@ -157,8 +157,12 @@ export async function installClaudeArtifact(
       throw conflict(targetDir, 'it already exists');
     return { paths: await writeInto(workspaceDir, targetDir, artifact) };
   }
-  if (format === 'claude-rule')
+  if (format === 'claude-rule') {
+    // A rule is one file in `.claude/rules/`; a nested path could pass through a planted link.
+    const nested = artifact.files.find((file) => file.path.includes('/'));
+    if (nested) throw conflict(`.claude/rules/${nested.path}`, 'a rule file must not be nested');
     return { paths: await writeInto(workspaceDir, '.claude/rules', artifact) };
+  }
   const text = artifact.files.map((file) => file.content).join('\n\n');
   if (format === 'claude-md') {
     await appendInstruction(workspaceDir, 'CLAUDE.md', text);

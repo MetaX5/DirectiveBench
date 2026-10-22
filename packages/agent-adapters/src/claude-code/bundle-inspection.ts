@@ -1,4 +1,5 @@
-import { parseFrontmatter, type ArtifactBundle } from '@directivebench/core';
+import type { ArtifactBundle } from '@directivebench/core';
+import { parseSkillFrontmatter } from './skill-name';
 
 /** Refusal codes of the artifact bundle inspection (SPEC-118 FR-118-26). */
 export type ArtifactInspectionCode = 'artifact-executes-code' | 'artifact-overrides-model';
@@ -40,7 +41,12 @@ const CONFIGURATION_FILES = new Set([
  * `.Claude` is `.claude`.
  */
 export function canonicalSegment(segment: string): string {
-  return segment.toLowerCase().replace(/[. ]+$/, (tail) => (tail === segment ? tail : ''));
+  // NFKC and an upper-case round trip fold non-ASCII look-alikes (`ſ` → `s`) as macOS does.
+  return segment
+    .normalize('NFKC')
+    .toUpperCase()
+    .toLowerCase()
+    .replace(/[. ]+$/, (tail) => (tail === segment ? tail : ''));
 }
 
 /** Frontmatter key as compared here: lowercase, without `-` and `_` (`allowed_tools` too). */
@@ -56,7 +62,7 @@ function isEmptyValue(value: unknown): boolean {
 }
 
 function frontmatterFindings(content: string): Omit<ArtifactFinding, 'role' | 'file'>[] {
-  const { frontmatter, error } = parseFrontmatter(content);
+  const { frontmatter, error } = parseSkillFrontmatter(content);
   if (error !== undefined) {
     return [
       {

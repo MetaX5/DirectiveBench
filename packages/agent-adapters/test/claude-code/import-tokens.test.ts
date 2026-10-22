@@ -26,6 +26,7 @@ describe('importCandidates (FR-118-27)', () => {
     expect(tokens('@docs/context.md @./a.md @a..b @x/..y @~user/x')).toEqual([]);
     expect(tokens('@x/..). @y/..\\z')).toEqual([
       'relative:x/..).',
+      'relative:x/..',
       'relative:x/',
       'relative:y/..\\z',
       'relative:y/..',
@@ -51,6 +52,24 @@ describe('importCandidates (FR-118-27)', () => {
     expect(tokens('name@example.com, @ alone, trailing@')).toEqual([]);
   });
 
+  it('also checks every prefix that ends where a Markdown lexer may split the word', () => {
+    for (const text of [
+      '@/etc/hostname*x*',
+      '@/etc/hostname`x`',
+      '@/etc/hostname**b**',
+      '@/etc/hostname<br>',
+      '@/etc/hostname[a](b)',
+      'see [@/etc/hostname](x)',
+      '@/etc/hostname#frag',
+      '@/etc/hostname&amp;',
+      '@/etc/hostname_x',
+    ]) {
+      expect(tokens(text), text).toContain('absolute:/etc/hostname');
+    }
+    expect(tokens('@~/.bashrc*x*')).toContain('home:~/.bashrc');
+    expect(tokens('@../../etc/hostname*x*')).toContain('relative:../../etc/hostname');
+  });
+
   it('also checks the token without trailing punctuation', () => {
     expect(tokens('(see @/etc/hostname).')).toEqual([
       'absolute:/etc/hostname).',
@@ -64,6 +83,7 @@ describe('importCandidates (FR-118-27)', () => {
     expect(tokens('@/my\\ file.md next')).toEqual([
       'absolute:/my file.md',
       'absolute:/my\\ file.md',
+      'absolute:/my',
     ]);
   });
 

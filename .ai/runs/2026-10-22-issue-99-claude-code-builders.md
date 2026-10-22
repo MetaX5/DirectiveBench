@@ -126,6 +126,25 @@ run (O_NOFOLLOW/O_NONBLOCK OR to 0 there; the identity checks cover it).
 - No deviation from an approved spec (both specs are drafts); the spec text was updated for the
   decisions above in the same change.
 
+## Review
+
+Round 1 (independent `om-code-review` agent, head `1643e68`): changes requested, posted as COMMENT
+on PR #108.
+
+- **B1 (blocker)**: Claude Code matches imports per Markdown text piece, so `@/etc/hostname*x*`,
+  `` @/etc/hostname`x` ``, `[@/etc/hostname](x)`, `@/etc/hostname#frag` imported a host file the
+  scan did not check. Fixed: every resolved candidate is also checked cut before each Markdown
+  split character (counted against the candidate limit); tests for each form.
+- **B2 (blocker)**: an opening `--- `/`---\t` line hid the frontmatter from core
+  `parseFrontmatter`, so `hooks`/`allowed-tools`/`model` passed. Fixed: `parseSkillFrontmatter`
+  accepts trailing blanks and fails closed on a block that opens but never closes (inspection and
+  skill-name resolution).
+- **M1**: outside directories (`@/lib`) no longer refuse; **M3**: NFKC + case round trip folds
+  `ſ`; **N1**: nested rule paths refused; **M2/M4** recorded as residuals in SPEC-118 §12
+  (Windows absolute forms; nested `CLAUDE.md` written mid-run, for the AC-22 live check).
+  N2 (≈4 s worst case at the limits) and N3 (`runLocalPaths` only required by FR-118-04) noted.
+- Red first: the new tests (11) fail on the round-1 source and pass after the fix.
+
 ## Lessons recorded
 
 - [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)

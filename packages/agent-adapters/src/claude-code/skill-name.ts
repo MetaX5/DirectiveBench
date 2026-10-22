@@ -6,6 +6,30 @@ export const CLAUDE_SKILL_NAME_MAX_LENGTH = 64;
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/** An opening frontmatter line with trailing blanks, which Claude Code accepts and core does not. */
+const LOOSE_OPENING = /^\uFEFF?---[ \t]+(?=\r?\n)/;
+
+/**
+ * The frontmatter of a SKILL.md as Claude Code would see it, failing closed: an opening `---` line
+ * with trailing spaces or tabs is accepted (Claude Code's own patterns allow them), and a file that
+ * starts with `---` but yields no frontmatter block is reported as an `error`, never as empty.
+ */
+export function parseSkillFrontmatter(content: string): {
+  frontmatter: Record<string, unknown>;
+  error?: string;
+} {
+  const text = content.replace(LOOSE_OPENING, '---').replace(/^\uFEFF/, '');
+  const parsed = parseFrontmatter(text);
+  if (parsed.error !== undefined) return { frontmatter: {}, error: parsed.error };
+  if (text.startsWith('---') && parsed.body === text) {
+    return {
+      frontmatter: {},
+      error: 'the file starts with --- but has no closed frontmatter block',
+    };
+  }
+  return { frontmatter: parsed.frontmatter };
+}
+
 /**
  * Throws `skill-name-unsupported` unless `name` has the documented skill-name form: lowercase
  * letters, digits and single hyphens, at most {@link CLAUDE_SKILL_NAME_MAX_LENGTH} characters. The
@@ -35,7 +59,7 @@ export function claudeSkillName(artifact: ArtifactBundle): string {
       'The skill version has no SKILL.md at its root.',
     );
   }
-  const { frontmatter, error } = parseFrontmatter(skillFile.content);
+  const { frontmatter, error } = parseSkillFrontmatter(skillFile.content);
   if (error !== undefined) {
     throw new ClaudeCodeError(
       'skill-name-unsupported',
