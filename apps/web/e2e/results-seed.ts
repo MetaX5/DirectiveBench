@@ -286,9 +286,35 @@ function seed(db: DatabaseSync): void {
 }
 
 /** Deletes the seeded runs by id (their agent runs and assertion results cascade). */
+/** `ARTIFACT_RUNS_PAGE_LIMIT` in `@directivebench/database`: runs the artifact page loads. */
+export const PAGE_LIMIT = 200;
+
+/** Ids of the runs `seedNewerRuns` adds to fill the artifact page's window. */
+export const NEWER_RUNS = Array.from(
+  { length: PAGE_LIMIT },
+  (_, i) => `run_e2e98_newer_${String(i).padStart(3, '0')}`,
+);
+
+/**
+ * Fills the page window with `PAGE_LIMIT` newer completed runs of v3 in a third comparability
+ * group, so the seeded v1/v2 runs fall outside it (Codex review of PR #112).
+ */
+export function seedNewerRuns(db: DatabaseSync): void {
+  const insert = db.prepare(
+    `insert into benchmark_runs
+       (id, suite_version_id, artifact_version_id, agent_adapter_id, agent_version, environment,
+        status, verdict, comparability_key, summary, warnings, started_at)
+     values (?, 'suitev_e2e98', 'artv_e2e98_3', 'claude-code', '2.1.302', '{}', 'completed',
+             'improved', ?, null, '[]', ?)`,
+  );
+  NEWER_RUNS.forEach((id, i) =>
+    insert.run(id, 'd'.repeat(64), new Date(Date.UTC(2026, 9, 10) + i * 1000).toISOString()),
+  );
+}
+
 export function deleteRuns(db: DatabaseSync): void {
   const remove = db.prepare('delete from benchmark_runs where id = ?');
-  for (const id of Object.values(RUN)) remove.run(id);
+  for (const id of [...Object.values(RUN), ...NEWER_RUNS]) remove.run(id);
 }
 
 export function cleanUp(db: DatabaseSync): void {

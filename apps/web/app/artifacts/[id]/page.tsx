@@ -1,4 +1,11 @@
-import { getArtifactDetail, listArtifactRuns, type ArtifactDetail } from '@directivebench/database';
+import {
+  countArtifactRuns,
+  getArtifactDetail,
+  listArtifactRuns,
+  listVersionComparisonRuns,
+  type ArtifactDetail,
+  type Database,
+} from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -28,6 +35,7 @@ import {
 import {
   groupCount,
   groupLabel,
+  historyNotices,
   resultsByVersion,
   type ComparabilityGroup,
   type VersionComparison,
@@ -390,7 +398,31 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
   );
 }
 
-function ResultsByVersionTab({ slug, results }: { slug: string; results: VersionResults[] }) {
+async function loadRunHistory(
+  db: Database,
+  artifactId: string,
+  versions: readonly { id: string; version: number }[],
+): Promise<{ results: VersionResults[]; notices: string[] }> {
+  const [items, total, comparisons] = await Promise.all([
+    listArtifactRuns(db, artifactId),
+    countArtifactRuns(db, artifactId),
+    listVersionComparisonRuns(db, artifactId),
+  ]);
+  return {
+    results: resultsByVersion(versions, items, comparisons.runs),
+    notices: historyNotices(items.length, total, comparisons.truncated),
+  };
+}
+
+function ResultsByVersionTab({
+  slug,
+  results,
+  notices,
+}: {
+  slug: string;
+  results: VersionResults[];
+  notices: string[];
+}) {
   const tested = results.some((b) => b.groups.length > 0 || b.otherRuns.length > 0);
   const groups = groupCount(results);
   return (
@@ -404,6 +436,11 @@ function ResultsByVersionTab({ slug, results }: { slug: string; results: Version
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {notices.map((notice) => (
+          <p key={notice} role="note" className="text-sm" data-testid="history-notice">
+            {notice}
+          </p>
+        ))}
         {!tested ? (
           <div className="space-y-2 text-sm" data-testid="no-runs">
             <p className="text-muted-foreground">
@@ -530,7 +567,7 @@ export default async function ArtifactPage({
       {query.tab === 'evaluations' ? (
         <ResultsByVersionTab
           slug={artifact.slug}
-          results={resultsByVersion(versions, await listArtifactRuns(handle.db, artifact.id))}
+          {...await loadRunHistory(handle.db, artifact.id, versions)}
         />
       ) : null}
     </>
