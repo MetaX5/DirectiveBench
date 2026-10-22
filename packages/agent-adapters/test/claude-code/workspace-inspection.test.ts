@@ -5,6 +5,8 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
+  readFile,
   realpath,
   rename,
   rm,
@@ -23,6 +25,11 @@ import {
   type WorkspaceInspectionOptions,
 } from '../../src/claude-code';
 import { pinWorkspace } from '../../src/workspace-pin';
+import {
+  expectLinearTime,
+  LINEAR_TIME_TEST_TIMEOUT_MS,
+  textBaseline,
+} from '../../../../test-support/linear-time';
 import { bundle, inspectPinned, installPinned } from './helpers';
 
 /** Timeout for the heavier tests: they take well under a second alone, but CI runs every package on 2 cores. */
@@ -368,32 +375,29 @@ describe('inspectWorkspace: limits (FR-118-27)', () => {
   it(
     'scans in time linear in the workspace size',
     async () => {
-      const fill = async (dir: string, files: number) => {
-        await mkdir(join(workspace, dir));
-        const line = `See @docs/a.md, mail a@b.c, @/nope/${dir} and @${'@'.repeat(50)}x\n`;
+      // A workspace of `files` files; the baseline reads and splits every file of it.
+      const fill = async (files: number) => {
+        const dir = join(workspace, `files-${files}`);
+        await mkdir(dir);
+        const line = `See @docs/a.md, mail a@b.c, @/nope/${files} and @${'@'.repeat(50)}x\n`;
         await Promise.all(
           Array.from({ length: files }, (_, index) =>
-            writeFile(join(workspace, dir, `f${index}.md`), line.repeat(100)),
+            writeFile(join(dir, `f${index}.md`), line.repeat(100)),
           ),
         );
+        return dir;
       };
-      // Fastest of three runs, so a busy runner slows a run down but cannot fake a ratio.
-      const time = async (dir: string) => {
-        let fastest = Number.POSITIVE_INFINITY;
-        for (let run = 0; run < 3; run += 1) {
-          const started = performance.now();
-          await inspectPinned(join(workspace, dir), { homeDir: home });
-          fastest = Math.min(fastest, performance.now() - started);
-        }
-        return Math.max(fastest, 1);
+      const readAll = async (dir: string) => {
+        for (const name of await readdir(dir))
+          textBaseline(await readFile(join(dir, name), 'utf8'));
       };
-      await fill('small', 25);
-      await fill('large', 100);
-      const small = await time('small');
-      const large = await time('large');
-      // Linear: about 4×; the bound is wide for a loaded runner (quadratic would be 16×).
-      expect(large / small).toBeLessThan(12);
+      await expectLinearTime({
+        build: fill,
+        run: (dir) => inspectPinned(dir, { homeDir: home }),
+        baseline: readAll,
+        size: 12,
+      });
     },
-    LOADED_RUNNER_TIMEOUT_MS,
+    LINEAR_TIME_TEST_TIMEOUT_MS,
   );
 });
