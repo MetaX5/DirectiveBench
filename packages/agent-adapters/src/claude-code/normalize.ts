@@ -2,6 +2,7 @@ import type { ClaudeAuthMode } from '../claude-code-readiness';
 import type { AgentRunMetadata, AgentRunResult, SkillActivation } from '../contract';
 import type { ClaudePermissionProfile } from './argv';
 import {
+  CLAUDE_STREAM_MAX_LINE_BYTES,
   CLAUDE_TRACE_TEXT_MAX_CHARS,
   redactStreamText,
   type ParsedClaudeStream,
@@ -176,7 +177,13 @@ export function classifyClaudeRun(
     }
   }
 
-  if (result === null || parsed.eventsOverflow || parsed.malformedLines > 0) {
+  // A dropped over-long line may have held a model, a skill call or an error: fail closed.
+  if (
+    result === null ||
+    parsed.eventsOverflow ||
+    parsed.malformedLines > 0 ||
+    parsed.oversizedLines > 0
+  ) {
     const stderr = tail(exit.stderr ?? '', knownSecrets);
     // A login or quota message printed outside the stream still stops the run (FR-118-15).
     const outside = textCode([parsed.rawTail ?? '', stderr]);
@@ -196,9 +203,11 @@ export function classifyClaudeRun(
       ? 'the stream has too many events'
       : parsed.malformedLines > 0
         ? `${parsed.malformedLines} line(s) are not valid stream events`
-        : parsed.events === 0
-          ? 'Claude Code wrote no output'
-          : 'the stream has no result line';
+        : parsed.oversizedLines > 0
+          ? `${parsed.oversizedLines} line(s) are longer than ${CLAUDE_STREAM_MAX_LINE_BYTES} bytes and were dropped`
+          : parsed.events === 0
+            ? 'Claude Code wrote no output'
+            : 'the stream has no result line';
     return agentError(
       'output-parse-error',
       `Claude Code output could not be read: ${reason}.${parsed.rawTail ? ` Last line: ${parsed.rawTail}` : ''}`,

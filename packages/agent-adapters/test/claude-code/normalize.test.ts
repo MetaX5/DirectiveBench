@@ -64,8 +64,17 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     });
     const truncated = { ...parse('skill-invoked'), droppedTraceEvents: 3 };
     expect(classifyClaudeRun(truncated, OK, 'api-key').warnings).toContain('trace-truncated');
-    const oversized = { ...parse('skill-invoked'), oversizedLines: 1 };
-    expect(classifyClaudeRun(oversized, OK, 'api-key').warnings).toContain('trace-truncated');
+  });
+
+  it('fails closed when a line was dropped, as it may have held a model or a skill call (Codex review)', () => {
+    const oversized = { ...parse('skill-invoked'), oversizedLines: 1, rawTail: '[line over]' };
+    expect(classifyClaudeRun(oversized, OK, 'subscription')).toMatchObject({
+      status: 'agent-error',
+      errorCode: 'output-parse-error',
+      error:
+        'Claude Code output could not be read: 1 line(s) are longer than 8388608 bytes and were dropped. Last line: [line over]',
+    });
+    expect(classifyClaudeRun(oversized, OK, 'subscription').warnings).toContain('trace-truncated');
   });
 
   it('names the credential source in an auth-mismatch, also when none was reported', () => {

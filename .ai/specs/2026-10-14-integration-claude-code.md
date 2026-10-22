@@ -263,7 +263,7 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | API failure | `system/api_retry` `error` category; final non-zero exit / `is_error: true` | `agent-error` | `authentication_failed`→`auth-invalid`, `billing_error`→`billing`, `rate_limit`→`rate-limited`, `overloaded`→`provider-error` (a temporary server overload fails that agent run only and does not stop the benchmark run; maintainer decision 2026-10-22), `model_not_found`→`model-not-found`, other→`provider-error` |
 | `error_max_budget_usd` | result subtype | `agent-error` | `budget-exceeded` |
 | `error_max_turns` / `error_during_execution` | result subtype | `agent-error` | `agent-failed` (message from `errors[]`) |
-| No `result` line / malformed NDJSON | parser | `agent-error` | `output-parse-error` (keep raw tail, redacted) |
+| No `result` line / malformed NDJSON / a line over the 8 MiB limit (dropped; it may have held a model or skill call, so the run fails closed) | parser | `agent-error` | `output-parse-error` (keep raw tail, redacted) |
 | Installed skill missing from `system/init` (`Skill` tool absent, or the skill not listed) | parser | `infrastructure-error` | `artifact-not-loaded` |
 | Artifact version contains executable customizations | inspection before enqueue | run rejected before enqueue | `artifact-executes-code` |
 | Skill name not lowercase letters, digits and hyphens (≤ 64), so it could change `Skill(<name>)` rules | argv builder | run rejected before enqueue | `skill-name-unsupported` |

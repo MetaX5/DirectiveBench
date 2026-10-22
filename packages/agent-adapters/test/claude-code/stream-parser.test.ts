@@ -221,7 +221,21 @@ describe('ClaudeStreamParser input handling', () => {
     parser.push(`${'a'.repeat(230)}${key}`);
     parser.push(Buffer.alloc(CLAUDE_STREAM_MAX_LINE_BYTES, 0x61));
     const parsed = parser.end();
-    expect(parsed.rawTail).toBe(`[line over 8388608 bytes] ${'a'.repeat(230)}[REDACTED]`);
+    expect(parsed.rawTail).toBe(
+      `[line over 8388608 bytes] ${'a'.repeat(230)}[REDACTED]${'a'.repeat(16)}`,
+    );
+  });
+
+  it('redacts a secret split across the chunks before a dropped line (Codex review)', () => {
+    const key = `sk-ant-test-${'k'.repeat(14)}`;
+    const parser = new ClaudeStreamParser({ ...SKILL, knownSecrets: [key] });
+    parser.push(`{"a":"${key.slice(0, 25)}`);
+    parser.push(key.slice(25));
+    parser.push(Buffer.alloc(CLAUDE_STREAM_MAX_LINE_BYTES, 0x61));
+    const parsed = parser.end();
+    expect(parsed.rawTail).toBe(
+      `[line over 8388608 bytes] {"a":"[REDACTED]${'a'.repeat(256 - 6 - 10)}`,
+    );
   });
 
   it('drops a final over-long line without a newline', () => {

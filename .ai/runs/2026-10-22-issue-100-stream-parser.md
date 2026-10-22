@@ -138,6 +138,14 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
     run (parser → engine); red first: with `overloaded → rate-limited` the same test stops the run
     after baseline repetition 1. Merged origin/main (PR #113) without conflicts.
 
+11. Codex re-review (round 3) found two defects, both reproduced and fixed red first:
+    - high: a dropped line's diagnostic head was redacted from the first chunk only, so a known
+      secret split across chunks leaked all but its tail. The head is now assembled across the
+      buffered chunks (bounded at 4 bytes per character of head + redaction margin).
+    - medium: a dropped over-long line was only a `trace-truncated` warning, so a run whose dropped
+      event held another model could still be `completed` and comparable. A dropped line now makes
+      the run `output-parse-error` (fail closed); SPEC-203 §9 says so.
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck` — pass.

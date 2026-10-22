@@ -67,6 +67,9 @@ export const CLAUDE_STREAM_NAME_MAX_CHARS = 200;
 /** Characters of an over-long line kept for diagnosis. */
 const DROPPED_LINE_HEAD_CHARS = 256;
 
+/** Bytes decoded for a dropped line's head: its characters plus the redaction margin, at 4 bytes each. */
+const DROPPED_LINE_HEAD_BYTES = 4 * (DROPPED_LINE_HEAD_CHARS + CLAUDE_REDACTION_MARGIN_CHARS);
+
 /** Stands in for a `Skill` call whose input names no skill. */
 const UNNAMED_SKILL = '(unnamed)';
 
@@ -301,10 +304,11 @@ export class ClaudeStreamParser {
       const piece = newline === -1 ? data : data.subarray(0, newline);
       if (!this.skippingLine) {
         if (this.buffered + piece.length > CLAUDE_STREAM_MAX_LINE_BYTES) {
+          // The head spans chunks, so a secret split across two of them is redacted whole.
           this.dropLine(
-            (this.chunks[0] ?? piece).subarray(
-              0,
-              DROPPED_LINE_HEAD_CHARS + CLAUDE_REDACTION_MARGIN_CHARS,
+            Buffer.concat(
+              [...this.chunks, piece],
+              Math.min(this.buffered + piece.length, DROPPED_LINE_HEAD_BYTES),
             ),
           );
         } else if (piece.length > 0) {
