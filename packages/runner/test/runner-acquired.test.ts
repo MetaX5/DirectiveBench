@@ -158,12 +158,16 @@ describe('A/B baseline in the runner (SPEC-118 FR-118-11…13)', () => {
       artifactVersionId: example.artifact.versionId,
     });
     const results = await createRunner(handle).runUntilIdle();
-    expect(results.map((r) => [r.jobId, r.status])).toEqual([
-      [ab.id, 'completed'],
-      [none.id, 'completed'],
-    ]);
+    // Both jobs may share a `createdAt` millisecond, so their order is not asserted.
+    const byJob = new Map(results.map((r) => [r.jobId, r]));
+    expect(results).toHaveLength(2);
+    expect(byJob.get(ab.id)?.status).toBe('completed');
+    expect(byJob.get(none.id)?.status).toBe('completed');
 
-    const abRun = await getBenchmarkRunDetail(handle.db, results[0]?.benchmarkRunId as string);
+    const abRun = await getBenchmarkRunDetail(
+      handle.db,
+      byJob.get(ab.id)?.benchmarkRunId as string,
+    );
     expect(abRun?.run).toMatchObject({
       status: 'completed',
       verdict: 'improved',
@@ -178,7 +182,10 @@ describe('A/B baseline in the runner (SPEC-118 FR-118-11…13)', () => {
         text: 'Installed artifact files: .agents/skills/validate-external-input/SKILL.md',
       });
     }
-    const noneRun = await getBenchmarkRunDetail(handle.db, results[1]?.benchmarkRunId as string);
+    const noneRun = await getBenchmarkRunDetail(
+      handle.db,
+      byJob.get(none.id)?.benchmarkRunId as string,
+    );
     expect(noneRun?.run).toMatchObject({
       baselineArtifactVersionId: null,
       comparabilityKey: MOCK_EXAMPLE_KEY,

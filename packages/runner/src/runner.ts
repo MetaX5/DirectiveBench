@@ -234,8 +234,9 @@ export class LocalRunner {
    * Executes a job created already acquired by this runner (`createAcquiredBenchmarkJob`,
    * SPEC-118 FR-118-34): `benchmark run` creates and runs its job in-process, so a `serve`
    * runner polling the same data directory never picks it up. Heartbeat, cancellation requests
-   * and `stop()` apply as to polled jobs, and the job occupies a slot of the long lane. Refuses a
-   * job that is not `running` for this runner or is already executing here.
+   * and `stop()` apply as to polled jobs. The job counts toward the long lane, which it may push
+   * past `concurrency` (the caller decided to run it), so a polling runner fills fewer long slots
+   * meanwhile. Refuses a job that is not `running` for this runner or is already executing here.
    */
   async runAcquiredJob(jobId: string): Promise<JobExecutionResult> {
     const job = await getJob(this.options.handle.db, jobId);

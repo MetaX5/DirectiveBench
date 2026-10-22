@@ -135,6 +135,16 @@ Not verified: anything that needs a real agent (`agentProfile` reported by an ad
   tests are in `ea4768e`.
 - No deviation from SPEC-118. The index layout (composite) is an interpretation of §8.1.
 
+## Review
+
+Round 1 (independent `om-code-review` agent, head `ed3f0ab`): changes requested — major: the A/B
+runner test asserted job order although both jobs could share a `createdAt` millisecond (failed
+2/13); minors: SPEC-118 §20 overstated `EnvironmentMetadata.agentProfile`, `ensureInstallationId`
+overclaimed its race behaviour and replaced a symlinked `config.json`, the enqueue check-then-act
+was undocumented; nit: the long lane may exceed `concurrency`. All fixed in the review-fix commit:
+results matched by job id (15/15 runs pass), the status reworded, symlinks written through (new
+test) and the race documented, comments added. Full gate re-run: pass, 100% coverage.
+
 ## Lessons recorded
 
 - [2026-10-22 — Pin each migration's up/down test to its own journal prefix](../lessons/2026-10-22-pin-migration-tests-to-their-journal-prefix.md)

@@ -677,8 +677,8 @@ changed before merge.
     migration; its run reads null). The `benchmark-run` job payload gains optional
     `baselineArtifactVersionId`, `auth.mode` and `maxBudgetUsd` (API Key Mode only); it stays
     strict, so no other field — and no secret — can be stored in it.
-  - §8.2/§8.3 (AC-5): `AgentProfile` and `EnvironmentMetadata.agentProfile`; the comparability key
-    hashes the profile only when one is reported, so the bundled mock example key is
+  - §8.2/§8.3 (AC-5): the `AgentProfile` type, the optional `EnvironmentMetadata.agentProfile`
+    field and the comparability key, which hashes a profile only when one is given, so the bundled mock example key is
     byte-identical (`8212a3eb…0f9f` from `demo` on `main` before the change, pinned in a test, and
     the same key from `demo` after it); keys differ in auth mode, isolation, permission profile,
     flags hash, execution model and `hostId`; the baseline choice does not change the key.
@@ -692,9 +692,11 @@ changed before merge.
     directly, and the benchmark page shows "Run from the CLI" with the planned command (marked not
     implemented) instead of **Run** (`apps/web/test/actions.test.ts`, Playwright test in
     `apps/web/e2e/management.spec.ts`).
-- **Partially implemented:** `hostId` is enforced by the `AgentProfile` type (only the
-  `user-profile` variant has it); feeding `installationId` into a reported profile waits for the
-  Claude Code adapter (Phase 3). AC-3, AC-5 and AC-9 are verified at the engine, repository and
+- **Partially implemented:** no adapter can report an `AgentProfile` yet — the adapter contract
+  has no field for it and `runBenchmark` never sets `EnvironmentMetadata.agentProfile`, so only
+  direct calls of `comparabilityKey` exercise profile hashing; the adapter→engine wiring and
+  feeding `installationId` into a `user-profile` profile as `hostId` (enforced by the type: only
+  that variant has it) wait for the Claude Code adapter (Phase 3). AC-3, AC-5 and AC-9 are verified at the engine, repository and
   runner level; their `benchmark run --baseline` / CLI parts wait for Phase 4. Existing pieces this
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -137,20 +137,23 @@ export function saveConfig(configPath: string, config: DirectiveBenchConfig): vo
  * Returns the configuration with an `installationId`, generating and storing one when the file
  * has none (SPEC-115 FR-115-15). A missing file is created with every default; an existing file
  * keeps its keys exactly as written and only gains the identifier, so defaults are not frozen
- * into it. An invalid file is an error and is never rewritten (FR-115-11). Two processes adding
- * an identifier at the same moment cannot leave a partial file; the returned value is read back
- * from the file after the write.
+ * into it, and a symlinked `config.json` is written through to its target. An invalid file is an
+ * error and is never rewritten (FR-115-11). The write is atomic, but not exclusive: two processes
+ * adding an identifier in the same instant each generate one and the last rename wins, so one of
+ * them may return an identifier that was replaced. It is read back after the write to narrow that
+ * window; consumers read `installationId` from the file when a run starts, after initialisation.
  */
 export function ensureInstallationId(configPath: string): DirectiveBenchConfig {
   const json = readConfigJson(configPath);
   const config = parseConfig(configPath, json ?? {});
   if (config.installationId) return config;
   const installationId = randomUUID();
-  writeConfigFile(
-    configPath,
+  if (json === undefined) {
+    writeConfigFile(configPath, { ...config, installationId });
+  } else {
     // A valid existing file is a JSON object: the strict schema accepts nothing else.
-    json === undefined ? { ...config, installationId } : { ...(json as object), installationId },
-  );
+    writeConfigFile(realpathSync(configPath), { ...(json as object), installationId });
+  }
   return loadConfig(configPath);
 }
 

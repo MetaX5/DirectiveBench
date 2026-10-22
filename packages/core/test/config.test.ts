@@ -1,4 +1,13 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -175,6 +184,23 @@ describe('ensureInstallationId (SPEC-115 FR-115-15)', () => {
       installationId: config.installationId,
     });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'writes a symlinked config.json through to its target',
+    () => {
+      const dir = tempDir();
+      const target = join(dir, 'dotfiles-config.json');
+      writeFileSync(target, JSON.stringify({ server: { port: 5000 } }));
+      const path = join(dir, 'config.json');
+      symlinkSync(target, path);
+      const config = ensureInstallationId(path);
+      expect(lstatSync(path).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({
+        server: { port: 5000 },
+        installationId: config.installationId,
+      });
+    },
+  );
 
   it('gives every data directory its own identifier', () => {
     const a = ensureInstallationId(join(tempDir(), 'config.json')).installationId;

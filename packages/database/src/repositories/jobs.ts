@@ -274,7 +274,12 @@ async function checkedBenchmarkPayload(
   return parsed;
 }
 
-/** Validates references and enqueues a benchmark run. The web process only ever enqueues. */
+/**
+ * Validates references and enqueues a benchmark run. The web process only ever enqueues. The
+ * check and the insert are separate statements: the referenced suite and artifact versions are
+ * immutable and no repository function deletes them, and the runner checks them again
+ * when it loads the job, so no transaction is needed here (SPEC-014 check-then-act).
+ */
 export async function enqueueBenchmarkJob(
   db: Database,
   payload: BenchmarkJobPayload,
