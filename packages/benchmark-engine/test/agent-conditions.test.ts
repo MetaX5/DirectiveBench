@@ -291,6 +291,22 @@ describe('skill activation rules (FR-118-09, AC-21)', () => {
     );
   }, 60_000);
 
+  it('leaves a cancelled or timed-out run as it is (review m4)', () => {
+    const notLoaded = activation({ loaded: false, invoked: false, invocations: 0 });
+    for (const executionStatus of ['cancelled', 'timeout'] as const) {
+      const record = facts({
+        executionStatus,
+        score: null,
+        passed: null,
+        skillActivation: notLoaded,
+      });
+      expect(applySkillActivationRules(record, false)).toMatchObject({
+        executionStatus,
+        errorCode: null,
+      });
+    }
+  });
+
   it('keeps a stop code, replaces another failure code, and adds the warning once', () => {
     const notLoaded = activation({ loaded: false, invoked: false, invocations: 0 });
     const auth = facts({

@@ -43,13 +43,16 @@ export const CLAUDE_STREAM_MAX_SKILL_CALLS = 1_000;
  * Text before a cut that is redacted with the kept part, so a secret that starts in the kept part
  * is matched whole (API keys are about 100 characters).
  */
-const REDACTION_MARGIN_CHARS = 4_096;
+export const CLAUDE_REDACTION_MARGIN_CHARS = 4_096;
 
-/** The prefix of the `parent_tool_use_id` of a forked skill's messages (C1, L3). */
+/** The prefix of the `parent_tool_use_id` of a forked skill's messages, `forked-command-<name>` (C1, L3). */
 export const FORKED_SKILL_PARENT_PREFIX = 'forked-command-';
 
 /** Characters kept of a name from the stream (model, skill, tool, call id, category). */
 export const CLAUDE_STREAM_NAME_MAX_CHARS = 200;
+
+/** Characters of an over-long line kept for diagnosis. */
+const DROPPED_LINE_HEAD_CHARS = 256;
 
 /** Stands in for a `Skill` call whose input names no skill. */
 const UNNAMED_SKILL = '(unnamed)';
@@ -104,11 +107,14 @@ export interface ParsedClaudeStream {
   reportedModels: string[];
   /** True when a model set exceeded {@link CLAUDE_STREAM_MAX_NAMES}; treated as a mismatch. */
   modelsOverflow: boolean;
-  /** `error` categories of assistant messages, in order (e.g. `authentication_failed`). */
-  apiErrors: string[];
-  /** Category of the last `system/api_retry`, if any. */
+  /**
+   * `error` category (e.g. `authentication_failed`) of the last main-conversation assistant
+   * message; a later main message without one clears it, so a recovered error never counts.
+   */
+  apiError: string | null;
+  /** Category of the last `system/api_retry`, cleared by a later model answer (recovered). */
   lastRetryCategory: string | null;
-  /** Texts of synthetic assistant messages (CLI-written errors), redacted and truncated. */
+  /** CLI-written error texts of main-conversation synthetic messages since the last model answer. */
   syntheticTexts: string[];
   permissionDenials: number;
   /** Successful `Skill` calls of the installed skill. */
@@ -251,7 +257,7 @@ export class ClaudeStreamParser {
     init: null,
     result: null,
     trace: [],
-    apiErrors: [],
+    apiError: null,
     lastRetryCategory: null,
     syntheticTexts: [],
     permissionDenials: 0,
@@ -279,7 +285,12 @@ export class ClaudeStreamParser {
       const piece = newline === -1 ? data : data.subarray(0, newline);
       if (!this.skippingLine) {
         if (this.buffered + piece.length > CLAUDE_STREAM_MAX_LINE_BYTES) {
-          this.dropLine((this.chunks[0] ?? piece).subarray(0, 256));
+          this.dropLine(
+            (this.chunks[0] ?? piece).subarray(
+              0,
+              DROPPED_LINE_HEAD_CHARS + CLAUDE_REDACTION_MARGIN_CHARS,
+            ),
+          );
         } else if (piece.length > 0) {
           this.chunks.push(piece);
           this.buffered += piece.length;
@@ -314,9 +325,9 @@ export class ClaudeStreamParser {
     this.buffered = 0;
     this.skippingLine = true;
     this.state.oversizedLines += 1;
-    this.state.rawTail = this.clip(
-      `[line over ${CLAUDE_STREAM_MAX_LINE_BYTES} bytes] ${head.toString('utf8')}`,
-    );
+    // Redacted before it is cut, so a secret that starts in the kept head is matched whole.
+    const text = redactSecrets(head.toString('utf8'), this.secrets);
+    this.state.rawTail = `[line over ${CLAUDE_STREAM_MAX_LINE_BYTES} bytes] ${text.slice(0, DROPPED_LINE_HEAD_CHARS)}`;
   }
 
   private flushLine(): void {
@@ -343,7 +354,7 @@ export class ClaudeStreamParser {
     this.state.malformedLines += 1;
     // The end of the line says where it broke off; only a bounded suffix is ever redacted.
     const redacted = redactSecrets(
-      line.slice(-(CLAUDE_STREAM_RAW_TAIL_CHARS + REDACTION_MARGIN_CHARS)),
+      line.slice(-(CLAUDE_STREAM_RAW_TAIL_CHARS + CLAUDE_REDACTION_MARGIN_CHARS)),
       this.secrets,
     );
     this.state.rawTail =
@@ -354,7 +365,10 @@ export class ClaudeStreamParser {
 
   /** Redacts, then truncates; only a bounded prefix is ever redacted. */
   private clip(text: string, max = CLAUDE_TRACE_TEXT_MAX_CHARS): string {
-    const redacted = redactSecrets(text.slice(0, max + REDACTION_MARGIN_CHARS), this.secrets);
+    const redacted = redactSecrets(
+      text.slice(0, max + CLAUDE_REDACTION_MARGIN_CHARS),
+      this.secrets,
+    );
     return redacted.length > max ? `${redacted.slice(0, max)}… [truncated]` : redacted;
   }
 
@@ -388,7 +402,7 @@ export class ClaudeStreamParser {
     if (
       this.slashPrompt &&
       typeof parent === 'string' &&
-      parent.startsWith(FORKED_SKILL_PARENT_PREFIX)
+      parent === `${FORKED_SKILL_PARENT_PREFIX}${this.options.skillName}`
     ) {
       this.state.slashExpanded = true;
     }
@@ -459,16 +473,23 @@ export class ClaudeStreamParser {
       reported === undefined ? undefined : this.clip(reported, CLAUDE_STREAM_NAME_MAX_CHARS);
     const synthetic = model === SYNTHETIC_MODEL;
     if (main && model !== undefined && !synthetic) this.messageModels.add(model);
-    if (extras.data.error !== undefined && this.state.apiErrors.length < CLAUDE_STREAM_MAX_NAMES) {
-      this.state.apiErrors.push(this.clip(extras.data.error, CLAUDE_STREAM_NAME_MAX_CHARS));
+    if (main) {
+      this.assistantSeen = true;
+      const error = extras.data.error;
+      this.state.apiError =
+        error === undefined ? null : this.clip(error, CLAUDE_STREAM_NAME_MAX_CHARS);
+      // A model answer means the API recovered: earlier retries and CLI-written errors are over.
+      if (!synthetic) {
+        this.state.lastRetryCategory = null;
+        this.state.syntheticTexts.length = 0;
+      }
     }
-    if (main) this.assistantSeen = true;
     const content = parsed.data.message.content;
     for (const block of typeof content === 'string' ? [{ type: 'text', text: content }] : content) {
       const text = textBlock.safeParse(block);
       if (text.success) {
         const clipped = this.clip(text.data.text);
-        if (synthetic && this.state.syntheticTexts.length < CLAUDE_STREAM_MAX_NAMES) {
+        if (main && synthetic && this.state.syntheticTexts.length < CLAUDE_STREAM_MAX_NAMES) {
           this.state.syntheticTexts.push(clipped);
         }
         this.record({ type: 'message', text: clipped });
@@ -586,7 +607,7 @@ function toolResultText(content: unknown): string {
     texts.push(text.data.text);
     length += text.data.text.length;
     // Enough to fill the kept prefix; the rest would be cut anyway.
-    if (length > CLAUDE_TRACE_TEXT_MAX_CHARS + REDACTION_MARGIN_CHARS) break;
+    if (length > CLAUDE_TRACE_TEXT_MAX_CHARS + CLAUDE_REDACTION_MARGIN_CHARS) break;
   }
   return texts.join('\n');
 }

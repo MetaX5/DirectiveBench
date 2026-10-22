@@ -787,7 +787,9 @@ changed before merge.
     (`executionModel` from `system/init`, `reportedModels` = `modelUsage` keys, auxiliary models,
     main-conversation messages on another model), FR-118-09 `skillActivation` (loaded from the
     `Skill` tool and the init `skills` list; invoked by a `Skill` call for `<name>` whose result is
-    not an error, or by a `/<name>` prompt with expansion evidence; other skills attempted), the
+    not an error, or by a `/<name>` prompt with expansion evidence (the forked signal is a
+    `parent_tool_use_id` equal to `forked-command-<name>`, the form L3 shows, so another skill's
+    fork never counts); other skills attempted), the
     FR-118-06 auth-source check (`apiKeySource`, fail closed when missing) and the SPEC-203 §9
     codes. Fixtures in `packages/agent-adapters/test/fixtures/claude-code/2.1.302/` were built
     from the documented format and the schemas in the local 2.1.302 binary (SPEC-203 L3), not
@@ -795,8 +797,8 @@ changed before merge.
   - Engine (`packages/benchmark-engine/src/agent-conditions.ts`, wired in `runBenchmark`):
     FR-118-15 — an agent run ending with any listed code (`STOP_CODES`) is persisted and then
     `BenchmarkStoppedError` ends the run, which the runner stores as benchmark run `error` with the
-    reason (`packages/runner/test/runner-acquired.test.ts`); FR-118-09 (a) a candidate run, or a
-    baseline run of an A/B run, with `loaded = false` becomes `infrastructure-error`
+    reason (`packages/runner/test/runner-acquired.test.ts`); FR-118-09 (a) a completed or failed (not cancelled or
+    timed-out) candidate run, or such a baseline run of an A/B run, with `loaded = false` becomes `infrastructure-error`
     `artifact-not-loaded` and stops the run (a `none` baseline is exempt); (b) loaded but not
     invoked → scored with warning `artifact-not-invoked`; the invocation rate per variant is in
     `summary.skillInvocation` and the warnings ("Skill invoked in 1/3 candidate runs", plus the

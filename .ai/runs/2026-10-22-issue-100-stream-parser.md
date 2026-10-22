@@ -94,6 +94,17 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 5. Merged origin/main (PR #105, document assertions); resolved the SPEC-118 §20 conflict; its
    `assertion-error` path now also sets `errorCode: 'assertion-error'`.
 6. SPEC-118 §20 and SPEC-203 §13 (+ evidence L3) updated for verified behaviour only.
+7. PR #111 opened; independent review round 1 (`e75c4df`, changes requested: 3 major, 4 minor)
+   fixed with regression tests: M1 — a recovered retry or error (model answer afterwards) and a
+   subagent's `error` no longer decide a later failure (`apiError` = last main message only,
+   retries and synthetic texts cleared by a model answer); M2 — failure wording is matched
+   anchored, line by line, only in CLI-written text, never in the agent's answer; M3 — the stderr
+   tail and the dropped-line head are redacted before they are cut; m1 — only
+   `forked-command-<name>` counts; m2 — comment corrected and an uncategorised synthetic error is
+   `provider-error`; m3 — login/quota messages outside the JSON stream (stdout, stderr) map to
+   their stop codes; m4 — cancelled/timed-out runs are exempt from `artifact-not-loaded`. Nit:
+   the linear-time test takes the fastest of three with a named 60 s timeout (it had hit vitest's
+   5 s default at load average 12 with parallel agents on the machine).
 
 ## Verification
 
@@ -113,6 +124,8 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 - A first full test run overlapped a source edit; it was discarded and the gate rerun.
 - `grep -o` with context on the 285 MB binary failed ("exceeds complexity limits"); used `strings`
   + Python instead.
+- Two CLI `doctor` tests timed out once (5 s) under load average ~12 from parallel agents; they
+  pass in isolation and in the reruns, and are unrelated to this change.
 - Deviation in naming: other differing agent conditions use the issue text
   `agent condition <field> differs …` (no separate code in the spec).
 
@@ -127,4 +140,6 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 - #101: spawn `claude`, feed `ClaudeStreamParser.push` with stdout, call `claudeRunOutcome` with
   the exit code/stderr and add `durationMs`; report pre-spawn inspection failures as
   `infrastructure-error` with their code so the stop rule applies.
+- Spec decision for the maintainer: SPEC-203 §9 maps `overloaded` → `rate-limited`, a stop code,
+  although a 529 is a transient server condition (review nit); kept as specified.
 - Phase 4: pass `installationId` as `RunBenchmarkInput.hostId`; show `summary.skillInvocation`.

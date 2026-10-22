@@ -121,7 +121,7 @@ describe('parseClaudeStream on recorded-format fixtures', () => {
 
   it('records CLI-written error texts and categories', () => {
     const parsed = parseClaudeStream(fixture('rate-limited'), SKILL);
-    expect(parsed.apiErrors).toEqual(['rate_limit']);
+    expect(parsed.apiError).toBe('rate_limit');
     expect(parsed.lastRetryCategory).toBe('rate_limit');
     expect(parsed.syntheticTexts).toEqual(['API Error: Rate limit reached']);
     expect(parsed.messageModels).toEqual([]);
@@ -210,6 +210,15 @@ describe('ClaudeStreamParser input handling', () => {
     expect(parsed.rawTail).toMatch(/^\[line over 8388608 bytes\] \{"type":"user"/);
     expect(parsed.result?.subtype).toBe('success');
     expect(parsed.events).toBe(2);
+  });
+
+  it('redacts the head of a dropped line before cutting it (review M3)', () => {
+    const key = `sk-ant-test-${'k'.repeat(60)}`;
+    const parser = new ClaudeStreamParser({ ...SKILL, knownSecrets: [key] });
+    parser.push(`${'a'.repeat(230)}${key}`);
+    parser.push(Buffer.alloc(CLAUDE_STREAM_MAX_LINE_BYTES, 0x61));
+    const parsed = parser.end();
+    expect(parsed.rawTail).toBe(`[line over 8388608 bytes] ${'a'.repeat(230)}[REDACTED]`);
   });
 
   it('drops a final over-long line without a newline', () => {
@@ -324,7 +333,7 @@ describe('ClaudeStreamParser events', () => {
     );
     expect(parsed.messageModels).toEqual(['m1']);
     expect(parsed.syntheticTexts).toEqual(['boom']);
-    expect(parsed.apiErrors).toEqual(['unknown']);
+    expect(parsed.apiError).toBe('unknown');
     expect(parsed.trace).toEqual([
       { type: 'message', text: 'plain string content' },
       { type: 'message', text: 'boom' },
@@ -347,7 +356,7 @@ describe('ClaudeStreamParser events', () => {
     const parsed = parseClaudeStream(lines(...many, ...synthetic), SKILL);
     expect(parsed.messageModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
     expect(parsed.modelsOverflow).toBe(true);
-    expect(parsed.apiErrors).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
+    expect(parsed.apiError).toBe(null);
     expect(parsed.syntheticTexts).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
 
     const usage = Object.fromEntries(
@@ -461,6 +470,13 @@ describe('ClaudeStreamParser events', () => {
       parseClaudeStream(lines(user('x', { parent_tool_use_id: 'forked-command-pdf' })), slash)
         .slashExpanded,
     ).toBe(true);
+    // Only the installed skill's fork counts (review m1).
+    expect(
+      parseClaudeStream(
+        lines(JSON.stringify({ type: 'stream_event', parent_tool_use_id: 'forked-command-other' })),
+        slash,
+      ).slashExpanded,
+    ).toBe(false);
     expect(
       parseClaudeStream(
         lines(JSON.stringify({ type: 'stream_event', parent_tool_use_id: 7 })),
@@ -508,15 +524,15 @@ describe('names from the stream', () => {
     const parsed = parseClaudeStream(
       lines(
         init({ model: long, apiKeySource: long }),
-        JSON.stringify({ type: 'system', subtype: 'api_retry', attempt: 1, error: long }),
         assistant([], { message: { model: long, content: [] }, error: long }),
+        JSON.stringify({ type: 'system', subtype: 'api_retry', attempt: 1, error: long }),
         result({ modelUsage: { [long]: {} } }),
       ),
       SKILL,
     );
     expect(parsed.init).toMatchObject({ model: clipped, apiKeySource: clipped });
     expect(parsed.lastRetryCategory).toBe(clipped);
-    expect(parsed.apiErrors).toEqual([clipped]);
+    expect(parsed.apiError).toBe(clipped);
     expect(parsed.messageModels).toEqual([clipped]);
     expect(parsed.reportedModels).toEqual([clipped]);
   });
@@ -531,21 +547,33 @@ describe('promptInvokesSkill', () => {
   });
 });
 
+/** Generous bound for the timing test on a loaded 2-core runner (lesson 2026-10-21). */
+const LINEAR_TIME_TEST_TIMEOUT_MS = 60_000;
+
 describe('ClaudeStreamParser cost', () => {
-  it('is linear in the stream size', () => {
-    const message = assistant([
-      { type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'deploy' } },
-    ]);
-    const time = (count: number) => {
-      const text = lines(...Array.from({ length: count }, () => message));
-      const started = performance.now();
-      parseClaudeStream(text, SKILL);
-      return performance.now() - started;
-    };
-    time(2_000); // warm-up
-    const small = Math.max(time(5_000), 1);
-    const large = time(40_000);
-    // 8× the input; a quadratic parser would take ~64×.
-    expect(large / small).toBeLessThan(30);
-  });
+  it(
+    'is linear in the stream size',
+    () => {
+      const message = assistant([
+        { type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'deploy' } },
+      ]);
+      // Fastest of three, so one GC pause on a loaded runner cannot fake a ratio.
+      const time = (count: number) => {
+        const text = lines(...Array.from({ length: count }, () => message));
+        let best = Infinity;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const started = performance.now();
+          parseClaudeStream(text, SKILL);
+          best = Math.min(best, performance.now() - started);
+        }
+        return best;
+      };
+      time(1_000); // warm-up
+      const small = Math.max(time(2_500), 1);
+      const large = time(20_000);
+      // 8× the input; a quadratic parser would take ~64×.
+      expect(large / small).toBeLessThan(30);
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 });

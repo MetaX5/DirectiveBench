@@ -67,6 +67,8 @@ export function applySkillActivationRules<T extends AgentRunFacts>(
 ): T {
   const activation = record.skillActivation;
   if (!activation || (record.variant === 'baseline' && !abBaseline)) return record;
+  // A cancelled or timed-out run says nothing about loading; it must stay cancelled or timed out.
+  if (record.executionStatus === 'cancelled' || record.executionStatus === 'timeout') return record;
   if (!activation.loaded) {
     if (record.errorCode !== null && STOP_CODES.includes(record.errorCode)) return record;
     record.executionStatus = 'infrastructure-error';

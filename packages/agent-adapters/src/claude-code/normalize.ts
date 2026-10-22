@@ -2,7 +2,11 @@ import { redactSecrets } from '@directivebench/core';
 import type { ClaudeAuthMode } from '../claude-code-readiness';
 import type { AgentRunMetadata, AgentRunResult, SkillActivation } from '../contract';
 import type { ClaudePermissionProfile } from './argv';
-import { CLAUDE_TRACE_TEXT_MAX_CHARS, type ParsedClaudeStream } from './stream-parser';
+import {
+  CLAUDE_REDACTION_MARGIN_CHARS,
+  CLAUDE_TRACE_TEXT_MAX_CHARS,
+  type ParsedClaudeStream,
+} from './stream-parser';
 
 /** SPEC-203 §9 codes an agent run of Claude Code can end with (after the process started). */
 export type ClaudeRunErrorCode =
@@ -48,19 +52,27 @@ const API_ERROR_CODES: Readonly<Record<string, ClaudeRunErrorCode>> = {
   model_not_found: 'model-not-found',
 };
 
-/** The expired-login text SPEC-203 §9 names; checked before the error categories. */
-const EXPIRED_LOGIN = /login expired|token (?:has )?expired/i;
+/** The expired-login texts (SPEC-203 §9); checked before the error categories. */
+const EXPIRED_LOGIN: readonly (readonly [RegExp, ClaudeRunErrorCode])[] = [
+  [/^(?:Login expired|OAuth token has expired)\b/i, 'auth-expired'],
+];
 
 /**
- * Other failure texts (result text, `errors[]`, CLI-written messages) → codes, first match wins.
- * They are the CLI's usual wording and are checked after the categories, so a changed wording
- * degrades to `provider-error` or `agent-failed`, never to success.
+ * The CLI's own failure messages → codes, first match wins. They are matched only against text
+ * the CLI wrote (`errors[]`, synthetic messages, non-JSON output, stderr), one line at a time and
+ * anchored at its start, so the agent's own words ("added rate limit middleware") never match.
+ * The wording is not a contract: a changed message degrades to `provider-error`, `agent-failed`
+ * or, for an `is_error` success without a category, to `completed` with `agent-reported-error`.
  */
 const TEXT_CODES: readonly (readonly [RegExp, ClaudeRunErrorCode])[] = [
-  [/not logged in|please run \/login/i, 'auth-missing'],
-  [/invalid api key|authentication[ _]failed/i, 'auth-invalid'],
-  [/credit balance is too low|billing[ _]error/i, 'billing'],
-  [/usage limit|rate[ _]limit|limit reached\W+resets/i, 'rate-limited'],
+  ...EXPIRED_LOGIN,
+  [/^(?:Not logged in|Please run \/login)\b/i, 'auth-missing'],
+  [/^Invalid API key\b/i, 'auth-invalid'],
+  [/^Credit balance is too low\b/i, 'billing'],
+  [
+    /^(?:API Error: Rate limit reached|Claude AI usage limit reached|You've hit your (?:\w+ )?limit|[\w-]+ limit reached\W+resets)/i,
+    'rate-limited',
+  ],
 ];
 
 /** How the `claude` process ended; timeout and cancellation are decided by the caller. */
@@ -78,18 +90,20 @@ export interface ClaudeRunClassification {
   warnings: ClaudeRunWarning[];
 }
 
+/** Text the CLI wrote about a failure: `errors[]` and synthetic main-conversation messages. */
 function failureTexts(parsed: ParsedClaudeStream): string[] {
-  const result = parsed.result;
-  return [
-    ...(result?.isError && result.text !== null ? [result.text] : []),
-    ...(result?.errors ?? []),
-    ...parsed.syntheticTexts,
-  ];
+  return [...(parsed.result?.errors ?? []), ...parsed.syntheticTexts];
 }
 
-function textCode(texts: readonly string[]): ClaudeRunErrorCode | null {
-  for (const [pattern, code] of TEXT_CODES) {
-    if (texts.some((text) => pattern.test(text))) return code;
+function textCode(
+  texts: readonly string[],
+  patterns: readonly (readonly [RegExp, ClaudeRunErrorCode])[] = TEXT_CODES,
+): ClaudeRunErrorCode | null {
+  const lines = texts
+    .flatMap((text) => text.split('\n'))
+    .map((line) => line.replace(/^…/, '').trim());
+  for (const [pattern, code] of patterns) {
+    if (lines.some((line) => pattern.test(line))) return code;
   }
   return null;
 }
@@ -99,8 +113,13 @@ function failed(parsed: ParsedClaudeStream, exitCode: number | null): boolean {
   return result === null || result.isError || result.subtype !== 'success' || exitCode !== 0;
 }
 
+/** The redacted end of `text`; redacted before it is cut, so a straddling secret is matched whole. */
 function tail(text: string, secrets: readonly string[]): string {
-  return redactSecrets(text.slice(-CLAUDE_TRACE_TEXT_MAX_CHARS), secrets).trim();
+  const redacted = redactSecrets(
+    text.slice(-(CLAUDE_TRACE_TEXT_MAX_CHARS + CLAUDE_REDACTION_MARGIN_CHARS)),
+    secrets,
+  );
+  return redacted.slice(-CLAUDE_TRACE_TEXT_MAX_CHARS).trim();
 }
 
 /**
@@ -146,24 +165,32 @@ export function classifyClaudeRun(
   }
   if (failed(parsed, exit.exitCode)) {
     const texts = failureTexts(parsed);
-    // A retry that recovered says nothing about a later failure: it counts only when the run
-    // ended without a regular error subtype.
+    // A retry counts only when the run ended without a regular error subtype; the parser already
+    // dropped one the model recovered from.
     const retried =
       result === null || result.subtype === 'success' ? parsed.lastRetryCategory : null;
-    const category = parsed.apiErrors.at(-1) ?? retried;
-    const code = texts.some((text) => EXPIRED_LOGIN.test(text))
-      ? 'auth-expired'
-      : category !== null
-        ? (API_ERROR_CODES[category] ?? 'provider-error')
-        : textCode(texts);
+    const category = parsed.apiError ?? retried;
+    const code =
+      textCode(texts, EXPIRED_LOGIN) ??
+      (category !== null ? (API_ERROR_CODES[category] ?? 'provider-error') : textCode(texts)) ??
+      // A message the CLI wrote itself about a failure it did not categorise.
+      (parsed.syntheticTexts.length > 0 ? 'provider-error' : null);
     if (code !== null) {
       return agentError(code, `Claude Code failed (${code}): ${texts[0] ?? category}`);
     }
   }
 
   if (result === null || parsed.eventsOverflow || parsed.malformedLines > 0) {
+    const stderr = tail(exit.stderr ?? '', knownSecrets);
+    // A login or quota message printed outside the stream still stops the run (FR-118-15).
+    const outside = textCode([parsed.rawTail ?? '', stderr]);
+    if (outside !== null) {
+      return agentError(
+        outside,
+        `Claude Code failed (${outside}): ${parsed.rawTail ?? ''}${parsed.rawTail && stderr ? ' / ' : ''}${stderr}`,
+      );
+    }
     if (parsed.events === 0 && exit.exitCode !== 0) {
-      const stderr = tail(exit.stderr ?? '', knownSecrets);
       return agentError(
         'cli-usage-error',
         `Claude Code exited with code ${exit.exitCode ?? 'none'} before any output${stderr ? `: ${stderr}` : '.'}`,

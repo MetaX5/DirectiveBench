@@ -93,7 +93,7 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     const base = parse('skill-invoked');
     const run = (category: string): string | null =>
       classifyClaudeRun(
-        { ...base, apiErrors: [category], result: { ...base.result!, isError: true, text: 'x' } },
+        { ...base, apiError: category, result: { ...base.result!, isError: true, text: 'x' } },
         OK,
         'subscription',
       ).errorCode;
@@ -119,11 +119,21 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     );
   });
 
-  it('reads auth, billing and quota failures from the text when no category is reported', () => {
+  it('reads auth, billing and quota failures from CLI-written text when no category is reported', () => {
     const base = parse('skill-invoked');
-    const run = (text: string) =>
+    const run = (text: string, where: 'errors' | 'synthetic' = 'synthetic') =>
       classifyClaudeRun(
-        { ...base, result: { ...base.result!, isError: true, text } },
+        where === 'synthetic'
+          ? { ...base, syntheticTexts: [text], result: { ...base.result!, isError: true } }
+          : {
+              ...base,
+              result: {
+                ...base.result!,
+                subtype: 'error_during_execution',
+                isError: true,
+                errors: [text],
+              },
+            },
         { exitCode: 1 },
         'subscription',
       ).errorCode;
@@ -131,9 +141,126 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
     expect(run('Invalid API key · Fix external API key')).toBe('auth-invalid');
     expect(run('Credit balance is too low')).toBe('billing');
     expect(run('Claude AI usage limit reached|1760000000')).toBe('rate-limited');
-    expect(run('OAuth token has expired.')).toBe('auth-expired');
-    // Unknown wording on a success subtype that exited non-zero: a plain failure.
-    expect(run('Something else went wrong')).toBe('agent-failed');
+    expect(run('5-hour limit reached ∙ resets 3pm', 'errors')).toBe('rate-limited');
+    expect(run('first line\nOAuth token has expired.', 'errors')).toBe('auth-expired');
+    // A message the CLI wrote without a known wording: a provider error, which does not stop.
+    expect(run('Something else went wrong')).toBe('provider-error');
+    expect(run('Something else went wrong', 'errors')).toBe('agent-failed');
+  });
+
+  it("never reads the agent's own answer as a login or quota failure (review M2)", () => {
+    const base = parse('skill-invoked');
+    const answer =
+      'I added rate limit middleware. Login expired sessions now redirect; please run /login.';
+    const reported = { ...base, result: { ...base.result!, isError: true, text: answer } };
+    expect(classifyClaudeRun(reported, OK, 'subscription')).toMatchObject({
+      status: 'completed',
+      warnings: ['ambient-user-config', 'agent-reported-error'],
+    });
+    expect(classifyClaudeRun(reported, { exitCode: 1 }, 'subscription').errorCode).toBe(
+      'agent-failed',
+    );
+    const inErrors = {
+      ...base,
+      result: {
+        ...base.result!,
+        subtype: 'error_during_execution',
+        isError: true,
+        errors: [`Tool failed: ${answer}`],
+      },
+    };
+    expect(classifyClaudeRun(inErrors, { exitCode: 1 }, 'subscription').errorCode).toBe(
+      'agent-failed',
+    );
+  });
+
+  it('never lets a recovered retry or a subagent error decide a later failure (review M1)', () => {
+    const lines = (...items: object[]) => items.map((item) => JSON.stringify(item)).join('\n');
+    const init = {
+      type: 'system',
+      subtype: 'init',
+      model: 'm1',
+      tools: ['Skill'],
+      skills: ['pdf'],
+      apiKeySource: 'none',
+    };
+    const retry = (error: string) => ({ type: 'system', subtype: 'api_retry', attempt: 1, error });
+    const answer = {
+      type: 'assistant',
+      message: { model: 'm1', content: [{ type: 'text', text: 'working' }] },
+      parent_tool_use_id: null,
+    };
+    const ok = { type: 'result', subtype: 'success', is_error: false, result: 'done' };
+    const maxTurns = {
+      type: 'result',
+      subtype: 'error_max_turns',
+      is_error: true,
+      errors: ['Reached maximum number of turns'],
+    };
+
+    const killed = parseClaudeStream(lines(init, retry('overloaded'), answer), SKILL);
+    expect(killed.lastRetryCategory).toBeNull();
+    expect(classifyClaudeRun(killed, { exitCode: 137 }, 'subscription').errorCode).toBe(
+      'output-parse-error',
+    );
+
+    const exitOne = parseClaudeStream(lines(init, retry('rate_limit'), answer, ok), SKILL);
+    expect(classifyClaudeRun(exitOne, { exitCode: 1 }, 'subscription').errorCode).toBe(
+      'agent-failed',
+    );
+
+    const subagent = {
+      type: 'assistant',
+      message: {
+        model: '<synthetic>',
+        content: [{ type: 'text', text: 'API Error: Rate limit reached' }],
+      },
+      parent_tool_use_id: 'toolu_sub',
+      error: 'rate_limit',
+    };
+    const sub = parseClaudeStream(lines(init, subagent, maxTurns), SKILL);
+    expect(sub.apiError).toBeNull();
+    expect(sub.syntheticTexts).toEqual([]);
+    expect(classifyClaudeRun(sub, { exitCode: 1 }, 'subscription').errorCode).toBe('agent-failed');
+
+    const mainError = { ...subagent, parent_tool_use_id: null };
+    const recovered = parseClaudeStream(lines(init, mainError, answer, maxTurns), SKILL);
+    expect(recovered.apiError).toBeNull();
+    expect(classifyClaudeRun(recovered, { exitCode: 1 }, 'subscription').errorCode).toBe(
+      'agent-failed',
+    );
+  });
+
+  it('stops on a login or quota message printed outside the stream (review m3)', () => {
+    const plain = parseClaudeStream('Not logged in · Please run /login\n', SKILL);
+    expect(classifyClaudeRun(plain, { exitCode: 1 }, 'subscription')).toMatchObject({
+      errorCode: 'auth-missing',
+      error: 'Claude Code failed (auth-missing): Not logged in · Please run /login',
+    });
+    const empty = parseClaudeStream('', SKILL);
+    expect(
+      classifyClaudeRun(
+        empty,
+        { exitCode: 1, stderr: 'warning: x\nInvalid API key · Fix external API key\n' },
+        'api-key',
+      ),
+    ).toMatchObject({ errorCode: 'auth-invalid' });
+    const both = parseClaudeStream('Credit balance is too low\n', SKILL);
+    expect(classifyClaudeRun(both, { exitCode: 1, stderr: 'exit' }, 'api-key').error).toBe(
+      'Claude Code failed (billing): Credit balance is too low / exit',
+    );
+  });
+
+  it('redacts a secret that straddles the kept end of stderr (review M3)', () => {
+    const key = `sk-ant-test-${'k'.repeat(60)}`;
+    const stderr = `${'x'.repeat(100)} ${key} ${'y'.repeat(1_990)}`;
+    const error = classifyClaudeRun(
+      parseClaudeStream('', SKILL),
+      { exitCode: 2, stderr },
+      'subscription',
+      [key],
+    ).error;
+    expect(error).not.toContain('kkkkkkkkkk');
   });
 
   it('distinguishes an invalid invocation, an empty stream, an overflow and malformed lines', () => {
