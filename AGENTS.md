@@ -132,6 +132,10 @@ These rules are not optional. A task is not done until the applicable steps are 
   not verified), `## Review` (after review rounds), `## Links`, `## Follow-ups`,
   `## Decisions touched`, then `Closes #N` — even when an `om-*` skill supplies its own template
   (see [`.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md`](.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md)).
+- Review PRs with `om-auto-review-pr <n>` (engine `om-code-review`), also when only asked
+  whether a PR can be approved; never with a hand-briefed agent. Do not claim another author's
+  PR while they are still pushing to it
+  ([lesson](.ai/lessons/2026-10-22-review-prs-through-om-auto-review-pr.md)).
 - Commit the run log, spec updates and lessons together with the code they describe.
 
 ## 5. Repository map

@@ -143,7 +143,7 @@ describe('doctor', () => {
     );
     expect(lines.find((l) => l.includes(' port '))).toMatch(/127\.0\.0\.1:\d+ is free$/);
     expect(lines).toContain(
-      'ok    agent:claude-code  Claude Code found (2.1.302 (Claude Code)); benchmark execution not implemented yet',
+      'ok    agent:claude-code  Claude Code found (2.1.302 (Claude Code)); runs benchmarks with `directivebench benchmark run`',
     );
     expect(lines).toContain('ok    agent:claude-code:subscription ready: Logged in (claude.ai).');
     expect(lines).toContain(
@@ -171,7 +171,7 @@ describe('doctor', () => {
         name: 'agent:claude-code',
         status: 'ok',
         detail:
-          'Claude Code found (2.1.302 (Claude Code)); benchmark execution not implemented yet',
+          'Claude Code found (2.1.302 (Claude Code)); runs benchmarks with `directivebench benchmark run`',
       },
       {
         name: 'agent:claude-code:subscription',

@@ -16,10 +16,12 @@ version regress? Does a rule activate only where it should? Can the result be re
 > local SQLite registry, a benchmark engine with RED/GREEN comparison, a job runner, a web UI
 > and a CLI. You can register local
 > repositories and public GitHub repositories (by URL, without credentials) and scan them for
-> skills, instructions and rules. Benchmarks currently run only with a **deterministic mock
-> agent**, which demonstrates the pipeline and is **not an AI evaluation**. Private and GitLab
-> repositories, change tracking across syncs and real agent integrations are specified but not
-> implemented.
+> skills, instructions and rules. From the CLI you can benchmark your own skill with your
+> installed **Claude Code** (`directivebench benchmark init` / `benchmark run`, against no skill
+> or another version); not yet checked against a real login (#103). The web UI and `demo` run the
+> **deterministic mock agent**, which demonstrates the pipeline and is **not an AI evaluation**.
+> Private and GitLab repositories, change tracking across syncs and Codex and Cursor integrations
+> are specified but not implemented.
 
 ## Capabilities
 
@@ -36,7 +38,8 @@ version regress? Does a rule activate only where it should? Can the result be re
 | Persistent local job queue with cancellation and crash recovery | ✅ Implemented |
 | Deterministic mock agent | ✅ Implemented (clearly labelled) |
 | Agent CLI detection (Claude Code, Codex, Cursor Agent) | ✅ Detection only |
-| Real agent execution (Claude Code, Codex, Cursor) | 📝 Specified, not implemented |
+| Benchmarking your own skill with Claude Code from the CLI (`benchmark init`, `benchmark run`; A/B against another version; subscription or API key) | ✅ Implemented; not yet checked against a real login ([#103](https://github.com/MetaX5/DirectiveBench/issues/103)) |
+| Real agent execution with Codex and Cursor, and from the web UI | 📝 Specified, not implemented |
 | Private GitHub, GitLab (incl. self-managed) and commit-based local Git synchronisation | 📝 Specified, not implemented |
 | Model providers (Anthropic, OpenAI, DeepSeek, Z.AI GLM, Kimi, custom) | 📝 Specified, not implemented |
 | Benchmark Builder UI, category management UI, Docker sandbox, LLM-as-judge | 📝 Specified, not implemented |
@@ -54,7 +57,7 @@ flowchart LR
     CLI["directivebench CLI\n(supervisor + job runner)"] -->|spawns| WEB["Next.js web UI\n127.0.0.1:4280"]
     CLI --> DB[("SQLite\n<data dir>")]
     WEB -->|reads, enqueues jobs| DB
-    CLI -->|RED/GREEN runs| ENGINE["benchmark engine"] --> AGENT["agent adapter\n(mock today)"]
+    CLI -->|RED/GREEN runs| ENGINE["benchmark engine"] --> AGENT["agent adapter\n(mock, Claude Code)"]
     CLI -->|read-only git, no hooks| REPO["registered local\nrepositories"]
 ```
 

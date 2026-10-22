@@ -449,7 +449,6 @@ function ResultsByVersionTab({
                 directivebench benchmark init --artifact {slug}
               </code>
             </p>
-            <Badge variant="muted">Planned — the command is not implemented yet</Badge>
           </div>
         ) : null}
         {tested && groups > 1 ? (

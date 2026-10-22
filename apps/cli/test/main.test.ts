@@ -10,7 +10,11 @@ const commands = vi.hoisted(() => ({
   doctorCommand: vi.fn(),
   demoCommand: vi.fn(),
   serve: vi.fn(),
+  benchmarkInitCommand: vi.fn(),
+  benchmarkRunCommand: vi.fn(),
 }));
+vi.mock('../src/benchmark-init', () => ({ benchmarkInitCommand: commands.benchmarkInitCommand }));
+vi.mock('../src/benchmark-run', () => ({ benchmarkRunCommand: commands.benchmarkRunCommand }));
 vi.mock('../src/commands', () => ({
   initCommand: commands.initCommand,
   doctorCommand: commands.doctorCommand,
@@ -116,6 +120,49 @@ describe('directivebench (main)', () => {
     expect(commands.doctorCommand).toHaveBeenCalledWith({ json: true, dataDir: undefined });
     await runCli('--data-dir', '/d', 'demo');
     expect(commands.demoCommand).toHaveBeenCalledWith({ dataDir: '/d' });
+  });
+
+  it('passes benchmark init and run options, with --artifact-version as version', async () => {
+    await runCli('--data-dir', '/d', 'benchmark', 'init', '--artifact', 'pdf');
+    expect(commands.benchmarkInitCommand).toHaveBeenCalledWith({ artifact: 'pdf', dataDir: '/d' });
+    await runCli(
+      'benchmark',
+      'run',
+      './suite',
+      '--artifact',
+      'pdf',
+      '--artifact-version',
+      '3',
+      '--baseline',
+      'v2',
+      '--auth',
+      'api-key',
+      '--max-budget-usd',
+      '1',
+      '--approve-commands',
+      '--yes',
+      '--json',
+    );
+    expect(commands.benchmarkRunCommand).toHaveBeenCalledWith({
+      suite: './suite',
+      artifact: 'pdf',
+      version: '3',
+      baseline: 'v2',
+      auth: 'api-key',
+      maxBudgetUsd: '1',
+      approveCommands: true,
+      yes: true,
+      json: true,
+      dataDir: undefined,
+    });
+    await runCli('benchmark', 'run', './suite', '--artifact', 'pdf');
+    expect(commands.benchmarkRunCommand).toHaveBeenLastCalledWith({
+      suite: './suite',
+      artifact: 'pdf',
+      dataDir: undefined,
+    });
+    expect(await runCli('benchmark', 'run', './suite')).toBe(ExitCode.Usage);
+    expect(stderr.join('')).toContain("required option '--artifact <ref>' not specified");
   });
 
   it("uses the command's result as the exit code", async () => {

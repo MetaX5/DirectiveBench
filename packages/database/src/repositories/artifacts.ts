@@ -835,3 +835,97 @@ export async function getLatestArtifactVersionId(
     .get();
   return row?.id ?? null;
 }
+
+/** Closest artifacts (or newest versions) named when a reference matches none (FR-118-22). */
+export const ARTIFACT_REF_SUGGESTIONS = 5;
+
+export type ArtifactRefErrorCode = 'artifact-not-found' | 'version-not-found';
+
+/** A `--artifact <ref>` (and `--version <n>`) that names nothing (SPEC-118 FR-118-22). */
+export class ArtifactRefError extends Error {
+  override name = 'ArtifactRefError';
+  constructor(
+    readonly code: ArtifactRefErrorCode,
+    message: string,
+    /** Closest artifact slugs, or the artifact's version numbers (newest first). */
+    readonly candidates: string[],
+  ) {
+    super(message);
+  }
+}
+
+export interface ResolvedArtifactRef {
+  artifact: { id: string; slug: string; name: string; type: ArtifactType };
+  version: { id: string; version: number; format: string; contentHash: string };
+  /** How many versions the artifact has; `--baseline vN` needs at least two. */
+  versionCount: number;
+}
+
+/** `%` and `_` are LIKE wildcards; `\` escapes them (and itself). */
+function likePattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+}
+
+/**
+ * Resolves an artifact reference for the CLI (SPEC-118 FR-118-22): an artifact id, else a slug
+ * (both are unique, and the id wins when one artifact's id is another's slug). `version` selects a
+ * version number; without it the latest version is chosen. Throws {@link ArtifactRefError} with
+ * the closest slugs (substring of slug or name) or the newest version numbers, at most
+ * {@link ARTIFACT_REF_SUGGESTIONS} each.
+ */
+export async function resolveArtifactRef(
+  db: Database,
+  ref: string,
+  version?: number,
+): Promise<ResolvedArtifactRef> {
+  const columns = {
+    id: artifacts.id,
+    slug: artifacts.slug,
+    name: artifacts.name,
+    type: artifacts.type,
+  };
+  const artifact =
+    (await db.select(columns).from(artifacts).where(eq(artifacts.id, ref)).get()) ??
+    (await db.select(columns).from(artifacts).where(eq(artifacts.slug, ref)).get());
+  if (!artifact) {
+    const pattern = likePattern(ref.toLowerCase());
+    const close = await db
+      .select({ slug: artifacts.slug })
+      .from(artifacts)
+      .where(
+        or(
+          sql`lower(${artifacts.slug}) like ${pattern} escape '\\'`,
+          sql`lower(${artifacts.name}) like ${pattern} escape '\\'`,
+        ),
+      )
+      .orderBy(artifacts.slug)
+      .limit(ARTIFACT_REF_SUGGESTIONS);
+    throw new ArtifactRefError(
+      'artifact-not-found',
+      `No artifact has the id or slug "${ref}".`,
+      close.map((row) => row.slug),
+    );
+  }
+  const versions = await db
+    .select({
+      id: artifactVersions.id,
+      version: artifactVersions.version,
+      format: artifactVersions.format,
+      contentHash: artifactVersions.contentHash,
+    })
+    .from(artifactVersions)
+    .where(eq(artifactVersions.artifactId, artifact.id))
+    .orderBy(desc(artifactVersions.version));
+  const chosen =
+    version === undefined ? versions[0] : versions.find((row) => row.version === version);
+  if (!chosen) {
+    throw new ArtifactRefError(
+      'version-not-found',
+      version === undefined
+        ? `Artifact "${artifact.slug}" has no versions.`
+        : `Artifact "${artifact.slug}" has no version ${version}.`,
+      versions.slice(0, ARTIFACT_REF_SUGGESTIONS).map((row) => `v${row.version}`),
+    );
+  }
+  return { artifact, version: chosen, versionCount: versions.length };
+}

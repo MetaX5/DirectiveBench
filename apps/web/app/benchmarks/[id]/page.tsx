@@ -144,7 +144,6 @@ export default async function BenchmarkPage({
                     {error}
                   </p>
                 ) : null}
-                <Badge variant="muted">Planned — not implemented yet</Badge>
                 {(detail.assignedArtifacts.length > 0
                   ? detail.assignedArtifacts.map((artifact) => artifact.slug)
                   : ['<artifact-slug>']
