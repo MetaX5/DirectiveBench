@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -52,7 +53,7 @@ interface Fake {
  * argv, environment and working directory, reads the prompt, writes `output.md` and replays
  * `streams/<n>.ndjson` for its n-th start (else `streams/default.ndjson`).
  */
-function fakeClaude(root: string, streams: Record<string, string>): Fake {
+function fakeClaude(root: string, streams: Record<string, string>, shebang = '#!/bin/sh'): Fake {
   const binDir = join(root, 'bin');
   const records = join(root, 'records');
   const streamDir = join(root, 'streams');
@@ -64,7 +65,7 @@ function fakeClaude(root: string, streams: Record<string, string>): Fake {
   writeFileSync(
     executable,
     [
-      '#!/bin/sh',
+      shebang,
       'case "$1" in',
       "  --version) echo '2.1.302 (Claude Code)'; exit 0 ;;",
       `  --setting-sources|auth) echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0 ;;`,
@@ -197,6 +198,8 @@ interface Scenario {
   baselineArtifact?: ArtifactBundle;
   adapter?: ClaudeCodeAdapterOptions;
   env?: Record<string, string>;
+  /** The fake's `#!` line (default `#!/bin/sh`). */
+  shebang?: string;
   /** Setup commands that need the fake's directory (the default PATH entry of `claude`). */
   setupFor?: (binDir: string) => string[][];
 }
@@ -204,7 +207,11 @@ interface Scenario {
 /** One benchmark run; resolves to the outcome or the error it rejected with. */
 async function scenario(prefix: string, options: Scenario = {}) {
   const root = realpathSync(tmp(prefix));
-  const fake = fakeClaude(root, options.streams ?? { default: stream('skill-invoked') });
+  const fake = fakeClaude(
+    root,
+    options.streams ?? { default: stream('skill-invoked') },
+    options.shebang,
+  );
   const home = join(root, 'user-home');
   mkdirSync(home);
   const path = `${fake.binDir}:/usr/bin:/bin`;
@@ -381,6 +388,32 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(readFileSync(marker, 'utf8')).toBe('--version\n');
     expect(outcome.summary.verdict).toBe('not-comparable');
     expect(outcome.summary.reasons.join('\n')).toContain('agent version changed during the run');
+  });
+
+  it('refuses a run whose launcher interpreter a setup command planted earlier on PATH (Codex round 3)', async () => {
+    const root = realpathSync(tmp('cc-interp'));
+    const early = join(root, 'early-bin');
+    const interp = join(root, 'interp-bin');
+    mkdirSync(early);
+    mkdirSync(interp);
+    symlinkSync('/bin/sh', join(interp, 'fake-sh'));
+    const marker = join(root, 'planted-ran');
+    const plant = `printf '#!/bin/sh\\necho "$*" >> ${marker}\\n' > ${early}/fake-sh && chmod +x ${early}/fake-sh`;
+    const { fake, records, result } = await scenario('cc-interp-plant', {
+      shebang: '#!/usr/bin/env fake-sh',
+      suite: { setup: [['sh', '-c', plant]] },
+      adapter: { authMode: 'api-key' },
+      env: { PATH: `${early}:${interp}:PLACEHOLDER`, ANTHROPIC_API_KEY: KEY },
+    });
+    outcomeOf(result);
+    expect(records.map((record) => record.errorCode)).toEqual([
+      'binary-replaced',
+      'binary-replaced',
+    ]);
+    expect(records[0]?.error).toContain('fake-sh now resolves to another file');
+    expect(fake.starts()).toEqual([]);
+    // Only the engine's final detection ran the planted interpreter (for `--version`).
+    expect(readFileSync(marker, 'utf8')).not.toContain(' -p');
   });
 
   it('refuses a claude executable that a setup command replaced (Codex round 2)', async () => {

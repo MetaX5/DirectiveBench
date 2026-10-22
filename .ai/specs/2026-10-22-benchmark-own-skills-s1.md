@@ -995,11 +995,13 @@ changed before merge.
   code; exempt only the agent `HOME`'s own `.claude` and `.claude.json`), since Claude Code loads
   them from above the working directory and a `setup` command can write `../CLAUDE.md`; and the
   adapter pins the `claude` its first detection located (before any `setup`), spawns its canonical
-  path without a `PATH` lookup and refuses a run whose file was replaced (`binary-replaced`).
+  path without a `PATH` lookup and refuses a run whose file was replaced (`binary-replaced`); for
+  a script launcher it also pins the interpreter of its `#!` line (`#!/usr/bin/env node` looked up
+  on the child's `PATH`), so a `node` planted earlier on `PATH` is refused too.
   Residual (not sandboxed, §12): an approved `setup` command runs with the user's permissions and
-  can still change other user-writable files the CLI uses — the interpreter a script-installed
-  `claude` finds on `PATH`, the installation's own files in place with the same size and
-  modification time, or user-level configuration in subscription mode. Not
+  can still change other user-writable files the CLI uses — an interpreter that is itself a
+  launcher, programs `claude` starts through `PATH`, the installation's own files in place with
+  the same size and modification time, or user-level configuration in subscription mode. Not
   verified: a real `claude` (AC-22, issue #103), the CLI wiring and plan-time refusals (Phase 4).
 - **Implemented — Phase 5 (issue #98, verified on 2026-10-22 with seeded runs, no agent):**
   read-only results by artifact version.

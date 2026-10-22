@@ -137,16 +137,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
    */
   private locate(detection?: AgentDetection): Promise<ClaudeExecutableLookup> {
     this.executable ??= detection
-      ? pinClaudeExecutable({
-          executablePath: detection.executablePath,
-          versionLine: detection.version,
-        })
+      ? pinClaudeExecutable(
+          { executablePath: detection.executablePath, versionLine: detection.version },
+          this.env,
+        )
       : (async () => {
           const executablePath = await findExecutable(CLAUDE_EXECUTABLE, this.env);
           const versionLine = executablePath
             ? await readVersionLine(executablePath, CLAUDE_CODE_AGENT.versionArgs, this.env)
             : null;
-          return pinClaudeExecutable({ executablePath, versionLine });
+          return pinClaudeExecutable({ executablePath, versionLine }, this.env);
         })();
     return this.executable;
   }
@@ -217,9 +217,6 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       const located = await this.locate();
       if (!located.ok) return refused('infrastructure-error', located.detail, located.code);
       const { pin } = located;
-      const replaced = await claudeExecutablePinIssue(pin);
-      if (replaced !== null)
-        return refused('infrastructure-error', `${replaced}.`, 'binary-replaced');
 
       const argv = buildClaudeArgv({
         authMode,
@@ -255,6 +252,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           isolatedHome,
         ],
       });
+      // Right before the spawn, against the child's own PATH: still the files located before setup.
+      // Widened like the spawn's `env` option (Next.js requires `NODE_ENV` in `ProcessEnv`).
+      const replaced = await claudeExecutablePinIssue(pin, env as NodeJS.ProcessEnv);
+      if (replaced !== null) {
+        return refused('infrastructure-error', `${replaced}.`, 'binary-replaced');
+      }
       const outcome = await runClaudeCode({
         executable: pin.canonical,
         argv,
