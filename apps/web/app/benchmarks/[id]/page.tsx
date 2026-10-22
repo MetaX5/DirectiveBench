@@ -32,6 +32,7 @@ import {
 import { enqueueBenchmarkRunAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import { cliRunCommand } from '@/lib/run-guard';
 import { formatDate, formatDelta } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmark' };
@@ -54,6 +55,8 @@ export default async function BenchmarkPage({
   const definition = parsed.success ? parsed.definition : null;
   const approved = Boolean(version.executionApprovedAt);
   const blockers = definition ? executionBlockers(definition, approved) : [];
+  // Real agents run only from the CLI in S1; the server action refuses them too (FR-118-05/53).
+  const cliOnly = definition !== null && !isMockAgent(definition.execution.agent);
   const { error } = await searchParams;
 
   return (
@@ -125,49 +128,78 @@ export default async function BenchmarkPage({
         </Card>
 
         <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Run benchmark</CardTitle>
-              <CardDescription>
-                Enqueues a RED/GREEN run for the latest artifact version. The runner in the CLI
-                process executes it.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              {error ? (
-                <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
-                  {error}
-                </p>
-              ) : null}
-              {blockers.map((blocker) => (
-                <p key={blocker} className="text-xs text-warning">
-                  {blocker}
-                  {blocker.includes('approved') ? ' Approval in the UI is planned.' : ''}
-                </p>
-              ))}
-              {detail.assignedArtifacts.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No artifacts are assigned to this suite.
-                </p>
-              ) : null}
-              {detail.assignedArtifacts.map((artifact) => (
-                <form
-                  key={artifact.id}
-                  action={enqueueBenchmarkRunAction}
-                  className="flex items-center justify-between gap-2"
-                >
-                  <input type="hidden" name="suiteVersionId" value={version.id} />
-                  <input type="hidden" name="artifactId" value={artifact.id} />
-                  <Link href={`/artifacts/${artifact.id}`} className="truncate hover:underline">
-                    {artifact.name}
-                  </Link>
-                  <Button size="sm" type="submit" disabled={!definition || blockers.length > 0}>
-                    <Play aria-hidden /> Run
-                  </Button>
-                </form>
-              ))}
-            </CardContent>
-          </Card>
+          {cliOnly ? (
+            <Card data-testid="run-from-cli">
+              <CardHeader>
+                <CardTitle>Run from the CLI</CardTitle>
+                <CardDescription>
+                  This suite uses agent{' '}
+                  <span className="font-mono">{definition.execution.agent}</span>. The web UI runs
+                  only mock-agent suites; real agents run from the CLI.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {error ? (
+                  <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
+                    {error}
+                  </p>
+                ) : null}
+                <Badge variant="muted">Planned — not implemented yet</Badge>
+                {(detail.assignedArtifacts.length > 0
+                  ? detail.assignedArtifacts.map((artifact) => artifact.slug)
+                  : ['<artifact-slug>']
+                ).map((slug) => (
+                  <Pre key={slug} className="whitespace-pre-wrap break-all">
+                    {cliRunCommand(slug)}
+                  </Pre>
+                ))}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Run benchmark</CardTitle>
+                <CardDescription>
+                  Enqueues a RED/GREEN run for the latest artifact version. The runner in the CLI
+                  process executes it.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                {error ? (
+                  <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
+                    {error}
+                  </p>
+                ) : null}
+                {blockers.map((blocker) => (
+                  <p key={blocker} className="text-xs text-warning">
+                    {blocker}
+                    {blocker.includes('approved') ? ' Approval in the UI is planned.' : ''}
+                  </p>
+                ))}
+                {detail.assignedArtifacts.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No artifacts are assigned to this suite.
+                  </p>
+                ) : null}
+                {detail.assignedArtifacts.map((artifact) => (
+                  <form
+                    key={artifact.id}
+                    action={enqueueBenchmarkRunAction}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <input type="hidden" name="suiteVersionId" value={version.id} />
+                    <input type="hidden" name="artifactId" value={artifact.id} />
+                    <Link href={`/artifacts/${artifact.id}`} className="truncate hover:underline">
+                      {artifact.name}
+                    </Link>
+                    <Button size="sm" type="submit" disabled={!definition || blockers.length > 0}>
+                      <Play aria-hidden /> Run
+                    </Button>
+                  </form>
+                ))}
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardHeader>
               <CardTitle>Configuration</CardTitle>

@@ -81,6 +81,7 @@ export function runInput(
     jobId: null,
     suiteVersionId: targets.suiteVersionId,
     artifactVersionId: targets.artifactVersionId,
+    baselineArtifactVersionId: null,
     agentAdapterId: 'mock',
     agentVersion: null,
     model: null,

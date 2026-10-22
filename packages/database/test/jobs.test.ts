@@ -2,7 +2,9 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acquireNextJob,
+  benchmarkJobPayloadSchema,
   countJobsByStatus,
+  createAcquiredBenchmarkJob,
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
@@ -12,7 +14,9 @@ import {
   getRepositoryRegistration,
   getRepositoryScan,
   heartbeatJob,
+  importArtifactVersion,
   interruptJobs,
+  InvalidBaselineError,
   isCancellationRequested,
   listJobs,
   NotFoundError,
@@ -21,7 +25,13 @@ import {
   schema,
   UnsupportedRepositoryError,
 } from '../src/index';
-import { registerLocal, seedRun, seedTargets, type SeededTargets } from './support/fixtures';
+import {
+  artifactInput,
+  registerLocal,
+  seedRun,
+  seedTargets,
+  type SeededTargets,
+} from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -87,6 +97,178 @@ describe('enqueueBenchmarkJob', () => {
       'CREATE TRIGGER drop_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(IGNORE); END',
     );
     await expect(enqueueBenchmarkJob(handle.db, payload)).rejects.toThrow('Failed to enqueue job');
+  });
+});
+
+describe('benchmark job payload (SPEC-118 §8.1)', () => {
+  const ids = { suiteVersionId: 's', artifactVersionId: 'a' };
+
+  it('accepts a baseline, the auth mode and a budget with API Key Mode', () => {
+    for (const payload of [
+      ids,
+      { ...ids, baselineArtifactVersionId: 'b' },
+      { ...ids, auth: { mode: 'subscription' } },
+      { ...ids, auth: { mode: 'api-key' }, maxBudgetUsd: 0.5 },
+    ]) {
+      expect(benchmarkJobPayloadSchema.parse(payload)).toEqual(payload);
+    }
+  });
+
+  it('rejects a budget without API Key Mode, and any field that could carry a secret', () => {
+    const rejected = [
+      [{ ...ids, maxBudgetUsd: 1 }, 'maxBudgetUsd is accepted only with auth mode api-key'],
+      [
+        { ...ids, auth: { mode: 'subscription' }, maxBudgetUsd: 1 },
+        'maxBudgetUsd is accepted only with auth mode api-key',
+      ],
+      [{ ...ids, auth: { mode: 'api-key' }, maxBudgetUsd: 0 }, 'Too small'],
+      [{ ...ids, auth: { mode: 'api-key' }, maxBudgetUsd: Infinity }, ''],
+      [{ ...ids, auth: { mode: 'api-key', apiKey: 'sk-ant-secret' } }, 'Unrecognized key'],
+      [{ ...ids, apiKey: 'sk-ant-secret' }, 'Unrecognized key'],
+      [{ ...ids, auth: { mode: 'gateway' } }, ''],
+      [{ ...ids, baselineArtifactVersionId: '' }, ''],
+    ] as const;
+    for (const [payload, message] of rejected) {
+      const result = benchmarkJobPayloadSchema.safeParse(payload);
+      expect(result.success, JSON.stringify(payload)).toBe(false);
+      expect(result.error?.issues.map((i) => i.message).join(' ')).toContain(message);
+    }
+  });
+});
+
+/** A second version of the seeded artifact (same slug, other content). */
+async function secondVersion(targets: SeededTargets, content = 'v2'): Promise<string> {
+  const handle = getHandle();
+  const version = await importArtifactVersion(handle, artifactInput(content));
+  expect(version.artifactId).toBe(targets.artifactId);
+  return version.versionId;
+}
+
+describe('benchmark jobs with an A/B baseline (SPEC-118 FR-118-12)', () => {
+  it('stores a baseline that is another version of the same artifact', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const candidate = await secondVersion(targets);
+    const payload = {
+      suiteVersionId: targets.suiteVersionId,
+      artifactVersionId: candidate,
+      baselineArtifactVersionId: targets.artifactVersionId,
+    };
+    expect((await enqueueBenchmarkJob(handle.db, payload)).payload).toEqual(payload);
+  });
+
+  it('rejects the candidate itself, another artifact, another format and unknown versions without creating a job', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const other = await importArtifactVersion(
+      handle,
+      artifactInput('other', { slug: 'other', path: 'skills/other' }),
+    );
+    expect(other.artifactId).not.toBe(targets.artifactId);
+    const otherFormat = await importArtifactVersion(
+      handle,
+      artifactInput('v3', { format: 'claude-md' }),
+    );
+    expect(otherFormat.artifactId).toBe(targets.artifactId);
+    const base = {
+      suiteVersionId: targets.suiteVersionId,
+      artifactVersionId: targets.artifactVersionId,
+    };
+    const cases = [
+      [targets.artifactVersionId, /candidate version itself/],
+      [other.versionId, /same artifact/],
+      [otherFormat.versionId, /same format/],
+    ] as const;
+    for (const [baselineArtifactVersionId, message] of cases) {
+      for (const create of [
+        () => enqueueBenchmarkJob(handle.db, { ...base, baselineArtifactVersionId }),
+        () =>
+          createAcquiredBenchmarkJob(
+            handle.db,
+            { ...base, baselineArtifactVersionId },
+            'cli',
+            '2026-04-01T00:00:00.000Z',
+          ),
+      ]) {
+        const attempt = create();
+        await expect(attempt).rejects.toBeInstanceOf(InvalidBaselineError);
+        await expect(attempt).rejects.toThrow(message);
+      }
+    }
+    await expect(
+      enqueueBenchmarkJob(handle.db, { ...base, baselineArtifactVersionId: 'artv_gone' }),
+    ).rejects.toThrow(new NotFoundError('Artifact version artv_gone not found'));
+    expect(await handle.db.$count(schema.jobs)).toBe(0);
+  });
+});
+
+describe('createAcquiredBenchmarkJob (SPEC-118 FR-118-34)', () => {
+  it('inserts the job already running for its runner, so no polling runner can acquire it', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const now = '2026-04-01T00:00:00.000Z';
+    const payload = { ...payloadOf(targets), auth: { mode: 'subscription' as const } };
+    const job = await createAcquiredBenchmarkJob(handle.db, payload, 'local-cli-1', now);
+    expect(job).toMatchObject({
+      type: 'benchmark-run',
+      status: 'running',
+      payload,
+      runnerId: 'local-cli-1',
+      attempts: 1,
+      createdAt: now,
+      startedAt: now,
+      heartbeatAt: now,
+      finishedAt: null,
+    });
+    expect(await getJob(handle.db, job.id)).toEqual(job);
+    expect(await acquireNextJob(handle.db, 'serve-runner')).toBeNull();
+    expect((await getJob(handle.db, job.id))?.runnerId).toBe('local-cli-1');
+  });
+
+  it('checks references and the payload before inserting anything', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const now = '2026-04-01T00:00:00.000Z';
+    await expect(
+      createAcquiredBenchmarkJob(
+        handle.db,
+        { ...payloadOf(targets), suiteVersionId: 'x' },
+        'cli',
+        now,
+      ),
+    ).rejects.toThrow(new NotFoundError('Suite version x not found'));
+    await expect(
+      createAcquiredBenchmarkJob(handle.db, { ...payloadOf(targets), maxBudgetUsd: 1 }, 'cli', now),
+    ).rejects.toThrow(/maxBudgetUsd/);
+    expect(await handle.db.$count(schema.jobs)).toBe(0);
+  });
+
+  it('leaves a job whose heartbeat went stale to the interrupted recovery', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const job = await createAcquiredBenchmarkJob(
+      handle.db,
+      payloadOf(targets),
+      'cli',
+      '2026-04-01T00:00:00.000Z',
+    );
+    expect(await recoverStaleJobs(handle.db, '2026-04-01T00:00:00.000Z')).toEqual([]);
+    expect(await recoverStaleJobs(handle.db, '2026-04-01T00:00:30.001Z')).toEqual([job.id]);
+    expect(await getJob(handle.db, job.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'Runner stopped unexpectedly while the job was running',
+    });
+  });
+
+  it('fails loudly when the database silently drops the insert', async () => {
+    const handle = getHandle();
+    const payload = payloadOf(await seedTargets(handle));
+    handle.sqlite.exec(
+      'CREATE TRIGGER drop_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(IGNORE); END',
+    );
+    await expect(
+      createAcquiredBenchmarkJob(handle.db, payload, 'cli', '2026-04-01T00:00:00.000Z'),
+    ).rejects.toThrow('Failed to create job');
   });
 });
 

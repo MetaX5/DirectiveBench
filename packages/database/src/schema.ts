@@ -271,6 +271,15 @@ export const benchmarkRuns = sqliteTable(
     artifactVersionId: text('artifact_version_id')
       .notNull()
       .references(() => artifactVersions.id),
+    /**
+     * The A/B baseline: another version of the same artifact (SPEC-118 FR-118-13); null =
+     * baseline kind `none`, also for every run stored before the column existed. Not part of the
+     * comparability key. The same-artifact rule is checked when the job is created and again by
+     * the runner, not by a constraint.
+     */
+    baselineArtifactVersionId: text('baseline_artifact_version_id').references(
+      () => artifactVersions.id,
+    ),
     agentAdapterId: text('agent_adapter_id').notNull(),
     agentVersion: text('agent_version'),
     model: text('model', { mode: 'json' }).$type<{ provider: string; model: string } | null>(),
@@ -293,6 +302,10 @@ export const benchmarkRuns = sqliteTable(
   },
   (t) => [
     index('benchmark_runs_artifact_version_idx').on(t.artifactVersionId),
+    index('benchmark_runs_artifact_baseline_idx').on(
+      t.artifactVersionId,
+      t.baselineArtifactVersionId,
+    ),
     index('benchmark_runs_started_idx').on(t.startedAt),
   ],
 );

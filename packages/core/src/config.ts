@@ -1,4 +1,13 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -26,6 +35,12 @@ export const configSchema = z
         keepWorkspaces: z.boolean().default(false),
       })
       .prefault({}),
+    /**
+     * A random identifier of this data directory, generated once by `ensureInstallationId`. It is
+     * the `hostId` in the comparability key of runs that may include this machine's user-level
+     * agent configuration (SPEC-115 FR-115-15, SPEC-118 §8.3). Not a secret.
+     */
+    installationId: z.uuid().optional(),
   })
   .strict();
 
@@ -84,21 +99,23 @@ export class ConfigError extends Error {
   override name = 'ConfigError';
 }
 
-/** Reads `config.json`; a missing file yields defaults, an invalid file is an error. */
-export function loadConfig(configPath: string): DirectiveBenchConfig {
+/** The parsed JSON of `config.json`, or undefined when the file does not exist. */
+function readConfigJson(configPath: string): unknown {
   let raw: string;
   try {
     raw = readFileSync(configPath, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return configSchema.parse({});
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
-  let json: unknown;
   try {
-    json = JSON.parse(raw);
+    return JSON.parse(raw) as unknown;
   } catch (error) {
     throw new ConfigError(`${configPath} is not valid JSON: ${(error as Error).message}`);
   }
+}
+
+function parseConfig(configPath: string, json: unknown): DirectiveBenchConfig {
   const result = configSchema.safeParse(json);
   if (!result.success) {
     throw new ConfigError(`${configPath} is invalid: ${z.prettifyError(result.error)}`);
@@ -106,13 +123,115 @@ export function loadConfig(configPath: string): DirectiveBenchConfig {
   return result.data;
 }
 
-/** Writes `config.json` atomically (temp file + rename) so a crash never leaves a partial file. */
-export function saveConfig(configPath: string, config: DirectiveBenchConfig): void {
-  const validated = configSchema.parse(config);
+/**
+ * Validates the parsed `config.json`; only an absent file (`undefined`) yields defaults, so a
+ * file containing `null` is invalid like any other non-object (FR-115-11).
+ */
+function configFromJson(configPath: string, json: unknown): DirectiveBenchConfig {
+  return parseConfig(configPath, json === undefined ? {} : json);
+}
+
+/** Reads `config.json`; a missing file yields defaults, an invalid file is an error. */
+export function loadConfig(configPath: string): DirectiveBenchConfig {
+  return configFromJson(configPath, readConfigJson(configPath));
+}
+
+/** Writes JSON atomically (temp file + rename, mode 0600) so a crash never leaves a partial file. */
+function writeConfigFile(configPath: string, value: unknown): void {
   mkdirSync(dirname(configPath), { recursive: true });
   const tmp = `${configPath}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, configPath);
+}
+
+/** Writes `config.json` atomically (temp file + rename) so a crash never leaves a partial file. */
+export function saveConfig(configPath: string, config: DirectiveBenchConfig): void {
+  writeConfigFile(configPath, configSchema.parse(config));
+}
+
+/** How long `ensureInstallationId` waits for another process's `config.json.lock`. */
+export const CONFIG_LOCK_TIMEOUT_MS = 5000;
+/** Pause between attempts to take the lock. */
+export const CONFIG_LOCK_RETRY_MS = 20;
+
+/** Blocks the calling thread; the callers of `ensureInstallationId` are synchronous start-up code. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** The token in a lock file, or null when there is no lock. */
+function readLockToken(lock: string): string | null {
+  try {
+    return readFileSync(lock, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/**
+ * Runs `fn` while holding `<configPath>.lock`, created with `wx` (O_CREAT | O_EXCL) and holding a
+ * random token, so only one process at a time can add an `installationId`. The lock is held only
+ * around a small write, so it is never broken automatically: a lock still present after
+ * {@link CONFIG_LOCK_TIMEOUT_MS} — left by a process that crashed inside that window — fails
+ * closed with a `ConfigError` naming the file and its age. Release removes the lock only while it
+ * still holds this call's token, so a lock someone else created is never deleted.
+ */
+function withConfigLock<T>(configPath: string, fn: () => T): T {
+  const lock = `${configPath}.lock`;
+  const token = randomUUID();
+  mkdirSync(dirname(configPath), { recursive: true });
+  const deadline = Date.now() + CONFIG_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      writeFileSync(lock, token, { flag: 'wx', mode: 0o600 });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    if (Date.now() >= deadline) {
+      const held = statSync(lock, { throwIfNoEntry: false });
+      // Released between our attempt and this check: try once more.
+      if (held === undefined) continue;
+      const ageSeconds = Math.max(0, Math.round((Date.now() - held.mtimeMs) / 1000));
+      throw new ConfigError(
+        `${lock} has existed for ${ageSeconds} s and was still held after ${CONFIG_LOCK_TIMEOUT_MS} ms. Delete it if no other DirectiveBench process is running.`,
+      );
+    }
+    sleepSync(CONFIG_LOCK_RETRY_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    if (readLockToken(lock) === token) rmSync(lock, { force: true });
+  }
+}
+
+/**
+ * Returns the configuration with an `installationId`, generating and storing one when the file
+ * has none (SPEC-115 FR-115-15). A missing file is created with every default; an existing file
+ * keeps its keys exactly as written and only gains the identifier, so defaults are not frozen
+ * into it, and a symlinked `config.json` is written through to its target. An invalid file is an
+ * error and is never rewritten (FR-115-11). The identifier is generated once: the file is read
+ * again while holding the exclusive config lock and an identifier is generated only if it is
+ * still absent, so concurrent initialisations all return the one that was stored.
+ */
+export function ensureInstallationId(configPath: string): DirectiveBenchConfig {
+  const current = loadConfig(configPath);
+  if (current.installationId) return current;
+  return withConfigLock(configPath, () => {
+    const json = readConfigJson(configPath);
+    const config = configFromJson(configPath, json);
+    if (config.installationId) return config;
+    const installationId = randomUUID();
+    if (json === undefined) {
+      writeConfigFile(configPath, { ...config, installationId });
+    } else {
+      // A valid existing file is a JSON object: the strict schema accepts nothing else.
+      writeConfigFile(realpathSync(configPath), { ...(json as object), installationId });
+    }
+    return loadConfig(configPath);
+  });
 }
 
 export function isLoopbackHost(host: string): boolean {

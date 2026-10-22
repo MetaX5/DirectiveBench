@@ -28,7 +28,7 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 ## 4. Non-goals
 
-- Comparing two different artifacts against each other. (Comparing two **versions of the same artifact** — A/B mode — is planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §6.2.)
+- Comparing two different artifacts against each other. (Comparing two **versions of the same artifact** — A/B mode — is specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §6.2; its engine and storage are implemented, the CLI flag is planned.)
 - Comparing agents or models against each other (that is a different comparability key, [SPEC-111](2026-10-14-benchmark-scoring.md)).
 - Guaranteeing causality for nondeterministic agents from a single run.
 
@@ -43,7 +43,7 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 | ID | Requirement |
 |---|---|
-| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate), and optionally a baseline artifact version of the same artifact (A/B, planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-10…13). |
+| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate), and optionally a baseline artifact version of the same artifact (A/B, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-10…13: engine, job payload, runner and `benchmark_runs.baseline_artifact_version_id` implemented; choosing it with `benchmark run --baseline` is planned). |
 | FR-112-02 | For each case and each repetition `r ∈ 1..repetitions`, the run SHALL execute exactly one baseline and one candidate agent run. |
 | FR-112-03 | Baseline SHALL have no artifact installed — or, in an A/B run, exactly the baseline version installed the same way as the candidate. Candidate SHALL have exactly the referenced artifact version installed via `AgentAdapter.installArtifact` (e.g. Mock Agent → `.agents/skills/<slug>/`). |
 | FR-112-04 | Both variants SHALL use the same fixture snapshot hash (same commit for repository-sourced fixtures), verification overlay hash, prompt, adapter id and version, model config, tool permissions, environment kind and limits (`timeoutSeconds`, `maxOutputBytes`). For real agents "same model" means the same **observed execution model** (the session model the agent reports, e.g. Claude Code's `system/init` `model`), not only the same requested model: a `null` model or an alias can resolve differently between agent runs ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-04). Auxiliary models an agent uses for internal tasks are recorded, not compared; only models that no task turn ran on count as auxiliary, and artifact- or fixture-controlled model overrides are refused in S1 (SPEC-118 FR-118-06/26). |
@@ -210,7 +210,7 @@ Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `mod
 
 ## 19. Future extensions
 
-- A/B mode: candidate vs. a different version of the same artifact instead of no artifact — specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) (planned).
+- A/B mode: candidate vs. a different version of the same artifact instead of no artifact — specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) (engine and storage implemented in Phase 2; CLI flag planned).
 - Multi-artifact candidates (artifact sets) with ablation.
 - Statistical tests for nondeterministic agents.
 - Remote runners executing pairs on the same host to keep environment equivalence.

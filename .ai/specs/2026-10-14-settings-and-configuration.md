@@ -3,7 +3,7 @@ id: SPEC-115
 title: Settings and Configuration
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
 related: [SPEC-009, SPEC-010, SPEC-007, SPEC-114, SPEC-110, SPEC-116, SPEC-011]
 ---
@@ -73,6 +73,11 @@ A tool distributed via `npx` must never store data inside the npm cache or insta
 | `server.openBrowser` | boolean | `true` | `--no-open` overrides |
 | `runner.concurrency` | int 1–16 | `1` | [SPEC-114](2026-10-14-runner-management.md) |
 | `runner.keepWorkspaces` | boolean | `false` | Keep temp workspaces for debugging |
+| `installationId` | UUID string, optional | generated (FR-115-15) | Identifies this data directory; not a secret |
+
+| ID | Requirement |
+|---|---|
+| FR-115-15 | `installationId` SHALL be a random UUID generated once per data directory: when `config.json` is created it carries one, and an existing file without one gains it at the next initialisation (`init`, `serve`, `demo`) with its other keys kept exactly as written (defaults are not written into it). It is never regenerated while present; an invalid value is a `ConfigError` (FR-115-11). It is generated once even when processes start concurrently: the writer creates `config.json.lock` exclusively (`wx`) holding a random token, re-reads the file under the lock and generates an identifier only if it is still absent, so every caller returns the stored one. The lock is held only around that small write and is never broken automatically: if it still exists after `CONFIG_LOCK_TIMEOUT_MS` (5 s) — left by a process that crashed inside that window — start-up fails closed with a `ConfigError` naming the lock file and its age and telling the user to delete it if no other DirectiveBench process is running. Release removes the lock only while it still holds the writer's token. A file containing JSON `null` is invalid, never treated as missing. It is the `hostId` of the comparability key for runs in the `user-profile` isolation profile, so results that may include one machine's user-level agent configuration never share a key with another machine's ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.3). Copying a data directory copies the identifier; export/import of it is future work. |
 
 Candidate future keys (not in schema v1; adding them requires a schema change): `logging.level`, `runner.pollIntervalMs`, `fixtures.maxBytes`, `ui.theme`, `ui.density`, `secrets` (reference definitions).
 
@@ -124,12 +129,14 @@ type DirectiveBenchConfig = {
   configVersion: 1;
   server: { host: string; port: number; openBrowser: boolean };
   runner: { concurrency: number; keepWorkspaces: boolean };
+  installationId?: string; // UUID, FR-115-15
 };
 
 function resolveDataDir(o?: { flag?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; home?: string }): string;
 function dataDirLayout(root: string): { root; database; config; fixtures; logs; cache: string };
 function loadConfig(path: string): DirectiveBenchConfig;      // throws ConfigError
 function saveConfig(path: string, c: DirectiveBenchConfig): void; // atomic
+function ensureInstallationId(path: string): DirectiveBenchConfig; // FR-115-15, atomic
 function isLoopbackHost(host: string): boolean;
 
 // future
@@ -220,4 +227,5 @@ CLI ([SPEC-009](2026-10-14-cli-architecture.md)): global `--data-dir`; `serve [-
 - **Implemented (verified by `packages/core/test/config.test.ts` and `apps/cli/test/cli.test.ts` on 2026-10-14):** `resolveDataDir` (flag > env > OS default, incl. XDG fallback; macOS path unit-tested, Windows `LOCALAPPDATA` path untested), `dataDirLayout`, strict Zod `configSchema` v1 with the keys in FR-115-14 (unknown/invalid keys rejected), `loadConfig` (missing → defaults, invalid → `ConfigError` → CLI exit 2), atomic `saveConfig` with mode `0600`, `isLoopbackHost`; CLI precedence flag > env > config > default for host/port, invalid port → exit 2, non-loopback host without `--allow-network-access` → exit 2; `runner.concurrency`, `runner.keepWorkspaces` and `server.openBrowser` honoured by `serve` (`keepWorkspaces` also by `demo`); data dir passed to the web child via `DIRECTIVEBENCH_DATA_DIR` (`pnpm verify:pack`).
 - **Implemented (FR-115-50, verified in code on 2026-10-15; no automated UI test):** the Settings page header shows the badge "Planned — not implemented: settings editor", the page shows the resolved data directory paths and the effective read-only configuration with no editable controls, and names this spec's path (`.ai/specs/2026-10-14-settings-and-configuration.md`, shown as text because the repository is not served by the app).
 - **Implemented (verified by `apps/cli/test/cli.test.ts` on 2026-10-15):** `doctor` reports config validity and data-directory writability, with a remediation hint for every non-`ok` check ([SPEC-009](2026-10-14-cli-architecture.md) §4).
+- **Implemented (FR-115-15, verified by `packages/core/test/config.test.ts` and `apps/cli/test/setup.test.ts` on 2026-10-22, and by hand: `directivebench init` on a data directory created by the previous version added only `installationId` to its `config.json`):** `ensureInstallationId` generates a random UUID once — a new `config.json` gets every default and the identifier, an existing file without one gains it with its other keys kept as written, an invalid file (including JSON `null`) is never rewritten, a non-UUID value is a `ConfigError`; the exclusive lock makes the identifier generated once across processes (a test with a second process holding the lock returns that process's identifier; a leftover lock fails closed after the timeout with the file and the lock untouched; a lock holding another token is never removed); `init`, `serve` and `demo` call it during initialisation. Its use as `hostId` waits for an adapter that reports the `user-profile` isolation (SPEC-118 Phase 3).
 - **Not implemented:** editable Settings UI, secret references (`SecretRef` shape defined in FR-115-30 and §8, used by SPEC-104 and the integration specs), backup/restore, import/export, config migrations beyond v1, `backups/` usage.
