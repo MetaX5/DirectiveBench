@@ -102,11 +102,11 @@ FR-118-20…39; Phase 4 steps 1–2).
 
 ### Phase 2: CLI
 
-- [ ] 2.1 benchmark init
-- [ ] 2.2 benchmark run preparation and refusals
-- [ ] 2.3 Plan, confirmation, run, summary and exit codes
-- [ ] 2.4 Register commands and update doctor and web copy
-- [ ] 2.5 CLI integration tests with a fake claude
+- [x] 2.1 benchmark init — 6d1b2d9
+- [x] 2.2 benchmark run preparation and refusals — b5b8ab6
+- [x] 2.3 Plan, confirmation, run, summary and exit codes — b5b8ab6
+- [x] 2.4 Register commands and update doctor and web copy — b5b8ab6, 87dcdf5
+- [x] 2.5 CLI integration tests with a fake claude — b5b8ab6
 
 ### Phase 3: Docs and verification
 
