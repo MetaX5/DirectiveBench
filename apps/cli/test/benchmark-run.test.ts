@@ -382,6 +382,27 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     expect(s.terminal.listening()).toBe(false);
   }, 60_000);
 
+  it('treats the end of input at the confirmation as a no and removes the staged copies', async () => {
+    const { PassThrough } = await import('node:stream');
+    const { askYesNo } = await import('../src/benchmark-run');
+    const s = await setup({ interactive: true });
+    const stdin = new PassThrough();
+    stdin.end();
+    const staged = () =>
+      readdirSync(tmpdir()).filter((name) => name.startsWith('directivebench-suite-'));
+    const before = staged();
+    expect(
+      await benchmarkRunCommand(
+        { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir },
+        { ...s.terminal, confirm: (question) => askYesNo(question, stdin, new PassThrough()) },
+      ),
+    ).toBe(ExitCode.Cancelled);
+    expect(s.output()).toContain('Not started; nothing was stored.');
+    expect(staged()).toEqual(before);
+    expect(await s.counts()).toEqual(NOTHING);
+    expect(s.fake.starts()).toBe(0);
+  });
+
   it('asks for confirmation on a terminal and stores nothing when declined', async () => {
     const declined = await setup({ interactive: true, confirm: false });
     expect(
@@ -681,6 +702,33 @@ posix(
       expect(await s.counts()).toEqual(NOTHING);
     });
 
+    it('refuses a model Claude Code cannot run before storing anything or running setup', async () => {
+      for (const [model, code] of [
+        [{ provider: 'openai', model: 'gpt-x' }, 'model-provider-unsupported'],
+        [{ provider: 'anthropic', model: '-claude --dangerously' }, 'model-invalid'],
+      ] as const) {
+        const marker = join(tempDir(), 'setup-ran');
+        const s = await setup({
+          definition: {
+            execution: { agent: 'claude-code', model, repetitions: 1, timeoutSeconds: 60 },
+            cases: [
+              {
+                id: 'example',
+                name: 'Example',
+                prompt: 'Write output.md',
+                fixture: { path: 'fixtures/example' },
+                setup: [['touch', marker]],
+                assertions: [{ id: 'present', type: 'file-exists', path: 'output.md' }],
+              },
+            ],
+          },
+        });
+        expect(await refused(s, { approveCommands: true })).toContain(`Refused (${code})`);
+        expect(s.fake.starts()).toBe(0);
+        expect(existsSync(marker)).toBe(false);
+      }
+    });
+
     it('refuses a short or multi-line API key at readiness, before anything is stored', async () => {
       const s = await setup();
       for (const key of ['abc', 'sk-first-line\nsk-second-line']) {
@@ -859,6 +907,20 @@ describe('benchmark run terminal helpers', () => {
       expect(await asked).toBe(expected);
       expect(String(output.read())).toContain('Start? [y/N] ');
     }
+  });
+
+  it('treats the end of input at the prompt as a no: a closed stdin or Ctrl-D', async () => {
+    const { PassThrough } = await import('node:stream');
+    const { askYesNo } = await import('../src/benchmark-run');
+    const closed = new PassThrough();
+    const asked = askYesNo('Start?', closed, new PassThrough());
+    closed.end();
+    expect(await asked).toBe(false);
+    const terminal = new PassThrough();
+    const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+    const ctrlD = askYesNo('Start?', terminal, output);
+    terminal.write('\x04');
+    expect(await ctrlD).toBe(false);
   });
 
   it('treats Ctrl-C at the prompt as a no', async () => {

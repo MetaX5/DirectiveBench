@@ -50,8 +50,9 @@ export interface RunTerminal {
 
 /**
  * Asks on `output` and reads one line from `input`; `y` or `yes` (any case) is a yes. An answer
- * that cannot be read — Ctrl-C at the prompt rejects with `AbortError`, a closed input — is a no:
- * nothing starts without an explicit yes.
+ * that cannot be read is a no — nothing starts without an explicit yes: Ctrl-C at the prompt
+ * rejects with `AbortError`, and on end of input (Ctrl-D, a closed stdin) readline closes while
+ * `question()` never settles, so the close event answers instead (Codex review round 2).
  */
 export async function askYesNo(
   question: string,
@@ -59,8 +60,12 @@ export async function askYesNo(
   output: NodeJS.WritableStream = process.stderr,
 ): Promise<boolean> {
   const prompt = createInterface({ input, output });
+  const closed = new Promise<string>((resolve) => prompt.once('close', () => resolve('')));
   try {
-    const answer = await prompt.question(`${question} [y/N] `).catch(() => '');
+    const answer = await Promise.race([
+      prompt.question(`${question} [y/N] `).catch(() => ''),
+      closed,
+    ]);
     return /^y(es)?$/i.test(answer.trim());
   } finally {
     prompt.close();
