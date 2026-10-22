@@ -3,7 +3,6 @@ import { createInterface } from 'node:readline/promises';
 import {
   CLAUDE_CODE_ADAPTER_ID,
   ClaudeCodeAdapter,
-  MockAgentAdapter,
   type AgentAdapter,
   type ClaudeAuthMode,
 } from '@directivebench/agent-adapters';
@@ -319,6 +318,7 @@ export async function benchmarkRunCommand(
       }
     }
 
+    // Only the adapter this suite needs; `serve` stays mock-only (FR-118-05).
     const adapters = new Map<string, AgentAdapter>([
       [
         CLAUDE_CODE_ADAPTER_ID,
@@ -331,8 +331,6 @@ export async function benchmarkRunCommand(
         ),
       ],
     ]);
-    const mock = new MockAgentAdapter();
-    adapters.set(mock.id, mock);
     const runner = new LocalRunner({
       handle,
       fixtureStore: layout.fixtures,
