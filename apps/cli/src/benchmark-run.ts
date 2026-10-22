@@ -329,11 +329,11 @@ export async function benchmarkRunCommand(
       }
     }
 
-    // Only the adapter this suite needs; `serve` stays mock-only (FR-118-05).
     for (const snapshot of prepared.snapshots) {
       // Content-addressed and idempotent: the same files give the same hash in the data store.
       await snapshotDirectory(join(staging, snapshot.hash), layout.fixtures);
     }
+    // Only the adapter this suite needs; `serve` stays mock-only (FR-118-05).
     const adapters = new Map<string, AgentAdapter>([
       [
         CLAUDE_CODE_ADAPTER_ID,

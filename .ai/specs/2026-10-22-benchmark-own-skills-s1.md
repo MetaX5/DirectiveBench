@@ -1076,7 +1076,8 @@ changed before merge.
     the program's own `-V`/`--version` takes `--version` before the subcommand sees it.
   - FR-118-23/39 `benchmark run` (`benchmark-plan.ts`, `benchmark-run.ts`) in the order of
     FR-118-39: suite validated and fixtures snapshotted into a temporary store, copied into the
-    content-addressed `<dataDir>/fixtures` only after the confirmation → candidate and baseline (`--baseline v<n>`; one-version artifact, same
+    content-addressed `<dataDir>/fixtures` only after the confirmation (if the final transaction
+    then fails, the copies stay, stored once by content and harmless) → candidate and baseline (`--baseline v<n>`; one-version artifact, same
     content or the candidate itself refused) → agent `claude-code` only, environment, empty
     `agentOptions`, type in `artifactTypes`, installable format (FR-118-25), bundle inspection of
     both versions (FR-118-26), one skill name (FR-118-08), `/` prompt only with an A/B baseline

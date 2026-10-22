@@ -430,9 +430,9 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     } finally {
       db.close();
     }
-    // A declined confirmation records no approval, also for a stored unapproved version (AC-15).
+    // A declined confirmation with --approve-commands records no approval and nothing else (AC-15).
     const unapproved = await setup({ definition, interactive: true, confirm: false });
-    await benchmarkRunCommand(
+    const declined = await benchmarkRunCommand(
       {
         suite: unapproved.suite,
         artifact: 'pdf',
@@ -441,6 +441,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
       },
       unapproved.terminal,
     );
+    expect(declined).toBe(ExitCode.Cancelled);
     expect(await unapproved.counts()).toEqual(NOTHING);
 
     // Approved once: the next run needs no flag and says so.
