@@ -73,6 +73,13 @@ fake CLI ignoring SIGINT/SIGTERM.
   `BenchmarkStoppedError`; names match PR #111's draft so #100 can import them instead of its own
   copy.
 
+- Codex round 2 (round-1 fixes confirmed; one HIGH, valid): the post-SIGKILL abandonment path
+  closed stdout/stderr and unref'd the child but left `child.stdin` with an unread prompt queued
+  and referenced, so the CLI process could stay alive indefinitely. Now stdin is destroyed too;
+  the EPERM regression test sends a 4 MiB prompt the fake never reads and checks that no
+  referenced pipe handle remains (fails without the fix: 4 pipes vs 3). `runCommand` spawns with
+  stdin `ignore`, so it has no such handle.
+
 ## Work performed
 
 1. `process-group.ts` (signal, kill-and-wait); `runCommand` kills the group on exit.

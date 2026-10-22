@@ -158,7 +158,13 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
   it('gives up on a claude that cannot be killed (signals refused with EPERM) after a bound', async () => {
     const { fake, input } = setup('hang');
     const kill = process.kill.bind(process);
-    const pending = runClaudeProcess(input({ timeoutMs: 100, killGraceMs: 100 }));
+    const pipes = () =>
+      process.getActiveResourcesInfo().filter((resource) => resource === 'PipeWrap').length;
+    const pipesBefore = pipes();
+    // A prompt larger than the pipe buffer, which the hanging fake never reads.
+    const pending = runClaudeProcess(
+      input({ timeoutMs: 100, killGraceMs: 100, prompt: 'x'.repeat(4 * 1024 * 1024) }),
+    );
     const pid = await waitFor(() => fake.pid());
     track(pid, await waitFor(() => fake.childPid()));
     const refuse = vi.spyOn(process, 'kill').mockImplementation(() => {
@@ -170,6 +176,10 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     } finally {
       refuse.mockRestore();
     }
+    // No referenced pipe of the abandoned child is left (stdin with the queued prompt included),
+    // so nothing keeps the CLI process alive.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(pipes()).toBeLessThanOrEqual(pipesBefore);
     kill(-pid, 'SIGKILL');
     expect(result).toMatchObject({ timedOut: true, exitCode: null, strayProcesses: true });
     expect(result.durationMs).toBeLessThan(PROCESS_KILL_CONFIRM_MS + 10_000);

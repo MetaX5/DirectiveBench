@@ -234,6 +234,9 @@ export function runClaudeProcess(input: ClaudeProcessInput): Promise<ClaudeProce
         // A `claude` that still does not exit (the signal was refused, EPERM, or it hangs in the
         // kernel) is given up after a bound instead of keeping the run pending forever.
         confirmTimer = setTimeout(() => {
+          // Every handle goes, stdin included: a prompt `claude` never read stays queued there
+          // and would keep the CLI process alive after the run is given up.
+          child.stdin?.destroy();
           child.stdout?.destroy();
           child.stderr?.destroy();
           child.unref();
