@@ -5,6 +5,9 @@ import {
   type ImportCandidate,
 } from '../../src/claude-code';
 
+/** Timeout for the timing test: about a second alone, but CI runs every package on 2 cores. */
+const LOADED_RUNNER_TIMEOUT_MS = 60_000;
+
 function candidates(text: string): ImportCandidate[] {
   return [...importCandidates(text)];
 }
@@ -134,34 +137,42 @@ describe('importCandidates (FR-118-27)', () => {
     expect(cut.map((candidate) => candidate.token)).toEqual(['/etc/hostname']);
   });
 
-  it('is linear in the input size, also for adversarial runs of @', () => {
-    const inputs = [
-      (n: number) => '@'.repeat(n),
-      (n: number) => '@a'.repeat(n / 2),
-      (n: number) => `${'@a'.repeat(n / 2)}/../x`,
-      (n: number) => 'word@host.example '.repeat(n / 18),
-      (n: number) => `@${'/'.repeat(n)}`,
-      (n: number) => '@/'.repeat(n / 2),
-      (n: number) => '@/a'.repeat(n / 3),
-      (n: number) => `${'@/*'.repeat(n / 3)}`,
-    ];
-    for (const make of inputs) {
-      const time = (size: number) => {
-        const text = make(size);
-        const started = performance.now();
-        let count = 0;
-        for (const candidate of importCandidates(text)) {
-          count += candidate.token.length > 0 ? 1 : 0;
-          // Bounded like the scanner: it stops resolving after its candidate limit.
-          if (count > 100_000) break;
-        }
-        return performance.now() - started;
-      };
-      time(200_000);
-      const small = Math.max(time(400_000), 1);
-      const large = time(1_600_000);
-      // Linear: about 4×; quadratic would be 16×. The bound is wide for a loaded runner.
-      expect(large / small, make(8)).toBeLessThan(12);
-    }
-  });
+  it(
+    'is linear in the input size, also for adversarial runs of @',
+    () => {
+      const inputs = [
+        (n: number) => '@'.repeat(n),
+        (n: number) => '@a'.repeat(n / 2),
+        (n: number) => `${'@a'.repeat(n / 2)}/../x`,
+        (n: number) => 'word@host.example '.repeat(n / 18),
+        (n: number) => `@${'/'.repeat(n)}`,
+        (n: number) => '@/'.repeat(n / 2),
+        (n: number) => '@/a'.repeat(n / 3),
+        (n: number) => `${'@/*'.repeat(n / 3)}`,
+      ];
+      for (const make of inputs) {
+        // Fastest of three runs, so a busy runner slows a run down but cannot fake a ratio.
+        const time = (size: number) => {
+          const text = make(size);
+          let fastest = Number.POSITIVE_INFINITY;
+          for (let run = 0; run < 3; run += 1) {
+            const started = performance.now();
+            let count = 0;
+            for (const candidate of importCandidates(text)) {
+              count += candidate.token.length > 0 ? 1 : 0;
+              // Bounded like the scanner, which stops after its candidate limit.
+              if (count > 10_000) break;
+            }
+            fastest = Math.min(fastest, performance.now() - started);
+          }
+          return Math.max(fastest, 1);
+        };
+        const small = time(50_000);
+        const large = time(200_000);
+        // Linear: about 4×; quadratic would be 16×. The bound is wide for a loaded runner.
+        expect(large / small, make(8)).toBeLessThan(12);
+      }
+    },
+    LOADED_RUNNER_TIMEOUT_MS,
+  );
 });

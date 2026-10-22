@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * simulated by letting a hook replace one call of the wrapped `node:fs/promises` functions.
  */
 const hooks: {
+  readdir?: (path: string) => Promise<unknown> | undefined;
   lstat?: (path: string) => Promise<unknown> | undefined;
   readlink?: (path: string) => Promise<unknown> | undefined;
   open?: (path: string, handle: FsPromises.FileHandle) => FsPromises.FileHandle;
@@ -18,6 +19,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
   return {
     ...actual,
+    readdir: (path: string) => hooks.readdir?.(path) ?? actual.readdir(path),
     lstat: (path: string) => hooks.lstat?.(path) ?? actual.lstat(path),
     readlink: (path: string) => hooks.readlink?.(path) ?? actual.readlink(path),
     open: async (path: string, flags: string | number) => {
@@ -27,7 +29,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
-const { inspectWorkspace, installClaudeArtifact, ClaudeCodeError } =
+const { inspectWorkspace, installClaudeArtifact, ClaudeCodeError, WORKSPACE_SCAN_MAX_FILES } =
   await import('../../src/claude-code');
 const { bundle } = await import('./helpers');
 
@@ -41,6 +43,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  delete hooks.readdir;
   delete hooks.lstat;
   delete hooks.readlink;
   delete hooks.open;
@@ -69,6 +72,36 @@ function lying(
     },
   });
 }
+
+describe('inspectWorkspace entry limit', () => {
+  it('refuses more entries than WORKSPACE_SCAN_MAX_FILES before inspecting the extra one', async () => {
+    // A listing of the limit plus one names, without creating them: the walk counts entries
+    // before it calls lstat, so the last name is never inspected.
+    const names = Array.from({ length: WORKSPACE_SCAN_MAX_FILES + 1 }, (_, index) => `f${index}`);
+    const file = await lstat(workspace);
+    const inspected: string[] = [];
+    hooks.readdir = (path) => (path === workspace ? Promise.resolve([...names]) : undefined);
+    hooks.lstat = (path) => {
+      if (!path.startsWith(`${workspace}/f`)) return undefined;
+      inspected.push(path);
+      return Promise.resolve(
+        Object.assign(Object.create(Object.getPrototypeOf(file)), file, {
+          isDirectory: () => false,
+          isFile: () => false,
+          isSymbolicLink: () => false,
+        }),
+      );
+    };
+    const findings = await inspectWorkspace(workspace, { homeDir: scratch });
+    expect(findings).toEqual([
+      expect.objectContaining({
+        code: 'workspace-scan-limit',
+        detail: `more than ${WORKSPACE_SCAN_MAX_FILES} entries in the workspace`,
+      }),
+    ]);
+    expect(inspected).toHaveLength(WORKSPACE_SCAN_MAX_FILES);
+  });
+});
 
 describe('inspectWorkspace under races', () => {
   it('fails closed on an entry that vanishes between listing and lstat', async () => {

@@ -164,8 +164,25 @@ first cut is bounded by the window and yields counted candidates; 1 MiB of `@/` 
 `'@/'`, `'@/a'` and `'@/*'` runs added to the linear-time test. R3-N1: the inner-`---` message now
 tells the author to replace it.
 
+Round 4 (head `a3b442e`, after merging #107): **approve**. R4-N1 (state the
+candidates × token-length bound in FR-118-27) applied.
+
+### CI correction
+
+CI "Unit tests (100% coverage)" failed on `1643e68`, `7b25396`, `1cc2751` and `a3b442e`
+(e.g. run 39773077571): four tests hit vitest's 5 s timeout on the 2-core runner (7.7 s for the
+20 000-file limit test, 8.7 s for the candidate limit, 5.2 s and 23.8 s for the two linear-time
+tests), so coverage fell below 100%. An earlier hand-back wrongly called CI green from an older
+head. The production cost is small (100 000 candidates ≈ 0.3 s; 1 MiB of adversarial `@` ≈ 0.1 s);
+the tests were heavy: the 20 000 entries are now a faked listing (no files created, also checks
+that the extra entry is never `lstat`ed), the linear-time tests take the fastest of three runs at
+smaller sizes (ratios measured at three sizes: ≤ 4.3× per 4× size), and the heavy tests carry
+`LOADED_RUNNER_TIMEOUT_MS` (60 s). `taskset -c 0,1 pnpm test --force` passed with the slowest test
+at 20.7 s before the size cut.
+
 ## Lessons recorded
 
+- [2026-10-21 — Timing tests must survive a loaded CI runner](../lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md) (updated: emulate the 2-core runner, check CI on the current head)
 - [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)
 
 ## Follow-ups
