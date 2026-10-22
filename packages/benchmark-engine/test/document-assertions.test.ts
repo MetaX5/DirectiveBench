@@ -295,6 +295,21 @@ describe('markdown structure boundaries (Codex review)', () => {
     }
   });
 
+  it('does not read a table after a header that is only a pipe (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'Backend API' },
+        column: 'Hours',
+        min: 16,
+        max: 40,
+      }),
+      workspace({ 'doc.md': '|\n|---|\n|\nRole | Hours\n|---|---|\nBackend API | 24' }),
+    );
+    expect(result).toMatchObject({ passed: false });
+  });
+
   it('does not read a row after a body line that is only a pipe (Codex review)', async () => {
     const result = await evaluateAssertion(
       assertion({

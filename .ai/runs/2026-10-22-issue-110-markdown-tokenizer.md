@@ -185,6 +185,11 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   do). Both mismatches changed the following block structure and invented a heading. Delimiter rows
   now accept `cmark_isspace` whitespace and the tag-line tail accepts only space, tab and form feed;
   every case was checked with cmarkgfm 2025.10.22. Red first on 3ee5e75.
+- Codex review round 8 (the last round by maintainer decision), medium: a header line that is only
+  a pipe opened a phantom one-column table, which reset the paragraph so a later table was
+  reported; cmark-gfm opens no table there and keeps one paragraph. A lone-pipe header now opens
+  no table (a lazy indented `   |`, which cmark-gfm reads as one empty cell, is not reported
+  either — fail-safe). Red first on 2120a39.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.

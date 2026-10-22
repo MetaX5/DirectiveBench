@@ -610,7 +610,10 @@ export function scanMarkdown(text: string): MarkdownScan {
             const last = paragraph.lines.at(-1) as string;
             // cmark-gfm (GitHub) keeps a lazy line's indentation: `   | a |` has an empty first cell.
             const header = [...(/^[ \t]+\|/.test(last) ? [''] : []), ...splitTableRow(last)];
-            if (!paragraph.noTable && header.length === delimiter.columns) {
+            // A lone pipe has no cell, so cmark-gfm opens no table on it (a lazy, indented one it
+            // reads as one empty cell; not reported either, fail-safe).
+            const lonePipe = trimWith(last, isMarkdownSpace) === '|';
+            if (!paragraph.noTable && !lonePipe && header.length === delimiter.columns) {
               const table: MarkdownTable = { header, rows: [] };
               // Reported only with a pipe in both rows, which every GFM reader accepts; without one
               // it is read as a table (its lines are no paragraph or heading) but not reported.

@@ -467,6 +467,13 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     expect(scanMarkdown('- | R | H |\n  |---|---|\n  |\n  | B | 24 |').tables[0]?.rows).toEqual([]);
   });
 
+  it('opens no table on a header that is only a pipe (Codex review)', () => {
+    const doc = '|\n|---|\n|\nRole | Hours\n|---|---|\nBackend API | 24';
+    expect(scanMarkdown(doc).tables).toEqual([]);
+    expect(scanMarkdown('  |  \n|---|\nx').tables).toEqual([]);
+    expect(scanMarkdown('> a\n   |\n> |-|-|\n> |1|2|').tables).toEqual([]);
+  });
+
   it('ignores one byte order mark at the start, as cmark-gfm does (Codex review)', () => {
     expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
       headings: [],
