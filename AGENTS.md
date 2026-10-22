@@ -172,6 +172,10 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   never disable TLS verification, keep commands argv-only with an environment allowlist.
 - The mock agent must always be labelled as a mock; never present mock results as AI results.
 - Incomplete features must be visibly marked as planned or not implemented.
+- Design generic capabilities. A user's concrete case (one skill, client or document type) is a
+  reference scenario to check the design, never a target to special-case: users build their own
+  scenarios, requirements and grading
+  ([lesson](.ai/lessons/2026-10-22-design-generic-not-for-the-example.md)).
 - Follow the engineering standards in
   [`.ai/specs/2026-10-15-engineering-standards.md`](.ai/specs/2026-10-15-engineering-standards.md)
   (SPEC-014): naming, architecture rules, security minimums, code quality and the review

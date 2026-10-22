@@ -3,9 +3,9 @@ id: SPEC-107
 title: Benchmark Engine
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-108, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-005, SPEC-006, SPEC-007, SPEC-012, ADR-0005, ADR-0006, ADR-0007]
+related: [SPEC-118, SPEC-108, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-005, SPEC-006, SPEC-007, SPEC-012, ADR-0005, ADR-0006, ADR-0007]
 ---
 
 # SPEC-107 — Benchmark Engine
@@ -53,7 +53,7 @@ To know whether a skill or rule actually changes agent behaviour, the same task 
 | FR-107-03 | **Suite content hash** SHALL be `suiteContentHash` = `sha256(canonicalJson({ definition, fixtures }))` over the validated definition (defaults applied) and the fixture hash map, so changing any fixture byte or definition field yields a new suite version. |
 | FR-107-04 | **Approval gate**: the engine SHALL refuse to execute setup commands or `command` assertions unless the caller passes `executionApproved: true` for the suite version ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-46). `definitionRunsCommands(definition)` reports whether approval is needed. |
 | FR-107-05 | **Agent run**: each agent run inside `runBenchmark` SHALL execute the pipeline of [SPEC-110](2026-10-14-benchmark-execution.md) (fresh workspace → fixture copy + hash verify → setup → install artifact (candidate only) → before-manifest → `adapter.run` → after-manifest/changed files → verification overlay → assertions → score → cleanup) and produce an `AgentRunRecord` with exactly one execution status. (The adapter-level `AgentRunResult` from `@directivebench/agent-adapters` is one input to it.) |
-| FR-107-06 | **Benchmark run**: `runBenchmark` SHALL execute every case × repetition × variant (baseline/RED and candidate/GREEN) per [SPEC-112](2026-10-14-red-green-evaluation.md), with identical fixture hash, prompt, adapter + version, model selection, environment kind and limits for both variants, each in an independent fresh workspace. |
+| FR-107-06 | **Benchmark run**: `runBenchmark` SHALL execute every case × repetition × variant (baseline/RED and candidate/GREEN) per [SPEC-112](2026-10-14-red-green-evaluation.md), with identical fixture hash, prompt, adapter + version, model selection, environment kind and limits for both variants, each in an independent fresh workspace. The baseline has no artifact, or — in an A/B run (planned, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-10…12) — another version of the same artifact, installed exactly like the candidate. |
 | FR-107-07 | **Capabilities**: before running, the engine SHALL check the adapter's `capabilities` (`execution`, `headless`, `artifactInstallation`; `modelSelection` if `execution.model` is set) and fail fast (bootstrap: `assertRunnable` throws `BenchmarkConfigurationError`; it also checks that `definition.execution.agent === adapter.id`, that the artifact type is in `definition.artifactTypes`, approval, and that every case has a fixture snapshot). Detection-only adapters (`claude-code`, `codex`, `cursor` in bootstrap) have `execution: false`. |
 | FR-107-08 | **Environment**: `local-process` runs with `sandboxed: false` recorded; `docker` SHALL be rejected with a clear "not implemented" error before any workspace is created. |
 | FR-107-09 | **Events**: the engine SHALL report progress only through caller-supplied callbacks (no I/O to DB/UI). Implemented: `onAgentRun(record)` after each agent run (awaited, enabling incremental persistence). Planned: `onEvent(EngineEvent)` with `benchmark-started`, `agent-run-started`, `stage-started`, `stage-finished`, `command-output`, `warning` (serialisable JSON, ISO timestamps). |
@@ -164,7 +164,8 @@ interface RunBenchmarkInput {
   definition: BenchmarkDefinition;
   fixtures: Record<string, CaseFixtures>;
   fixtureStore: string;               // <dataDir>/fixtures
-  artifact: ArtifactBundle;           // @directivebench/core
+  artifact: ArtifactBundle;           // @directivebench/core — the candidate
+  baselineArtifact?: ArtifactBundle;  // planned (SPEC-118): A/B baseline, another version of the same artifact; absent = no artifact
   adapter: AgentAdapter;              // @directivebench/agent-adapters
   workRoot: string;                   // temp workspaces of this run
   keepWorkspaces?: boolean;
@@ -228,6 +229,7 @@ interface AssertionResult {                // implemented; persisted to assertio
   passed: boolean; score: number;          // 0..1 (deterministic: 0 or 1)
   weight: number; required: boolean; deterministic: boolean;
   message: string; details: Record<string, unknown> | null;
+  error?: { code: string; message: string }; // planned (SPEC-118 FR-118-46): evaluation could not finish → agent run infrastructure-error
 }
 ```
 
@@ -235,8 +237,11 @@ interface AssertionResult {                // implemented; persisted to assertio
 |------|--------|-----------|
 | `command` | Implemented | argv run in workspace without shell; pass iff exit code = `expectExitCode` (default 0); optional `timeoutSeconds`; details: argv, exit code, signal, duration, truncated/redacted stdout/stderr. Executes commands → approval required. |
 | `file-exists` | Implemented | `path` exists (or not, with `exists: false`); path confined to workspace. |
-| `file-contains` | Implemented | regex `pattern` with `flags` (`i`,`m`,`s`,`u`) matches file content (≤ 2 MiB); `negate` inverts. |
+| `file-contains` | Implemented | regex `pattern` with `flags` (`i`,`m`,`s`,`u`) matches file content (≤ 2 MiB); `negate` inverts. Matching runs synchronously today; planned: in a worker with `ASSERTION_REGEX_TIMEOUT_MS` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46). |
 | `changed-files` | Implemented | every agent-changed file matches ≥1 `allowed` glob and none match `forbidden` globs (`node:path` `matchesGlob`). |
+| `markdown-sections` | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-41) | required Markdown headings (text or regex, optional level and order) in a target file. Deterministic. |
+| `required-phrases` | Planned (SPEC-118 FR-118-42) | all/any of a list of literal phrases or regexes occur in a target file. Deterministic. |
+| `markdown-table-value` | Planned (SPEC-118 FR-118-43) | the number in a GFM table cell (row matched by pattern, column by header) lies within `min`/`max`. Deterministic. |
 | `json-schema` | Planned | file parses as JSON and validates against an inline/relative JSON Schema. Deterministic. |
 | `unit-tests` / `integration-tests` | Planned | test-runner wrappers (e.g. `node --test`, `vitest`, `phpunit`, `pytest`) with result parsing for partial credit (`passed/total`). Executes commands. Today expressible via `command`. |
 | `static-analysis` | Planned | linters/analysers (ESLint, PHPStan, PHPCS, Semgrep) with rule/severity thresholds; partial credit by findings. Executes commands. |
@@ -252,7 +257,7 @@ How suites express each evaluation type with format v1 ([SPEC-108](2026-10-14-be
 | Static validation | Is the artifact well-formed for its format (frontmatter, description, globs)? | Not an agent run: parser warnings from [SPEC-102](2026-10-14-artifact-discovery.md); dedicated "static" checks without agent are planned. | Partially (parser warnings only) |
 | Activation & scope | Does the artifact activate when it should (matching globs, relevant task) and stay silent otherwise? | Paired cases: one prompt touching in-scope files, one out-of-scope; assertions on resulting files. Meaningful only with real agents; the Mock Agent only checks context-phrase presence. | Expressible; real agents not implemented |
 | Behavioural | Does the agent's output change in the intended direction? | Core RED/GREEN case: prompt + fixture + hidden verification overlay + `command`/`file-*` assertions. | Implemented (mock agent) |
-| Regression | Does a new artifact version keep or improve results vs the previous version / baseline? | Re-run the same suite version on vN and vN-1; compare under one comparability key ([SPEC-103](2026-10-14-artifact-versioning.md) FR-103-14, [SPEC-111](2026-10-14-benchmark-scoring.md)). | Scoring implemented; version comparison UI not implemented |
+| Regression | Does a new artifact version keep or improve results vs the previous version / baseline? | Re-run the same suite version on vN and vN-1; compare under one comparability key ([SPEC-103](2026-10-14-artifact-versioning.md) FR-103-14, [SPEC-111](2026-10-14-benchmark-scoring.md)). Direct A/B: vN as candidate against vN-1 as baseline in one run ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)). | Scoring implemented; version comparison UI and A/B not implemented |
 | Safety & constraint | Does the agent stay within allowed files, avoid forbidden patterns/secrets? | `changed-files` (allowed/forbidden), `file-contains` with `negate: true`, `required: true` gates. | Implemented |
 
 ## 9. Data flow

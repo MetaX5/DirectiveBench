@@ -3,9 +3,9 @@ id: SPEC-013
 title: Implementation Roadmap
 status: draft
 created: 2026-10-14
-updated: 2026-10-19
+updated: 2026-10-22
 category: foundation
-related: [SPEC-001, SPEC-002, SPEC-003, SPEC-009, SPEC-011, SPEC-012, SPEC-101, SPEC-102, SPEC-104, SPEC-105, SPEC-107, SPEC-109, SPEC-111, SPEC-112, SPEC-114, SPEC-201, SPEC-202, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-211, SPEC-212]
+related: [SPEC-118, SPEC-001, SPEC-002, SPEC-003, SPEC-009, SPEC-011, SPEC-012, SPEC-101, SPEC-102, SPEC-104, SPEC-105, SPEC-107, SPEC-109, SPEC-111, SPEC-112, SPEC-114, SPEC-201, SPEC-202, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-211, SPEC-212]
 ---
 
 # SPEC-013 — Implementation Roadmap
@@ -34,8 +34,8 @@ flowchart LR
 | M0 Bootstrap | P0 | In progress — all deliverables done (CI ran green on PR #1); UI cancellation and crash-restart not yet verified end to end (§3 M0, §5) |
 | M1 Artifact Registry | P0 | In progress — local registration (#15) and the scan of registered local repositories (#16) |
 | M2 Git Integrations | P1 | Not started |
-| M3 Benchmark Engine | P0 | Not started beyond the bootstrap subset in M0 |
-| M4 Real Agent Integration | P1 | Not started (detection only in M0) |
+| M3 Benchmark Engine | P0 | Not started beyond the bootstrap subset in M0; next per D08 through slice S1 ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)) |
+| M4 Real Agent Integration | P1 | Not started (detection only in M0); Claude Code is next per D08 (S1, SPEC-118) |
 | M5 Benchmark Builder | P1 | Not started |
 | M6 Alternative Model Providers | P2 | Not started |
 | M7 Advanced Evaluation | P2 | Not started |
@@ -88,7 +88,8 @@ Applies to every milestone:
 
 **Priority:** P0. **Dependencies:** M0.
 **Deliverables:** local repository registration ([SPEC-104](2026-10-14-repository-management.md)); artifact discovery scan of registered local directories ([SPEC-102](2026-10-14-artifact-discovery.md)); artifact registry browsing and filtering ([SPEC-101](2026-10-14-artifact-registry.md)); versioning on content change ([SPEC-103](2026-10-14-artifact-versioning.md)); category CRUD and assignment ([SPEC-106](2026-10-14-category-management.md)); registering a **public GitHub repository by URL** without credentials, fetching only candidate artifact paths ([SPEC-201](2026-10-14-integration-github.md), [SPEC-105](2026-10-14-repository-synchronization.md) FR-105-05; moved from M2 by product-brief decision D06).
-**Value checkpoint:** after registration, scan, browsing and preview ship, the maintainer uses the Registry on their own repositories for one to two weeks and records whether they open it when working on skills; category CRUD starts after that record exists (product-brief decision D07).
+**Order change (product-brief decision D08, 2026-10-22):** the comparison work (slice S1, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md)) goes next; the remaining M1 items — cross-repository identity (#20), removed files (#21) and categories (#22) — wait.
+**Value checkpoint:** answered early on 2026-10-22 (D07, D08). After registration, scan, browsing and preview ship, the maintainer uses the Registry on their own repositories for one to two weeks and records whether they open it when working on skills; category CRUD starts after that record exists (product-brief decision D07).
 **Acceptance criteria:**
 - Registering a local directory containing `.agents/skills/*/SKILL.md`, `AGENTS.md`, `.cursor/rules/*.mdc` and `.github/copilot-instructions.md` discovers each as an artifact with the correct type/format and an occurrence path.
 - Re-scanning an unchanged repository creates 0 new versions; editing one file creates exactly 1 new version of that artifact.
@@ -113,8 +114,9 @@ Applies to every milestone:
 
 **Priority:** P0. **Dependencies:** M0, M1.
 **Deliverables:** completion of [SPEC-107](2026-10-14-benchmark-engine.md), [SPEC-110](2026-10-14-benchmark-execution.md), [SPEC-111](2026-10-14-benchmark-scoring.md), [SPEC-112](2026-10-14-red-green-evaluation.md): assigning benchmarks to registry artifacts, execution approval UX for imported suites, comparability key enforcement in results, results history per artifact ([SPEC-113](2026-10-14-results-and-reporting.md)), `benchmark run|list` CLI, Docker environment (`environment.kind: docker`).
+**First slice:** S1 ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)) delivers from M3 the assignment of suites to registry artifacts, `benchmark run` (plus `benchmark init`), results history per artifact version and A/B against another artifact version; from M4 only the Claude Code adapter. Docker, `benchmark list` and the UI approval flow are not in S1.
 **Acceptance criteria:**
-- A user-imported suite cannot execute commands until approved in the UI; approval is recorded with its source.
+- A user-imported suite cannot execute commands until approved in the UI; approval is recorded with its source. (S1 adds an explicit CLI approval, `--approve-commands`, as well — confirmed by the maintainer on 2026-10-22, SPEC-118 Q5.)
 - Results with different comparability keys are never aggregated (verified by test).
 - `directivebench benchmark run <suite> --artifact <id>` runs headless and exits non-zero on `regressed`/`failed`.
 - The `wordpress-ajax-security` example runs in Docker when Docker is available and reports a clear error otherwise.
@@ -171,6 +173,10 @@ Applies to every milestone:
 **Risks:** security surface of a multi-user server; dual-dialect database maintenance.
 
 ## 4. Recommended next task
+
+**Slice S1 of the comparison work ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md), decision D08):** phase 1 (document assertions), then A/B storage, the Claude Code adapter, and the CLI with the read-only UI.
+
+Previous recommendation (done in #15/#16), kept for history:
 
 **Milestone 1, first slice: local repository registration + discovery.**
 

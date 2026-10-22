@@ -3,7 +3,7 @@ id: SPEC-108
 title: Benchmark Definition Format
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-22
 category: feature
 related: [SPEC-107, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-106, SPEC-005, SPEC-007, ADR-0005, ADR-0006]
 ---
@@ -53,12 +53,13 @@ Benchmarks must be reviewable in pull requests, portable between machines, repro
 | FR-108-07 | Path fields (`fixture.path`, `verification.overlay`, `file-exists.path`, `file-contains.path`) SHALL be relative POSIX paths: no backslashes, not absolute, no NUL, and not escaping their base after normalisation (`..`). |
 | FR-108-08 | **Path resolution**: `fixture.path` and `verification.overlay` are resolved relative to the **directory containing the definition file** at import time; assertion paths and playbook `write.path` are resolved relative to the **workspace root** at run time (with `resolveInside`). Globs in `changed-files` match workspace-relative POSIX paths (`node:path` `matchesGlob`). |
 | FR-108-09 | Commands (`setup[]`, `command` assertions) SHALL be argv arrays of non-empty strings, never shell strings; they are executed without a shell ([SPEC-110](2026-10-14-benchmark-execution.md)). |
-| FR-108-10 | `file-contains.pattern` SHALL compile as a JavaScript `RegExp` with the given `flags` (only `i`, `m`, `s`, `u` allowed); invalid patterns are validation errors at path `…pattern`. |
+| FR-108-10 | `file-contains.pattern` SHALL compile as a JavaScript `RegExp` with the given `flags` (only `i`, `m`, `s`, `u` allowed); invalid patterns are validation errors at path `…pattern`. Compiling does not bound matching time; matching user patterns is bounded at evaluation time (planned, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46: worker thread, `ASSERTION_REGEX_TIMEOUT_MS`, assertion error). |
 | FR-108-11 | Each case SHALL have ≥ 1 assertion and at least one assertion with `weight > 0`. |
 | FR-108-12 | `execution.environment.kind: docker` SHALL require `image` (validation), and is rejected at run time in the bootstrap (not implemented). |
 | FR-108-13 | `categories[]` are category **slugs** ([SPEC-106](2026-10-14-category-management.md)); unknown slugs are import warnings, not validation errors. `technologies[]` are free-form labels. |
 | FR-108-14 | **Import** (`prepareSuiteImport`) SHALL snapshot every fixture and overlay directory into `<dataDir>/fixtures/<sha256>/` and compute the suite content hash; identical content re-imported yields the existing suite version ([SPEC-107](2026-10-14-benchmark-engine.md) FR-107-02/03). |
 | FR-108-15 | A definition that runs commands (`definitionRunsCommands`) SHALL require execution approval of its suite version before running ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-46). |
+| FR-108-16 | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-06): for a `claude-code` suite, import SHALL refuse fixtures and overlays that contain Claude Code configuration at any depth (`.claude`, `.claude-plugin`, `.mcp.json`, `CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`) and any file whose `@` import token resolves to an existing path outside the fixture (FR-118-27); execution approval does not lift this. |
 
 ## 7. Non-functional requirements
 
@@ -113,6 +114,8 @@ type AssertionDefinition =
   | { type: 'file-exists'; path: string; exists: boolean /*true*/ } & Common
   | { type: 'file-contains'; path: string; pattern: string; flags: string /*''*/; negate: boolean /*false*/ } & Common
   | { type: 'changed-files'; allowed?: string[]; forbidden?: string[] /* at least one */ } & Common;
+// Planned additive members (no schemaVersion change): 'markdown-sections', 'required-phrases',
+// 'markdown-table-value' — shapes in SPEC-118 §8.4 (2026-10-22-benchmark-own-skills-s1.md).
 
 interface Common { id: string; description?: string; weight: number /*1, 0..1000*/; required: boolean /*false*/ }
 ```
@@ -386,7 +389,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 19. Future extensions
 
-- v1-compatible additions: planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
+- v1-compatible additions: the document assertions `markdown-sections`, `required-phrases` and `markdown-table-value` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.4, next); planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
 - v2 candidates: case matrices (parameterised prompts/fixtures), artifact-specific install hints, multi-turn prompts.
 - Published JSON Schema for editor completion; Builder round-tripping ([SPEC-109](2026-10-14-benchmark-builder.md)).
 

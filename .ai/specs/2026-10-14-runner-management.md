@@ -3,9 +3,9 @@ id: SPEC-114
 title: Runner Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-19
+updated: 2026-10-22
 category: feature
-related: [SPEC-104, SPEC-110, SPEC-112, SPEC-113, SPEC-115, SPEC-003, SPEC-006, SPEC-009, SPEC-011]
+related: [SPEC-118, SPEC-104, SPEC-110, SPEC-112, SPEC-113, SPEC-115, SPEC-003, SPEC-006, SPEC-009, SPEC-011]
 ---
 
 # SPEC-114 — Runner Management
@@ -45,7 +45,7 @@ Benchmarks run for minutes, spawn processes, and must survive browser reloads. R
 | ID | Requirement |
 |---|---|
 | FR-114-01 | Job statuses SHALL be exactly `pending`, `running`, `completed`, `failed`, `cancelled`, `interrupted`. Terminal: `completed`, `failed`, `cancelled`, `interrupted`. |
-| FR-114-02 | Enqueue SHALL insert a row with `status = 'pending'`, `type = 'benchmark-run'`, a validated `payload` (`{ suiteVersionId, artifactVersionId }`), `attempts = 0`, `created_at`. The web app SHALL validate that the suite version exists and is execution-approved before enqueueing. |
+| FR-114-02 | Enqueue SHALL insert a row with `status = 'pending'`, `type = 'benchmark-run'`, a validated `payload` (`{ suiteVersionId, artifactVersionId }`), `attempts = 0`, `created_at`. The web app SHALL validate that the suite version exists and is execution-approved before enqueueing. Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-34): `directivebench benchmark run` instead inserts its job already `running` with its own `runner_id` in one statement and executes it in-process, so no other runner can acquire it; stale-heartbeat recovery (FR-114-06) still applies. |
 | FR-114-03 | Acquisition SHALL be atomic: `UPDATE jobs SET status='running', runner_id=?, started_at=?, heartbeat_at=?, attempts=attempts+1 WHERE id = (SELECT id FROM jobs WHERE status='pending' ORDER BY created_at LIMIT 1) AND status='pending' RETURNING *`. Zero returned rows means nothing acquired. |
 | FR-114-04 | The runner SHALL poll for pending jobs when it has free capacity (default poll interval 1 s; immediate re-poll after a job finishes). |
 | FR-114-05 | While a job runs, the runner SHALL update `heartbeat_at` every **5 s**. |

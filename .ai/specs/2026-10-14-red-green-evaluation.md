@@ -3,9 +3,9 @@ id: SPEC-112
 title: RED/GREEN Evaluation
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-107, SPEC-110, SPEC-111, SPEC-113, SPEC-103, SPEC-203, SPEC-204, SPEC-205]
+related: [SPEC-118, SPEC-107, SPEC-110, SPEC-111, SPEC-113, SPEC-103, SPEC-203, SPEC-204, SPEC-205]
 ---
 
 # SPEC-112 — RED/GREEN Evaluation
@@ -28,7 +28,7 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 ## 4. Non-goals
 
-- Comparing two different artifacts against each other (future: A/B mode, §19).
+- Comparing two different artifacts against each other. (Comparing two **versions of the same artifact** — A/B mode — is planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §6.2.)
 - Comparing agents or models against each other (that is a different comparability key, [SPEC-111](2026-10-14-benchmark-scoring.md)).
 - Guaranteeing causality for nondeterministic agents from a single run.
 
@@ -43,15 +43,15 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 | ID | Requirement |
 |---|---|
-| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate). |
+| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate), and optionally a baseline artifact version of the same artifact (A/B, planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-10…13). |
 | FR-112-02 | For each case and each repetition `r ∈ 1..repetitions`, the run SHALL execute exactly one baseline and one candidate agent run. |
-| FR-112-03 | Baseline SHALL have no artifact installed. Candidate SHALL have exactly the referenced artifact version installed via `AgentAdapter.installArtifact` (e.g. Mock Agent → `.agents/skills/<slug>/`). |
-| FR-112-04 | Both variants SHALL use the same fixture snapshot hash (same commit for repository-sourced fixtures), verification overlay hash, prompt, adapter id and version, model config, tool permissions, environment kind and limits (`timeoutSeconds`, `maxOutputBytes`). |
+| FR-112-03 | Baseline SHALL have no artifact installed — or, in an A/B run, exactly the baseline version installed the same way as the candidate. Candidate SHALL have exactly the referenced artifact version installed via `AgentAdapter.installArtifact` (e.g. Mock Agent → `.agents/skills/<slug>/`). |
+| FR-112-04 | Both variants SHALL use the same fixture snapshot hash (same commit for repository-sourced fixtures), verification overlay hash, prompt, adapter id and version, model config, tool permissions, environment kind and limits (`timeoutSeconds`, `maxOutputBytes`). For real agents "same model" means the same **observed execution model** (the session model the agent reports, e.g. Claude Code's `system/init` `model`), not only the same requested model: a `null` model or an alias can resolve differently between agent runs ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-04). Auxiliary models an agent uses for internal tasks are recorded, not compared; only models that no task turn ran on count as auxiliary, and artifact- or fixture-controlled model overrides are refused in S1 (SPEC-118 FR-118-06/26). |
 | FR-112-05 | Each agent run SHALL use an independent fresh workspace ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-01); no files, processes, caches or HOME directories are shared between agent runs. |
 | FR-112-06 | Adapter-level state (sessions, conversation ids, caches the adapter controls) SHALL be reset per agent run; adapters SHALL declare which state they cannot reset. |
 | FR-112-07 | Environment metadata (adapter id/version, node version, platform/arch, environment kind, `sandboxed` flag, model config, limits) SHALL be recorded once per benchmark run; it is identical for all agent runs of that run by construction (one runner process, one adapter detection, one suite version — [SPEC-005](2026-10-14-domain-model.md)). Each agent run SHALL record the fixture snapshot hash it started from, its duration and its creation time. |
-| FR-112-08 | After execution, the engine SHALL verify that recorded metadata of baseline and candidate match on all equivalence fields; a mismatch SHALL make the comparison `not-comparable`. The equivalence fields of FR-112-04 are also what the benchmark run's comparability key hashes (definition `cases`, `scoring`, `execution`, fixture hashes, adapter id and version — [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43). |
-| FR-112-09 | Known uncontrolled differences SHALL be recorded as warnings on the benchmark run, at minimum: ambient user-level skills/instructions that cannot be excluded for real agents; provider-side model updates behind an alias; non-pinned model versions; network access on `local-process`. |
+| FR-112-08 | After execution, the engine SHALL verify that recorded metadata of baseline and candidate match on all equivalence fields; a mismatch SHALL make the comparison `not-comparable`. For real agents this includes the observed execution model of every agent run of both variants (FR-112-04; planned, SPEC-118 FR-118-04). The equivalence fields of FR-112-04 are also what the benchmark run's comparability key hashes (definition `cases`, `scoring`, `execution`, fixture hashes, adapter id and version — [SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-43). |
+| FR-112-09 | Known uncontrolled differences SHALL be recorded as warnings on the benchmark run, at minimum: ambient user-level skills/instructions that cannot be excluded for real agents; non-pinned model versions (`unpinned-model`; if the resolved execution model actually differs between agent runs, FR-112-08 makes the run `not-comparable` instead); auxiliary models reported besides the execution model; network access on `local-process`. |
 | FR-112-10 | Execution order SHALL interleave variants: for repetition r, run baseline and candidate back to back, alternating which goes first (r odd → baseline first; r even → candidate first). Cases are processed in definition order. |
 | FR-112-11 | With concurrency > 1 (future, within a run), pairs SHALL be scheduled together so both variants of a repetition run concurrently or adjacently. |
 | FR-112-12 | Results SHALL be stored and shown as produced. The system SHALL NOT retry only failed variants, discard outliers, re-order results, or re-run a variant to "fix" an outcome. A user re-run creates a new benchmark run. |
@@ -175,7 +175,7 @@ Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `mod
 
 - Artifact already present in the fixture (e.g. fixture contains `.agents/skills/<slug>/`) → engine warns: baseline is not artifact-free; comparison flagged `not-comparable` unless the suite explicitly declares it.
 - Adapter version changes mid-run (CLI auto-update) → detected by FR-112-08 → `not-comparable`.
-- Model alias resolves to different snapshots across runs → warning `unpinned-model`.
+- Model alias (or the agent's default model) resolves to different execution models across agent runs of one benchmark run → `not-comparable` (FR-112-08); an unpinned model that resolves identically → warning `unpinned-model`.
 - Baseline passes, candidate fails → reported as `regressed` (if delta ≤ −minDelta) — never suppressed.
 - Repetitions = 1 → allowed; confidence `low`.
 
@@ -210,7 +210,7 @@ Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `mod
 
 ## 19. Future extensions
 
-- A/B mode: candidate vs. a different artifact version instead of no artifact.
+- A/B mode: candidate vs. a different version of the same artifact instead of no artifact — specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) (planned).
 - Multi-artifact candidates (artifact sets) with ablation.
 - Statistical tests for nondeterministic agents.
 - Remote runners executing pairs on the same host to keep environment equivalence.
