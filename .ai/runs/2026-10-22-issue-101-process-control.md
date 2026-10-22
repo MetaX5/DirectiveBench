@@ -133,6 +133,9 @@ fake CLI ignoring SIGINT/SIGTERM.
   pinned (an existing stop code keeps precedence), so every exit path after pinning is covered —
   not only the paths Codex named. Red first: the rejecting-adapter regression fails on 5552abd.
 
+- Codex round 6 on 5b2dbad: approve, no material findings. Lesson recorded: enforce an invariant
+  on every exit path.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
