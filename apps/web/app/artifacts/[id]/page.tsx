@@ -1,4 +1,4 @@
-import { getArtifactDetail, type ArtifactDetail } from '@directivebench/database';
+import { getArtifactDetail, listArtifactRuns, type ArtifactDetail } from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -25,6 +25,14 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
+import {
+  groupCount,
+  groupLabel,
+  resultsByVersion,
+  type ComparabilityGroup,
+  type VersionComparison,
+  type VersionResults,
+} from '@/lib/artifact-runs';
 import {
   ARTIFACT_TABS,
   artifactHref,
@@ -264,59 +272,186 @@ function BenchmarksTab({ detail }: { detail: ArtifactDetail }) {
   );
 }
 
-function EvaluationsTab({ detail }: { detail: ArtifactDetail }) {
-  const { evaluations } = detail;
+function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
+  if (comparison.kind === 'regression') {
+    return (
+      <Badge
+        variant="destructive"
+        data-testid="version-regression"
+        title={comparison.reasons.join('; ')}
+      >
+        Version regression vs v{comparison.previousVersion}
+        {comparison.versionDelta === null ? '' : ` (${formatDelta(comparison.versionDelta)})`}
+      </Badge>
+    );
+  }
+  if (comparison.kind === 'inconclusive') {
+    return (
+      <Badge variant="warning" title={comparison.reason} data-testid="version-comparison">
+        Inconclusive vs v{comparison.previousVersion}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="muted" data-testid="version-comparison">
+      No regression vs v{comparison.previousVersion} ({formatDelta(comparison.versionDelta)})
+    </Badge>
+  );
+}
+
+function GroupTable({ group }: { group: ComparabilityGroup }) {
+  return (
+    <div className="space-y-2" data-testid="comparability-group" data-key={group.key ?? ''}>
+      <p className="text-xs font-medium">
+        <span className="font-mono">{groupLabel(group.key)}</span>
+        <span className="text-muted-foreground"> · not comparable with other groups</span>
+      </p>
+      <Table>
+        <THead>
+          <TR>
+            <TH>Run</TH>
+            <TH>Suite</TH>
+            <TH>Baseline</TH>
+            <TH>Agent · auth mode · isolation</TH>
+            <TH>Model</TH>
+            <TH>Status</TH>
+            <TH className="text-right">Delta</TH>
+            <TH>Confidence</TH>
+            <TH>Date</TH>
+          </TR>
+        </THead>
+        <TBody>
+          {group.runs.map((row) => (
+            <TR
+              key={row.runId}
+              data-testid="version-run"
+              data-run-id={row.runId}
+              className={row.comparison?.kind === 'regression' ? 'bg-destructive/10' : undefined}
+            >
+              <TD>
+                <Link className="font-mono text-xs underline" href={`/results/${row.runId}`}>
+                  {row.runId}
+                </Link>
+              </TD>
+              <TD className="text-xs">
+                <Link className="underline" href={`/benchmarks/${row.suite.id}`}>
+                  {row.suite.name}
+                </Link>{' '}
+                v{row.suite.version}
+              </TD>
+              <TD className="text-xs" data-testid="run-baseline">
+                {row.baseline}
+              </TD>
+              <TD className="text-xs">
+                {row.mock ? (
+                  <MockBadge />
+                ) : (
+                  <span className="font-mono">
+                    {row.agentAdapterId} {row.agentVersion ?? ''}
+                  </span>
+                )}
+                <p className="text-muted-foreground" data-testid="run-conditions">
+                  {row.authMode} · {row.isolationProfile}
+                </p>
+                {row.ambientConfig ? (
+                  <Badge
+                    variant="warning"
+                    title="Claude Code loaded your user-level configuration into both variants"
+                  >
+                    May include user-level instructions
+                  </Badge>
+                ) : null}
+              </TD>
+              <TD className="max-w-48 break-words font-mono text-xs">{row.model}</TD>
+              <TD>
+                <div className="flex flex-wrap items-center gap-1">
+                  <StatusBadge status={row.displayStatus} />
+                  {row.comparison ? <ComparisonBadge comparison={row.comparison} /> : null}
+                </div>
+              </TD>
+              <TD className="text-right tabular-nums">{formatDelta(row.delta)}</TD>
+              <TD className="text-xs">{row.confidence ?? '—'}</TD>
+              <TD className="whitespace-nowrap text-xs text-muted-foreground">
+                {formatDate(row.startedAt)}
+              </TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
+    </div>
+  );
+}
+
+function ResultsByVersionTab({ slug, results }: { slug: string; results: VersionResults[] }) {
+  const tested = results.some((b) => b.groups.length > 0 || b.otherRuns.length > 0);
+  const groups = groupCount(results);
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Evaluation history</CardTitle>
+        <CardTitle>Benchmark results by version</CardTitle>
+        <CardDescription>
+          Completed runs per artifact version, newest first, grouped by comparability key. A version
+          regression compares the latest run of a version with the latest run of the previous tested
+          version in the same group.
+        </CardDescription>
       </CardHeader>
-      <CardContent>
-        {evaluations.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Not evaluated yet.</p>
-        ) : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Run</TH>
-                <TH>Version</TH>
-                <TH>Agent</TH>
-                <TH>Status</TH>
-                <TH className="text-right">Baseline</TH>
-                <TH className="text-right">Candidate</TH>
-                <TH className="text-right">Delta</TH>
-                <TH>Date</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {evaluations.map((e) => (
-                <TR key={e.runId}>
-                  <TD>
-                    <Link className="font-mono text-xs underline" href={`/results/${e.runId}`}>
-                      {e.runId}
-                    </Link>
-                  </TD>
-                  <TD>v{e.artifactVersion}</TD>
-                  <TD className="text-xs">
-                    {isMockAgent(e.agentAdapterId) ? <MockBadge /> : e.agentAdapterId}
-                  </TD>
-                  <TD>
-                    <StatusBadge
-                      status={runDisplayStatus({
-                        ...e,
-                        summary: { candidateOutcome: e.candidateOutcome },
-                      })}
-                    />
-                  </TD>
-                  <TD className="text-right tabular-nums">{formatScore(e.baselineScore)}</TD>
-                  <TD className="text-right tabular-nums">{formatScore(e.candidateScore)}</TD>
-                  <TD className="text-right tabular-nums">{formatDelta(e.delta)}</TD>
-                  <TD className="text-xs text-muted-foreground">{formatDate(e.startedAt)}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
+      <CardContent className="space-y-6">
+        {!tested ? (
+          <div className="space-y-2 text-sm" data-testid="no-runs">
+            <p className="text-muted-foreground">
+              No benchmark runs yet. Create a suite with{' '}
+              <code className="select-all rounded bg-muted px-1 font-mono">
+                directivebench benchmark init --artifact {slug}
+              </code>
+            </p>
+            <Badge variant="muted">Planned — the command is not implemented yet</Badge>
+          </div>
+        ) : null}
+        {tested && groups > 1 ? (
+          <p role="note" className="text-sm" data-testid="not-comparable-notice">
+            These runs fall into {groups} comparability groups that are{' '}
+            <strong>not comparable with each other</strong>: no number is compared across groups.
+          </p>
+        ) : null}
+        {tested
+          ? results.map((block) => (
+              <section
+                key={block.versionId}
+                aria-label={`Version ${block.version}`}
+                data-testid="version-results"
+                data-version={block.version}
+                className="space-y-3"
+              >
+                <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                  v{block.version}
+                  {block.regressed ? <Badge variant="destructive">Version regression</Badge> : null}
+                </h3>
+                {block.groups.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No completed runs for this version.
+                  </p>
+                ) : (
+                  block.groups.map((group, index) => (
+                    <GroupTable key={group.key ?? `unkeyed-${index}`} group={group} />
+                  ))
+                )}
+                {block.otherRuns.length > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="other-runs">
+                    Not completed:{' '}
+                    {block.otherRuns.map((run, index) => (
+                      <span key={run.runId}>
+                        {index > 0 ? ', ' : null}
+                        <Link className="font-mono underline" href={`/results/${run.runId}`}>
+                          {run.runId}
+                        </Link>{' '}
+                        ({run.status})
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
+              </section>
+            ))
+          : null}
       </CardContent>
     </Card>
   );
@@ -374,7 +509,12 @@ export default async function ArtifactPage({
       {query.tab === 'metadata' ? <MetadataTab detail={detail} /> : null}
       {query.tab === 'versions' ? <VersionsTab detail={detail} /> : null}
       {query.tab === 'benchmarks' ? <BenchmarksTab detail={detail} /> : null}
-      {query.tab === 'evaluations' ? <EvaluationsTab detail={detail} /> : null}
+      {query.tab === 'evaluations' ? (
+        <ResultsByVersionTab
+          slug={artifact.slug}
+          results={resultsByVersion(versions, await listArtifactRuns(handle.db, artifact.id))}
+        />
+      ) : null}
     </>
   );
 }

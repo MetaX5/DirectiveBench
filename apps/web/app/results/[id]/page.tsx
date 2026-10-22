@@ -29,6 +29,21 @@ import {
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import {
+  agentProfileOf,
+  agentRunMetadata,
+  assertionDetailLines,
+  assertionErrorOf,
+  baselineLabel,
+  candidateLabel,
+  invocationText,
+  NOT_REPORTED,
+  otherReportedModels,
+  runWarnings,
+  traceCounts,
+  usageText,
+  type AgentProfile,
+} from '@/lib/run-detail';
 import { cn, formatDate, formatDelta, formatDuration, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmark run' };
@@ -47,19 +62,24 @@ function ScoreBar({ value, tone }: { value: number | null; tone: 'red' | 'green'
 
 function VariantCard({
   label,
+  subtitle,
   tone,
   data,
+  invocation,
   testId,
 }: {
   label: string;
+  subtitle: string;
   tone: 'red' | 'green';
   data: Aggregate | undefined;
+  invocation: string | null;
   testId: string;
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{label}</CardTitle>
+        <CardTitle data-testid={`${testId}-label`}>{label}</CardTitle>
+        <CardDescription>{subtitle}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-2xl font-semibold tabular-nums" data-testid={testId}>
@@ -78,6 +98,81 @@ function VariantCard({
           <dt className="text-muted-foreground">Mean duration</dt>
           <dd className="tabular-nums">{formatDuration(data?.meanDurationMs)}</dd>
         </dl>
+        {invocation ? (
+          <p className="text-xs" data-testid={`${testId}-invocation`}>
+            {invocation}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AssertionDetails({ lines }: { lines: { label: string; value: string }[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2" data-testid="assertion-details">
+      {lines.map((line) => (
+        <div key={line.label} className="contents">
+          <dt>{line.label}</dt>
+          <dd className="break-all font-mono text-foreground">{line.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function AgentProfileCard({
+  mock,
+  profile,
+  requestedModel,
+  otherModels,
+}: {
+  mock: boolean;
+  profile: AgentProfile | null;
+  requestedModel: string;
+  otherModels: string[];
+}) {
+  if (mock) {
+    return (
+      <Card className="mt-4" data-testid="agent-profile">
+        <CardHeader>
+          <CardTitle>Agent profile</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          The deterministic mock agent reports no agent profile: no auth mode, isolation or model.
+        </CardContent>
+      </Card>
+    );
+  }
+  const value = (text: string | undefined) => text ?? NOT_REPORTED;
+  return (
+    <Card className="mt-4" data-testid="agent-profile">
+      <CardHeader>
+        <CardTitle>Agent profile</CardTitle>
+        <CardDescription>
+          The conditions every agent run of this benchmark ran under.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid gap-1 text-xs md:grid-cols-2">
+          <dt className="text-muted-foreground">Auth mode</dt>
+          <dd data-testid="profile-auth-mode">{value(profile?.authMode)}</dd>
+          <dt className="text-muted-foreground">Isolation profile</dt>
+          <dd data-testid="profile-isolation">{value(profile?.isolationProfile)}</dd>
+          <dt className="text-muted-foreground">Permission profile</dt>
+          <dd data-testid="profile-permission">{value(profile?.permissionProfile)}</dd>
+          <dt className="text-muted-foreground">Model requested</dt>
+          <dd className="font-mono">{requestedModel}</dd>
+          <dt className="text-muted-foreground">Execution model</dt>
+          <dd className="font-mono" data-testid="profile-execution-model">
+            {value(profile?.executionModel)}
+          </dd>
+          <dt className="text-muted-foreground">Other reported models</dt>
+          <dd className="font-mono" data-testid="profile-other-models">
+            {otherModels.length ? otherModels.join(', ') : 'none'}
+          </dd>
+        </dl>
       </CardContent>
     </Card>
   );
@@ -89,10 +184,23 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const { id } = await params;
   const detail = await getBenchmarkRunDetail(handle.db, id);
   if (!detail) notFound();
-  const { run, suite, suiteVersion, artifact, artifactVersion, agentRuns } = detail;
+  const {
+    run,
+    suite,
+    suiteVersion,
+    artifact,
+    artifactVersion,
+    baselineArtifactVersion,
+    agentRuns,
+  } = detail;
   const summary = run.summary as
     (ScoringSummary & { environment?: Record<string, unknown> }) | null;
   const status = runDisplayStatus(run);
+  const mock = isMockAgent(run.agentAdapterId);
+  const profile = agentProfileOf(run.summary);
+  const baselineName = baselineLabel(baselineArtifactVersion);
+  const candidateName = candidateLabel(artifactVersion);
+  const warnings = runWarnings(run.warnings, profile);
 
   return (
     <>
@@ -101,7 +209,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         title={`${artifact.name} v${artifactVersion.version} × ${suite.name} v${suiteVersion.version}`}
         description={
           <>
-            Run <span className="font-mono">{run.id}</span> · started {formatDate(run.startedAt)}
+            <span data-testid="run-variants">
+              {baselineName} vs {candidateName}
+            </span>{' '}
+            · run <span className="font-mono">{run.id}</span> · started {formatDate(run.startedAt)}
           </>
         }
         actions={
@@ -111,7 +222,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             ) : (
               <Badge variant="info">{run.status}</Badge>
             )}
-            {isMockAgent(run.agentAdapterId) ? <MockBadge /> : null}
+            {mock ? <MockBadge /> : null}
             <NotSandboxedBadge />
           </>
         }
@@ -126,15 +237,23 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       {summary ? (
         <div className="grid gap-4 md:grid-cols-3">
           <VariantCard
-            label="Baseline (RED) — without artifact"
+            label={baselineName}
+            subtitle={
+              baselineArtifactVersion
+                ? `RED — artifact v${baselineArtifactVersion.version} installed`
+                : 'RED — without the artifact'
+            }
             tone="red"
             data={summary.baseline}
+            invocation={invocationText(run.summary, 'baseline')}
             testId="baseline-score"
           />
           <VariantCard
-            label="Candidate (GREEN) — with artifact"
+            label={candidateName}
+            subtitle={`GREEN — artifact v${artifactVersion.version} installed`}
             tone="green"
             data={summary.candidate}
+            invocation={invocationText(run.summary, 'candidate')}
             testId="candidate-score"
           />
           <Card>
@@ -157,6 +276,11 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <dt className="text-muted-foreground">Confidence</dt>
                 <dd title={summary.confidence.reason}>{summary.confidence.level}</dd>
               </dl>
+              {mock ? null : (
+                <Badge variant="warning" data-testid="real-agent-badge">
+                  Real agent — results vary between runs
+                </Badge>
+              )}
               <p className="text-xs text-muted-foreground">{summary.confidence.reason}</p>
               {summary.reasons?.length ? (
                 <ul className="list-inside list-disc text-xs" data-testid="verdict-reasons">
@@ -181,15 +305,30 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </Card>
       )}
 
-      {run.warnings.length > 0 ? (
-        <Card className="mt-4">
+      <AgentProfileCard
+        mock={mock}
+        profile={profile}
+        requestedModel={run.model ? `${run.model.provider}/${run.model.model}` : 'agent default'}
+        otherModels={otherReportedModels(
+          agentRuns.map((r) => r.trace),
+          profile,
+        )}
+      />
+
+      {warnings.length > 0 ? (
+        <Card className="mt-4" data-testid="run-warnings">
           <CardHeader>
             <CardTitle>Warnings and uncontrolled differences</CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="list-inside list-disc text-sm text-muted-foreground">
-              {run.warnings.map((w) => (
-                <li key={w}>{w}</li>
+            <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+              {warnings.map((w) => (
+                <li key={w.text} data-code={w.code ?? ''}>
+                  <span className={w.code ? 'font-mono text-xs' : undefined}>{w.text}</span>
+                  {w.explanation ? (
+                    <span className="text-foreground"> — {w.explanation}</span>
+                  ) : null}
+                </li>
               ))}
             </ul>
           </CardContent>
@@ -205,104 +344,130 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {agentRuns.map((agentRun) => (
-            <details key={agentRun.id} className="rounded-md border" data-testid="agent-run">
-              <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
-                  {agentRun.variant === 'baseline' ? 'RED baseline' : 'GREEN candidate'}
-                </Badge>
-                <span className="font-mono text-xs">
-                  {agentRun.caseId} · rep {agentRun.repetition}
-                </span>
-                <span className="tabular-nums">{formatScore(agentRun.score)}</span>
-                <Badge
-                  variant={
-                    agentRun.passed
-                      ? 'success'
-                      : agentRun.passed === false
-                        ? 'destructive'
-                        : 'muted'
-                  }
-                >
-                  {agentRun.executionStatus === 'completed'
-                    ? agentRun.passed
-                      ? 'passed'
-                      : 'failed'
-                    : agentRun.executionStatus}
-                </Badge>
-                <span className="ml-auto text-xs text-muted-foreground">
-                  {formatDuration(agentRun.durationMs)}
-                </span>
-              </summary>
-              <div className="space-y-3 border-t p-3">
-                {agentRun.error ? (
-                  <p className="text-sm text-destructive">{agentRun.error}</p>
-                ) : null}
-                <Table>
-                  <THead>
-                    <TR>
-                      <TH>Assertion</TH>
-                      <TH>Type</TH>
-                      <TH>Result</TH>
-                      <TH className="text-right">Weight</TH>
-                      <TH>Message</TH>
-                    </TR>
-                  </THead>
-                  <TBody>
-                    {agentRun.assertions.map((a) => (
-                      <TR key={a.id}>
-                        <TD className="font-mono text-xs">
-                          {a.assertionId}
-                          {a.required ? ' *' : ''}
-                        </TD>
-                        <TD>
-                          <Badge variant="outline">{a.type}</Badge>
-                          {a.deterministic ? null : (
-                            <Badge variant="warning" className="ml-1">
-                              nondeterministic
-                            </Badge>
-                          )}
-                        </TD>
-                        <TD>
-                          <Badge variant={a.passed ? 'success' : 'destructive'}>
-                            {a.passed ? 'pass' : 'fail'}
-                          </Badge>
-                        </TD>
-                        <TD className="text-right tabular-nums">{a.weight}</TD>
-                        <TD className="text-xs text-muted-foreground">{a.message}</TD>
+          {agentRuns.map((agentRun) => {
+            const activation = agentRunMetadata(agentRun.trace)?.skillActivation;
+            const usage = usageText(agentRun.usage, profile);
+            const counts = traceCounts(agentRun.trace);
+            return (
+              <details key={agentRun.id} className="rounded-md border" data-testid="agent-run">
+                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                  <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
+                    {agentRun.variant === 'baseline' ? baselineName : candidateName}
+                  </Badge>
+                  <span className="font-mono text-xs">
+                    {agentRun.caseId} · rep {agentRun.repetition}
+                  </span>
+                  <span className="tabular-nums">{formatScore(agentRun.score)}</span>
+                  <Badge
+                    variant={
+                      agentRun.passed
+                        ? 'success'
+                        : agentRun.passed === false
+                          ? 'destructive'
+                          : 'muted'
+                    }
+                  >
+                    {agentRun.executionStatus === 'completed'
+                      ? agentRun.passed
+                        ? 'passed'
+                        : 'failed'
+                      : agentRun.executionStatus}
+                  </Badge>
+                  {activation ? (
+                    <Badge
+                      variant={activation.invoked ? 'outline' : 'muted'}
+                      data-testid="skill-invoked"
+                    >
+                      {activation.invoked
+                        ? `Skill invoked (${activation.invocations})`
+                        : activation.loaded
+                          ? 'Skill not invoked'
+                          : 'Skill not loaded'}
+                    </Badge>
+                  ) : null}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {formatDuration(agentRun.durationMs)}
+                  </span>
+                </summary>
+                <div className="space-y-3 border-t p-3">
+                  {agentRun.error ? (
+                    <p className="text-sm text-destructive">{agentRun.error}</p>
+                  ) : null}
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Assertion</TH>
+                        <TH>Type</TH>
+                        <TH>Result</TH>
+                        <TH className="text-right">Weight</TH>
+                        <TH>Message</TH>
                       </TR>
-                    ))}
-                  </TBody>
-                </Table>
-                <p className="text-xs text-muted-foreground">
-                  Changed files:{' '}
-                  {agentRun.changedFiles.length
-                    ? agentRun.changedFiles.map((f) => `${f.path} (${f.change})`).join(', ')
-                    : 'none'}{' '}
-                  · fixture{' '}
-                  <span className="font-mono">{agentRun.fixtureVersionId.slice(0, 12)}…</span>
-                </p>
-                <details>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">
-                    Execution trace
-                  </summary>
-                  <Pre className="mt-2">{JSON.stringify(agentRun.trace, null, 2)}</Pre>
-                </details>
-                <details>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">
-                    Assertion details (command output)
-                  </summary>
-                  <Pre className="mt-2">
-                    {JSON.stringify(
-                      agentRun.assertions.map((a) => ({ id: a.assertionId, details: a.details })),
-                      null,
-                      2,
-                    )}
-                  </Pre>
-                </details>
-              </div>
-            </details>
-          ))}
+                    </THead>
+                    <TBody>
+                      {agentRun.assertions.map((a) => (
+                        <TR key={a.id}>
+                          <TD className="font-mono text-xs">
+                            {a.assertionId}
+                            {a.required ? ' *' : ''}
+                          </TD>
+                          <TD>
+                            <Badge variant="outline">{a.type}</Badge>
+                            {a.deterministic ? null : (
+                              <Badge variant="warning" className="ml-1">
+                                nondeterministic
+                              </Badge>
+                            )}
+                          </TD>
+                          <TD>
+                            <Badge variant={a.passed ? 'success' : 'destructive'}>
+                              {a.passed ? 'pass' : assertionErrorOf(a.details) ? 'error' : 'fail'}
+                            </Badge>
+                          </TD>
+                          <TD className="text-right tabular-nums">{a.weight}</TD>
+                          <TD className="text-xs text-muted-foreground">
+                            <p>{a.message}</p>
+                            <AssertionDetails lines={assertionDetailLines(a.type, a.details)} />
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                  <p className="text-xs text-muted-foreground">
+                    Changed files:{' '}
+                    {agentRun.changedFiles.length
+                      ? agentRun.changedFiles.map((f) => `${f.path} (${f.change})`).join(', ')
+                      : 'none'}{' '}
+                    · fixture{' '}
+                    <span className="font-mono">{agentRun.fixtureVersionId.slice(0, 12)}…</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground" data-testid="agent-run-usage">
+                    Tokens: {usage.tokens} · Cost: {usage.cost}
+                    {mock
+                      ? null
+                      : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
+                  </p>
+                  <details>
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      Execution trace
+                    </summary>
+                    <Pre className="mt-2">{JSON.stringify(agentRun.trace, null, 2)}</Pre>
+                  </details>
+                  <details>
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      Assertion details (raw)
+                    </summary>
+                    <Pre className="mt-2">
+                      {JSON.stringify(
+                        agentRun.assertions.map((a) => ({ id: a.assertionId, details: a.details })),
+                        null,
+                        2,
+                      )}
+                    </Pre>
+                  </details>
+                </div>
+              </details>
+            );
+          })}
           {agentRuns.length === 0 ? (
             <p className="text-sm text-muted-foreground">No agent runs recorded.</p>
           ) : null}
