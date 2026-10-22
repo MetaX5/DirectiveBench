@@ -188,6 +188,16 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
         ? `${descriptor.displayName} found (${detection.version ?? 'version unknown'}); benchmark execution not implemented yet`
         : `${descriptor.displayName} not found on PATH (optional)`,
     );
+    if (!detection.installed) continue;
+    // Readiness per auth mode (SPEC-118 FR-118-35). One ready mode is enough, so a mode that is
+    // not ready only warns when no mode is.
+    for (const mode of detection.readiness ?? []) {
+      add(
+        `agent:${descriptor.id}:${mode.mode}`,
+        mode.ready || detection.auth === 'ready' ? 'ok' : 'warn',
+        mode.ready ? `ready: ${mode.detail}` : `not ready (${mode.code}): ${mode.detail}`,
+      );
+    }
   }
 
   if (flags.json) {

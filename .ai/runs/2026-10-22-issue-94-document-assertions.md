@@ -182,6 +182,12 @@ source (a string, not instrumented — behaviour is tested end to end).
    `1.` interrupts a paragraph. A closed fence or comment also clears lazy continuation. Own review
    caught a quadratic array spread for long quoted paragraphs before commit; new linearity shapes
    cover it.
+10. The pushes of 6ac90df and 0ceaec3 got no CI run: PRs #107 and #108 had merged, so PR #105
+    was `CONFLICTING` and GitHub never started the `pull_request` workflow. The agent waited on
+    checks of an older head until the coordinator noticed. Merged origin/main (deea91a). The
+    conflicts were only in docs: the SPEC-118 §20 "not implemented" line, the lessons index and
+    the timing lesson, all with both sides kept. Lesson recorded. The full gate ran again with
+    the tests pinned to two cores (`taskset -c 0,1`) like the runner.
 
 ## Verification
 

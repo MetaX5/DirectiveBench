@@ -37,3 +37,9 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   ~16× for an 8× input, so a raw ratio bound of 10 failed on CI at 10.6 for a linear scanner.
   The ratio (scan growth ÷ baseline growth) is ~1 for linear code and ~6–8 for quadratic code,
   with a bound of 4. Also force a GC (`collectGarbage()`) before each timed run.
+- Reproduce CI's capacity before pushing heavy tests: `taskset -c 0,1 pnpm test --force` runs every
+  package's suite in parallel on two cores like the GitHub runner. PR #108's scan tests took under
+  1.5 s alone but 5–24 s on CI (vitest's default 5 s timeout); creating 20 000 real files to hit a
+  limit was replaced by a faked listing, timing tests take the fastest of three runs at small sizes,
+  and heavy tests carry a named timeout. Never report CI as green without checking the current
+  head (`gh pr checks`), not an earlier one (added 2026-10-22).
