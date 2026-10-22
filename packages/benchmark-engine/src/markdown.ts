@@ -258,7 +258,8 @@ function delimiterRow(line: string, start: number): { columns: number; pipe: boo
   for (let index = start; index < line.length; index += 1) {
     const char = line[index] as string;
     if (char === '|') pipe = true;
-    else if (char !== ':' && char !== '-' && !isSpaceOrTab(char)) return null;
+    // Line tabulation and form feed count as whitespace here, as in cmark-gfm's table scanner.
+    else if (char !== ':' && char !== '-' && !isMarkdownSpace(char)) return null;
   }
   const cells = splitTableRow(line.slice(start));
   return cells.length <= MAX_TABLE_ROW_CELLS && cells.every((cell) => /^:?-+:?$/.test(cell))
@@ -305,7 +306,8 @@ const ATTRIBUTE_NAME = /[A-Za-z_:][A-Za-z0-9_.:-]*/y;
 // HTML whitespace is `cmark_isspace`'s, not JavaScript's `\s` (see `isMarkdownSpace`).
 const UNQUOTED_VALUE = /[^ \t\n\v\f\r"'=<>`]+/y;
 const HTML_WHITESPACE = /[ \t\n\v\f\r]*/y;
-const ONLY_WHITESPACE = /[ \t\n\v\f\r]*$/y;
+// After a complete tag (kind 7) cmark-gfm accepts spaces, tabs and form feeds, not a line tabulation.
+const ONLY_WHITESPACE = /[ \t\f]*$/y;
 
 /**
  * True when `line` from `start` is one complete open or closing tag followed only by whitespace

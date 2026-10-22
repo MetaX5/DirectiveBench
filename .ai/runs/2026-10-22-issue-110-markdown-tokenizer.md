@@ -179,6 +179,12 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   read `[""]` and kept the table, so a later row was reported. Such a line now ends the table and
   starts a paragraph (checked with cmarkgfm 2025.10.22, also in block quotes and list items;
   `||` and `| |` stay rows). Red first on c9ace69.
+- Codex review round 7, two high findings on the whitespace boundaries of round 5: a delimiter
+  row ending in a form feed or line tabulation is a (pipe-less) table row for cmark-gfm, and a
+  line tabulation after a complete tag opens no kind-7 HTML block (spaces, tabs and form feeds
+  do). Both mismatches changed the following block structure and invented a heading. Delimiter rows
+  now accept `cmark_isspace` whitespace and the tag-line tail accepts only space, tab and form feed;
+  every case was checked with cmarkgfm 2025.10.22. Red first on 3ee5e75.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.

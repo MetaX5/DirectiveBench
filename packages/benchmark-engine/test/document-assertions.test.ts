@@ -285,6 +285,16 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false });
   });
 
+  it('does not accept headings after form feed or line tabulation boundaries (Codex review)', async () => {
+    for (const doc of ['> text\n> ---\f\ntext\n2. # Fake', '> <span>\v\n    text\n> 2. # Fake']) {
+      const result = await evaluateAssertion(
+        assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+        workspace({ 'doc.md': doc }),
+      );
+      expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+    }
+  });
+
   it('does not read a row after a body line that is only a pipe (Codex review)', async () => {
     const result = await evaluateAssertion(
       assertion({

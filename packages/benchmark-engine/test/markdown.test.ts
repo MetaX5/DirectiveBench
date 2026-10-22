@@ -449,6 +449,12 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     // A tag line followed by U+00A0 is no HTML block; by a form feed it is.
     expect(scanMarkdown('<x>\u00a0\n# y').headings).toEqual(['y']);
     expect(scanMarkdown('<x>\f\n# y\n\n<x a\fb>\n# z').headings).toEqual([]);
+    // Round 7: a line tabulation after a tag opens no HTML block; delimiter rows accept VT and FF.
+    expect(scanMarkdown('<span>\v\n# x').headings).toEqual(['x']);
+    expect(scanMarkdown('> <span>\v\n    text\n> 2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('> text\n> ---\f\ntext\n2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('> text\n> ---\v\ntext\n2. # Fake').headings).toEqual([]);
+    expect(scanMarkdown('| a | b |\n|-\v|-|\f\n| c | d |').tables).toHaveLength(1);
   });
 
   it('ends a table at a body line that is only a pipe, as cmark-gfm does (Codex review)', () => {
