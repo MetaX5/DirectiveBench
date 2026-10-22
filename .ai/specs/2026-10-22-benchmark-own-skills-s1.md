@@ -132,7 +132,7 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | FR-118-24 | After any benchmark run that reaches status `completed` (whatever its verdict) the CLI SHALL record the assignment artifact ↔ suite (`artifact_benchmark_assignments`, existing table) so the artifact page lists the suite. |
 | FR-118-25 | The artifact type SHALL be in the suite's `artifactTypes` and its format SHALL be installable by the adapter (SPEC-203 §4.1); otherwise the run is refused before any job is created, with the reason. |
 | FR-118-26 | **Artifact bundle inspection.** Before readiness and the plan (FR-118-39), the CLI SHALL inspect the stored files of **both** the candidate and the baseline artifact version and refuse the run (exit 2, code `artifact-executes-code`, listing each finding) when a version contains an executable customization: SKILL.md frontmatter `hooks` (registered on invocation even in an untrusted `-p` run, C8); a shell-injection placeholder `` !`…` `` in SKILL.md (run before the content reaches the model, C3), detected by a line scan that fails closed on any `` !` `` sequence; a non-empty frontmatter `allowed-tools` of any value (applied even in an untrusted `-p` run, C3) — a tool inside the profile can still widen it: bare `Skill` or `Skill(other-name)` would let ambient skills run (FR-118-08), bare `Edit` would approve edits outside the workspace (FR-118-07), so S1 does not validate grants and refuses them all; a bundled file Claude Code could load as configuration (`.claude-plugin/`, `plugin.json`, `hooks.json`, `hooks/`, `.mcp.json`, `settings.json`, `settings.local.json`); or a `.claude/` directory at any depth inside the bundle (its skills, commands or agents would load once Claude reads a file there, C3); an `@` import of a host file in any bundled file is refused through FR-118-27. It SHALL also refuse (code `artifact-overrides-model`) a SKILL.md whose `model` is anything other than absent or `inherit`, or that sets `context: fork` (the forked subagent's model is not the execution model), because the task would then run on a model the equivalence check of FR-118-04 does not see. S1 refuses rather than offers approval, because suite approval (FR-118-33) is bound to the suite version, not to artifact versions; approval bound to artifact-version content hashes is future work (§19). Unparsable frontmatter is a finding (fail closed, SPEC-014). As defence in depth the argv always carries `--settings '{"disableSkillShellExecution":true}'` (C3; effect on project skills: Assumption — requires validation by the live check). Both refusals are S1 restrictions; benchmarking such skills needs approval bound to artifact hashes and a per-turn model record (§19). |
-| FR-118-27 | **No path out of the workspace through imports or links.** Claude Code expands `@path` imports in memory files at launch, recursively up to four hops, with relative, absolute and `~` paths, and an imported file can have any name (C4); so an inside file importing another inside file that imports a host file discloses that host file. Instead of walking the import graph, S1 scans **every** file: the scanner reads each file in the workspace byte-wise in one linear pass and treats every `@` followed by a path character as an import token (path up to whitespace, backslash-escaped spaces included; code spans and fences are **not** excluded, which only adds tokens), resolves the token as Claude Code would — relative to the containing file, `~` to the agent process's `HOME` (the real one in subscription mode, the run-local one in api-key mode), absolute as is — canonicalises it (`realpath`, so symlinks and `..` are resolved) and refuses the run when the target lies outside the workspace root **and exists** (or its existence cannot be determined, e.g. `EACCES`: fail closed). Because every file is checked and every edge of the import graph starts in some file of the workspace, no edge can lead outside, whatever the depth; a non-existent outside target cannot disclose anything, which keeps code such as `import x from '@/lib'` from refusing ordinary fixtures. The same pass refuses any symlink whose canonical target lies outside the workspace or cannot be resolved, and any regular file with more than one hard link (fixtures and overlays already reject both at snapshot time, SPEC-110 FR-110-03; the pass covers what `setup` commands create). The scan runs (a) at plan time over the fixture and overlay snapshots and both artifact versions placed at their install paths (exit 2), and (b) authoritatively in every agent run right before `claude` is spawned, after setup and installation, over the whole workspace **with no exemption for artifact files** (agent run `infrastructure-error`, stopping further agent runs as in FR-118-15). Code `workspace-imports-outside`, listing file, token and target. Named limits: `WORKSPACE_SCAN_MAX_FILES` (20 000) and `WORKSPACE_SCAN_MAX_BYTES` (256 MiB), above the fixture limits (5 000 files, 100 MiB, SPEC-108) to leave room for `setup` output; exceeding either refuses with `workspace-scan-limit` (fail closed). The overlay is applied after the agent run (SPEC-110 FR-110-11), so it is checked only at plan time. |
+| FR-118-27 | **No path out of the workspace through imports or links.** Claude Code expands `@path` imports in memory files at launch, recursively up to four hops, with relative, absolute and `~` paths, and an imported file can have any name (C4); so an inside file importing another inside file that imports a host file discloses that host file. Instead of walking the import graph, S1 scans **every** file: the scanner reads each file in the workspace byte-wise in one linear pass and treats every `@` followed by a path character as an import token (path up to whitespace, backslash-escaped spaces included; code spans and fences are **not** excluded, which only adds tokens), resolves the token as Claude Code would — relative to the containing file, `~` to the agent process's `HOME` (the real one in subscription mode, the run-local one in api-key mode), absolute as is — canonicalises it (`realpath`, so symlinks and `..` are resolved) and refuses the run when the target lies outside the workspace root **and exists** as something other than a directory (a directory cannot be read as a memory file, so `@/lib` passes even where `/usr/lib` exists) (or its existence cannot be determined, e.g. `EACCES`: fail closed). Because every file is checked and every edge of the import graph starts in some file of the workspace, no edge can lead outside, whatever the depth; a non-existent outside target cannot disclose anything, which keeps code such as `import x from '@/lib'` from refusing ordinary fixtures. The same pass refuses any symlink whose canonical target lies outside the workspace or cannot be resolved, and any regular file with more than one hard link (fixtures and overlays already reject both at snapshot time, SPEC-110 FR-110-03; the pass covers what `setup` commands create). The scan runs (a) at plan time over the fixture and overlay snapshots and both artifact versions placed at their install paths (exit 2), and (b) authoritatively in every agent run right before `claude` is spawned, after setup and installation, over the whole workspace **with no exemption for artifact files** (agent run `infrastructure-error`, stopping further agent runs as in FR-118-15). Code `workspace-imports-outside`, listing file, token and target. Named limits: `WORKSPACE_SCAN_MAX_FILES` (20 000) and `WORKSPACE_SCAN_MAX_BYTES` (256 MiB), above the fixture limits (5 000 files, 100 MiB, SPEC-108) to leave room for `setup` output; exceeding either refuses with `workspace-scan-limit` (fail closed). Every `@` costs O(1) unless its token needs a file system check (absolute, `~`, or with a `..` segment); those are bounded by `WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES` (100 000 per inspection) — with at most `IMPORT_TOKEN_MAX_LENGTH` characters of work each, so a hostile workspace costs a few seconds at worst before it is refused and `IMPORT_TOKEN_MAX_LENGTH` (4 096 characters: a longer token cannot name an openable path, so only its prefixes cut at Markdown split characters within the first 4 096 characters are checked, unless `.`/`..` segments, repeated `/` or escaped spaces could shorten it, which refuses with `workspace-scan-limit`). As a superset of Claude Code's token rule each token is also checked cut at a backslash that does not escape a space, without trailing punctuation, and cut before every character at which a Markdown lexer may split a word (`*`, `_`, `` ` ``, `[`, `]`, `<`, `>`, `!`, `#`, `&`, parentheses, quotes, `~`, `|`, braces — Claude Code runs its import pattern on each lexed text piece), lexically from the canonical and the given workspace path and physically; in a workspace that contains a symbolic link, a relative token that climbs above its own directory is refused, because the file may be read through the link from a shallower place. The overlay is applied after the agent run (SPEC-110 FR-110-11), so it is checked only at plan time. |
 
 ### 6.4 `benchmark run`
 
@@ -433,6 +433,29 @@ Additions and residual risks of this slice:
   (§15) proves it for the production flags.
 - **Secrets.** The API key exists only in the agent child's environment; never in argv, job
   payload, database, logs, traces or CLI output; the exact value is added to redaction.
+- **Setup processes must not outlive `setup` (FR-118-06/27).** Installation and the pre-spawn
+  inspection assume nothing a `setup` command started is still running: such a process could change
+  the workspace after the checks. Today `runCommand` (`packages/benchmark-engine/src/commands.ts`)
+  signals the command's process group only on timeout or cancellation, so a backgrounded child that
+  closed its output survives a normal exit. **Requirement for Phase 3 step 3 / the orchestrator:**
+  kill each `setup` command's process group when it ends, before installation and before the
+  pre-spawn inspection. Until then the install itself never writes through the workspace by
+  pathname (staged in a private directory next to it and moved in with `rename`, which fails closed
+  on a planted `.claude`), so a late change cannot redirect an install write outside the workspace.
+- **Workspace identity pinned before `setup` (FR-118-06/27).** A `setup` command can move the
+  workspace away and leave a link to a host directory (or another directory) at its path, then
+  exit normally. **Requirement for the orchestrator (Phase 3 step 3, #101):** create the workspace,
+  then pin it with `pinWorkspace` (real directory, device + inode, canonical path) **before** any
+  `setup` command runs, and pass the pin to `installClaudeArtifact` and `inspectWorkspace`. Both
+  check the path against the pin before reading or writing, before and after the move, and at the
+  start of the inspection, and fail closed with `workspace-replaced`; the staging directory is
+  created beside the pinned canonical path.
+- **Import scan residuals (FR-118-27).** The scan covers the workspace at launch. Claude Code also
+  loads a subdirectory's `CLAUDE.md` lazily once it touches a file there, and the agent can write
+  such a file during the run; whether import expansion of a file written mid-run is confined by
+  `blockReadsOutsideWorkingDirectories` is not documented, so the AC-22 live check must probe it.
+  Windows absolute forms (`C:\…`, `\\server\…`) are not import candidates (Windows is best
+  effort, NFR-118-04).
 - **Untrusted output.** Agent output, traces and assertion details are rendered as escaped text;
   the new parsers never evaluate Markdown or HTML.
 
@@ -692,6 +715,39 @@ changed before merge.
     directly, and the benchmark page shows "Run from the CLI" with the planned command (marked not
     implemented) instead of **Run** (`apps/web/test/actions.test.ts`, Playwright test in
     `apps/web/e2e/management.spec.ts`).
+- **Implemented — Phase 3 step 1 (issue #99, verified on 2026-10-22 by unit tests and a manual
+  run of the builders on temporary workspaces; no `claude` process is started):** pure pieces in
+  `packages/agent-adapters/src/claude-code/`, not yet wired into an adapter or the CLI:
+  - FR-118-07/08 argv (`buildClaudeArgv`): `edit-only`/`edit-and-shell` with `Edit(/**)` as the
+    only file-tool allow rule, `Skill` plus `Skill(<name>)`/`Skill(<name> *)` only for `skill-md`,
+    `--settings` with `disableSkillShellExecution` and `blockReadsOutsideWorkingDirectories`, no
+    `--add-dir`/`--fallback-model`/`--bare`/bypass; `--setting-sources project,local` in
+    subscription mode; `--max-budget-usd` only in api-key mode (FR-118-30). A skill name that is
+    not lowercase letters, digits and hyphens (≤ 64) is refused (`skill-name-unsupported`), so it
+    can never change the allow rules. `baselineSkillNameIssue` implements
+    `baseline-skill-name-differs`.
+  - FR-118-04 flags hash (`claudeFlagsHash`): sha256 of the argv with the skill rules and run-local
+    paths replaced by placeholders; equal for two workspaces of one run.
+  - FR-118-02/03 env (`buildClaudeEnv`, `claudeAuthProfile`): allowlist only; subscription keeps the
+    real `HOME` and no `ANTHROPIC_*`/`CLAUDE_CODE_OAUTH_TOKEN`/`CLAUDE_CODE_USE_*`; api-key mode
+    sets run-local `HOME`/`CLAUDE_CONFIG_DIR` and the key only as `ANTHROPIC_API_KEY`.
+  - The install convention of SPEC-203 §4.1 (`installClaudeArtifact`), built in a private staging
+    directory beside the workspace and moved in with `rename`, so a symbolic link a `setup` command
+    plants, even after the checks, makes it fail closed instead of writing outside the workspace;
+    the workspace is passed as a `WorkspacePin` and a replaced workspace path is refused
+    (`workspace-replaced`), also by `inspectWorkspace`.
+  - FR-118-26 (`inspectArtifactVersions`): candidate and baseline; frontmatter is read as Claude
+    Code reads it (an opening `---` with trailing blanks); a SKILL.md that opens a block it never
+    closes, or has `---` inside the block, fails closed; AC-23 and the bundle part of
+    AC-26 and AC-25 at the unit level.
+  - FR-118-06 and FR-118-27 (`inspectWorkspace`): configuration paths at any depth (case-insensitive),
+    the installed artifact exempt only from the configuration check, imports, links, hard links,
+    special files, unreadable entries and the named limits, all fail closed; AC-16 (paths), AC-26
+    (paths) and AC-27 at the unit level, with a linear-time test.
+  - Not verified here: that Claude Code parses the argv as intended (e.g. `Skill(<name> *)` as one
+    `--allowedTools` value), its exact `@` token grammar, and every behaviour marked as an
+    assumption — all for the AC-22 live check. The engine and CLI wiring (plan-time and pre-spawn
+    calls, codes as exit 2 / `infrastructure-error`) is Phase 3 steps 2–3 and Phase 4.
 - **Implemented — Phase 3 step 4 (issue #102, verified on 2026-10-22 with a fake `claude` and
   read-only against the real `claude` 2.1.302 on the maintainer's machine):** the readiness half
   of FR-118-35 and the API-key source of FR-118-02 as a library function,
@@ -720,8 +776,8 @@ changed before merge.
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 steps 1–3 (Claude Code
-  adapter builders, inspection, stream parser and process control),
+- **Not implemented:** Phase 1 (document assertions, issue #94), Phase 3 steps 2–3 (Claude Code
+  stream parser and process control),
   Phase 4 (`benchmark init` / `benchmark run`), Phase 5 (results by artifact version) and every
   other requirement of §6 not listed above.
 

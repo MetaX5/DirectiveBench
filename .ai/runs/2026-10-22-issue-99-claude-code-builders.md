@@ -1,0 +1,233 @@
+---
+title: Claude Code adapter pure builders and pre-spawn inspection (SPEC-118 Phase 3 step 1)
+date: 2026-10-22
+agent: Claude Code / claude-opus-5-5
+trigger: om-auto-fix-issue 99 (E06-S03-T01), feature route → om-auto-implement-spec → om-auto-create-pr
+status: in-progress
+branch: feat/issue-99-claude-code-builders
+specs: [SPEC-118, SPEC-203]
+---
+
+# Run: Claude Code pure builders and pre-spawn inspection (issue #99)
+
+Source doc: .ai/specs/2026-10-22-benchmark-own-skills-s1.md
+
+## Objective
+
+Implement SPEC-118 §21 Phase 3 step 1 for issue #99 (task of story #96): deterministic pieces of
+the Claude Code adapter that decide what runs and refuse everything that could widen the profile
+or reach host files, before any `claude` process starts. No process is spawned, no network, no
+credentials.
+
+Acceptance criteria used (issue #99 "Done when"): pure functions in `packages/agent-adapters`
+covering FR-118-06 (`fixture-contains-claude-config`, every listed path at any depth, fail
+closed), FR-118-07 (no bare file-tool allow rule, `Edit(/**)`,
+`blockReadsOutsideWorkingDirectories`, no `--add-dir`, `disableSkillShellExecution`), FR-118-08
+(`Skill` only for `skill-md`, `baseline-skill-name-differs`), FR-118-26 (`artifact-executes-code`,
+`artifact-overrides-model`, candidate and baseline), FR-118-27 (`workspace-imports-outside`,
+`workspace-scan-limit`, `WORKSPACE_SCAN_MAX_FILES`/`WORKSPACE_SCAN_MAX_BYTES`, linear-time test),
+the env rules of FR-118-02/03, the flags hash of FR-118-04 equal for two workspaces; 100% unit
+coverage including the unit-testable parts of AC-16, AC-23, AC-25, AC-26 and AC-27.
+
+Non-goals: stream parsing, `skillActivation`, error normalisation and the engine's
+execution-model check (Phase 3 step 2); process control and the fake `claude` (step 3);
+readiness and detection `ready`/`missing` (step 4, issue #102, in flight — `detection.ts` is not
+touched); the `benchmark` CLI (Phase 4); the `AgentRunRequest`/`AgentRunResult` contract
+extensions of SPEC-203 §4.2 (needed by step 2/3, not by pure builders).
+
+## Plan
+
+Goal: a `packages/agent-adapters/src/claude-code/` module with pure builders (argv, flags hash,
+env, version, install convention, skill name) and pre-spawn inspection (fixture/workspace
+Claude-configuration check, import and link scan, artifact bundle inspection), each fail closed
+and unit-tested to 100%.
+
+Risks: the import scan is security-critical and must be linear in workspace size while treating
+every `@` as a token (a run of `@` without whitespace makes naive suffix tokens quadratic); paths
+must be canonicalised (`realpath`) and unknown existence fails closed; the install must not write
+through a symbolic link a `setup` command planted (setup runs before installation); behaviours of
+Claude Code that are only assumptions stay marked for the AC-22 live check.
+
+## Progress
+
+> Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
+
+### Phase 1: Builders
+
+- [x] 1.1 argv per permission profile and artifact type, `Skill` rules, settings, normalised flags hash, version parser — ebb43d8
+- [x] 1.2 env per auth mode (subscription strips credential variables, api-key isolates `HOME`/`CLAUDE_CONFIG_DIR`) — ebb43d8
+- [x] 1.3 Install convention (§4.1) with symlink-safe writes, skill name resolution and `baseline-skill-name-differs` — ebb43d8
+
+### Phase 2: Inspection
+
+- [x] 2.1 Artifact bundle inspection (FR-118-26) for candidate and baseline — f449832
+- [x] 2.2 Workspace walk with named limits and the Claude-configuration check (FR-118-06) — f449832
+- [x] 2.3 Import and link scan (FR-118-27) with a linear-time test — f449832
+
+### Phase 3: Verification and documentation
+
+- [x] 3.1 Quality gate, SPEC-118 §20 / SPEC-203 §13 status, lessons, run log — see the docs commit
+
+## Decisions
+
+- **Module layout** `packages/agent-adapters/src/claude-code/` (SPEC-203 §5) with one export line
+  in `src/index.ts`; `detection.ts` untouched (issue #102 works there in parallel).
+- **`ClaudeCodeError` with a code** for every builder refusal; inspections return findings
+  (`{ code, path/file, detail, token?, target? }`) so the CLI can list each one (FR-118-06/26/27).
+- **Skill name restricted to the documented form** (lowercase letters, digits, hyphens, ≤ 64):
+  `Skill(<name>)` is an argv value, so a space, comma, `*` or parenthesis would widen the allow
+  list. New code `skill-name-unsupported`, added to SPEC-203 §9.
+- **`agents-md` always imports through `CLAUDE.md`** (SPEC-203 §4.1 updated): one
+  version-independent layout instead of a version-dependent install; the builder needs no CLI
+  version.
+- **Subscription mode drops `CLAUDE_CONFIG_DIR`** like the #107 readiness probe, so the run and
+  the readiness check see the same login (an earlier commit passed a user-set value through; it
+  was aligned when #107 merged).
+- **One version parser:** after #107 merged, this branch's `version.ts` was removed in favour of
+  `parseClaudeCodeVersion` / `isSupportedClaudeCodeVersion` / `CLAUDE_CODE_MIN_VERSION` and
+  `ClaudeAuthMode` from `claude-code-readiness.ts`.
+- **Import scan as a superset of Claude Code's grammar** (FR-118-27 updated): every `@`, cut also
+  at a lone backslash and without trailing punctuation, both spellings of escaped spaces; lexical
+  (canonical and given workspace path) and physical (`realpath`) resolution; in a workspace with
+  a symbolic link, relative tokens climbing above their directory are refused. Linear: one O(1)
+  decision per `@` (right-to-left pass per word); resolution bounded by the new named limits
+  `WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES` (100 000) and `IMPORT_TOKEN_MAX_LENGTH` (4 096).
+- **Fail closed beyond the letter of FR-118-26**: bundles are also refused for the FR-118-06 file
+  names (`CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`), for `!`-fences (```` ```! ````),
+  and frontmatter keys are compared case- and separator-insensitively (`allowed_tools`); path
+  segments are compared case-insensitively (macOS, Windows). Special files (FIFOs) in a
+  workspace are refused.
+- **Install refuses links a `setup` command planted** (setup runs before installation in the
+  orchestrator): every existing directory component is `lstat`ed, files are created with `wx`,
+  instruction files are appended only when regular with one link and identical when opened.
+
+## Work performed
+
+1. Plan and draft PR #108 (0ce4a67).
+2. Builders: errors, version, argv + flags hash, skill name, env, install, with tests (ebb43d8).
+3. Inspection: bundle inspection, import tokenizer, workspace walk / configuration check /
+   import and link scan, race tests through a wrapped `node:fs/promises` (f449832).
+4. SPEC-118 FR-118-27 and §20, SPEC-203 §3.2/§4.1/§9/§13, lesson, this log.
+
+## Verification
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:pack` at f449832 | pass; 100% statements/branches/functions/lines in every package; agent-adapters 130 tests (was 44), core 266, database 131, benchmark-engine 115, runner 229, web 157, cli 75; "Packaging verification passed" |
+| Manual exercise (`tsx` script in a temporary workspace, not committed) | skill-md argv as specified; install wrote `.claude/skills/estimate-project/SKILL.md`; flags hash equal for two workspaces; subscription env keys `HOME,LANG,PATH,TEMP,TMP,TMPDIR`; clean workspace → no findings; planted `.claude/settings.local.json`, `.claude/agents`, `@/etc/hostname` and `@~/.bashrc` (via `CLAUDE.md` → `docs/context.md`) → four findings with targets; a baseline with `hooks`, `allowed-tools: Skill`, `model: opus` and `` !`id` `` → four findings |
+| `claude --help` drift check (2.1.302, read-only) | every flag the argv uses exists: `--print`, `--output-format`, `--verbose`, `--model`, `--tools`, `--permission-mode`, `--allowedTools`, `--permission-prompts`, `--no-session-persistence`, `--strict-mcp-config`, `--settings`, `--setting-sources`, `--max-budget-usd` |
+
+Not verified: how Claude Code parses the argv (e.g. `Skill(<name> *)` as one `--allowedTools`
+value — the help says "comma or space-separated" and shows `"Bash(git *)"` as one rule), its
+exact `@` token grammar, `disableSkillShellExecution` and `blockReadsOutsideWorkingDirectories`
+in effect — all reserved for the AC-22 live check. No `claude -p` run was started. Windows was not
+run (O_NOFOLLOW/O_NONBLOCK OR to 0 there; the identity checks cover it).
+
+## Problems and deviations
+
+- The first tokenizer draft treated any backslash as "shortening", so a long word with a lone
+  backslash was refused instead of checked at the cut; fixed with a test.
+- No deviation from an approved spec (both specs are drafts); the spec text was updated for the
+  decisions above in the same change.
+
+## Review
+
+Round 1 (independent `om-code-review` agent, head `1643e68`): changes requested, posted as COMMENT
+on PR #108.
+
+- **B1 (blocker)**: Claude Code matches imports per Markdown text piece, so `@/etc/hostname*x*`,
+  `` @/etc/hostname`x` ``, `[@/etc/hostname](x)`, `@/etc/hostname#frag` imported a host file the
+  scan did not check. Fixed: every resolved candidate is also checked cut before each Markdown
+  split character (counted against the candidate limit); tests for each form.
+- **B2 (blocker)**: an opening `--- `/`---\t` line hid the frontmatter from core
+  `parseFrontmatter`, so `hooks`/`allowed-tools`/`model` passed. Fixed: `parseSkillFrontmatter`
+  accepts trailing blanks and fails closed on a block that opens but never closes (inspection and
+  skill-name resolution).
+- **M1**: outside directories (`@/lib`) no longer refuse; **M3**: NFKC + case round trip folds
+  `ſ`; **N1**: nested rule paths refused; **M2/M4** recorded as residuals in SPEC-118 §12
+  (Windows absolute forms; nested `CLAUDE.md` written mid-run, for the AC-22 live check).
+  N2 (≈4 s worst case at the limits) and N3 (`runLocalPaths` only required by FR-118-04) noted.
+- Red first: the new tests (11) fail on the round-1 source and pass after the fix.
+
+Round 2 (same reviewer, head `7b25396`): changes requested — **R2-B1 (blocker)**: tokens over
+4 096 characters skipped the Markdown-cut prefixes (`@/etc/hostname*x*` + 5 000 characters passed).
+Fixed: a long token without shortening sequences still yields its cut prefixes within the first
+4 096 characters; six regression tests. **R2-M1 (minor)**: Claude Code's frontmatter pattern may
+close at a `---` inside a line; any inner `---` now fails closed. R2-N1 (NFKC flags full-width
+look-alikes) accepted as a harmless over-report.
+
+Round 3 (head `1cc2751`): changes requested — **R3-M1 (major)**: the round-2 fix scanned the
+4 096-character window of every over-long token even without a cut character, uncounted
+(`'@/'.repeat(n)`: 10.7 s per MiB, ~45 min at the byte limit). Fixed: the right-to-left pass
+tracks the nearest cut characters, so a window without one costs O(1) and every step after the
+first cut is bounded by the window and yields counted candidates; 1 MiB of `@/` now takes 106 ms.
+`'@/'`, `'@/a'` and `'@/*'` runs added to the linear-time test. R3-N1: the inner-`---` message now
+tells the author to replace it.
+
+Round 4 (head `a3b442e`, after merging #107): **approve**. R4-N1 (state the
+candidates × token-length bound in FR-118-27) applied.
+
+### CI correction
+
+CI "Unit tests (100% coverage)" failed on `1643e68`, `7b25396`, `1cc2751` and `a3b442e`
+(e.g. run 39773077571): four tests hit vitest's 5 s timeout on the 2-core runner (7.7 s for the
+20 000-file limit test, 8.7 s for the candidate limit, 5.2 s and 23.8 s for the two linear-time
+tests), so coverage fell below 100%. An earlier hand-back wrongly called CI green from an older
+head. The production cost is small (100 000 candidates ≈ 0.3 s; 1 MiB of adversarial `@` ≈ 0.1 s);
+the tests were heavy: the 20 000 entries are now a faked listing (no files created, also checks
+that the extra entry is never `lstat`ed), the linear-time tests take the fastest of three runs at
+smaller sizes (ratios measured at three sizes: ≤ 4.3× per 4× size), and the heavy tests carry
+`LOADED_RUNNER_TIMEOUT_MS` (60 s). `taskset -c 0,1 pnpm test --force` passed with the slowest test
+at 20.7 s before the size cut.
+
+### Codex adversarial review (coordinator)
+
+Needs-attention, one **HIGH**, valid: `install.ts` checked the directories with `lstat` and then
+wrote with pathname-based `mkdir`/`writeFile`, so a process left behind by `setup` could replace
+`.claude` or `.claude/rules` with an outward link in between and the write would land outside the
+workspace (Codex reproduced it with a mocked interleaving). Fixed: the install is built in a
+`mkdtemp` (0700) staging directory beside the workspace and moved in with `rename` per top-level
+entry; `rename` replaces a link at the destination itself and fails on an occupied `.claude`, so a
+planted link fails closed (`artifact-install-conflict`); each moved entry is `lstat`ed again (a
+real directory or a single-link regular file directly in the workspace), and the staging
+directory is always removed. Existing instruction files are read with `O_NOFOLLOW` and an
+identity check, then replaced whole by `rename`. Tests (races via the wrapped `node:fs/promises`):
+a link to a host directory planted at `.claude` right before the move (skill and rule), a
+pre-existing `.claude/rules` link, an entry swapped right after the move, a non-occupied `rename`
+error propagated, and no staging directory left behind; the host directory stays empty. The old
+code had no `rename` step, so the new interleaving tests do not apply to it (red-first is Codex's
+own reproduction). Ownership: `runCommand` kills the setup process group only on timeout or
+cancellation, so a background child can outlive `setup`; recorded as a requirement for Phase 3
+step 3 / the orchestrator in SPEC-118 §12, not changed here.
+
+Codex round 2: the child-link fix holds; one new **HIGH**, valid: a `setup` command can move the
+workspace away and put a link to another writable host directory at its path, then exit
+normally; `rename` follows that intermediate link, so the install landed in the host directory,
+the post-move `lstat` saw only the final entry, and `inspectWorkspace` canonicalised the
+replacement and trusted it as root. Fixed: `pinWorkspace` records the workspace (real directory,
+device + inode, canonical path) and `installClaudeArtifact` / `inspectWorkspace` now take the pin;
+`workspacePinIssue` is checked before existing files are read, before and after the move, and at
+the start of the inspection (`workspace-replaced`, new code in SPEC-203 §9); the staging directory
+sits beside the pinned canonical path. Tests: the workspace replaced by a link to a host
+directory, by another real directory, an ancestor re-linked, the workspace gone, a pin of a link —
+install and inspection refuse and the host directory stays empty. Red first: the old API had no
+pin (Codex reproduced the write into the host directory). The orchestrator requirement (pin before
+`setup`) is in SPEC-118 §12 and on issue #101.
+
+## Lessons recorded
+
+- [2026-10-21 — Timing tests must survive a loaded CI runner](../lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md) (updated: emulate the 2-core runner, check CI on the current head)
+- [2026-10-22 — An import scan must be O(1) per token start and check every way a path can resolve](../lessons/2026-10-22-import-scans-need-every-resolution.md)
+
+## Follow-ups
+
+- Orchestrator / Phase 3 step 3 (#101): pin the workspace with `pinWorkspace` before `setup` and
+  pass the pin to installation and inspection (SPEC-118 §12).
+- Orchestrator / Phase 3 step 3: kill each `setup` command's process group when it ends, before
+  installation and the pre-spawn inspection (SPEC-118 §12).
+- Phase 3 step 2–3: wire the builders into a `ClaudeCodeAdapter` (call `inspectWorkspace` with the
+  installed paths right before spawn; map codes to `infrastructure-error` and FR-118-15 stops).
+- Phase 4: plan-time calls — `inspectArtifactVersions`, `baselineSkillNameIssue`, a materialised
+  workspace (fixture + overlay + both artifact versions) through `inspectWorkspace` with
+  `claudeConfigCode: 'fixture-contains-claude-config'` for fixture/overlay; exit 2.
+- AC-22 live check: record the token grammar, the `--allowedTools` parsing and the field names.
