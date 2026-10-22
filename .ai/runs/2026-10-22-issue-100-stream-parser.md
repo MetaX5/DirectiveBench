@@ -146,6 +146,11 @@ the engine's comparability/activation/stop rules. Shared touch points: `contract
 - #101: spawn `claude`, feed `ClaudeStreamParser.push` with stdout, call `claudeRunOutcome` with
   the exit code/stderr and add `durationMs`; report pre-spawn inspection failures as
   `infrastructure-error` with their code so the stop rule applies.
+- `packages/runner/test/hosted-git.test.ts` "fails the blob fetch…" failed on CI three times
+  (runs 39786963206, 39790265388 ×2; also on #101's branch): every case ran with 200 ms git
+  timeouts, so a fake git that started slowly on the loaded runner became `timeout` instead of
+  `auth-required`/`git-failed`. Fixed in this PR (test only): the short timeouts apply only to
+  the cases that expect `timeout`.
 - #99's `import-tokens` linear-time test flaked once on CI (`@a@a…` ratio 13 vs bound 12 on
   run 39783979231); worth measuring at three sizes per the timing lesson.
 - Spec decision for the maintainer: SPEC-203 §9 maps `overloaded` → `rate-limited`, a stop code,
