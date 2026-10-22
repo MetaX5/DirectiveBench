@@ -157,6 +157,8 @@ export async function evaluateAssertion(
   assertion: AssertionDefinition,
   context: AssertionContext,
 ): Promise<AssertionResult> {
+  // Safe: the registry maps each type to the plugin for exactly that type, and `assertion.type`
+  // selects it; TypeScript cannot correlate the two through the indexed access.
   const evaluator = assertionPlugins[assertion.type] as AssertionPlugin<AssertionType>;
   try {
     return await evaluator.evaluate(assertion, context);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collapseWhitespace,
+  literalSearch,
   normalizeText,
   parseFirstNumber,
   scanMarkdown,
@@ -71,6 +72,52 @@ describe('scanMarkdown headings', () => {
     expect(headings).toEqual(['Visible', 'Last']);
   });
 
+  it('counts headings in block quotes and list items, not their other lines', () => {
+    const { headings } = scanMarkdown(
+      [
+        '> # Quoted',
+        '> > ## Nested quote',
+        '- # Listed',
+        '12) ### Numbered',
+        '> quote',
+        '---',
+        '',
+        '- item',
+        '  continuation',
+        '---',
+        '',
+        '* * *',
+        '',
+        '    indented code',
+        '---',
+        '',
+        '-not a list',
+        '===',
+      ].join('\n'),
+    );
+    expect(headings).toEqual(['Quoted', 'Nested quote', 'Listed', 'Numbered', '-not a list']);
+  });
+
+  it('does not count headings inside HTML comments', () => {
+    const { headings } = scanMarkdown(
+      [
+        '<!--',
+        '# Hidden',
+        'still --> hidden is over',
+        '# One',
+        '<!-- # Inline --> ',
+        '# Two',
+        '   <!-- open',
+        'Hidden',
+        '===',
+        '-->',
+        '    <!-- indented is code -->',
+        '# Three',
+      ].join('\n'),
+    );
+    expect(headings).toEqual(['One', 'Two', 'Three']);
+  });
+
   it('treats an unclosed fence as code to the end of the document', () => {
     expect(scanMarkdown('# A\n    ```\n# B\n```\n# C').headings).toEqual(['A', 'B']);
   });
@@ -94,6 +141,7 @@ describe('scanMarkdown tables', () => {
         'x | y',
         ':-: | -',
         '> quote',
+        '',
         'p | q',
         '---|---',
         '```',
@@ -146,9 +194,8 @@ describe('scanMarkdown tables', () => {
   });
 });
 
-/** How `required-phrases` matches a literal. */
 const containsLiteral = (text: string, phrase: string, caseSensitive: boolean) =>
-  normalizeText(text, caseSensitive).includes(normalizeText(phrase, caseSensitive));
+  literalSearch(text, caseSensitive)(phrase);
 
 describe('text normalisation', () => {
   it('collapses whitespace, trims and folds case', () => {
@@ -178,7 +225,17 @@ describe('parseFirstNumber', () => {
     ['about 16 h', '.', 16],
     ['-3.5', '.', -3.5],
     ['−7', '.', -7],
-    ['x-5', '.', -5],
+    ['x-5', '.', 5],
+    ['PM-5', '.', 5],
+    ['Sprint-2: 8', '.', 2],
+    ['about -5', '.', -5],
+    ['(-5)', '.', -5],
+    ['.5', '.', 0.5],
+    [',5', ',', 0.5],
+    ['-.25 h', '.', -0.25],
+    ['1.5', '.', 1.5],
+    [`${'9'.repeat(400)}`, '.', null],
+    [`.${'9'.repeat(400)}`, '.', 1],
     ['+4', '.', 4],
     ['1 000 000 000', '.', 1_000_000_000],
     ['12,5', '.', 12],
@@ -189,7 +246,7 @@ describe('parseFirstNumber', () => {
     ['3.', '.', 3],
     ['0.25', '.', 0.25],
     ['12 345 h', '.', 12345],
-  ] as const)('parses %j with %j as %d', (text, separator, expected) => {
+  ] as const)('parses %j with %j as %s', (text, separator, expected) => {
     expect(parseFirstNumber(text, separator)).toBe(expected);
   });
 
@@ -222,6 +279,9 @@ describe('linear time', () => {
     'hashes and spaces': (n) => `#${' #'.repeat(n * 12)}x\n`,
     'backticks and tildes': (n) => '```\n~~~\n'.repeat(n),
     whitespace: (n) => ' \t'.repeat(n * 12),
+    'nested quote markers': (n) => `${'> '.repeat(n * 12)}# x\n`,
+    'nested list markers': (n) => `${'- 1. '.repeat(n * 5)}x\n`,
+    'html comments': (n) => '<!-- x\n'.repeat(n) + '-->\n',
   };
 
   it.each(Object.keys(shapes))('scans %s in linear time', (name) => {

@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { matchesGlob } from 'node:path';
 import { resolveInside } from '@directivebench/agent-adapters';
-import type { AssertionDefinition } from './definition';
+import { ASSERTION_TYPE_TRAITS, type AssertionDefinition } from './definition';
 import type { FileChange } from './files';
 import type { PatternError } from './pattern-worker';
 
@@ -48,7 +48,7 @@ export function assertionResult(
     score: passed ? 1 : 0,
     weight: assertion.weight,
     required: assertion.required,
-    deterministic: true,
+    deterministic: ASSERTION_TYPE_TRAITS[assertion.type].deterministic,
     message,
     details,
   };
@@ -83,7 +83,18 @@ export type TargetRead =
   | { ok: true; file: string; text: string }
   | { ok: false; message: string; details: Record<string, unknown> };
 
+/** A `file` containing `*`, `?` or `[` is a glob; there is no escape for these characters. */
 const GLOB_CHARACTERS = /[*?[]/;
+
+/** Most glob matches named in a message or details; agents can create thousands of files. */
+export const MAX_LISTED_MATCHES = 20;
+
+function listed(paths: readonly string[]): string {
+  const shown = paths.slice(0, MAX_LISTED_MATCHES).join(', ');
+  return paths.length > MAX_LISTED_MATCHES
+    ? `${shown} … ${paths.length - MAX_LISTED_MATCHES} more`
+    : shown;
+}
 
 /**
  * Reads the document of a document assertion (SPEC-118 FR-118-40): `file` is a workspace path,
@@ -104,8 +115,12 @@ export async function readTargetFile(
         message:
           matches.length === 0
             ? `No file added or modified by the agent matches ${file}`
-            : `${matches.length} files match ${file}, expected exactly one: ${matches.join(', ')}`,
-        details: { file, matches },
+            : `${matches.length} files match ${file}, expected exactly one: ${listed(matches)}`,
+        details: {
+          file,
+          matches: matches.slice(0, MAX_LISTED_MATCHES),
+          matchCount: matches.length,
+        },
       };
     }
     target = matches[0] as string;

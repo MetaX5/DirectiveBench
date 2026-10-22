@@ -61,8 +61,21 @@ export function matchPatterns(
       error: { code: 'pattern-worker-failed', message: 'Pattern evaluation cancelled' },
     });
   }
+  let worker: Worker;
+  try {
+    worker = new Worker(WORKER_SOURCE, { eval: true, workerData: jobs });
+  } catch (error) {
+    // E.g. worker threads disallowed by the permission model, or uncloneable data: fail closed
+    // as an assertion error, never as a scored failure.
+    return Promise.resolve({
+      ok: false,
+      error: {
+        code: 'pattern-worker-failed',
+        message: `Pattern evaluation failed: ${(error as Error).message}`,
+      },
+    });
+  }
   return new Promise((resolve) => {
-    const worker = new Worker(WORKER_SOURCE, { eval: true, workerData: jobs });
     const finish = (outcome: PatternOutcome): void => {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);

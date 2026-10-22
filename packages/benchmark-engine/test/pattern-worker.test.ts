@@ -123,4 +123,16 @@ describe('matchPatterns', () => {
     expect(outcome).toMatchObject({ ok: false, error: { code: 'pattern-worker-failed' } });
     if (!outcome.ok) expect(outcome.error.message).toMatch(/^Pattern evaluation failed: Invalid/);
   });
+
+  it('fails closed when the worker cannot be started', async () => {
+    // Uncloneable worker data makes the Worker constructor throw synchronously, like a process
+    // started with `--permission` but without `--allow-worker`.
+    const texts = [() => 'not cloneable'] as unknown as string[];
+    const outcome = await matchPatterns(
+      [{ pattern: 'a', flags: '', texts, firstOnly: true }],
+      signal(),
+    );
+    expect(outcome).toMatchObject({ ok: false, error: { code: 'pattern-worker-failed' } });
+    if (!outcome.ok) expect(outcome.error.message).toMatch(/^Pattern evaluation failed: /);
+  });
 });

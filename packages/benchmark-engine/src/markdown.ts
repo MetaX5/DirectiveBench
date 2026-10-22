@@ -33,6 +33,16 @@ export function normalizeText(text: string, caseSensitive = false): string {
   return caseSensitive ? collapsed : collapsed.toLowerCase();
 }
 
+/**
+ * Literal phrase search over `text` (FR-118-42): whitespace runs match any whitespace run, case is
+ * folded unless `caseSensitive`, and a phrase is never a regular expression. The text is
+ * normalised once, so searching several phrases stays linear in the text per phrase.
+ */
+export function literalSearch(text: string, caseSensitive: boolean): (phrase: string) => boolean {
+  const haystack = normalizeText(text, caseSensitive);
+  return (phrase) => haystack.includes(normalizeText(phrase, caseSensitive));
+}
+
 /** Number of leading spaces (a tab counts as four, which already exceeds every limit here). */
 function indentation(line: string): number {
   let count = 0;
@@ -138,8 +148,29 @@ function endsTable(line: string): boolean {
 }
 
 /**
- * Scans ATX and setext headings of any level and GFM tables, skipping fenced code blocks.
- * Linear in the input length.
+ * The content of a block-quote or list-item line (`> # Risks` → `# Risks`, `1. text` → `text`),
+ * or null for any other line. Nested markers are stripped one at a time.
+ */
+function containerContent(line: string): string | null {
+  let rest = line;
+  let stripped = false;
+  for (;;) {
+    const marker = /^ {0,3}(?:>|[-+*](?=[ \t]|$)|\d{1,9}[.)](?=[ \t]|$))[ \t]?/.exec(rest);
+    if (!marker) return stripped ? rest : null;
+    rest = rest.slice(marker[0].length);
+    stripped = true;
+  }
+}
+
+/** An HTML comment opener at the start of a line; its content is never rendered. */
+function opensComment(line: string): boolean {
+  return line.trimStart().startsWith('<!--') && indentation(line) <= 3;
+}
+
+/**
+ * Scans ATX and setext headings of any level and GFM tables, skipping fenced code blocks and
+ * HTML comments. Headings inside block quotes and list items count; their other lines, and
+ * indented code, are neither paragraphs nor setext content. Linear in the input length.
  */
 export function scanMarkdown(text: string): MarkdownScan {
   const lines = text.split(/\r\n|\r|\n/);
@@ -148,10 +179,17 @@ export function scanMarkdown(text: string): MarkdownScan {
   let fence: Fence | null = null;
   let paragraph: string[] = [];
   let table: MarkdownTable | null = null;
+  let comment = false;
+  // Inside a block quote or list item until a blank line (lazy continuation lines).
+  let container = false;
 
   for (const line of lines) {
     if (fence) {
       if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    if (comment) {
+      comment = !line.includes('-->');
       continue;
     }
     if (table) {
@@ -167,8 +205,14 @@ export function scanMarkdown(text: string): MarkdownScan {
       paragraph = [];
       continue;
     }
+    if (opensComment(line)) {
+      comment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
+      paragraph = [];
+      continue;
+    }
     if (line.trim() === '') {
       paragraph = [];
+      container = false;
       continue;
     }
     const atx = atxHeading(line);
@@ -177,7 +221,16 @@ export function scanMarkdown(text: string): MarkdownScan {
       paragraph = [];
       continue;
     }
+    const inner = containerContent(line);
+    if (inner !== null) {
+      const nested = atxHeading(inner);
+      if (nested !== null) headings.push(nested);
+      paragraph = [];
+      container = true;
+      continue;
+    }
     const header = paragraph.at(-1);
+    if (header === undefined && (container || indentation(line) >= 4)) continue;
     if (header === undefined && isSetextUnderline(line) && line.trim()[0] === '-') {
       // Without a paragraph above, `---` is a thematic break (or an empty list item), not text.
       continue;
@@ -222,18 +275,25 @@ function isDigitGroup(text: string, index: number): boolean {
 /**
  * The first number in `text` (SPEC-118 FR-118-44): an optional minus sign, digits with optional
  * grouping (groups of three after `,` or a space with `decimalSeparator` `.`, after `.` or a space
- * with `,`) and an optional decimal part. A range such as `8–12` yields its first number.
+ * with `,`) and an optional decimal part (`.5` is 0.5). A range such as `8–12` yields its first
+ * number. A minus counts as a sign only at the start or after whitespace or `(`.
  */
 export function parseFirstNumber(text: string, decimalSeparator: '.' | ','): number | null {
   const grouping = decimalSeparator === '.' ? ',' : '.';
   let start = 0;
   while (start < text.length && !isDigit(text[start])) start += 1;
   if (start === text.length) return null;
-  const sign = text[start - 1];
-  const negative = (sign === '-' || sign === '−') && !isDigit(text[start - 2]);
+  // `.5` (or `,5`): a decimal part without an integer part.
+  const fractionOnly = text[start - 1] === decimalSeparator && !isDigit(text[start - 2]);
+  const signIndex = fractionOnly ? start - 2 : start - 1;
+  const sign = text[signIndex];
+  // A minus is a sign only at the start or after whitespace or `(`: `PM-5` is not negative.
+  const negative =
+    (sign === '-' || sign === '\u2212') && /^[\s(]?$/.test(text[signIndex - 1] ?? '');
   let index = start;
   let digits = '';
   while (isDigit(text[index])) digits += text[index++];
+  if (fractionOnly) return finite(Number(`0.${digits}`), negative);
   for (;;) {
     const separator = text[index] ?? '';
     if (
@@ -251,6 +311,11 @@ export function parseFirstNumber(text: string, decimalSeparator: '.' | ','): num
     index += 1;
     while (isDigit(text[index])) fraction += text[index++];
   }
-  const value = Number(fraction ? `${digits}.${fraction}` : digits);
+  return finite(Number(fraction ? `${digits}.${fraction}` : digits), negative);
+}
+
+/** A value too large for a double is no number at all (JSON would store `Infinity` as null). */
+function finite(value: number, negative: boolean): number | null {
+  if (!Number.isFinite(value)) return null;
   return negative ? -value : value;
 }

@@ -9,7 +9,7 @@ import {
   type AssertionContext,
   type AssertionResult,
 } from '../src/assertions';
-import { MAX_READ_BYTES } from '../src/assertion-support';
+import { MAX_LISTED_MATCHES, MAX_READ_BYTES } from '../src/assertion-support';
 import {
   ASSERTION_TYPE_TRAITS,
   assertionSchema,
@@ -415,8 +415,23 @@ describe.each(Object.keys(documentAssertions))('%s target file', (type) => {
     expect(await evaluateAssertion(make('**/*.md'), ctx)).toMatchObject({
       passed: false,
       message: '2 files match **/*.md, expected exactly one: a.md, b/c.md',
-      details: { matches: ['a.md', 'b/c.md'] },
+      details: { matches: ['a.md', 'b/c.md'], matchCount: 2 },
     });
+  });
+
+  it('names at most the first matches when a glob matches many files', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: MAX_LISTED_MATCHES + 3 }, (_, i) => [
+        `d/${String(i).padStart(2, '0')}.md`,
+        '',
+      ]),
+    );
+    const result = await evaluateAssertion(make('d/*.md'), workspace(files));
+    expect(result.message).toMatch(
+      /^23 files match d\/\*\.md, expected exactly one: d\/00\.md, .*d\/19\.md … 3 more$/,
+    );
+    expect(result.details).toMatchObject({ matchCount: 23 });
+    expect((result.details?.matches as string[]).length).toBe(MAX_LISTED_MATCHES);
   });
 
   it('fails when the named file is missing, too large or outside the workspace', async () => {

@@ -7,7 +7,13 @@ import {
   type AssertionResult,
 } from './assertion-support';
 import type { AssertionDefinition, PatternMatcher, TextMatcher } from './definition';
-import { normalizeText, parseFirstNumber, scanMarkdown, type MarkdownTableRow } from './markdown';
+import {
+  literalSearch,
+  normalizeText,
+  parseFirstNumber,
+  scanMarkdown,
+  type MarkdownTableRow,
+} from './markdown';
 import { matchPatterns, type PatternJob } from './pattern-worker';
 
 type Of<T extends AssertionDefinition['type']> = Extract<AssertionDefinition, { type: T }>;
@@ -34,8 +40,8 @@ export function matcherLabel(matcher: TextMatcher): string {
 const patternJob = (
   matcher: PatternMatcher,
   texts: readonly string[],
-  firstOnly: boolean,
-): PatternJob => ({ pattern: matcher.pattern, flags: matcher.flags, texts, firstOnly });
+  options: { firstOnly: boolean },
+): PatternJob => ({ pattern: matcher.pattern, flags: matcher.flags, texts, ...options });
 
 /**
  * For each matcher, the indexes of the `texts` it matches: literals by normalised equality on
@@ -50,7 +56,7 @@ async function matchTexts(
 ): Promise<{ ok: true; matches: number[][] } | { ok: false; result: AssertionResult }> {
   const patterns = matchers.filter((m): m is PatternMatcher => typeof m !== 'string');
   const outcome = await matchPatterns(
-    patterns.map((m) => patternJob(m, texts, false)),
+    patterns.map((m) => patternJob(m, texts, { firstOnly: false })),
     context.signal,
   );
   if (!outcome.ok) {
@@ -121,16 +127,16 @@ async function evaluateRequiredPhrases(
   if (!target.ok) return assertionResult(assertion, false, target.message, target.details);
   const patterns = assertion.phrases.filter((m): m is PatternMatcher => typeof m !== 'string');
   const outcome = await matchPatterns(
-    patterns.map((m) => patternJob(m, [target.text], true)),
+    patterns.map((m) => patternJob(m, [target.text], { firstOnly: true })),
     context.signal,
   );
   if (!outcome.ok) return assertionError(assertion, outcome.error, patterns.map(matcherLabel));
   // Literals: whitespace runs match any run; never a regular expression (FR-118-42).
-  const haystack = normalizeText(target.text, assertion.caseSensitive);
+  const containsLiteral = literalSearch(target.text, assertion.caseSensitive);
   let next = 0;
   const present = assertion.phrases.map((phrase) =>
     typeof phrase === 'string'
-      ? haystack.includes(normalizeText(phrase, assertion.caseSensitive))
+      ? containsLiteral(phrase)
       : (outcome.matches[next++] as number[]).length > 0,
   );
   const labels = assertion.phrases.map(matcherLabel);
@@ -180,7 +186,7 @@ async function evaluateMarkdownTableValue(
         patternJob(
           assertion.row,
           candidates.map((c) => c.row.cells[0] as string),
-          true,
+          { firstOnly: true },
         ),
       ],
       context.signal,
