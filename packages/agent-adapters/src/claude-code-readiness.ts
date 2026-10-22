@@ -188,33 +188,59 @@ function apiKeyReadiness(env: NodeJS.ProcessEnv): ClaudeCodeReadiness {
       );
 }
 
+/** Whether a located binary can run a benchmark, whatever the auth mode. */
+export type ClaudeBinaryCheck =
+  | { ok: true; executablePath: string; versionLine: string; version: string }
+  | { ok: false; code: 'binary-not-found' | 'version-unsupported'; detail: string };
+
+/**
+ * Checks the binary detection located: found on `PATH`, a readable version, and at least
+ * {@link CLAUDE_CODE_MIN_VERSION}. Shared by readiness and by the adapter's check right before
+ * each spawn.
+ */
+export function checkClaudeBinary(target: ClaudeCodeTarget): ClaudeBinaryCheck {
+  if (!target.executablePath) {
+    return {
+      ok: false,
+      code: 'binary-not-found',
+      detail: `\`${CLAUDE_EXECUTABLE}\` was not found on PATH.`,
+    };
+  }
+  const { versionLine } = target;
+  const version = versionLine === null ? null : parseClaudeCodeVersion(versionLine);
+  if (versionLine === null || !version) {
+    return {
+      ok: false,
+      code: 'version-unsupported',
+      detail: `Could not read the Claude Code version from \`${CLAUDE_EXECUTABLE} --version\`.`,
+    };
+  }
+  if (!isSupportedClaudeCodeVersion(version)) {
+    return {
+      ok: false,
+      code: 'version-unsupported',
+      detail: `Claude Code ${version} is older than the minimum ${CLAUDE_CODE_MIN_VERSION}; update it.`,
+    };
+  }
+  return {
+    ok: true,
+    executablePath: target.executablePath,
+    versionLine,
+    version,
+  };
+}
+
 /** Readiness of one auth mode for a binary detection already located. */
 export async function claudeCodeModeReadiness(
   mode: ClaudeAuthMode,
   target: ClaudeCodeTarget,
   env: NodeJS.ProcessEnv,
 ): Promise<ClaudeCodeReadiness> {
-  if (!target.executablePath) {
-    return result(mode, 'binary-not-found', `\`${CLAUDE_EXECUTABLE}\` was not found on PATH.`);
-  }
-  const version = parseClaudeCodeVersion(target.versionLine);
-  if (!version) {
-    return result(
-      mode,
-      'version-unsupported',
-      `Could not read the Claude Code version from \`${CLAUDE_EXECUTABLE} --version\`.`,
-    );
-  }
-  if (!isSupportedClaudeCodeVersion(version)) {
-    return result(
-      mode,
-      'version-unsupported',
-      `Claude Code ${version} is older than the minimum ${CLAUDE_CODE_MIN_VERSION}; update it.`,
-    );
-  }
+  const binary = checkClaudeBinary(target);
+  if (!binary.ok) return result(mode, binary.code, binary.detail);
   return mode === 'api-key'
     ? apiKeyReadiness(env)
-    : subscriptionReadiness(target.executablePath, env);
+    : subscriptionReadiness(binary.executablePath, env);
 }
 
 /** Readiness of every supported auth mode, for detection (Agent Connections, `doctor`). */

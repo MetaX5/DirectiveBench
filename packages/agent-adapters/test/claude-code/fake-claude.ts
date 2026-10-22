@@ -22,7 +22,12 @@ export type FakeClaudeMode =
   /** Writes 200 000 bytes to stderr and exits 3. */
   | 'stderr-flood'
   /** Exits at once without reading stdin. */
-  | 'no-read';
+  | 'no-read'
+  /**
+   * Reads the prompt, writes the stream set with {@link FakeClaude.setStream} (a recorded
+   * fixture), then sleeps for the set delay (seconds; signals end it) and exits with the set code.
+   */
+  | 'replay';
 
 export interface FakeClaude {
   /** Directory holding the script (`claude`) — put it on `PATH`. */
@@ -41,6 +46,13 @@ export interface FakeClaude {
   pid(): number | null;
   /** Pid of the background child of `hang`, `leave-child` and `escape-session`. */
   childPid(): number | null;
+  /** `replay`: the stream to write, the exit code and the delay after the stream (seconds). */
+  setStream(stream: string, options?: { exitCode?: number; delaySeconds?: number }): void;
+}
+
+export interface FakeClaudeOptions {
+  /** The `--version` line (default `2.1.296 (Claude Code)`). */
+  version?: string;
 }
 
 const NDJSON = [
@@ -96,11 +108,22 @@ function body(mode: FakeClaudeMode, dir: string): string {
       return `cat > /dev/null\nhead -c 200000 /dev/zero | tr '\\000' e >&2\nexit 3`;
     case 'no-read':
       return 'exit 0';
+    case 'replay':
+      return [
+        `cat > ${q('stdin.txt')}`,
+        `cat ${q('stream.ndjson')}`,
+        `sleep "$(cat ${q('delay')})"`,
+        `exit "$(cat ${q('exit-code')})"`,
+      ].join('\n');
   }
 }
 
 /** Writes a fake `claude` into `root/bin` (and its records into `root/records`). */
-export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude {
+export function writeFakeClaude(
+  root: string,
+  mode: FakeClaudeMode,
+  options: FakeClaudeOptions = {},
+): FakeClaude {
   const binDir = join(root, 'bin');
   const records = join(root, 'records');
   mkdirSync(binDir, { recursive: true });
@@ -113,8 +136,10 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
       '#!/bin/sh',
       "trap '' INT TERM",
       'case "$1" in',
-      '  --version) echo "2.1.296 (Claude Code)"; exit 0 ;;',
+      `  --version) echo '${options.version ?? '2.1.296 (Claude Code)'}'; exit 0 ;;`,
       '  auth) echo \'{"loggedIn":true,"authMethod":"claude.ai"}\'; exit 0 ;;',
+      // The readiness probe: `--setting-sources project,local auth status --json`.
+      '  --setting-sources) echo \'{"loggedIn":true,"authMethod":"claude.ai"}\'; exit 0 ;;',
       'esac',
       // Signals are ignored only where the mode says so.
       ...(mode === 'hang' ? [] : ['trap - INT TERM']),
@@ -127,6 +152,12 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
     ].join('\n'),
   );
   chmodSync(executable, 0o755);
+  const setStream: FakeClaude['setStream'] = (stream, streamOptions = {}) => {
+    writeFileSync(join(records, 'stream.ndjson'), stream);
+    writeFileSync(join(records, 'exit-code'), String(streamOptions.exitCode ?? 0));
+    writeFileSync(join(records, 'delay'), String(streamOptions.delaySeconds ?? 0));
+  };
+  if (mode === 'replay') setStream('');
   const read = (name: string) => readFileSync(join(records, name), 'utf8');
   // A pid file being written reads empty: 0 is "not yet".
   const pidOf = (name: string) =>
@@ -147,6 +178,7 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
     stdin: () => read('stdin.txt'),
     pid: () => pidOf('pid'),
     childPid: () => pidOf('child.pid'),
+    setStream,
   };
 }
 

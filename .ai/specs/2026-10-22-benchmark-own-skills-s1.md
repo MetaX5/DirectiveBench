@@ -119,7 +119,7 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | FR-118-12 | The baseline version SHALL differ from the candidate version (different `artifact_versions.id` **and** content hash); same artifact, same format. Violations are rejected before any job is created. A suite with a case whose prompt begins with `/` (explicit skill invocation) SHALL be refused with `--baseline none` at plan time (exit 2, before any job or session; code `slash-prompt-needs-ab-baseline`), with the message "An explicit /<name> invocation has no meaningful no-skill control; use an A/B baseline: --baseline v<n>". |
 | FR-118-13 | The baseline SHALL be stored on the benchmark run (`benchmark_runs.baseline_artifact_version_id`, null = `none`, §8). It is **not** part of the comparability key (§8.3): the key describes the conditions, the baseline describes what the candidate was compared with. |
 | FR-118-14 | Delta, verdict and display status keep their SPEC-111 meaning with "baseline" read as "the chosen baseline": `improved` in an A/B run means the candidate version scored better than the baseline version. Every surface SHALL name the baseline ("Baseline: no artifact" / "Baseline: v3"). |
-| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited`, `auth-mismatch`, `artifact-not-loaded` (FR-118-09), `workspace-contains-claude-config` (FR-118-06), `workspace-imports-outside` or `workspace-scan-limit` (FR-118-27), `workspace-replaced` or `stray-processes` (§12: a `setup` command, the agent or a command assertion replaced the workspace — the pin is checked after each of them, before the next step — or a `setup` command, an assertion command or the agent left processes that could not be stopped — maintainer decision 2026-10-22; an assertion command's survivors also end that run's assertions; `output-limit` and `spawn-failed` stay per-run failures), the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors, and a temporary server overload, `overloaded` → `provider-error`, per the maintainer decision of 2026-10-22) are recorded and the run continues (SPEC-112 §13). |
+| FR-118-15 | When an agent run ends with `auth-missing`, `auth-expired`, `auth-invalid`, `billing`, `rate-limited`, `auth-mismatch`, `artifact-not-loaded` (FR-118-09), `workspace-contains-claude-config` (FR-118-06), `workspace-imports-outside` or `workspace-scan-limit` (FR-118-27), `workspace-replaced`, `stray-processes` or `binary-replaced` (§12: the pinned `claude` or its interpreter was replaced — maintainer decision 2026-10-22; a `setup` command, the agent or a command assertion replaced the workspace — the pin is checked after each of them, before the next step — or a `setup` command, an assertion command or the agent left processes that could not be stopped — maintainer decision 2026-10-22; an assertion command's survivors also end that run's assertions; `output-limit` and `spawn-failed` stay per-run failures), the run SHALL NOT start further agent runs: remaining runs are not executed, the benchmark run ends with status `error` and the reason, so a broken login or exhausted quota is not spent on runs that cannot succeed. Other agent-run failures (timeout, `agent-failed`, parse errors, and a temporary server overload, `overloaded` → `provider-error`, per the maintainer decision of 2026-10-22) are recorded and the run continues (SPEC-112 §13). |
 
 ### 6.3 Suites bound to registry artifacts
 
@@ -243,6 +243,15 @@ interface RunBenchmarkInput {
   // existing fields unchanged
   artifact: ArtifactBundle;               // candidate
   baselineArtifact?: ArtifactBundle;      // absent = baseline kind 'none' (FR-118-10/11)
+}
+
+// Passed by runBenchmark to every agent run of both variants (issue #117): the argv of both
+// variants depends on the candidate (Skill(<name>), FR-118-08), and the adapter re-inspects
+// both versions before each spawn (FR-118-26)
+interface AgentRunRequest {
+  // existing fields unchanged
+  artifact: ArtifactBundle;               // the candidate, whether or not this run installed it
+  baselineArtifact: ArtifactBundle | null; // null = baseline kind 'none'
 }
 
 // Adapter metadata (SPEC-203 §4.2), recorded in EnvironmentMetadata.agentProfile
@@ -925,6 +934,77 @@ changed before merge.
     background child that keeps a command's output open is reported as stray, so such a `setup`
     fails closed there), macOS,
     and the real CLI.
+- **Implemented — Phase 3 step 5 (issue #117, verified on 2026-10-22 with a fake `claude` on a
+  test `PATH` replaying the constructed stream fixtures, Linux; no real `claude` was started):**
+  `ClaudeCodeAdapter` (`packages/agent-adapters/src/claude-code/adapter.ts`) composes the step 1–4
+  pieces. Options (auth mode, default `subscription`; permission profile, default `edit-only`;
+  `maxBudgetUsd`, API Key Mode only) are validated with Zod and come from the caller, never from
+  the suite; a case's `agentOptions['claude-code']` must be absent or empty (refused before the
+  spawn otherwise). `detect()` is the detection descriptor with readiness; `installArtifact()` is
+  `installClaudeArtifact`. `run()`, in order: the bundle inspection of **both** versions (FR-118-26,
+  so a `none` baseline run of a refused candidate never starts `claude`), the per-type profile and
+  the A/B skill-name check (`baseline-skill-name-differs`), `claude` located on the CLI `PATH` and
+  its version checked against the minimum (`binary-not-found` / `version-unsupported`), argv and
+  environment per auth mode (API Key Mode: `HOME` = `<scratchDir>/home`, `CLAUDE_CONFIG_DIR`
+  below it; a key shorter than the exact-value redaction minimum of 8 characters is
+  `auth-missing`), the flags hash over the argv with run-local paths and the skill name
+  normalised, `runClaudeCode` (pre-spawn inspection and process control), stdout fed line by line
+  to `ClaudeStreamParser` with the key as known secret, and `claudeRunOutcome`; when the process
+  layer ended the run (timeout, cancellation, output limit, survivors, spawn failure) its status
+  and code win and what the stream showed is kept. Every exit — each refusal, each status and any
+  thrown error (`infrastructure-error`, keeping a `ClaudeCodeError`'s code) — passes one function
+  that redacts the summary and the error with the core patterns and the key; a run refused before
+  the spawn carries no metadata, and every run carries the auth mode's warnings. Contract (§8.2):
+  `AgentRunRequest` carries the measured `artifact` and the `baselineArtifact` (null for `none`),
+  passed by `runBenchmark` to every agent run. Not registered in `createExecutableAdapters()`
+  (FR-118-05, Phase 4). Verified end to end through `runBenchmark`
+  (`packages/benchmark-engine/test/claude-code-adapter.test.ts`) for the #96 criteria: API Key
+  Mode with a run-local `HOME`/`CLAUDE_CONFIG_DIR` and a planted key of no known token shape in no
+  argv, outcome or record (AC-4); every FR-118-06 fixture path, local settings allowing `Skill`,
+  a legacy command or nested skill with a `/x` prompt, and a `setup` command writing
+  `.claude/settings.local.json` stop the run before any start (AC-16, AC-26); hooks, a `` !` ``
+  placeholder in prose, `allowed-tools` (`Skill`, `Skill(other-name)`, `Edit`), unparsable
+  frontmatter, `model: opus` and `context: fork` in the candidate, and bundled configuration files
+  or a nested `.claude/` in an A/B baseline, start no `claude` (AC-23, AC-25); imports of host
+  files from a fixture chain, through `~` against the agent `HOME`, from a candidate or baseline
+  bundle file, through a hard link a `setup` command created and inside a fence stop the run
+  before the run's `claude` starts (AC-27); 20 001 directories stop it with
+  `workspace-scan-limit`; a candidate session without the skill stops it with
+  `artifact-not-loaded` and a `none` baseline invoking the skill makes it `not-comparable`
+  (AC-21); a denied outside edit is a `permission-denied` warning and trace event of a completed,
+  scored run (FR-118-07); differing `system/init` models between variants, or a main-conversation
+  message on another model, make it `not-comparable` with `execution-model-mismatch` (AC-18,
+  AC-25); `rate_limit` and an expired login on the first agent run stop it after one start, and a
+  parse error is recorded while the run goes on (AC-17). Adapter unit tests:
+  `packages/agent-adapters/test/claude-code/adapter.test.ts` and `adapter-thrown.test.ts`.
+  Findings: the engine's snapshot after installation (`buildManifest`: no symbolic links, at most
+  5 000 files and 100 MiB) refuses a `setup` symlink and oversized file sets before the adapter's
+  pre-spawn scan, as an `infrastructure-error` without a stop code; the scan's own limits are
+  reached first only through directories and other non-file entries. In an A/B run a fixture with
+  a root `.claude` fails the baseline's and the candidate's installation
+  (`artifact-install-conflict`, not a stop code) before the pre-spawn check; a `none` run stops at
+  it. Both are refused at plan time with `fixture-contains-claude-config` by Phase 4.
+  After the Codex review (§12, each with a regression test that failed before the fix): the engine
+  creates the adapter's `scratchDir` only after `setup`, installation and the pin check, with an
+  exclusive `mkdir` (a `setup` command could plant `../agent/home/.claude/settings.json`, which
+  API Key Mode loads as `CLAUDE_CONFIG_DIR`, or link `../agent` to a host directory), and the
+  adapter creates its home and temporary directories exclusively and refuses a `scratchDir` that
+  is not a real directory; the pre-spawn inspection also checks every **ancestor** of the
+  workspace for `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `.claude`, `.claude-plugin`,
+  `.mcp.json`, `.worktreeinclude` and `.claude.json` (`workspace-contains-claude-config`, a stop
+  code; exempt only the agent `HOME`'s own `.claude` and `.claude.json`), since Claude Code loads
+  them from above the working directory and a `setup` command can write `../CLAUDE.md`; and the
+  adapter pins the `claude` its first detection located (before any `setup`), spawns its canonical
+  path without a `PATH` lookup and refuses a run whose file was replaced (`binary-replaced`); for
+  a script launcher it also pins the interpreter of its `#!` line (`#!/usr/bin/env node` looked up
+  on the child's `PATH`), so a `node` planted earlier on `PATH` is refused too; and the child's
+  `PATH` keeps only absolute entries (a `.`, relative or empty entry would resolve against the
+  workspace, where a fixture or `setup` command can put a program).
+  Residual (not sandboxed, §12): an approved `setup` command runs with the user's permissions and
+  can still change other user-writable files the CLI uses — an interpreter that is itself a
+  launcher, programs `claude` starts through `PATH`, the installation's own files in place with
+  the same size and modification time, or user-level configuration in subscription mode. Not
+  verified: a real `claude` (AC-22, issue #103), the CLI wiring and plan-time refusals (Phase 4).
 - **Implemented — Phase 5 (issue #98, verified on 2026-10-22 with seeded runs, no agent):**
   read-only results by artifact version.
   - FR-118-50: `listArtifactRuns` (`packages/database/src/repositories/runs.ts`) returns every run
@@ -985,15 +1065,15 @@ changed before merge.
     and the engine types; the dashboard's "recent regressions" does not list version regressions
     yet (FR-111-52, FR-116-12).
 - **Partially implemented:** the adapter contract now carries per-run metadata and
-  `runBenchmark` derives `EnvironmentMetadata.agentProfile` from it (Phase 3 step 2), but no
-  executable adapter reports it yet, and no caller passes `installationId` as
+  `runBenchmark` derives `EnvironmentMetadata.agentProfile` from it (Phase 3 step 2);
+  `ClaudeCodeAdapter` reports it (step 5) but is not registered in any runner yet, and no caller passes `installationId` as
   `RunBenchmarkInput.hostId` (Phase 4, `benchmark run`). AC-3, AC-5 and AC-9 are verified at the engine, repository and
   runner level; their `benchmark run --baseline` / CLI parts wait for Phase 4. Existing pieces this
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** the `ClaudeCodeAdapter` that composes installation, process control and
-  the parser, Phase 4 (`benchmark init` / `benchmark run`) and every
+- **Not implemented:** Phase 4 (`benchmark init` / `benchmark run`, which registers
+  `ClaudeCodeAdapter` in its runner) and every
   other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan
@@ -1032,6 +1112,10 @@ shippable because each leaves the mock path unchanged and fully tested.
 3. Process control with the fake `claude` (stdin prompt, timeout, cancellation, process group,
    out-of-workspace edit denied).
 4. Readiness (`auth status`, API key presence); detection reports `ready`/`missing`.
+5. Compose `ClaudeCodeAdapter` from steps 1–4 (detection and readiness, install convention,
+   both bundle inspections, argv/env per auth mode, process control, stream parser and
+   normalisation, one redacting exit); prove the S03 end-to-end criteria through `runBenchmark`
+   with the fake `claude`. Exported, not registered (FR-118-05, Phase 4).
 
 **Phase 4 — CLI** (cli, database queries).
 1. `resolveArtifactRef`; `benchmark init` with scaffold and slug-confinement tests.

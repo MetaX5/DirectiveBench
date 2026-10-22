@@ -19,15 +19,18 @@ export interface CliAgentDescriptor {
   ) => Promise<AgentModeReadiness[]>;
 }
 
+/** Claude Code: detection with per-auth-mode readiness (SPEC-203 §4, §13). */
+export const CLAUDE_CODE_AGENT: CliAgentDescriptor = {
+  id: 'claude-code',
+  displayName: 'Claude Code',
+  executable: CLAUDE_EXECUTABLE,
+  versionArgs: ['--version'],
+  specPath: '.ai/specs/2026-10-14-integration-claude-code.md',
+  readiness: claudeCodeReadiness,
+};
+
 export const CLI_AGENTS: readonly CliAgentDescriptor[] = [
-  {
-    id: 'claude-code',
-    displayName: 'Claude Code',
-    executable: CLAUDE_EXECUTABLE,
-    versionArgs: ['--version'],
-    specPath: '.ai/specs/2026-10-14-integration-claude-code.md',
-    readiness: claudeCodeReadiness,
-  },
+  CLAUDE_CODE_AGENT,
   {
     id: 'codex',
     displayName: 'OpenAI Codex CLI',
