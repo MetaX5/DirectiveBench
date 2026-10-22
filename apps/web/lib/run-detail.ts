@@ -23,13 +23,14 @@ const invocationSchema = z.object({ invoked: z.number(), runs: z.number() });
 
 /** The parts of a stored run summary the results views read; everything else is ignored. */
 const storedSummarySchema = z.object({
-  delta: z.number().nullable().optional(),
-  verdict: z.string().optional(),
-  candidateOutcome: z.enum(['passed', 'failed']).nullable().optional(),
-  candidate: z.object({ meanScore: z.number().nullable() }).optional(),
-  confidence: z.object({ level: z.string() }).optional(),
-  scoring: z.object({ minDelta: z.number() }).optional(),
-  environment: z.object({ agentProfile: agentProfileSchema.optional() }).optional(),
+  // Nullish throughout: `listArtifactRuns` returns a lean summary whose missing fields are null.
+  delta: z.number().nullish(),
+  verdict: z.string().nullish(),
+  candidateOutcome: z.enum(['passed', 'failed']).nullish(),
+  candidate: z.object({ meanScore: z.number().nullish() }).nullish(),
+  confidence: z.object({ level: z.string().nullish() }).nullish(),
+  scoring: z.object({ minDelta: z.number().nullish() }).nullish(),
+  environment: z.object({ agentProfile: agentProfileSchema.nullish() }).nullish(),
   /** Skill invocations per variant, `skill-md` runs of a real agent (SPEC-118 FR-118-09). */
   skillInvocation: z.object({ baseline: invocationSchema, candidate: invocationSchema }).optional(),
 });

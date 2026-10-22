@@ -6,7 +6,11 @@ import {
   getBenchmarkRunDetail,
   importSuiteVersion,
   insertAgentRun,
+  ARTIFACT_RUNS_PAGE_LIMIT,
+  ARTIFACT_VERSION_COMPARISON_LIMIT,
+  countArtifactRuns,
   listArtifactRuns,
+  listVersionComparisonRuns,
   listBenchmarkRuns,
   schema,
   type AgentRunInput,
@@ -263,6 +267,233 @@ describe('listArtifactRuns (SPEC-118 FR-118-50)', () => {
       baselineVersion: null,
     });
     expect(await listArtifactRuns(handle.db, 'art_missing')).toEqual([]);
+  });
+});
+
+const fullSummary = {
+  delta: 0.25,
+  verdict: 'improved',
+  candidateOutcome: 'passed',
+  candidate: { meanScore: 0.75, validRuns: 2, stdDev: 0.1 },
+  baseline: { meanScore: 0.5 },
+  confidence: { level: 'low', reason: 'one repetition' },
+  scoring: { minDelta: 0.05, passThreshold: 1 },
+  environment: { kind: 'local-process', agentProfile: { authMode: 'api-key' } },
+  cases: [{ caseId: 'a', delta: 0.25 }],
+  reasons: ['x'.repeat(1000)],
+};
+
+/** Inserts `count` runs in one statement; ids and start times sort in insertion order. */
+async function bulkRuns(
+  handle: ReturnType<typeof getHandle>,
+  rows: {
+    versionId: string;
+    suiteVersionId: string;
+    key?: (i: number) => string | null;
+    summary?: Record<string, unknown> | null;
+    verdict?: string | null;
+    status?: 'completed' | 'running';
+  }[],
+): Promise<void> {
+  const values = rows.map((row, i) => ({
+    id: `run_bulk_${String(i).padStart(6, '0')}`,
+    jobId: null,
+    suiteVersionId: row.suiteVersionId,
+    artifactVersionId: row.versionId,
+    baselineArtifactVersionId: null,
+    agentAdapterId: 'mock',
+    agentVersion: null,
+    model: null,
+    environment: {},
+    status: row.status ?? ('completed' as const),
+    verdict: row.verdict === undefined ? 'improved' : row.verdict,
+    summary: row.summary === undefined ? fullSummary : row.summary,
+    comparabilityKey: row.key ? row.key(i) : 'key',
+    warnings: [],
+    error: null,
+    startedAt: new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString(),
+    finishedAt: null,
+  }));
+  for (let i = 0; i < values.length; i += 500) {
+    await handle.db.insert(schema.benchmarkRuns).values(values.slice(i, i + 500));
+  }
+}
+
+describe('listArtifactRuns bound and projection (Codex review of PR #112)', () => {
+  it('loads at most ARTIFACT_RUNS_PAGE_LIMIT runs, newest first, and counts them all', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const total = ARTIFACT_RUNS_PAGE_LIMIT + 5;
+    await bulkRuns(
+      handle,
+      Array.from({ length: total }, () => ({
+        versionId: targets.artifactVersionId,
+        suiteVersionId: targets.suiteVersionId,
+      })),
+    );
+    const runs = await listArtifactRuns(handle.db, targets.artifactId);
+    expect(runs).toHaveLength(ARTIFACT_RUNS_PAGE_LIMIT);
+    expect(runs[0]?.run.id).toBe(`run_bulk_${String(total - 1).padStart(6, '0')}`);
+    expect(runs.at(-1)?.run.id).toBe('run_bulk_000005');
+    expect(await countArtifactRuns(handle.db, targets.artifactId)).toBe(total);
+    expect(await countArtifactRuns(handle.db, 'art_missing')).toBe(0);
+  });
+
+  it('returns only the summary fields the page renders, never traces, cases or reasons', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets);
+    const bare = await seedRun(handle, targets);
+    await finishBenchmarkRun(handle.db, runId, finished({ summary: fullSummary, warnings: ['w'] }));
+    await finishBenchmarkRun(handle.db, bare, finished({ summary: { verdict: 'error' } }));
+    const runs = await listArtifactRuns(handle.db, targets.artifactId);
+    const full = runs.find((r) => r.run.id === runId);
+    expect(Object.keys(full?.run ?? {}).sort()).toEqual([
+      'agentAdapterId',
+      'agentVersion',
+      'comparabilityKey',
+      'id',
+      'model',
+      'startedAt',
+      'status',
+      'summary',
+      'verdict',
+      'warnings',
+    ]);
+    expect(full?.run.warnings).toEqual(['w']);
+    expect(full?.run.summary).toEqual({
+      delta: 0.25,
+      verdict: 'improved',
+      candidateOutcome: 'passed',
+      candidate: { meanScore: 0.75 },
+      confidence: { level: 'low' },
+      scoring: { minDelta: 0.05 },
+      environment: { agentProfile: { authMode: 'api-key' } },
+    });
+    expect(runs.find((r) => r.run.id === bare)?.run.summary).toEqual({
+      delta: null,
+      verdict: 'error',
+      candidateOutcome: null,
+      candidate: { meanScore: null },
+      confidence: { level: null },
+      scoring: { minDelta: null },
+      environment: { agentProfile: null },
+    });
+    const running = await seedRun(handle, targets);
+    expect(
+      (await listArtifactRuns(handle.db, targets.artifactId)).find((r) => r.run.id === running)?.run
+        .summary,
+    ).toBeNull();
+  });
+});
+
+describe('listVersionComparisonRuns (SPEC-111 FR-111-50, Codex review of PR #112)', () => {
+  it('returns the latest eligible run per version and comparability key, outside any page window', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const v2 = await importArtifactVersion(handle, artifactInput('v2'));
+    const base = { suiteVersionId: targets.suiteVersionId };
+    await bulkRuns(handle, [
+      // v1, key a: the older run is the only one; v1 also has a key without an eligible run.
+      { ...base, versionId: targets.artifactVersionId, key: () => 'a' },
+      { ...base, versionId: targets.artifactVersionId, key: () => 'b', verdict: 'error' },
+      { ...base, versionId: targets.artifactVersionId, key: () => 'b', verdict: 'not-comparable' },
+      { ...base, versionId: targets.artifactVersionId, key: () => null },
+      {
+        ...base,
+        versionId: targets.artifactVersionId,
+        key: () => 'b',
+        status: 'running',
+        summary: null,
+        verdict: null,
+      },
+      { ...base, versionId: targets.artifactVersionId, key: () => 'b', summary: { candidate: {} } },
+      {
+        ...base,
+        versionId: targets.artifactVersionId,
+        key: () => 'b',
+        summary: { scoring: { minDelta: 0.05 } },
+      },
+      // v2, key a: two runs, the later one wins; after them hundreds of newer runs of key c.
+      {
+        ...base,
+        versionId: v2.versionId,
+        key: () => 'a',
+        summary: { ...fullSummary, candidateOutcome: 'failed' },
+      },
+      {
+        ...base,
+        versionId: v2.versionId,
+        key: () => 'a',
+        verdict: 'unstable',
+        summary: { ...fullSummary, candidate: { meanScore: null } },
+      },
+      ...Array.from({ length: ARTIFACT_RUNS_PAGE_LIMIT + 1 }, () => ({
+        ...base,
+        versionId: v2.versionId,
+        key: () => 'c',
+      })),
+    ]);
+    const window = await listArtifactRuns(handle.db, targets.artifactId);
+    expect(window.some((r) => r.run.comparabilityKey === 'a')).toBe(false);
+
+    const { runs, truncated } = await listVersionComparisonRuns(handle.db, targets.artifactId);
+    expect(truncated).toBe(false);
+    expect(runs).toEqual([
+      {
+        runId: 'run_bulk_000008',
+        artifactVersionId: v2.versionId,
+        version: 2,
+        comparabilityKey: 'a',
+        verdict: 'unstable',
+        agentAdapterId: 'mock',
+        candidateMeanScore: null,
+        candidateOutcome: 'passed',
+        minDelta: 0.05,
+      },
+      {
+        runId: `run_bulk_${String(9 + ARTIFACT_RUNS_PAGE_LIMIT).padStart(6, '0')}`,
+        artifactVersionId: v2.versionId,
+        version: 2,
+        comparabilityKey: 'c',
+        verdict: 'improved',
+        agentAdapterId: 'mock',
+        candidateMeanScore: 0.75,
+        candidateOutcome: 'passed',
+        minDelta: 0.05,
+      },
+      {
+        runId: 'run_bulk_000000',
+        artifactVersionId: targets.artifactVersionId,
+        version: 1,
+        comparabilityKey: 'a',
+        verdict: 'improved',
+        agentAdapterId: 'mock',
+        candidateMeanScore: 0.75,
+        candidateOutcome: 'passed',
+        minDelta: 0.05,
+      },
+    ]);
+  });
+
+  it('loads at most ARTIFACT_VERSION_COMPARISON_LIMIT pairs, newest version first', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const v2 = await importArtifactVersion(handle, artifactInput('v2'));
+    const base = { suiteVersionId: targets.suiteVersionId };
+    await bulkRuns(handle, [
+      { ...base, versionId: targets.artifactVersionId, key: () => 'old' },
+      ...Array.from({ length: ARTIFACT_VERSION_COMPARISON_LIMIT }, () => ({
+        ...base,
+        versionId: v2.versionId,
+        key: (i: number) => `k${String(i).padStart(6, '0')}`,
+      })),
+    ]);
+    const { runs, truncated } = await listVersionComparisonRuns(handle.db, targets.artifactId);
+    expect(truncated).toBe(true);
+    expect(runs).toHaveLength(ARTIFACT_VERSION_COMPARISON_LIMIT);
+    expect(runs.every((r) => r.version === 2)).toBe(true);
+    expect((await listVersionComparisonRuns(handle.db, 'art_missing')).runs).toEqual([]);
   });
 });
 
