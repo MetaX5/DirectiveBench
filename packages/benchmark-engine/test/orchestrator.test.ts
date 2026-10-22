@@ -634,6 +634,36 @@ describe('setup commands', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32').each([
+    ['agent-error', undefined, 'workspace-replaced'],
+    ['timeout', undefined, 'workspace-replaced'],
+    // A code that already stops the run keeps precedence.
+    ['agent-error', 'auth-expired', 'auth-expired'],
+  ] as const)(
+    'stops when a %s agent run replaced the workspace (Codex review, code %s)',
+    async (status, errorCode, stopCode) => {
+      const victim = tmp('victim');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        return completed({ status, error: 'failed', ...(errorCode ? { errorCode } : {}) });
+      });
+      const records: AgentRunRecord[] = [];
+      const stopped = await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: async (record) => {
+          records.push(record);
+        },
+      }).catch((error: unknown) => error);
+      expect(stopped).toMatchObject({ code: stopCode });
+      expect(records).toHaveLength(1);
+      expect(adapter.requests).toHaveLength(1);
+    },
+  );
+
   it('stops the benchmark when cancelled during setup', async () => {
     const input = await suite({
       cases: [testCase({ setup: [nodeScript('setTimeout(() => {}, 30000)')] })],

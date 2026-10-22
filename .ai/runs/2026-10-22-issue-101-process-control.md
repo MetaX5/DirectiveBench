@@ -123,6 +123,11 @@ fake CLI ignoring SIGINT/SIGTERM.
   Red first: the assertion and agent regressions (a victim directory must stay empty) fail on
   cc93981.
 
+- Codex round 4, high: the pin check after the agent ran only for completed runs, so an agent that
+  replaced the workspace and ended `agent-error` or `timeout` let the next runs start. The check now
+  runs after every agent run (after the cancellation check; an existing stop code keeps
+  precedence). Red first: the agent-error and timeout regressions fail on 5405b08.
+
 ## Verification
 
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.

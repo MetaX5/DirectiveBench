@@ -26,6 +26,7 @@ import {
   assertNotStopped,
   observedAgentProfile,
   skillInvocationRates,
+  STOP_CODES,
 } from './agent-conditions';
 import { evaluateAssertion, type AssertionResult } from './assertions';
 import { buildCommandEnv, runCommand } from './commands';
@@ -442,6 +443,12 @@ async function executeAgentRun(
     if (agentResult.metadata) base.metadata = agentResult.metadata;
     if (agentResult.skillActivation) base.skillActivation = agentResult.skillActivation;
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
+    // Whatever the agent run's status: a failed or timed-out run that replaced the workspace must
+    // still stop the benchmark run, and a code that already stops it keeps precedence.
+    if (agentResult.errorCode === undefined || !STOP_CODES.includes(agentResult.errorCode)) {
+      const replacedByAgent = await replacedAfter('the agent run');
+      if (replacedByAgent) return replacedByAgent;
+    }
     if (agentResult.status !== 'completed') {
       return fail(
         agentResult.status,
@@ -449,9 +456,6 @@ async function executeAgentRun(
         agentResult.errorCode ?? null,
       );
     }
-
-    const replacedByAgent = await replacedAfter('the agent run');
-    if (replacedByAgent) return replacedByAgent;
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
 
