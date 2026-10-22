@@ -731,9 +731,12 @@ changed before merge.
   on 40 000 more documents, the regression tests of both repros at scanner and assertion level,
   and linearity tests for adversarial shapes. Known limits, each failing safe (reported less,
   never more): a table without a pipe in its header or delimiter row is read but not reported; a
-  setext heading whose paragraph may start with a link reference definition is not reported; a
+  setext heading whose paragraph may start with a link reference definition is not reported, and
+  that paragraph stays open without tables (so a list cannot interrupt it); a
   document nested deeper than `MAX_MARKDOWN_NESTING` (32) block quotes and list items is read only
-  up to that line. NFR-118-02 on 2 cores (`taskset -c 0,1`): 103 / 53 / 91 ms for the three
+  up to that line. cmark-gfm's table limits are mirrored: a row of more than 65 535 cells, or any
+  row once a table has filled in more than 524 288 cells for short rows, ends the table and starts
+  a paragraph (Codex review of PR #115). NFR-118-02 on 2 cores (`taskset -c 0,1`): 103 / 53 / 91 ms for the three
   assertions on the 2 MiB test document including worker start-up; adversarial 2 MiB shapes scan
   in at most about 300 ms.
 - **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**

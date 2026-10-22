@@ -52,6 +52,15 @@ export function literalSearch(text: string, caseSensitive: boolean): (phrase: st
  */
 export const MAX_MARKDOWN_NESTING = 32;
 
+/** Most cells cmark-gfm reads in one table row (`uint16_t`); a wider row is no table row. */
+export const MAX_TABLE_ROW_CELLS = 0xffff;
+
+/**
+ * cmark-gfm's budget of cells it fills in for short body rows (`MAX_AUTOCOMPLETED_CELLS`): once a
+ * table has filled in more, the next line is no table row but starts a paragraph.
+ */
+export const MAX_TABLE_AUTOCOMPLETED_CELLS = 0x80000;
+
 /** Columns per tab stop (CommonMark §2.2). */
 const TAB_STOP = 4;
 /** Indentation from which a line is indented code (CommonMark §4.4). */
@@ -234,7 +243,9 @@ function delimiterRow(line: string, start: number): { columns: number; pipe: boo
     else if (char !== ':' && char !== '-' && !isSpaceOrTab(char)) return null;
   }
   const cells = splitTableRow(line.slice(start));
-  return cells.every((cell) => /^:?-+:?$/.test(cell)) ? { columns: cells.length, pipe } : null;
+  return cells.length <= MAX_TABLE_ROW_CELLS && cells.every((cell) => /^:?-+:?$/.test(cell))
+    ? { columns: cells.length, pipe }
+    : null;
 }
 
 /**
@@ -381,7 +392,7 @@ type Leaf =
   | { kind: 'fence'; marker: FenceMarker }
   | { kind: 'code' }
   | { kind: 'html'; html: HtmlKind }
-  | { kind: 'table'; table: MarkdownTable };
+  | { kind: 'table'; table: MarkdownTable; autocompleted: number };
 
 /** Moves the cursor past a block-quote marker and its optional space. */
 function enterQuote(cursor: Cursor): void {
@@ -521,11 +532,18 @@ export function scanMarkdown(text: string): MarkdownScan {
             const paragraph = current as Extract<Leaf, { kind: 'paragraph' }>;
             // A paragraph may start with link reference definitions, which are no heading text;
             // they are not parsed, so such a heading is not reported (fail-safe). A label may span
-            // lines, so `]:` counts on any line.
+            // lines, so `]:` counts on any line. cmark-gfm reads the underline as paragraph text
+            // when only definitions precede it, and as a heading of the text after them otherwise;
+            // keeping the paragraph open (without tables) reports no block that either reading
+            // lacks: a line that interrupts a paragraph starts a block in both.
             const first = paragraph.lines[0] as string;
-            if (!(/^ {0,3}\[/.test(first) && paragraph.lines.some((l) => l.includes(']:')))) {
-              headings.push(collapseWhitespace(paragraph.lines.join(' ')));
+            if (/^ {0,3}\[/.test(first) && paragraph.lines.some((l) => l.includes(']:'))) {
+              paragraph.lines.push(cursor.rest());
+              paragraph.noTable = true;
+              lineDone = true;
+              break;
             }
+            headings.push(collapseWhitespace(paragraph.lines.join(' ')));
             leaf = null;
             started = true;
             lineDone = true;
@@ -575,7 +593,7 @@ export function scanMarkdown(text: string): MarkdownScan {
               // Reported only with a pipe in both rows, which every GFM reader accepts; without one
               // it is read as a table (its lines are no paragraph or heading) but not reported.
               if (delimiter.pipe && last.includes('|')) tables.push(table);
-              leaf = { kind: 'table', table };
+              leaf = { kind: 'table', table, autocompleted: 0 };
               started = true;
               lineDone = true;
               break;
@@ -611,7 +629,17 @@ export function scanMarkdown(text: string): MarkdownScan {
     } else if (open?.kind === 'html') {
       if (endsHtmlBlock(open.html, cursor.rest())) leaf = null;
     } else if (open?.kind === 'table') {
-      open.table.rows.push({ text: line, cells: splitTableRow(cursor.rest()) });
+      const cells = splitTableRow(cursor.rest());
+      if (
+        cells.length > MAX_TABLE_ROW_CELLS ||
+        open.autocompleted > MAX_TABLE_AUTOCOMPLETED_CELLS
+      ) {
+        // cmark-gfm ends the table here; the line starts a paragraph.
+        leaf = { kind: 'paragraph', lines: [cursor.rest()], noTable: false };
+      } else {
+        open.autocompleted += Math.max(0, open.table.header.length - cells.length);
+        open.table.rows.push({ text: line, cells });
+      }
     } else if (open === null && !cursor.blank) {
       markChild();
       leaf = { kind: 'paragraph', lines: [cursor.rest()], noTable: false };

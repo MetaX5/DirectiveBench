@@ -143,6 +143,20 @@ Not verified: Windows (no path or process changes); behaviour of inline content 
   previous code. Link definitions stay out of the differential corpus on purpose: the scanner does
   not parse them and under-reports such headings (fail-safe), which an equality comparison with
   cmark-gfm would flag.
+- Codex review round 2, two findings, both reproduced against cmarkgfm 2025.10.22 and fixed red
+  first (5 new tests fail on the previous code):
+  - high: after the suppressed underline the paragraph was closed, so `[foo\nbar]: /url\n---\n2.
+    # Fake` reported `Fake`; cmark-gfm reads `---` as paragraph text after definitions only, where
+    `2.` cannot interrupt. The paragraph now stays open (with `noTable`), which reports no block
+    either cmark-gfm reading lacks (definitions only, or definitions plus a heading).
+  - medium: cmark-gfm's table limits (`MAX_AUTOCOMPLETED_CELLS` 0x80000 filled-in cells per table,
+    at most 65 535 cells per row, from `extensions/table.c`) were not mirrored, so a sparse
+    1 000-column table kept rows that GitHub renders as paragraph text. The scanner now counts
+    filled-in cells without materialising them and ends the table as cmark-gfm does; boundaries
+    (524 vs 525 sparse rows, 65 535 vs 65 536 cells) match the empirical cmark-gfm output.
+  - Neither case went into the recorded corpus: link definitions are deliberately not compared
+    (fail-safe under-reporting), and the limit cases need documents of hundreds of KiB that the
+    generator does not produce; both are pinned by direct tests instead.
 
 - An earlier single-threaded spike of the realistic 2 MiB document with micromark took 32 s, which
   led to the per-shape breakdown.

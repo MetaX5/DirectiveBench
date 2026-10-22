@@ -262,6 +262,39 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false, message: 'Missing headings: [foo bar]: /url' });
   });
 
+  it('does not accept a heading in a list that cannot interrupt a definition paragraph (Codex review)', async () => {
+    const result = await evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
+      workspace({ 'doc.md': '[foo\nbar]: /url\n---\n2. # Fake' }),
+    );
+    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+  });
+
+  it('does not read a row after a table filled in its cell budget (Codex review)', async () => {
+    const columns = 1000;
+    const doc = [
+      ['Role', 'Hours', ...Array<string>(columns - 2).fill('c')].join('|'),
+      Array<string>(columns).fill('-').join('|'),
+      ...Array<string>(1000).fill('x'),
+      'Dev|24',
+    ].join('\n');
+    const result = await evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: '^Dev$' },
+        column: 'Hours',
+        min: 24,
+        max: 24,
+      }),
+      workspace({ 'doc.md': doc }),
+    );
+    expect(result).toMatchObject({
+      passed: false,
+      message: expect.stringMatching(/^No row whose first cell matches/),
+    });
+  });
+
   it('does not read a row hidden in an HTML comment after a table', async () => {
     const result = await evaluateAssertion(
       assertion({

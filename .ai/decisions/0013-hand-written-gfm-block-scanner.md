@@ -26,11 +26,13 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
    tab stops with partly consumed tabs, and the GFM table extension tried after every other block
    start, as cmark-gfm does. Inline content is never parsed. Where cmark-gfm and the CommonMark
    reference differ, the scanner follows cmark-gfm (GitHub), e.g. an HTML block of kind 7 may start
-   on a lazy continuation line.
+   on a lazy continuation line, and cmark-gfm's table limits (65 535 cells per row, 524 288
+   filled-in cells per table) end a table as they do on GitHub.
 2. **Fail safe where readers disagree.** Where GFM readers differ or the scanner does not model a
    construct, it reports less, never more: a table without a pipe in its header or delimiter row is
    read (its lines are no paragraph) but not reported; a setext heading whose paragraph may start
-   with a link reference definition is not reported; a document nested deeper than
+   with a link reference definition is not reported, and that paragraph stays open without
+   tables; a document nested deeper than
    `MAX_MARKDOWN_NESTING` (32) ends the scan there.
 3. **Verified differentially against cmark-gfm.** A seeded generator builds container-heavy
    documents (nested block quotes and list items with varied marker padding, tabs and lazy lines;

@@ -3,6 +3,8 @@ import {
   collapseWhitespace,
   literalSearch,
   MAX_MARKDOWN_NESTING,
+  MAX_TABLE_AUTOCOMPLETED_CELLS,
+  MAX_TABLE_ROW_CELLS,
   normalizeText,
   parseFirstNumber,
   scanMarkdown,
@@ -442,6 +444,14 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     ]);
   });
 
+  it('keeps the paragraph open after an underline below a possible link definition (Codex review)', () => {
+    // cmark-gfm: `---` is paragraph text after definitions only, so `2. # Fake` cannot interrupt it.
+    expect(scan(['[foo', 'bar]: /url', '---', '2. # Fake']).headings).toEqual([]);
+    expect(scan(['[foo]: /url', '===', '# Real']).headings).toEqual(['Real']);
+    // No table in that paragraph either, which cmark-gfm may already have ended with a heading.
+    expect(scan(['[foo]: /url', 'text', '---', 'a | b', '- | -']).tables).toEqual([]);
+  });
+
   it(`follows ${MAX_MARKDOWN_NESTING} nested containers and stops the scan below them`, () => {
     const nested = (depth: number) => `${'> '.repeat(depth - 1)}- # Deep`;
     expect(scan(['# Before', nested(MAX_MARKDOWN_NESTING), '# After']).headings).toEqual([
@@ -729,4 +739,39 @@ describe('linear time', () => {
     const number = (text: string) => () => parseFirstNumber(text, '.');
     expect(await ratio(digits, number, 50_000)).toBeLessThan(MAX_LINEAR_RATIO);
   }, 60_000);
+});
+
+describe('scanMarkdown table limits (cmark-gfm)', () => {
+  const sparse = (rows: number) => {
+    const columns = 1000;
+    return [
+      ['Role', 'Hours', ...Array<string>(columns - 2).fill('c')].join('|'),
+      Array<string>(columns).fill('-').join('|'),
+      ...Array<string>(rows).fill('x'),
+      'Dev|24',
+      'more|1',
+    ].join('\n');
+  };
+
+  it(`ends a table once it filled in more than ${MAX_TABLE_AUTOCOMPLETED_CELLS} cells (Codex review)`, () => {
+    // Each `x` row fills in 999 cells; cmark-gfm 2025.10.22 reads `Dev|24` as a row after 524 of
+    // them and as paragraph text after 525, with `more|1` continuing that paragraph.
+    const before = scanMarkdown(sparse(524)).tables[0];
+    expect(before?.rows).toHaveLength(525);
+    expect(before?.rows.at(-1)?.text).toBe('Dev|24');
+    const after = scanMarkdown(sparse(525)).tables;
+    expect(after).toHaveLength(1);
+    expect(after[0]?.rows).toHaveLength(525);
+    expect(after[0]?.rows.at(-1)?.text).toBe('x');
+  });
+
+  it(`reads at most ${MAX_TABLE_ROW_CELLS} cells in a row (Codex review)`, () => {
+    const row = (cells: number) => Array<string>(cells).fill('a').join('|');
+    const delimiter = (cells: number) => Array<string>(cells).fill('-').join('|');
+    expect(scanMarkdown(`${row(0xffff)}\n${delimiter(0xffff)}`).tables).toHaveLength(1);
+    expect(scanMarkdown(`${row(0x10000)}\n${delimiter(0x10000)}`).tables).toEqual([]);
+    // A wider body row ends the table: it and the next line are paragraph text.
+    const wide = scanMarkdown(`a|b\n-|-\n${row(0x10000)}\nc|d`).tables;
+    expect(wide).toEqual([{ header: ['a', 'b'], rows: [] }]);
+  });
 });
