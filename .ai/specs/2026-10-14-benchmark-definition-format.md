@@ -3,7 +3,7 @@ id: SPEC-108
 title: Benchmark Definition Format
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-22
 category: feature
 related: [SPEC-107, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-106, SPEC-005, SPEC-007, ADR-0005, ADR-0006]
 ---
@@ -113,6 +113,8 @@ type AssertionDefinition =
   | { type: 'file-exists'; path: string; exists: boolean /*true*/ } & Common
   | { type: 'file-contains'; path: string; pattern: string; flags: string /*''*/; negate: boolean /*false*/ } & Common
   | { type: 'changed-files'; allowed?: string[]; forbidden?: string[] /* at least one */ } & Common;
+// Planned additive members (no schemaVersion change): 'markdown-sections', 'required-phrases',
+// 'markdown-table-value' — shapes in SPEC-118 §8.4 (2026-10-22-benchmark-own-skills-s1.md).
 
 interface Common { id: string; description?: string; weight: number /*1, 0..1000*/; required: boolean /*false*/ }
 ```
@@ -386,7 +388,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 19. Future extensions
 
-- v1-compatible additions: planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
+- v1-compatible additions: the document assertions `markdown-sections`, `required-phrases` and `markdown-table-value` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.4, next); planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
 - v2 candidates: case matrices (parameterised prompts/fixtures), artifact-specific install hints, multi-turn prompts.
 - Published JSON Schema for editor completion; Builder round-tripping ([SPEC-109](2026-10-14-benchmark-builder.md)).
 

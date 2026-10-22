@@ -3,9 +3,9 @@ id: SPEC-009
 title: CLI Architecture
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: foundation
-related: [SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-010, SPEC-012, SPEC-114, SPEC-115, ADR-0001, ADR-0004, ADR-0007]
+related: [SPEC-118, SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-010, SPEC-012, SPEC-114, SPEC-115, ADR-0001, ADR-0004, ADR-0007]
 ---
 
 # SPEC-009 — CLI Architecture
@@ -28,7 +28,8 @@ The `directivebench` npm package (`apps/cli`): commands, options, environment va
 | `directivebench --help`, `-h` | Implemented (bootstrap) | Usage for the program or a subcommand. |
 | `directivebench --version`, `-V` | Implemented (bootstrap) | Prints the package version. |
 | `sync` | Future | Synchronize registered repositories ([SPEC-105](2026-10-14-repository-synchronization.md)). |
-| `benchmark run`, `benchmark list` | Future | Run/list benchmarks headless ([SPEC-110](2026-10-14-benchmark-execution.md)). |
+| `benchmark init`, `benchmark run` | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)) | `init --artifact <ref>` scaffolds a suite folder; `run <suite> --artifact <ref> [--baseline none\|v<n>] [--auth subscription\|api-key] …` imports the suite, confirms the plan and runs it headless with Claude Code; exit codes in SPEC-118 FR-118-38. |
+| `benchmark list` | Future | List benchmarks headless ([SPEC-110](2026-10-14-benchmark-execution.md)). |
 | `export`, `import` | Future | Portable export/import of registry and results. |
 | `backup`, `restore` | Future | Consistent SQLite backup into `<dataDir>/backups/` and restore. |
 | `runner` | Future | Standalone runner process; later a remote runner ([SPEC-114](2026-10-14-runner-management.md), [SPEC-011](2026-10-14-self-hosting-architecture.md)). |

@@ -21,6 +21,7 @@ The mandatory workflow for AI agents is defined in [`AGENTS.md`](../../AGENTS.md
 ├── product-brief.md          # product brief (om-discover; fixed name, see AGENTS.md §1)
 ├── backlog.md                # backlog record (om-backlog; fixed name)
 ├── research/                 # discovery interviews, decisions and capture templates
+├── briefs/                   # handoff briefs from om-brainstorm (YYYY-MM-DD-slug.md), committed with their spec
 ├── implemented/              # specs whose acceptance criteria are verified in code and tests
 └── archive/                  # deprecated or superseded specs (kept for history)
 ```
@@ -89,7 +90,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 ## Index
 
 All specifications are drafts. They were created on 2026-10-14 during the bootstrap, except
-SPEC-014 and SPEC-117 (2026-10-15).
+SPEC-014 and SPEC-117 (2026-10-15) and SPEC-118 (2026-10-22).
 `implemented/` and `archive/` are currently empty.
 
 ### Foundation
@@ -132,6 +133,7 @@ SPEC-014 and SPEC-117 (2026-10-15).
 | SPEC-115 | [Settings and Configuration](2026-10-14-settings-and-configuration.md) | draft |
 | SPEC-116 | [Dashboard and Navigation](2026-10-14-dashboard-and-navigation.md) | draft |
 | SPEC-117 | [Optional PostgreSQL Backend](2026-10-15-postgresql-backend.md) | draft |
+| SPEC-118 | [Benchmark own skills with Claude Code against registry artifacts (S1)](2026-10-22-benchmark-own-skills-s1.md) | draft |
 
 ### Integrations
 

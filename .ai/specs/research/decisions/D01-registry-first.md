@@ -12,5 +12,6 @@
   (roadmap M3/M4) stays after the Registry. Revisit if the Registry does not give the maintainer
   one place to see and preview their skills, or if judging skill updates becomes the more urgent
   need.
-- Status: active
+- Status: superseded by [D08](D08-comparison-before-the-rest-of-the-registry.md) on 2026-10-22
+  (the first Registry slice shipped; the comparison work goes next).
 - Origin: the maintainer's own choice; it went against the agent's recommendation (B).

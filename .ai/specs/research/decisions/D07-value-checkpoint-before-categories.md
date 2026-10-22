@@ -12,5 +12,7 @@
   uses the Registry on their own repositories for one to two weeks and records whether they open
   it when working on skills; this is the test of A02. Categories (E03) start only after that note
   exists. The one-to-two-week window was the agent's proposal, accepted with the rest.
-- Status: active
+- Status: answered early on 2026-10-22: after using 0.1.1-rc.0 the maintainer said the preview is
+  nice but the product's main job is benchmarking skills and building one's own benchmarks, with
+  no other use today. Categories wait under [D08](D08-comparison-before-the-rest-of-the-registry.md).
 - Origin: Codex review finding; checkpoint shape proposed by the agent; accepted by the maintainer.

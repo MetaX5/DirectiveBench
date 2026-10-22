@@ -3,9 +3,9 @@ id: SPEC-112
 title: RED/GREEN Evaluation
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-107, SPEC-110, SPEC-111, SPEC-113, SPEC-103, SPEC-203, SPEC-204, SPEC-205]
+related: [SPEC-118, SPEC-107, SPEC-110, SPEC-111, SPEC-113, SPEC-103, SPEC-203, SPEC-204, SPEC-205]
 ---
 
 # SPEC-112 — RED/GREEN Evaluation
@@ -28,7 +28,7 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 ## 4. Non-goals
 
-- Comparing two different artifacts against each other (future: A/B mode, §19).
+- Comparing two different artifacts against each other. (Comparing two **versions of the same artifact** — A/B mode — is planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §6.2.)
 - Comparing agents or models against each other (that is a different comparability key, [SPEC-111](2026-10-14-benchmark-scoring.md)).
 - Guaranteeing causality for nondeterministic agents from a single run.
 
@@ -43,9 +43,9 @@ Absolute benchmark scores say little about an instruction file: a capable agent 
 
 | ID | Requirement |
 |---|---|
-| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate). |
+| FR-112-01 | A benchmark run SHALL reference one suite version and one artifact version (candidate), and optionally a baseline artifact version of the same artifact (A/B, planned in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-10…13). |
 | FR-112-02 | For each case and each repetition `r ∈ 1..repetitions`, the run SHALL execute exactly one baseline and one candidate agent run. |
-| FR-112-03 | Baseline SHALL have no artifact installed. Candidate SHALL have exactly the referenced artifact version installed via `AgentAdapter.installArtifact` (e.g. Mock Agent → `.agents/skills/<slug>/`). |
+| FR-112-03 | Baseline SHALL have no artifact installed — or, in an A/B run, exactly the baseline version installed the same way as the candidate. Candidate SHALL have exactly the referenced artifact version installed via `AgentAdapter.installArtifact` (e.g. Mock Agent → `.agents/skills/<slug>/`). |
 | FR-112-04 | Both variants SHALL use the same fixture snapshot hash (same commit for repository-sourced fixtures), verification overlay hash, prompt, adapter id and version, model config, tool permissions, environment kind and limits (`timeoutSeconds`, `maxOutputBytes`). |
 | FR-112-05 | Each agent run SHALL use an independent fresh workspace ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-01); no files, processes, caches or HOME directories are shared between agent runs. |
 | FR-112-06 | Adapter-level state (sessions, conversation ids, caches the adapter controls) SHALL be reset per agent run; adapters SHALL declare which state they cannot reset. |
@@ -210,7 +210,7 @@ Runner persists `benchmark_runs` (with `agent_adapter_id`, `agent_version`, `mod
 
 ## 19. Future extensions
 
-- A/B mode: candidate vs. a different artifact version instead of no artifact.
+- A/B mode: candidate vs. a different version of the same artifact instead of no artifact — specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) (planned).
 - Multi-artifact candidates (artifact sets) with ablation.
 - Statistical tests for nondeterministic agents.
 - Remote runners executing pairs on the same host to keep environment equivalence.

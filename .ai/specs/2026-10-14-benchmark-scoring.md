@@ -3,9 +3,9 @@ id: SPEC-111
 title: Benchmark Scoring
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-107, SPEC-108, SPEC-110, SPEC-112, SPEC-113, SPEC-103, SPEC-005]
+related: [SPEC-118, SPEC-107, SPEC-108, SPEC-110, SPEC-112, SPEC-113, SPEC-103, SPEC-005]
 ---
 
 # SPEC-111 — Benchmark Scoring
@@ -93,7 +93,7 @@ For case `c`, variant `v ∈ {baseline, candidate}`, let `N` be the number of at
 | FR-111-40 | Confidence SHALL be `low` if repetitions < 3; `medium` if 3–9, or ≥ 10 but the verdict is `unstable`; `high` if repetitions ≥ 10 and not `unstable`. Repetitions means the configured count per variant per case. |
 | FR-111-41 | Each assertion type SHALL declare `deterministic: boolean`. Each agent adapter SHALL declare `deterministic: boolean` (Mock Agent: true; real agents and the future harness: false). |
 | FR-111-42 | A benchmark run SHALL be flagged `nondeterministic` if its adapter or any of its assertions is nondeterministic. Results from a `nondeterministic` run with a single repetition SHALL be labelled "not conclusive". |
-| FR-111-43 | A run SHALL store `comparabilityKey = sha256(canonicalJson({ cases, scoring, execution, fixtures, adapterId, adapterVersion }))`, where `cases`, `scoring` and `execution` are the validated definition sections (prompts, assertions, weights, thresholds, agent, model, environment, `timeoutSeconds`, `repetitions`, `maxOutputBytes`) and `fixtures` are the per-case fixture and overlay hashes. Because `cases + scoring + execution` are the definition content, this subsumes the suite version; suite metadata (name, description, categories) does not change the key. The artifact version is **not** part of the key. Future harness-specific dimensions (e.g. harness version) are added to the hashed object. Implemented as `comparabilityKey()` in `packages/benchmark-engine/src/orchestrator.ts`. |
+| FR-111-43 | A run SHALL store `comparabilityKey = sha256(canonicalJson({ cases, scoring, execution, fixtures, adapterId, adapterVersion }))`, where `cases`, `scoring` and `execution` are the validated definition sections (prompts, assertions, weights, thresholds, agent, model, environment, `timeoutSeconds`, `repetitions`, `maxOutputBytes`) and `fixtures` are the per-case fixture and overlay hashes. Because `cases + scoring + execution` are the definition content, this subsumes the suite version; suite metadata (name, description, categories) does not change the key. The artifact version is **not** part of the key. Future harness-specific dimensions (e.g. harness version) are added to the hashed object. Planned for real agents ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.3): an `agentProfile` (auth mode, isolation profile, permission profile, flags hash, and a per-installation `hostId` for the `user-profile` isolation) is added **only when the adapter reports one**, so mock-agent keys stay byte-identical; the A/B baseline version is stored on the run, not hashed. Implemented as `comparabilityKey()` in `packages/benchmark-engine/src/orchestrator.ts`. |
 | FR-111-44 | Within one benchmark run the baseline and candidate SHALL share the key; if any agent run's actually-observed adapter version or environment differs, the comparability check fails → `not-comparable`. |
 | FR-111-45 | Results with different comparability keys SHALL never be aggregated, averaged, ranked or charted on one series. Cross-key views SHALL show them side by side with an explicit "not comparable" label. |
 | FR-111-46 | The system SHALL NOT compute or display global rankings across different suites. |

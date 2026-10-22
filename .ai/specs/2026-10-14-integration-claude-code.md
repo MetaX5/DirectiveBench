@@ -3,9 +3,9 @@ id: SPEC-203
 title: Claude Code agent adapter
 status: draft
 created: 2026-10-14
-updated: 2026-10-14
+updated: 2026-10-22
 category: integration
-related: [SPEC-003, SPEC-007, SPEC-012, SPEC-102, SPEC-110, SPEC-112, SPEC-114, SPEC-115, SPEC-204, SPEC-205, SPEC-206, SPEC-211, ADR-0006, ADR-0007, ADR-0008, ADR-0009]
+related: [SPEC-118, SPEC-003, SPEC-007, SPEC-012, SPEC-102, SPEC-110, SPEC-112, SPEC-114, SPEC-115, SPEC-204, SPEC-205, SPEC-206, SPEC-211, ADR-0006, ADR-0007, ADR-0008, ADR-0009]
 ---
 
 # SPEC-203 — Claude Code agent adapter
@@ -123,7 +123,7 @@ Mapping to the `AgentAdapter` capability contract ([SPEC-110 §8](2026-10-14-ben
 
 - Instruction files (`CLAUDE.md`, `AGENTS.md`) that already exist in the fixture are **appended to**, separated by a blank line. This matches the Mock Agent (`packages/agent-adapters/src/mock.ts`). For skills and rules, an existing target path → `infrastructure-error` (`artifact-install-conflict`). Files are written with exclusive-create and path containment (`writeArtifactFiles`).
 - `.agents/skills/` is **not** documented as a Claude Code skill location (C3 does not mention it). Do not use it for this adapter.
-- The baseline variant receives nothing. Both variants get identical flags, model, permission profile and environment.
+- The baseline variant receives nothing, except in an A/B run ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-11), where it receives the baseline version of the same artifact through exactly this convention. Both variants get identical flags, model, permission profile and environment.
 
 ### 4.2 Contract mapping and required extensions
 
@@ -214,8 +214,8 @@ Per agent configuration (stored in `config.json` / DB without secrets; [SPEC-115
 | Setting | Values | Default |
 | --- | --- | --- |
 | `binaryPath` | absolute path override | auto (PATH) |
-| `authMode` | `subscription` \| `api-key` \| `gateway` | none: the user must choose explicitly |
-| `secretRef` | reference to `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (api-key/gateway) | — |
+| `authMode` | `subscription` \| `api-key` \| `gateway` | `subscription` (maintainer decision for S1, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md); previously "none: the user must choose explicitly"). Every run shows the mode, and subscription runs carry `ambient-user-config` (§8). `gateway` is not offered in S1. |
+| `secretRef` | reference to `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (api-key/gateway) | — (S1: only `{ source: 'env', name: 'ANTHROPIC_API_KEY' }` from the CLI environment, until [ADR-0008](../decisions/0008-secret-storage-and-authentication.md) keychain storage exists) |
 | `baseUrl` | gateway URL (gateway mode) | — |
 | `permissionProfile` | `edit-only` → `--tools "Read,Edit,Write,Glob,Grep" --permission-mode dontAsk --allowedTools "Read,Edit,Write,Glob,Grep"`. `--tools` removes `Bash` entirely, because under `dontAsk` the read-only command set would otherwise still run (C1). `edit-and-shell` → adds `Bash` to both lists (only for execution-approved suites). | `edit-only` |
 | `maxBudgetUsd` | number (API Key Mode) | unset |
@@ -280,14 +280,16 @@ Per [SPEC-012](2026-10-14-testing-strategy.md). **No paid or authenticated calls
 - [ ] AC-2: Readiness distinguishes "logged in (subscription)", "API key configured", and "not ready" without reading any credential file, and without persisting raw `auth status` output.
 - [ ] AC-3: In API Key Mode the agent process has `HOME` and `CLAUDE_CONFIG_DIR` inside the run temp dir and the key only in env. A test proves the key never appears in argv, DB rows, logs or traces.
 - [ ] AC-4: In Local Subscription Mode no `ANTHROPIC_*`/`CLAUDE_CODE_USE_*`/`CLAUDE_CODE_OAUTH_TOKEN` variable reaches the agent, and every run records the `ambient-user-config` warning.
-- [ ] AC-5: The candidate install places `skill-md` under `.claude/skills/<slug>/`, `claude-md` at `CLAUDE.md`, `claude-rule` under `.claude/rules/`, `agents-md` per §4.1. The baseline workspace contains none of them.
-- [ ] AC-6: Baseline and candidate runs of one case use byte-identical argv and identical env keys. Only the workspace contents differ.
+- [ ] AC-5: The candidate install places `skill-md` under `.claude/skills/<slug>/`, `claude-md` at `CLAUDE.md`, `claude-rule` under `.claude/rules/`, `agents-md` per §4.1. The baseline workspace contains none of them, or in an A/B run exactly the baseline version installed the same way ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md)).
+- [ ] AC-6: Baseline and candidate runs of one case use byte-identical argv and identical env keys. Only the workspace contents differ (no artifact vs candidate, or baseline version vs candidate version).
 - [ ] AC-7: A recorded stream-json fixture is parsed into trace events, reported model, token usage and estimated cost. Malformed input yields `output-parse-error`, not a crash.
 - [ ] AC-8: Cancellation and timeout terminate the whole process group within 10 s (fake CLI test) and yield `cancelled` / `timeout`.
 - [ ] AC-9: Configurations requesting `bypassPermissions`, `--dangerously-skip-permissions`, `--bare` for candidate runs, or `--fallback-model` are rejected with a clear message.
 - [ ] AC-10: Error fixtures map to the codes in §9.
 
 ## 13. Current implementation status
+
+The first execution slice (S1) is specified in [SPEC-118](2026-10-22-benchmark-own-skills-s1.md): print mode with `stream-json`, both auth modes (subscription default; API key from the environment only), the `edit-only`/`edit-and-shell` profiles, install convention §4.1 for candidate and A/B baseline, the §4.2 extensions it needs, cancellation, parsing, usage and §9 errors. The Agent SDK option, gateway and cloud-provider modes stay out of S1. The terms review of §3.2 must be recorded here before a release ships subscription mode as the default.
 
 - **Implemented in bootstrap** (code in `packages/agent-adapters/src/detection.ts`; the missing-executable path is verified by `packages/agent-adapters/test/mock.test.ts` "detectCliAgent"; detection of an installed `claude` is not covered by a test): a detection descriptor (`id: 'claude-code'`, executable `claude`, `--version`). It locates the binary on `PATH` without a shell, runs `--version` with a 5 s timeout, stores the first output line, reports `auth: 'unknown'`, and never reads credential files. The results are shown on the Agent Connections page and by `directivebench doctor`.
 - **Partially implemented:** version parsing. The raw first line is stored (e.g. `2.1.296 (Claude Code)`). The semver extraction and minimum-version check from AC-1/§10 are not implemented.

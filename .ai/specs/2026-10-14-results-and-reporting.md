@@ -3,9 +3,9 @@ id: SPEC-113
 title: Results and Reporting
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-111, SPEC-112, SPEC-110, SPEC-114, SPEC-101, SPEC-103, SPEC-116, SPEC-007, SPEC-006]
+related: [SPEC-118, SPEC-111, SPEC-112, SPEC-110, SPEC-114, SPEC-101, SPEC-103, SPEC-116, SPEC-007, SPEC-006]
 ---
 
 # SPEC-113 — Results and Reporting
@@ -66,7 +66,7 @@ Users decide whether to keep, change or roll out an instruction based on what th
 
 | ID | Requirement |
 |---|---|
-| FR-113-10 | The run detail SHALL show header: suite name + version, artifact name + version, agent adapter + version, model (or "none"), environment kind with sandbox badge ("Not sandboxed" for `local-process`), repetitions, started/finished, duration, display status, verdict reasons, confidence, comparability key (short). |
+| FR-113-10 | The run detail SHALL show header: suite name + version, artifact name + version, agent adapter + version, model (or "none"), environment kind with sandbox badge ("Not sandboxed" for `local-process`), repetitions, started/finished, duration, display status, verdict reasons, confidence, comparability key (short). For real agents (planned, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-52) it also names the baseline ("Baseline (no artifact)" / "Baseline (vN)") and shows the agent profile (auth mode, isolation profile, permission profile, requested and reported model). |
 | FR-113-11 | A RED vs GREEN comparison SHALL show, per variant at suite level and per case: meanScore, passRate, errorRate, stdDev, min/max, validRuns, mean duration; delta and passRateDelta. |
 | FR-113-12 | A per-assertion table SHALL show for each case and assertion: id, type, weight, required, deterministic, and per variant the pass count over valid runs (e.g. `0/3`, `3/3`) with links to individual results. |
 | FR-113-13 | Per agent run, the view SHALL show execution status, score, passed, changed files, assertion results with messages, and the trace (stage timeline, commands with argv, exit code, duration, truncated/redacted stdout/stderr). |
@@ -80,7 +80,7 @@ Users decide whether to keep, change or roll out an instruction based on what th
 | ID | Requirement |
 |---|---|
 | FR-113-20 | Artifact detail SHALL show, per assigned suite, the latest completed result for the latest artifact version (display status, delta, confidence, date) or `not-tested`. |
-| FR-113-21 | Artifact detail SHALL show evaluation history: all benchmark runs across artifact versions, newest first, grouped by comparability key; rows from different keys are not compared. |
+| FR-113-21 | Artifact detail SHALL show evaluation history: all benchmark runs across artifact versions, newest first, grouped by comparability key; rows from different keys are not compared. Planned layout ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-50/51): one block per artifact version, each run row naming its baseline, agent, auth mode and isolation profile. |
 | FR-113-22 | Version regressions ([SPEC-111](2026-10-14-benchmark-scoring.md) FR-111-50…52) SHALL be highlighted in the history. |
 | FR-113-23 | Artifact lists SHALL show a compact status summarizing the worst display status among assigned suites for the latest version (precedence: error > not-comparable > unstable > regression > failed > passed > not-tested), with the mock label if all results are mock-only. |
 

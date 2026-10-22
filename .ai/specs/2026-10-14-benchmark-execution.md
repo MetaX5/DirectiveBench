@@ -3,9 +3,9 @@ id: SPEC-110
 title: Benchmark Execution
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-22
 category: feature
-related: [SPEC-107, SPEC-108, SPEC-111, SPEC-112, SPEC-114, SPEC-007, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-207, SPEC-211]
+related: [SPEC-118, SPEC-107, SPEC-108, SPEC-111, SPEC-112, SPEC-114, SPEC-007, SPEC-203, SPEC-204, SPEC-205, SPEC-206, SPEC-207, SPEC-211]
 ---
 
 # SPEC-110 — Benchmark Execution
@@ -55,7 +55,7 @@ Benchmarking instructions only means something if both variants run under contro
 | FR-110-02 | The engine SHALL copy the fixture snapshot `<dataDir>/fixtures/<sha256>/` into the workspace and verify the resulting file manifest hash equals the snapshot hash. |
 | FR-110-03 | Snapshotting (at import) and copying SHALL reject symlinks, hard-link tricks resolving outside the root, device files and paths escaping the root (`..`, absolute paths). |
 | FR-110-04 | The engine SHALL run the case's `setup` commands in order, under the command execution rules; a non-zero exit SHALL end the run with `infrastructure-error`. |
-| FR-110-05 | For the **candidate** variant only, the engine SHALL install the exact artifact version using the adapter's install convention (`AgentAdapter.installArtifact`), e.g. Mock Agent → `.agents/skills/<slug>/`. The baseline SHALL receive no artifact. |
+| FR-110-05 | For the **candidate** variant only, the engine SHALL install the exact artifact version using the adapter's install convention (`AgentAdapter.installArtifact`), e.g. Mock Agent → `.agents/skills/<slug>/`. The baseline SHALL receive no artifact — except in an A/B run (planned, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-11), where it receives the chosen baseline version of the same artifact through the same install convention. |
 | FR-110-06 | The engine SHALL compute a **before manifest** (relative path → sha256, mode, size) after setup and installation, excluding the installed-artifact paths from agent change attribution (recorded separately). |
 | FR-110-07 | The engine SHALL invoke the agent through `AgentAdapter.run` with the case prompt, workspace path, model config, limits, and an `AbortSignal`; the call SHALL be bounded by `timeoutSeconds`. |
 | FR-110-08 | On timeout the engine SHALL abort the agent, kill its process tree (SIGTERM, then SIGKILL after a grace period of 5 s), and record status `timeout`. |
