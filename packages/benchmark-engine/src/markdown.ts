@@ -196,23 +196,27 @@ function containerContent(line: string): string | null {
   return quotes > 0 || indent > 0 ? content : null;
 }
 
+/** The container a fenced code block or an HTML comment was opened in. */
+interface Context {
+  quotes: number;
+  indent: number;
+}
+
 /**
- * True when `line` closes `fence` in the container it was opened in: the same block-quote depth,
- * list-item content indented at least as far. Any other prefix keeps the line inside the code
- * block, so `> ```` inside a top-level fence is code, not a fence.
+ * The rest of `line` when it still continues `context` — the same block-quote depth and, inside
+ * a list item, a blank line or content indented at least as far — or null when the container has
+ * ended. Fenced code and HTML blocks have no lazy continuation (GFM §4.5, §4.6, §5.1, §5.2): a
+ * line without the quote marker, or with less indentation, ends them with their container.
  */
-function closesInContext(line: string, fence: Fence): boolean {
+function containerRest(line: string, context: Context): string | null {
   let rest = line;
-  for (let depth = 0; depth < fence.quotes; depth += 1) {
+  for (let depth = 0; depth < context.quotes; depth += 1) {
     const marker = QUOTE_MARKER.exec(rest);
-    if (!marker) return false;
+    if (!marker) return null;
     rest = rest.slice(marker[0].length);
   }
-  if (fence.indent > 0) {
-    if (indentation(rest) < fence.indent) return false;
-    rest = rest.slice(fence.indent);
-  }
-  return closesFence(rest, fence);
+  if (context.indent === 0 || rest.trim() === '') return rest;
+  return indentation(rest) < context.indent ? null : rest.slice(context.indent);
 }
 
 /** An HTML comment opener at the start of a line; its content is never rendered. */
@@ -232,18 +236,31 @@ export function scanMarkdown(text: string): MarkdownScan {
   let fence: Fence | null = null;
   let paragraph: string[] = [];
   let table: MarkdownTable | null = null;
-  let comment = false;
+  let comment: Context | null = null;
   // Inside a block quote or list item until a blank line (lazy continuation lines).
   let container = false;
+  // Content indentation of the open top-level list item; its lines are read relative to it.
+  let listIndent = 0;
 
   for (const line of lines) {
     if (fence) {
-      if (closesInContext(line, fence)) fence = null;
-      continue;
+      // Code until the closing fence, or until the fence's container ends; then the line is
+      // read again as a new block.
+      const rest = containerRest(line, fence);
+      if (rest !== null) {
+        // Lazy continuation follows paragraphs only, never a closed fence (GFM §5.1).
+        if (closesFence(rest, fence)) [fence, container] = [null, false];
+        continue;
+      }
+      fence = null;
     }
     if (comment) {
-      comment = !line.includes('-->');
-      continue;
+      const rest = containerRest(line, comment);
+      if (rest !== null) {
+        if (rest.includes('-->')) [comment, container] = [null, false];
+        continue;
+      }
+      comment = null;
     }
     if (table) {
       if (!endsTable(line)) {
@@ -252,22 +269,43 @@ export function scanMarkdown(text: string): MarkdownScan {
       }
       table = null;
     }
-    // Fences also open inside block quotes and list items (`> ```` … `> ````).
-    const containers = splitContainers(line);
-    const inner = containers.quotes > 0 || containers.indent > 0 ? containers.content : null;
-    const topLevel = openingFence(line);
-    const opened = topLevel ?? openingFence(containers.content);
+    // Only a bullet or an ordered list starting at 1 may interrupt a paragraph (GFM §5.2).
+    const keepsParagraph: boolean =
+      paragraph.length > 0 &&
+      !container &&
+      /^ {0,3}\d{1,9}[.)]/.test(line) &&
+      !/^ {0,3}1[.)]/.test(line);
+    const containers: Containers = keepsParagraph
+      ? { quotes: 0, indent: 0, content: line }
+      : splitContainers(line);
+    const inner: string | null =
+      containers.quotes > 0 || containers.indent > 0 ? containers.content : null;
+    // A line indented at least as far as the open list item's content continues that item.
+    const listRest =
+      inner === null && listIndent > 0 && line.trim() !== '' && indentation(line) >= listIndent
+        ? line.slice(listIndent)
+        : null;
+    if (inner === null && listRest === null && line.trim() !== '' && !container) listIndent = 0;
+    // Fences and HTML comments open at the top level, in a block quote or list-item line, or on
+    // a continuation line of the open list item, and remember that container.
+    const block: Context & { text: string } =
+      inner !== null
+        ? { quotes: containers.quotes, indent: containers.indent, text: inner }
+        : listRest !== null
+          ? { quotes: 0, indent: listIndent, text: listRest }
+          : { quotes: 0, indent: 0, text: line };
+    const opened = openingFence(block.text);
     if (opened) {
-      fence = topLevel
-        ? { ...topLevel, quotes: 0, indent: 0 }
-        : { ...opened, quotes: containers.quotes, indent: containers.indent };
+      fence = { ...opened, quotes: block.quotes, indent: block.indent };
       paragraph = [];
       container = inner !== null;
       continue;
     }
-    if (opensComment(line)) {
-      comment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
+    if (opensComment(block.text)) {
+      const closed = block.text.slice(block.text.indexOf('<!--') + 4).includes('-->');
+      comment = closed ? null : { quotes: block.quotes, indent: block.indent };
       paragraph = [];
+      container = inner !== null;
       continue;
     }
     if (line.trim() === '') {
@@ -275,7 +313,7 @@ export function scanMarkdown(text: string): MarkdownScan {
       container = false;
       continue;
     }
-    const atx = atxHeading(line);
+    const atx = atxHeading(line) ?? (listRest === null ? null : atxHeading(listRest));
     if (atx !== null) {
       headings.push(atx);
       paragraph = [];
@@ -296,14 +334,33 @@ export function scanMarkdown(text: string): MarkdownScan {
     }
     if (inner !== null) {
       const nested = atxHeading(inner);
+      // A quote-only line continues the quote's paragraph; a list-item line starts a new one.
+      const quoteContinuation = container && containers.indent === 0;
+      if (
+        nested === null &&
+        quoteContinuation &&
+        paragraph.length > 0 &&
+        isSetextUnderline(inner)
+      ) {
+        headings.push(collapseWhitespace(paragraph.join(' ')));
+        paragraph = [];
+        continue;
+      }
+      listIndent = containers.quotes === 0 ? containers.indent : 0;
       container = true;
-      // A new block-quote or list-item line starts a new paragraph inside the container.
-      paragraph = nested === null && inner.trim() !== '' ? [inner.trim()] : [];
       if (nested !== null) headings.push(nested);
+      if (nested !== null || inner.trim() === '') paragraph = [];
+      else if (quoteContinuation) paragraph.push(inner.trim());
+      else paragraph = [inner.trim()];
       continue;
     }
     if (container) {
-      // Lazy or indented continuation: its text can head a table, never a setext heading.
+      // A setext underline counts only inside the list item; a lazy line never underlines.
+      if (listRest !== null && paragraph.length > 0 && isSetextUnderline(listRest)) {
+        headings.push(collapseWhitespace(paragraph.join(' ')));
+        paragraph = [];
+        continue;
+      }
       paragraph.push(line.trim());
       continue;
     }

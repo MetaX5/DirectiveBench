@@ -170,6 +170,18 @@ source (a string, not instrumented — behaviour is tested end to end).
      self-contained function run on the runner thread for literals and from its source text in
      the worker), so results are O(matchers); a dense-heading test bounds the result size.
      No other path returns per-match data from the worker; glob lists are capped at 20.
+   The first push of 6ac90df was rejected by GitHub with a bare "(failed)". The retry succeeded,
+   but the chained comment step had run without its file; it was posted after the retry.
+9. Codex review round 3 (one medium, valid): an unclosed fence ended only at a closing fence,
+   even after its quote or list item had ended (`> ~~~` / blank / top-level `~~~` / `> ~~~` /
+   `# Fake` reported "Fake"). Fences and HTML comments now end with their container
+   (`containerRest`: quote depth, list content indentation, no lazy continuation) and the line
+   is read again. A self-audit against GFM §4.2/§4.3/§4.5/§5.1/§5.2 found five more false
+   negatives, all fixed and covered by a table-driven test: setext headings inside quotes and list
+   items, ATX headings and fences at a relative indent in a list item, and the rule that only
+   `1.` interrupts a paragraph. A closed fence or comment also clears lazy continuation. Own review
+   caught a quadratic array spread for long quoted paragraphs before commit; new linearity shapes
+   cover it.
 
 ## Verification
 

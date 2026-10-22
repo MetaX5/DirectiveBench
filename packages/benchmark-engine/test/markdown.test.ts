@@ -141,20 +141,36 @@ describe('scanMarkdown headings', () => {
     const { headings } = scanMarkdown(
       [
         '> ```',
-        '```',
-        '# Hidden: unquoted fence line does not close a quoted fence',
         '> > ```',
-        '# Hidden: deeper quote does not close it either',
+        '> # Hidden: a deeper quote marker does not close it',
         '> ```',
         '# Quote closed',
         '- ```',
-        '```',
-        '# Hidden: less indented than the list content',
+        '  # Hidden: list content',
         '  ```',
         '# List closed',
       ].join('\n'),
     );
     expect(headings).toEqual(['Quote closed', 'List closed']);
+  });
+
+  it('ends an unclosed fence with its container and reads the line again (GFM §4.5)', () => {
+    const scan = (lines: string[]) => scanMarkdown(lines.join('\n')).headings;
+    // The Codex repro: the quoted fence ends at the blank line; `# Fake` is inside the later
+    // top-level fence, whose `> ~~~` line is code.
+    expect(scan(['> ~~~', '> code', '', '~~~', '> ~~~', '# Fake', '~~~'])).toEqual([]);
+    // Quote exit: a line without `>` ends the quote and the fence; the heading after it counts.
+    expect(scan(['> ```', '> code', '# Visible after quote'])).toEqual(['Visible after quote']);
+    expect(scan(['> ```', '> code', 'plain', '# Visible'])).toEqual(['Visible']);
+    // List exit: content indented less than the item ends it.
+    expect(scan(['- ```', '  code', '# Visible after list'])).toEqual(['Visible after list']);
+    // Blank lines continue a list item, but end a block quote.
+    expect(scan(['- ```', '  a', '', '  # Hidden', '  ```', '# After'])).toEqual(['After']);
+    expect(scan(['> ```', '', '# After blank'])).toEqual(['After blank']);
+    // Nested containers: leaving the inner list but staying in the quote.
+    expect(scan(['> - ```', '>   # Hidden', '> # Visible in quote'])).toEqual(['Visible in quote']);
+    // A top-level fence has no container to leave.
+    expect(scan(['```', '', '> x', '- y', '# Hidden', '```'])).toEqual([]);
   });
 
   it('ends a list item at an ATX heading or a fence', () => {
@@ -164,6 +180,60 @@ describe('scanMarkdown headings', () => {
       ),
     );
     expect(headings).toEqual(['Risks', 'Title', 'After']);
+  });
+
+  // Self-audit against the GFM container rules the scanner relies on (block quotes §5.1, list
+  // items §5.2, fences §4.5, setext §4.3, ATX §4.2): every case a reader sees as a heading counts,
+  // and nothing else does.
+  it.each([
+    ['setext inside a block quote', ['> Title', '> ==='], ['Title']],
+    ['multi-line setext inside a block quote', ['> a', '> b', '> ---'], ['a b']],
+    ['a lazy line never underlines', ['> Title', '==='], []],
+    ['a blank quote line ends the paragraph', ['> a', '>', '> ==='], []],
+    ['setext inside a list item', ['- Title', '  ---'], ['Title']],
+    ['an unindented --- ends the list item', ['- item', '---'], []],
+    ['a new list item starts a new paragraph', ['- a', '- b', '  ---'], ['b']],
+    ['ATX at a relative indent in a list item', ['- item', '    # Sub'], ['Sub']],
+    [
+      'blank lines keep the list item open',
+      ['- a', '', '  # In item', '', '    # Deep'],
+      ['In item', 'Deep'],
+    ],
+    ['an unindented paragraph ends the list item', ['- a', '', 'Para', '    # code'], []],
+    [
+      'a fence at a relative indent in a list item',
+      ['- a', '    ```', '    # x', '    ```', '# y'],
+      ['y'],
+    ],
+    [
+      'an unindented fence line ends the item and opens a new fence',
+      ['- a', '  ```', '  code', '```', '# hidden', '```', '# z'],
+      ['z'],
+    ],
+    [
+      'a comment on a list continuation line',
+      ['- a', '    <!--', '    # Hidden', '    -->', '# After'],
+      ['After'],
+    ],
+    [
+      'only 1. interrupts a paragraph',
+      ['Revenue grew in', '2026. Plan', '==='],
+      ['Revenue grew in 2026. Plan'],
+    ],
+    ['1. interrupts a paragraph', ['Text', '1. # Item'], ['Item']],
+    ['a block quote interrupts a paragraph', ['Para', '> # Q'], ['Q']],
+  ] as const)('%s', (_, lines, expected) => {
+    expect(scanMarkdown(lines.join('\n')).headings).toEqual(expected);
+  });
+
+  it('hides headings in HTML comments inside containers until the comment or container ends', () => {
+    const scan = (lines: string[]) => scanMarkdown(lines.join('\n')).headings;
+    expect(scan(['> <!--', '> # Hidden', '> -->', '# Shown'])).toEqual(['Shown']);
+    expect(scan(['> <!--', '> x', '# Shown after quote'])).toEqual(['Shown after quote']);
+    expect(scan(['- <!-- # Hidden -->', '# Shown after list comment'])).toEqual([
+      'Shown after list comment',
+    ]);
+    expect(scan(['- <!--', '  # Hidden', '', '  -->', 'Title', '==='])).toEqual(['Title']);
   });
 
   it('does not count headings inside HTML comments', () => {
@@ -424,6 +494,9 @@ describe('linear time', () => {
     'nested list markers': (n) => `${'- 1. '.repeat(n * 5)}x\n`,
     'html comments': (n) => '<!-- x\n'.repeat(n) + '-->\n',
     'quoted fences': (n) => '> ```\n> # x\n'.repeat(n),
+    'one long quoted paragraph': (n) => `${'> quoted line of text\n'.repeat(n)}> ===\n`,
+    'one long list item': (n) => `- item\n${'  continuation line\n'.repeat(n)}  ---\n`,
+    'unclosed fences leaving quotes': (n) => '> ```\n> code\n\n'.repeat(n),
     'table body with breaks': (n) => `| a | b |\n|---|---|\n${'| 1 | 2 |\n* * *\n'.repeat(n)}`,
   };
 

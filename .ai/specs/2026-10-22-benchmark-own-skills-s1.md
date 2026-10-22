@@ -681,7 +681,13 @@ changed before merge.
   body ends at a list item, block quote or thematic break as in GFM. After Codex round 2: a fence
   closes only in the container context it opened in (block-quote depth, list indentation), so
   quoted or listed fence text inside an outer fence stays code; the worker returns O(matchers)
-  results.
+  results. After Codex round 3 and a self-audit against the GFM container rules (§4.2 ATX, §4.3
+  setext, §4.5 fences, §5.1 block quotes, §5.2 list items): an unclosed fence or HTML comment
+  ends with its container (quote marker missing, list content less indented); setext headings
+  count inside block quotes and list items but never on a lazy line; list-item lines are read
+  relative to the item's content indentation; only `1.` or a bullet interrupts a paragraph.
+  Known limits, each failing safe (a heading or table is missed, never invented): tables inside
+  block quotes, and list items nested inside block quotes beyond their first line.
   NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
   development machine; the CI test bounds it at 5 s (plus linearity tests normalised by a linear
   baseline) so a loaded runner cannot flake it.

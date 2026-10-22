@@ -213,6 +213,19 @@ describe('markdown structure boundaries (Codex review)', () => {
     }
   });
 
+  it('grades fences that end with their container as GFM does', async () => {
+    const sections = (document: string) =>
+      evaluateAssertion(
+        assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake', 'Risks'] }),
+        workspace({ 'doc.md': document }),
+      );
+    expect(await sections('> ~~~\n> code\n\n~~~\n> ~~~\n# Fake\n~~~\n# Risks\n')).toMatchObject({
+      passed: false,
+      message: 'Missing headings: Fake',
+    });
+    expect(await sections('# Fake\n> ```\n> code\n# Risks\n')).toMatchObject({ passed: true });
+  });
+
   it('does not read numbers after a list or thematic break as table rows', async () => {
     for (const boundary of ['- no table anymore', '---', '* * *']) {
       const result = await evaluateAssertion(
