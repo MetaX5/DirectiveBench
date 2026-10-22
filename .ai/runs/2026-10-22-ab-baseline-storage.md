@@ -163,6 +163,18 @@ both valid and fixed in the Codex-fix commit:
    defaults and `ensureInstallationId` overwrote it (FR-115-11). Defaults now apply only when the
    file is absent; test: `null` throws `ConfigError` and the file stays unchanged.
 
+Codex round 2 (head `38bf9ab`): the `null` fix confirmed; one medium finding, valid: automatic
+stale-lock recovery let two starters break the same stale lock, and either `finally` could
+unlink the other's lock, reopening the identity race during crash recovery. Fixed by failing
+closed: no automatic recovery — a lock still present after `CONFIG_LOCK_TIMEOUT_MS` throws a
+`ConfigError` naming the lock file and its age (`CONFIG_LOCK_STALE_MS` removed); the lock holds a
+random token and release unlinks it only while it still holds that token. Tests: a leftover
+(hour-old) lock fails closed with config and lock untouched; a lock replaced by another token is
+kept; a lock deleted while held, an unreadable lock and a lock released at the deadline are
+covered. Red first: the fail-closed and foreign-token tests fail on `38bf9ab`. `doctor` does not
+report a leftover lock (not trivial: a new check, its tests and a SPEC-009 change); the error
+message names the file and the fix.
+
 ## Lessons recorded
 
 - [2026-10-22 — Pin each migration's up/down test to its own journal prefix](../lessons/2026-10-22-pin-migration-tests-to-their-journal-prefix.md)

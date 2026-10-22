@@ -16,7 +16,6 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  CONFIG_LOCK_STALE_MS,
   CONFIG_LOCK_TIMEOUT_MS,
   ConfigError,
   dataDirLayout,
@@ -296,30 +295,31 @@ describe('ensureInstallationId across processes (FR-115-15, generated once)', ()
     expect(existsSync(`${path}.lock`)).toBe(false);
   });
 
-  it('removes a stale lock left by a process that died', () => {
-    const path = join(tempDir(), 'config.json');
-    writeFileSync(`${path}.lock`, '12345');
-    const old = (Date.now() - CONFIG_LOCK_STALE_MS - 1000) / 1000;
-    utimesSync(`${path}.lock`, old, old);
-    expect(ensureInstallationId(path).installationId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(existsSync(`${path}.lock`)).toBe(false);
-  });
-
-  it('gives up on a live lock after the named timeout without touching the file', () => {
+  it('fails closed on a lock left by a crashed process: no automatic recovery', () => {
     const path = join(tempDir(), 'config.json');
     writeFileSync(path, '{}');
-    writeFileSync(`${path}.lock`, '12345');
+    writeFileSync(`${path}.lock`, 'token-of-a-crashed-process');
+    const hourAgo = (Date.now() - 3_600_000) / 1000;
+    utimesSync(`${path}.lock`, hourAgo, hourAgo);
     // Each clock read advances one second, so the timeout passes without real waiting.
     let now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => (now += 1000));
-    expect(() => ensureInstallationId(path)).toThrow(
-      new ConfigError(
-        `Timed out after ${CONFIG_LOCK_TIMEOUT_MS} ms waiting for ${path}.lock; delete it if no DirectiveBench process is starting.`,
-      ),
-    );
+    let error: unknown;
+    try {
+      ensureInstallationId(path);
+    } catch (caught) {
+      error = caught;
+    }
     vi.restoreAllMocks();
+    expect(error).toBeInstanceOf(ConfigError);
+    const message = (error as ConfigError).message;
+    expect(message.startsWith(`${path}.lock has existed for `)).toBe(true);
+    expect(message).toContain(
+      ` s and was still held after ${CONFIG_LOCK_TIMEOUT_MS} ms. Delete it if no other DirectiveBench process is running.`,
+    );
+    expect(Number(/for (\d+) s/.exec(message)?.[1])).toBeGreaterThanOrEqual(3600);
     expect(readFileSync(path, 'utf8')).toBe('{}');
-    expect(existsSync(`${path}.lock`)).toBe(true);
+    expect(readFileSync(`${path}.lock`, 'utf8')).toBe('token-of-a-crashed-process');
   });
 
   it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(

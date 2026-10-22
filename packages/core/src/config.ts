@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  closeSync,
   mkdirSync,
-  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -153,8 +151,6 @@ export function saveConfig(configPath: string, config: DirectiveBenchConfig): vo
 
 /** How long `ensureInstallationId` waits for another process's `config.json.lock`. */
 export const CONFIG_LOCK_TIMEOUT_MS = 5000;
-/** A lock older than this is left by a process that died and is removed. */
-export const CONFIG_LOCK_STALE_MS = 30_000;
 /** Pause between attempts to take the lock. */
 export const CONFIG_LOCK_RETRY_MS = 20;
 
@@ -163,34 +159,43 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+/** The token in a lock file, or null when there is no lock. */
+function readLockToken(lock: string): string | null {
+  try {
+    return readFileSync(lock, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 /**
- * Runs `fn` while holding `<configPath>.lock`, created with `wx` (O_CREAT | O_EXCL), so only one
- * process at a time can add an `installationId`. A lock older than {@link CONFIG_LOCK_STALE_MS}
- * is removed; after {@link CONFIG_LOCK_TIMEOUT_MS} the call fails with a `ConfigError` naming the
- * lock. Residual: two processes that find the same stale lock in the same instant can both
- * remove it, the second removing the first's fresh lock.
+ * Runs `fn` while holding `<configPath>.lock`, created with `wx` (O_CREAT | O_EXCL) and holding a
+ * random token, so only one process at a time can add an `installationId`. The lock is held only
+ * around a small write, so it is never broken automatically: a lock still present after
+ * {@link CONFIG_LOCK_TIMEOUT_MS} — left by a process that crashed inside that window — fails
+ * closed with a `ConfigError` naming the file and its age. Release removes the lock only while it
+ * still holds this call's token, so a lock someone else created is never deleted.
  */
 function withConfigLock<T>(configPath: string, fn: () => T): T {
   const lock = `${configPath}.lock`;
+  const token = randomUUID();
   mkdirSync(dirname(configPath), { recursive: true });
   const deadline = Date.now() + CONFIG_LOCK_TIMEOUT_MS;
   for (;;) {
     try {
-      closeSync(openSync(lock, 'wx', 0o600));
+      writeFileSync(lock, token, { flag: 'wx', mode: 0o600 });
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     }
-    const held = statSync(lock, { throwIfNoEntry: false });
-    // Released between our attempt and the check: try again at once.
-    if (held === undefined) continue;
-    if (Date.now() - held.mtimeMs > CONFIG_LOCK_STALE_MS) {
-      rmSync(lock, { force: true });
-      continue;
-    }
     if (Date.now() >= deadline) {
+      const held = statSync(lock, { throwIfNoEntry: false });
+      // Released between our attempt and this check: try once more.
+      if (held === undefined) continue;
+      const ageSeconds = Math.max(0, Math.round((Date.now() - held.mtimeMs) / 1000));
       throw new ConfigError(
-        `Timed out after ${CONFIG_LOCK_TIMEOUT_MS} ms waiting for ${lock}; delete it if no DirectiveBench process is starting.`,
+        `${lock} has existed for ${ageSeconds} s and was still held after ${CONFIG_LOCK_TIMEOUT_MS} ms. Delete it if no other DirectiveBench process is running.`,
       );
     }
     sleepSync(CONFIG_LOCK_RETRY_MS);
@@ -198,7 +203,7 @@ function withConfigLock<T>(configPath: string, fn: () => T): T {
   try {
     return fn();
   } finally {
-    rmSync(lock, { force: true });
+    if (readLockToken(lock) === token) rmSync(lock, { force: true });
   }
 }
 
