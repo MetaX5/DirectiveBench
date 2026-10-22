@@ -4,6 +4,14 @@ import {
   type ArtifactBundle,
   type ArtifactFormat,
 } from '@directivebench/core';
+import {
+  inspectWorkspace,
+  installClaudeArtifact,
+  pinWorkspace,
+  type WorkspaceFinding,
+  type WorkspaceInspectionOptions,
+} from '../../src/claude-code';
+import type { InstalledArtifact } from '../../src/contract';
 
 /** An artifact bundle with the given files (path → content). */
 export function bundle(
@@ -28,4 +36,20 @@ export function bundle(
     files: list,
     ...overrides,
   };
+}
+
+/** Installs into a workspace pinned right before the call. */
+export async function installPinned(
+  workspaceDir: string,
+  artifact: ArtifactBundle,
+): Promise<InstalledArtifact> {
+  return installClaudeArtifact(await pinWorkspace(workspaceDir), artifact);
+}
+
+/** Inspects a workspace pinned right before the call. */
+export async function inspectPinned(
+  workspaceDir: string,
+  options: WorkspaceInspectionOptions,
+): Promise<WorkspaceFinding[]> {
+  return inspectWorkspace(await pinWorkspace(workspaceDir), options);
 }

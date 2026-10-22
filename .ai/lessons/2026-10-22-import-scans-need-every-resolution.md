@@ -37,7 +37,9 @@ links and hard links themselves, not rely on a later check.
   #108 reproduced it): build the result in a private `mkdtemp` directory on the same file system
   and `rename` each top-level entry in, then `lstat` what landed; read existing files with
   `O_NOFOLLOW` plus an `fstat`/`lstat` identity check. And kill the untrusted command's process
-  group when it ends.
+  group when it ends. Pin the workspace itself (device, inode, canonical path) before untrusted
+  commands run and re-check the pin around every read, write and scan: a command can replace the
+  workspace path with a link, and `rename`/`realpath` follow it (Codex round 2 on PR #108).
 - Model the consumer's parser, not a regex in isolation: Claude Code lexes memory files as
   Markdown and matches imports per text piece (so `@/etc/hostname*x*` imports `/etc/hostname`),
   and accepts `--- ` as a frontmatter opener that the core parser ignores. Review round 1 of PR

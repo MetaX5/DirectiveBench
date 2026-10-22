@@ -442,6 +442,14 @@ Additions and residual risks of this slice:
   pre-spawn inspection. Until then the install itself never writes through the workspace by
   pathname (staged in a private directory next to it and moved in with `rename`, which fails closed
   on a planted `.claude`), so a late change cannot redirect an install write outside the workspace.
+- **Workspace identity pinned before `setup` (FR-118-06/27).** A `setup` command can move the
+  workspace away and leave a link to a host directory (or another directory) at its path, then
+  exit normally. **Requirement for the orchestrator (Phase 3 step 3, #101):** create the workspace,
+  then pin it with `pinWorkspace` (real directory, device + inode, canonical path) **before** any
+  `setup` command runs, and pass the pin to `installClaudeArtifact` and `inspectWorkspace`. Both
+  check the path against the pin before reading or writing, before and after the move, and at the
+  start of the inspection, and fail closed with `workspace-replaced`; the staging directory is
+  created beside the pinned canonical path.
 - **Import scan residuals (FR-118-27).** The scan covers the workspace at launch. Claude Code also
   loads a subdirectory's `CLAUDE.md` lazily once it touches a file there, and the agent can write
   such a file during the run; whether import expansion of a file written mid-run is confined by
@@ -725,7 +733,9 @@ changed before merge.
     sets run-local `HOME`/`CLAUDE_CONFIG_DIR` and the key only as `ANTHROPIC_API_KEY`.
   - The install convention of SPEC-203 §4.1 (`installClaudeArtifact`), built in a private staging
     directory beside the workspace and moved in with `rename`, so a symbolic link a `setup` command
-    plants, even after the checks, makes it fail closed instead of writing outside the workspace.
+    plants, even after the checks, makes it fail closed instead of writing outside the workspace;
+    the workspace is passed as a `WorkspacePin` and a replaced workspace path is refused
+    (`workspace-replaced`), also by `inspectWorkspace`.
   - FR-118-26 (`inspectArtifactVersions`): candidate and baseline; frontmatter is read as Claude
     Code reads it (an opening `---` with trailing blanks); a SKILL.md that opens a block it never
     closes, or has `---` inside the block, fails closed; AC-23 and the bundle part of

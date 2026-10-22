@@ -200,6 +200,20 @@ own reproduction). Ownership: `runCommand` kills the setup process group only on
 cancellation, so a background child can outlive `setup`; recorded as a requirement for Phase 3
 step 3 / the orchestrator in SPEC-118 §12, not changed here.
 
+Codex round 2: the child-link fix holds; one new **HIGH**, valid: a `setup` command can move the
+workspace away and put a link to another writable host directory at its path, then exit
+normally; `rename` follows that intermediate link, so the install landed in the host directory,
+the post-move `lstat` saw only the final entry, and `inspectWorkspace` canonicalised the
+replacement and trusted it as root. Fixed: `pinWorkspace` records the workspace (real directory,
+device + inode, canonical path) and `installClaudeArtifact` / `inspectWorkspace` now take the pin;
+`workspacePinIssue` is checked before existing files are read, before and after the move, and at
+the start of the inspection (`workspace-replaced`, new code in SPEC-203 §9); the staging directory
+sits beside the pinned canonical path. Tests: the workspace replaced by a link to a host
+directory, by another real directory, an ancestor re-linked, the workspace gone, a pin of a link —
+install and inspection refuse and the host directory stays empty. Red first: the old API had no
+pin (Codex reproduced the write into the host directory). The orchestrator requirement (pin before
+`setup`) is in SPEC-118 §12 and on issue #101.
+
 ## Lessons recorded
 
 - [2026-10-21 — Timing tests must survive a loaded CI runner](../lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md) (updated: emulate the 2-core runner, check CI on the current head)
@@ -207,6 +221,8 @@ step 3 / the orchestrator in SPEC-118 §12, not changed here.
 
 ## Follow-ups
 
+- Orchestrator / Phase 3 step 3 (#101): pin the workspace with `pinWorkspace` before `setup` and
+  pass the pin to installation and inspection (SPEC-118 §12).
 - Orchestrator / Phase 3 step 3: kill each `setup` command's process group when it ends, before
   installation and the pre-spawn inspection (SPEC-118 §12).
 - Phase 3 step 2–3: wire the builders into a `ClaudeCodeAdapter` (call `inspectWorkspace` with the

@@ -1,10 +1,12 @@
 import {
+  chmod,
   link,
   lstat,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -18,8 +20,9 @@ import {
   ClaudeCodeError,
   installClaudeArtifact,
   isClaudeInstallableFormat,
+  pinWorkspace,
 } from '../../src/claude-code';
-import { bundle } from './helpers';
+import { bundle, installPinned } from './helpers';
 
 let scratch: string;
 let workspace: string;
@@ -55,7 +58,7 @@ const skill = bundle('skill-md', {
 
 describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
   it('installs a skill with its files under .claude/skills/<slug>/', async () => {
-    expect(await installClaudeArtifact(workspace, skill)).toEqual({
+    expect(await installPinned(workspace, skill)).toEqual({
       paths: ['.claude/skills/pdf/SKILL.md', '.claude/skills/pdf/scripts/fill.py'],
     });
     expect(await readFile(join(workspace, '.claude/skills/pdf/scripts/fill.py'), 'utf8')).toBe(
@@ -65,29 +68,29 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
 
   it('installs a rule under .claude/rules/', async () => {
     const rule = bundle('claude-rule', { 'testing.md': '---\npaths: ["**/*.ts"]\n---\nTest.\n' });
-    expect(await installClaudeArtifact(workspace, rule)).toEqual({
+    expect(await installPinned(workspace, rule)).toEqual({
       paths: ['.claude/rules/testing.md'],
     });
   });
 
   it('creates CLAUDE.md, or appends to the fixture copy after a blank line', async () => {
     const claudeMd = bundle('claude-md', { 'CLAUDE.md': 'Use tabs.' });
-    expect(await installClaudeArtifact(workspace, claudeMd)).toEqual({ paths: ['CLAUDE.md'] });
+    expect(await installPinned(workspace, claudeMd)).toEqual({ paths: ['CLAUDE.md'] });
     expect(await readFile(join(workspace, 'CLAUDE.md'), 'utf8')).toBe('Use tabs.');
-    await installClaudeArtifact(workspace, claudeMd);
+    await installPinned(workspace, claudeMd);
     expect(await readFile(join(workspace, 'CLAUDE.md'), 'utf8')).toBe('Use tabs.\n\nUse tabs.');
   });
 
   it('appends to an empty fixture file without a separator', async () => {
     await writeFile(join(workspace, 'CLAUDE.md'), '');
-    await installClaudeArtifact(workspace, bundle('claude-md', { 'CLAUDE.md': 'Rule.' }));
+    await installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'Rule.' }));
     expect(await readFile(join(workspace, 'CLAUDE.md'), 'utf8')).toBe('Rule.');
   });
 
   it('installs AGENTS.md and imports it from CLAUDE.md for every Claude Code version', async () => {
     await writeFile(join(workspace, 'CLAUDE.md'), '# Fixture\n');
     const agentsMd = bundle('agents-md', { 'AGENTS.md': 'Agents rule.' });
-    expect(await installClaudeArtifact(workspace, agentsMd)).toEqual({
+    expect(await installPinned(workspace, agentsMd)).toEqual({
       paths: ['AGENTS.md', 'CLAUDE.md'],
     });
     expect(await readFile(join(workspace, 'AGENTS.md'), 'utf8')).toBe('Agents rule.');
@@ -98,54 +101,42 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
 
   it('refuses formats without a Claude Code convention (FR-118-25)', async () => {
     for (const format of ['cursor-rule', 'copilot-instructions'] as const) {
-      expect(
-        await codeOf(() => installClaudeArtifact(workspace, bundle(format, { 'x.md': 'x' }))),
-      ).toBe('artifact-format-unsupported');
+      expect(await codeOf(() => installPinned(workspace, bundle(format, { 'x.md': 'x' })))).toBe(
+        'artifact-format-unsupported',
+      );
     }
   });
 
   it('refuses an existing skill directory and an existing rule file', async () => {
     await mkdir(join(workspace, '.claude/skills/pdf'), { recursive: true });
-    expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
-      'artifact-install-conflict',
-    );
+    expect(await codeOf(() => installPinned(workspace, skill))).toBe('artifact-install-conflict');
     await mkdir(join(workspace, '.claude/rules'), { recursive: true });
     await writeFile(join(workspace, '.claude/rules/testing.md'), 'fixture');
     expect(
-      await codeOf(() =>
-        installClaudeArtifact(workspace, bundle('claude-rule', { 'testing.md': 'x' })),
-      ),
+      await codeOf(() => installPinned(workspace, bundle('claude-rule', { 'testing.md': 'x' }))),
     ).toBe('artifact-install-conflict');
   });
 
   it('never writes through a symbolic link a setup command planted', async () => {
     await symlink(host, join(workspace, '.claude'));
-    expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
-      'artifact-install-conflict',
-    );
+    expect(await codeOf(() => installPinned(workspace, skill))).toBe('artifact-install-conflict');
     expect(
-      await codeOf(() => installClaudeArtifact(workspace, bundle('claude-rule', { 'r.md': 'x' }))),
+      await codeOf(() => installPinned(workspace, bundle('claude-rule', { 'r.md': 'x' }))),
     ).toBe('artifact-install-conflict');
     await rm(join(workspace, '.claude'));
     await mkdir(join(workspace, '.claude'));
     await symlink(host, join(workspace, '.claude/skills'));
-    expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
-      'artifact-install-conflict',
-    );
+    expect(await codeOf(() => installPinned(workspace, skill))).toBe('artifact-install-conflict');
 
     const hostFile = join(host, 'CLAUDE.md');
     await writeFile(hostFile, 'host');
     await symlink(hostFile, join(workspace, 'CLAUDE.md'));
     expect(
-      await codeOf(() =>
-        installClaudeArtifact(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' })),
-      ),
+      await codeOf(() => installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' }))),
     ).toBe('artifact-install-conflict');
     await link(hostFile, join(workspace, 'AGENTS.md'));
     expect(
-      await codeOf(() =>
-        installClaudeArtifact(workspace, bundle('agents-md', { 'AGENTS.md': 'x' })),
-      ),
+      await codeOf(() => installPinned(workspace, bundle('agents-md', { 'AGENTS.md': 'x' }))),
     ).toBe('artifact-install-conflict');
     expect(await readFile(hostFile, 'utf8')).toBe('host');
     expect((await lstat(join(host, 'pdf')).catch(() => null)) === null).toBe(true);
@@ -155,49 +146,87 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     await mkdir(join(workspace, '.claude/rules'), { recursive: true });
     await symlink(host, join(workspace, '.claude/rules/sub'));
     expect(
-      await codeOf(() =>
-        installClaudeArtifact(workspace, bundle('claude-rule', { 'sub/r.md': 'x' })),
-      ),
+      await codeOf(() => installPinned(workspace, bundle('claude-rule', { 'sub/r.md': 'x' }))),
     ).toBe('artifact-install-conflict');
     expect((await lstat(join(host, 'r.md')).catch(() => null)) === null).toBe(true);
   });
 
   it('leaves no staging directory behind, after success and after a refusal', async () => {
-    await installClaudeArtifact(workspace, skill);
-    await installClaudeArtifact(workspace, skill).catch(() => undefined);
+    await installPinned(workspace, skill);
+    await installPinned(workspace, skill).catch(() => undefined);
     expect((await readdir(scratch)).sort()).toEqual(['host', 'workspace']);
   });
 
   it('refuses a .claude entry that is a file', async () => {
     await writeFile(join(workspace, '.claude'), 'file');
-    expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
-      'artifact-install-conflict',
-    );
+    expect(await codeOf(() => installPinned(workspace, skill))).toBe('artifact-install-conflict');
   });
 
   it('refuses a slug that is not one plain segment', async () => {
-    expect(
-      await codeOf(() => installClaudeArtifact(workspace, { ...skill, slug: '../escape' })),
-    ).toBe('artifact-install-conflict');
+    expect(await codeOf(() => installPinned(workspace, { ...skill, slug: '../escape' }))).toBe(
+      'artifact-install-conflict',
+    );
   });
 
   it('propagates file system errors other than a conflict', async () => {
     const file = join(scratch, 'not-a-directory');
     await writeFile(file, 'x');
-    const claudeMd = bundle('claude-md', { 'CLAUDE.md': 'x' });
-    expect(await codeOf(() => installClaudeArtifact(file, claudeMd))).toMatch(/ENOTDIR/);
-    // The rename into a workspace that is not a directory reports an occupied destination.
-    expect(await codeOf(() => installClaudeArtifact(file, skill))).toBe(
-      'artifact-install-conflict',
-    );
+    await expect(pinWorkspace(file)).rejects.toThrow(/must be a real directory/);
+    if (process.getuid?.() !== 0) {
+      // A workspace that cannot be searched: reading CLAUDE.md fails with EACCES, not a conflict.
+      await chmod(workspace, 0o600);
+      try {
+        expect(
+          await codeOf(() => installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' }))),
+        ).toMatch(/EACCES/);
+      } finally {
+        await chmod(workspace, 0o700);
+      }
+    }
     const escapingSkill = bundle('skill-md', { 'SKILL.md': 'x', '../../evil.md': 'x' });
-    expect(await codeOf(() => installClaudeArtifact(workspace, escapingSkill))).toMatch(
-      /PathEscapeError/,
-    );
+    expect(await codeOf(() => installPinned(workspace, escapingSkill))).toMatch(/PathEscapeError/);
     const escaping = bundle('claude-rule', { '../../outside.md': 'x' });
-    expect(await codeOf(() => installClaudeArtifact(workspace, escaping))).toBe(
+    expect(await codeOf(() => installPinned(workspace, escaping))).toBe(
       'artifact-install-conflict',
     );
+  });
+});
+
+describe('installClaudeArtifact with a replaced workspace (SPEC-118 §12)', () => {
+  it('refuses a workspace path a setup command replaced by a link to a host directory', async () => {
+    const pin = await pinWorkspace(workspace);
+    await rename(workspace, join(scratch, 'moved'));
+    await symlink(host, workspace);
+    for (const artifact of [skill, bundle('claude-md', { 'CLAUDE.md': 'x' })]) {
+      expect(await codeOf(() => installClaudeArtifact(pin, artifact))).toBe('workspace-replaced');
+    }
+    expect(await readdir(host)).toEqual([]);
+    expect((await readdir(scratch)).sort()).toEqual(['host', 'moved', 'workspace']);
+  });
+
+  it('refuses a workspace path that now holds another real directory', async () => {
+    const pin = await pinWorkspace(workspace);
+    await rename(workspace, join(scratch, 'moved'));
+    await mkdir(workspace);
+    expect(await codeOf(() => installClaudeArtifact(pin, skill))).toBe('workspace-replaced');
+    expect(await readdir(workspace)).toEqual([]);
+  });
+
+  it('refuses a workspace whose ancestor was re-linked, and one that vanished', async () => {
+    const parent = join(scratch, 'parent');
+    await mkdir(join(parent, 'ws'), { recursive: true });
+    const pin = await pinWorkspace(join(parent, 'ws'));
+    await rename(parent, join(scratch, 'parent-moved'));
+    await symlink(join(scratch, 'parent-moved'), parent);
+    expect(await codeOf(() => installClaudeArtifact(pin, skill))).toBe('workspace-replaced');
+    await rm(parent);
+    await rm(join(scratch, 'parent-moved'), { recursive: true });
+    expect(await codeOf(() => installClaudeArtifact(pin, skill))).toBe('workspace-replaced');
+  });
+
+  it('refuses a pin of a link', async () => {
+    await symlink(workspace, join(scratch, 'alias'));
+    await expect(pinWorkspace(join(scratch, 'alias'))).rejects.toThrow(/must be a real directory/);
   });
 });
 

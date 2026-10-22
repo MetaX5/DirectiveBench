@@ -3,6 +3,7 @@ import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { canonicalSegment } from './bundle-inspection';
 import { importCandidates, IMPORT_TOKEN_MAX_LENGTH } from './import-tokens';
+import { errorCode, workspacePinIssue, type WorkspacePin } from './workspace-pin';
 
 /**
  * The most directory entries (files, directories, links and others) one inspection visits
@@ -25,6 +26,7 @@ export type WorkspaceInspectionCode =
   | 'fixture-contains-claude-config'
   | 'workspace-contains-claude-config'
   | 'workspace-imports-outside'
+  | 'workspace-replaced'
   | 'workspace-scan-limit';
 
 export interface WorkspaceFinding {
@@ -85,10 +87,6 @@ interface Entry {
   path: string;
   kind: EntryKind;
   stats: Stats;
-}
-
-function errorCode(error: unknown): string {
-  return (error as NodeJS.ErrnoException).code ?? 'unknown error';
 }
 
 function kindOf(stats: Stats): EntryKind {
@@ -287,14 +285,17 @@ function shown(token: string): string {
  * then link and import findings, in path order; an empty list means the workspace may run.
  */
 export async function inspectWorkspace(
-  workspaceDir: string,
+  workspace: WorkspacePin,
   options: WorkspaceInspectionOptions,
 ): Promise<WorkspaceFinding[]> {
-  const root = await realpath(workspaceDir);
-  if (!(await lstat(root)).isDirectory()) throw new Error('The workspace is not a directory.');
-  // The workspace as given: a process started there may resolve `..` lexically from this path,
+  // A workspace a `setup` command replaced (e.g. by a link to a host directory) is never inspected
+  // as if it were the run's: the scan would trust the replacement as its root.
+  const issue = await workspacePinIssue(workspace);
+  if (issue !== null) return [{ code: 'workspace-replaced', path: '.', detail: issue }];
+  const root = workspace.canonical;
+  // The workspace as used: a process started there may resolve `..` lexically from this path,
   // which differs from the canonical root when an ancestor is a symbolic link.
-  const given = resolve(workspaceDir);
+  const given = workspace.path;
   const home = resolve(options.homeDir);
   const configCode = options.claudeConfigCode ?? 'workspace-contains-claude-config';
   const walked = await walk(root, configCode);

@@ -36,9 +36,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
-const { inspectWorkspace, installClaudeArtifact, ClaudeCodeError, WORKSPACE_SCAN_MAX_FILES } =
-  await import('../../src/claude-code');
-const { bundle } = await import('./helpers');
+const { ClaudeCodeError, WORKSPACE_SCAN_MAX_FILES } = await import('../../src/claude-code');
+const { bundle, installPinned, inspectPinned } = await import('./helpers');
 
 let scratch: string;
 let workspace: string;
@@ -100,7 +99,7 @@ describe('inspectWorkspace entry limit', () => {
         }),
       );
     };
-    const findings = await inspectWorkspace(workspace, { homeDir: scratch });
+    const findings = await inspectPinned(workspace, { homeDir: scratch });
     expect(findings).toEqual([
       expect.objectContaining({
         code: 'workspace-scan-limit',
@@ -115,7 +114,7 @@ describe('inspectWorkspace under races', () => {
   it('fails closed on an entry that vanishes between listing and lstat', async () => {
     await writeFile(join(workspace, 'gone.md'), 'x');
     hooks.lstat = (path) => (path.endsWith('gone.md') ? failing('ENOENT') : undefined);
-    const findings = await inspectWorkspace(workspace, { homeDir: scratch });
+    const findings = await inspectPinned(workspace, { homeDir: scratch });
     expect(findings).toEqual([
       expect.objectContaining({
         code: 'workspace-contains-claude-config',
@@ -129,7 +128,7 @@ describe('inspectWorkspace under races', () => {
     await writeFile(join(workspace, 'odd.md'), 'x');
     hooks.lstat = (path) =>
       path.endsWith('odd.md') ? Promise.reject(new Error('odd')) : undefined;
-    expect(await inspectWorkspace(workspace, { homeDir: scratch })).toEqual([
+    expect(await inspectPinned(workspace, { homeDir: scratch })).toEqual([
       expect.objectContaining({ detail: 'the entry cannot be inspected (unknown error)' }),
     ]);
   });
@@ -138,7 +137,7 @@ describe('inspectWorkspace under races', () => {
     await writeFile(join(workspace, 'a.md'), 'x');
     for (const change of [{ ino: -1 }, { bytesRead: 0 }]) {
       hooks.open = (path, handle) => (path.endsWith('a.md') ? lying(handle, change) : handle);
-      expect(await inspectWorkspace(workspace, { homeDir: scratch })).toEqual([
+      expect(await inspectPinned(workspace, { homeDir: scratch })).toEqual([
         expect.objectContaining({
           code: 'workspace-imports-outside',
           path: 'a.md',
@@ -151,7 +150,7 @@ describe('inspectWorkspace under races', () => {
   it('still reports an outside link whose text cannot be read', async () => {
     await symlink(scratch, join(workspace, 'out'));
     hooks.readlink = () => failing('EINVAL');
-    expect(await inspectWorkspace(workspace, { homeDir: scratch })).toEqual([
+    expect(await inspectPinned(workspace, { homeDir: scratch })).toEqual([
       expect.objectContaining({ path: 'out', token: '(EINVAL)', target: scratch }),
     ]);
   });
@@ -171,7 +170,7 @@ describe('installClaudeArtifact under races', () => {
         await symlink(host(), join(workspace, planted));
         return rename(from, to);
       };
-      await expect(installClaudeArtifact(workspace, bundle(format, files))).rejects.toMatchObject({
+      await expect(installPinned(workspace, bundle(format, files))).rejects.toMatchObject({
         code: 'artifact-install-conflict',
       });
       expect(await readdir(host())).toEqual([]);
@@ -181,7 +180,7 @@ describe('installClaudeArtifact under races', () => {
     await symlink(host(), join(workspace, '.claude', 'rules'));
     delete hooks.rename;
     await expect(
-      installClaudeArtifact(workspace, bundle('claude-rule', { 'r.md': 'rule' })),
+      installPinned(workspace, bundle('claude-rule', { 'r.md': 'rule' })),
     ).rejects.toMatchObject({ code: 'artifact-install-conflict' });
     expect(await readdir(host())).toEqual([]);
   });
@@ -197,7 +196,7 @@ describe('installClaudeArtifact under races', () => {
         await rm(to, { recursive: true });
         await symlink(host(), to);
       };
-      await expect(installClaudeArtifact(workspace, bundle(format, files))).rejects.toMatchObject({
+      await expect(installPinned(workspace, bundle(format, files))).rejects.toMatchObject({
         code: 'artifact-install-conflict',
         message: expect.stringMatching(/replaced after installation/),
       });
@@ -208,7 +207,7 @@ describe('installClaudeArtifact under races', () => {
   it('propagates a move error that is not an occupied destination', async () => {
     hooks.rename = () => failing('EXDEV');
     await expect(
-      installClaudeArtifact(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' })),
+      installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' })),
     ).rejects.toMatchObject({ code: 'EXDEV' });
   });
 
@@ -216,7 +215,7 @@ describe('installClaudeArtifact under races', () => {
     await writeFile(join(workspace, 'CLAUDE.md'), 'fixture');
     hooks.open = (path, handle) =>
       path.endsWith('CLAUDE.md') ? lying(handle, { ino: -1 }) : handle;
-    const install = installClaudeArtifact(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' }));
+    const install = installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' }));
     await expect(install).rejects.toBeInstanceOf(ClaudeCodeError);
     await expect(install).rejects.toMatchObject({ code: 'artifact-install-conflict' });
   });

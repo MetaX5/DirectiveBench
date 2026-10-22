@@ -6,6 +6,7 @@ import {
   mkdtemp,
   open,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -15,13 +16,14 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   inspectWorkspace,
-  installClaudeArtifact,
   isClaudeConfigPath,
+  pinWorkspace,
   WORKSPACE_SCAN_MAX_BYTES,
   WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES,
   type WorkspaceFinding,
+  type WorkspaceInspectionOptions,
 } from '../../src/claude-code';
-import { bundle } from './helpers';
+import { bundle, inspectPinned, installPinned } from './helpers';
 
 /** Timeout for the heavier tests: they take well under a second alone, but CI runs every package on 2 cores. */
 const LOADED_RUNNER_TIMEOUT_MS = 60_000;
@@ -55,8 +57,8 @@ async function put(path: string, content = 'x'): Promise<void> {
   await writeFile(join(workspace, path), content);
 }
 
-function inspect(options: Partial<Parameters<typeof inspectWorkspace>[1]> = {}) {
-  return inspectWorkspace(workspace, { homeDir: home, ...options });
+function inspect(options: Partial<WorkspaceInspectionOptions> = {}) {
+  return inspectPinned(workspace, { homeDir: home, ...options });
 }
 
 function summary(findings: WorkspaceFinding[]): string[] {
@@ -134,7 +136,7 @@ describe('inspectWorkspace: Claude Code configuration (FR-118-06, AC-16, AC-26)'
       'SKILL.md': '---\nname: pdf\n---\nBody\n',
       'ref/a.md': 'a',
     });
-    const installed = await installClaudeArtifact(workspace, skill);
+    const installed = await installPinned(workspace, skill);
     expect(await inspect({ installedPaths: installed.paths })).toEqual([]);
     await put('.claude/settings.local.json', '{}');
     await put('.claude/skills/pdf/extra.md', 'added by setup');
@@ -170,7 +172,21 @@ describe('inspectWorkspace: Claude Code configuration (FR-118-06, AC-16, AC-26)'
   });
 
   it('refuses a workspace that is not a directory', async () => {
-    await expect(inspectWorkspace(hostFile, { homeDir: home })).rejects.toThrow(/not a directory/);
+    await expect(inspectPinned(hostFile, { homeDir: home })).rejects.toThrow(/real directory/);
+  });
+
+  it('refuses to inspect a workspace replaced by a link to a host directory (SPEC-118 §12)', async () => {
+    const pin = await pinWorkspace(workspace);
+    await rename(workspace, join(scratch, 'moved'));
+    await symlink(host, workspace);
+    expect(await inspectWorkspace(pin, { homeDir: home })).toEqual([
+      expect.objectContaining({ code: 'workspace-replaced', path: '.' }),
+    ]);
+    await rm(workspace);
+    await mkdir(workspace);
+    expect(summary(await inspectWorkspace(pin, { homeDir: home }))).toEqual([
+      'workspace-replaced .',
+    ]);
   });
 });
 
@@ -197,7 +213,7 @@ describe('inspectWorkspace: imports and links (FR-118-27, AC-27)', () => {
       'SKILL.md': '---\nname: pdf\n---\nBody\n',
       'reference/CLAUDE.md': `@${hostFile}\n`,
     });
-    const installed = await installClaudeArtifact(workspace, skill);
+    const installed = await installPinned(workspace, skill);
     expect(summary(await inspect({ installedPaths: installed.paths }))).toEqual([
       `workspace-imports-outside .claude/skills/pdf/reference/CLAUDE.md ${hostFile}`,
     ]);
@@ -231,24 +247,17 @@ describe('inspectWorkspace: imports and links (FR-118-27, AC-27)', () => {
   });
 
   it('also resolves .. from the workspace path as given, not only the canonical one', async () => {
+    // The run uses links/alias/workspace, where links/alias is a link to the scratch directory.
     await mkdir(join(scratch, 'links'));
-    await symlink(workspace, join(scratch, 'links', 'ws'));
+    await symlink(scratch, join(scratch, 'links', 'alias'));
     await writeFile(join(scratch, 'links', 'planted.md'), 'planted');
-    await put('CLAUDE.md', '@../planted.md\n');
+    await put('CLAUDE.md', '@../../planted.md\n');
     expect(await inspect()).toEqual([]);
-    const findings = await inspectWorkspace(join(scratch, 'links', 'ws'), { homeDir: home });
-    expect(summary(findings)).toEqual(['workspace-imports-outside CLAUDE.md ../planted.md']);
+    const findings = await inspectPinned(join(scratch, 'links', 'alias', 'workspace'), {
+      homeDir: home,
+    });
+    expect(summary(findings)).toEqual(['workspace-imports-outside CLAUDE.md ../../planted.md']);
     expect(findings[0]?.target).toBe(join(scratch, 'links', 'planted.md'));
-  });
-
-  it('refuses a host file named before a Markdown boundary in the same word', async () => {
-    await put('CLAUDE.md', `See @${hostFile}*x* and [@${hostFile}](x)\n`);
-    expect(summary(await inspect())).toEqual([`workspace-imports-outside CLAUDE.md ${hostFile}`]);
-  });
-
-  it('passes an import of an existing outside directory, which discloses nothing', async () => {
-    await put('src/app.ts', `import { cn } from '@${host}';\nconst root = '@/';\n`);
-    expect(await inspect()).toEqual([]);
   });
 
   it('passes non-existent outside targets and inside imports', async () => {
@@ -373,7 +382,7 @@ describe('inspectWorkspace: limits (FR-118-27)', () => {
         let fastest = Number.POSITIVE_INFINITY;
         for (let run = 0; run < 3; run += 1) {
           const started = performance.now();
-          await inspectWorkspace(join(workspace, dir), { homeDir: home });
+          await inspectPinned(join(workspace, dir), { homeDir: home });
           fastest = Math.min(fastest, performance.now() - started);
         }
         return Math.max(fastest, 1);

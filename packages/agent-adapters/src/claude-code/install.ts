@@ -1,12 +1,13 @@
 import { constants } from 'node:fs';
 import { lstat, mkdtemp, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ArtifactBundle, ArtifactFormat } from '@directivebench/core';
 import type { InstalledArtifact } from '../contract';
 import { writeArtifactFiles } from '../install';
 import type { ClaudeArtifactProfile } from './argv';
 import { ClaudeCodeError } from './errors';
 import { claudeSkillName } from './skill-name';
+import { workspacePinIssue, type WorkspacePin } from './workspace-pin';
 
 /** Artifact formats Claude Code can load from a workspace (SPEC-203 §4.1). */
 export const CLAUDE_INSTALLABLE_FORMATS = [
@@ -140,15 +141,24 @@ async function moveIntoPlace(stage: string, workspaceDir: string): Promise<void>
  * FR-118-06 forbids anyway) fails closed. Other formats fail with `artifact-format-unsupported`;
  * an occupied, linked or hard-linked target with `artifact-install-conflict`.
  *
+ * The workspace is passed as its {@link WorkspacePin}: the path must still be the pinned directory
+ * before existing files are read, before the move and after it (`workspace-replaced` otherwise),
+ * and the staging directory is created beside its canonical path.
+ *
  * Precondition: no process a `setup` command started is still running (SPEC-118 FR-118-27). The
  * staging closes the window between checks and writes, but such a process could still change the
  * workspace after installation; the pre-spawn inspection then catches what it can.
  */
 export async function installClaudeArtifact(
-  workspaceDir: string,
+  workspace: WorkspacePin,
   artifact: ArtifactBundle,
 ): Promise<InstalledArtifact> {
   const format = assertInstallable(artifact);
+  const workspaceDir = workspace.canonical;
+  const assertPinned = async () => {
+    const issue = await workspacePinIssue(workspace);
+    if (issue !== null) throw new ClaudeCodeError('workspace-replaced', `${issue}.`);
+  };
   if (format === 'skill-md' && !SLUG.test(artifact.slug)) {
     throw conflict(`.claude/skills/${artifact.slug}`, 'the slug is not a single plain segment');
   }
@@ -158,13 +168,14 @@ export async function installClaudeArtifact(
     throw conflict(`.claude/rules/${nested.path}`, 'a rule file must not be nested');
   }
   const text = artifact.files.map((file) => file.content).join('\n\n');
+  await assertPinned();
   const claudeMd =
     format === 'claude-md' || format === 'agents-md'
       ? await existingInstruction(workspaceDir, 'CLAUDE.md')
       : null;
   const agentsMd =
     format === 'agents-md' ? await existingInstruction(workspaceDir, 'AGENTS.md') : null;
-  const stage = await mkdtemp(join(dirname(resolve(workspaceDir)), '.claude-install-'));
+  const stage = await mkdtemp(join(dirname(workspaceDir), '.claude-install-'));
   try {
     let paths: string[];
     if (format === 'skill-md') {
@@ -181,7 +192,9 @@ export async function installClaudeArtifact(
       });
       paths = ['AGENTS.md', 'CLAUDE.md'];
     }
+    await assertPinned();
     await moveIntoPlace(stage, workspaceDir);
+    await assertPinned();
     return { paths };
   } finally {
     await rm(stage, { recursive: true, force: true });

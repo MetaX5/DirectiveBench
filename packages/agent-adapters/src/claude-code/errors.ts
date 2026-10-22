@@ -18,7 +18,9 @@ export type ClaudeCodeErrorCode =
   /** The artifact format has no Claude Code install convention (SPEC-203 §4.1, FR-118-25). */
   | 'artifact-format-unsupported'
   /** The install target already exists or is not a plain path in the workspace (SPEC-203 §4.1). */
-  | 'artifact-install-conflict';
+  | 'artifact-install-conflict'
+  /** The workspace path no longer is the directory pinned at creation (SPEC-118 §12). */
+  | 'workspace-replaced';
 
 export class ClaudeCodeError extends Error {
   override name = 'ClaudeCodeError';

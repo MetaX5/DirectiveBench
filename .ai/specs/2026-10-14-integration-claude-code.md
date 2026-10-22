@@ -267,6 +267,7 @@ Baseline rules: [SPEC-007](2026-10-14-security-and-privacy.md), [ADR-0007](../de
 | Artifact version contains executable customizations | inspection before enqueue | run rejected before enqueue | `artifact-executes-code` |
 | Skill name not lowercase letters, digits and hyphens (≤ 64), so it could change `Skill(<name>)` rules | argv builder | run rejected before enqueue | `skill-name-unsupported` |
 | Install target exists, or is reached through a link a setup command planted | install | `infrastructure-error` | `artifact-install-conflict` |
+| Workspace path no longer the directory pinned before `setup` (moved away, replaced by a link or another directory) | install, pre-spawn inspection | `infrastructure-error` | `workspace-replaced` |
 | Timeout | DirectiveBench timer | `timeout` | — |
 | Cancel | `AbortSignal` | `cancelled` | — (exit 143 after SIGTERM expected) |
 | Spawn failure (EACCES, ENOENT after detection) | spawn error | `infrastructure-error` | `spawn-failed` |
