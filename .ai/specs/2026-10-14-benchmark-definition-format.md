@@ -53,7 +53,7 @@ Benchmarks must be reviewable in pull requests, portable between machines, repro
 | FR-108-07 | Path fields (`fixture.path`, `verification.overlay`, `file-exists.path`, `file-contains.path`) SHALL be relative POSIX paths: no backslashes, not absolute, no NUL, and not escaping their base after normalisation (`..`). |
 | FR-108-08 | **Path resolution**: `fixture.path` and `verification.overlay` are resolved relative to the **directory containing the definition file** at import time; assertion paths and playbook `write.path` are resolved relative to the **workspace root** at run time (with `resolveInside`). Globs in `changed-files` match workspace-relative POSIX paths (`node:path` `matchesGlob`). |
 | FR-108-09 | Commands (`setup[]`, `command` assertions) SHALL be argv arrays of non-empty strings, never shell strings; they are executed without a shell ([SPEC-110](2026-10-14-benchmark-execution.md)). |
-| FR-108-10 | `file-contains.pattern` SHALL compile as a JavaScript `RegExp` with the given `flags` (only `i`, `m`, `s`, `u` allowed); invalid patterns are validation errors at path `…pattern`. Compiling does not bound matching time; matching user patterns is bounded at evaluation time (planned, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46: worker thread, `ASSERTION_REGEX_TIMEOUT_MS`, assertion error). |
+| FR-108-10 | `file-contains.pattern` SHALL compile as a JavaScript `RegExp` with the given `flags` (only `i`, `m`, `s`, `u` allowed); invalid patterns are validation errors at path `…pattern`. The same holds for every `{ pattern, flags }` of the document assertions (`…headings.N.pattern`, `…phrases.N.pattern`, `…row.pattern`). Compiling does not bound matching time; matching user patterns is bounded at evaluation time ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46: worker thread, `ASSERTION_REGEX_TIMEOUT_MS`, assertion error). |
 | FR-108-11 | Each case SHALL have ≥ 1 assertion and at least one assertion with `weight > 0`. |
 | FR-108-12 | `execution.environment.kind: docker` SHALL require `image` (validation), and is rejected at run time in the bootstrap (not implemented). |
 | FR-108-13 | `categories[]` are category **slugs** ([SPEC-106](2026-10-14-category-management.md)); unknown slugs are import warnings, not validation errors. `technologies[]` are free-form labels. |
@@ -113,9 +113,15 @@ type AssertionDefinition =
   | { type: 'command'; command: string[]; expectExitCode: number /*0*/; timeoutSeconds?: number /*≤3600*/ } & Common
   | { type: 'file-exists'; path: string; exists: boolean /*true*/ } & Common
   | { type: 'file-contains'; path: string; pattern: string; flags: string /*''*/; negate: boolean /*false*/ } & Common
-  | { type: 'changed-files'; allowed?: string[]; forbidden?: string[] /* at least one */ } & Common;
-// Planned additive members (no schemaVersion change): 'markdown-sections', 'required-phrases',
-// 'markdown-table-value' — shapes in SPEC-118 §8.4 (2026-10-22-benchmark-own-skills-s1.md).
+  | { type: 'changed-files'; allowed?: string[]; forbidden?: string[] /* at least one */ } & Common
+  // Additive members of SPEC-118 §8.4 (no schemaVersion change). `file`: relative path, or a glob
+  // that must match exactly one file the agent added or modified.
+  | { type: 'markdown-sections'; file: string; headings: TextMatcher[] /*min 1*/; ordered: boolean /*false*/ } & Common
+  | { type: 'required-phrases'; file: string; phrases: TextMatcher[] /*min 1*/; caseSensitive: boolean /*false*/ } & Common
+  | { type: 'markdown-table-value'; file: string; row: { pattern: string; flags: string /*''*/ }; column: string;
+      min?: number; max?: number /* at least one, min ≤ max */; decimalSeparator: '.' | ',' /*'.'*/ } & Common;
+
+type TextMatcher = string /* literal, not blank */ | { pattern: string; flags: string /*'' ⊆ imsu*/ };
 
 interface Common { id: string; description?: string; weight: number /*1, 0..1000*/; required: boolean /*false*/ }
 ```
@@ -389,12 +395,13 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 ## 19. Future extensions
 
-- v1-compatible additions: the document assertions `markdown-sections`, `required-phrases` and `markdown-table-value` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §8.4, next); planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
+- v1-compatible additions: planned assertion types (`json-schema`, test-runner, `static-analysis`, `custom-script`, `llm-judge`) as new discriminated-union members; per-suite network policy for docker.
 - v2 candidates: case matrices (parameterised prompts/fixtures), artifact-specific install hints, multi-turn prompts.
 - Published JSON Schema for editor completion; Builder round-tripping ([SPEC-109](2026-10-14-benchmark-builder.md)).
 
 ## 20. Implementation status
 
 - **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` "benchmark definition format" and "fixtures and workspaces"):** `benchmarkDefinitionSchema` v1 with all fields/defaults in §8.2 (`timeoutSeconds` 300, `repetitions` 3, `maxOutputBytes` 65536, `passThreshold` 1, `minDelta` 0.05, `stabilityThreshold` 0.1, assertion `weight` 1, `required` false), strict objects, slug/path/regex/weight/duplicate validation; YAML/JSON loading with dotted-path issues; `migrateDefinitionDocument` (no migrations yet; rejects newer versions and malformed YAML); `prepareSuiteImport` with fixture/overlay snapshots and `suiteContentHash`; Mock Agent playbook; executable example `examples/benchmarks/mock-input-validation/` (verified end-to-end by `engine.test.ts`, `runner.test.ts` and `directivebench demo`); specification-only examples validate against the schema.
+- **Implemented (2026-10-22, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1):** the additive assertion types `markdown-sections`, `required-phrases` and `markdown-table-value` with their defaults and validation (invalid patterns and flags at their dotted paths, at least one of `min`/`max`); existing definitions parse and hash exactly as before (pinned hashes of the three original examples in `test/definition.test.ts`); the specification-only example `examples/benchmarks/document-assertions/` validates and its sample documents are graded in `test/document-assertions.test.ts`.
 - **Partially implemented:** import UI/CLI (only `demo` imports the bundled example).
 - **Not implemented:** export bundles, `benchmark validate`/`import` CLI commands, JSON Schema publication, import-time validation of `agentOptions`, YAML source positions in errors, any v2 migration, docker execution.

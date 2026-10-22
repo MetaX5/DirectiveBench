@@ -548,7 +548,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-3: With `--baseline v<n>` the baseline workspace contains exactly version n and the candidate exactly the chosen version; `benchmark_runs.baseline_artifact_version_id` is set; same-content, other-artifact and other-format baselines are rejected before a job exists.
 - [ ] AC-4: In subscription mode no `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_CODE_USE_*` variable reaches the agent and every run carries `ambient-user-config`; in api-key mode `HOME`/`CLAUDE_CONFIG_DIR` are run-local and the key appears in no argv, row, log, trace or CLI output (planted-key test).
 - [ ] AC-5: The comparability key of the bundled mock example is byte-identical before and after this change; two runs differing only in auth mode, isolation profile, permission profile or `hostId` get different keys; baseline choice does not change the key.
-- [ ] AC-6: The three new assertions behave as FR-118-40…44 on fixture documents, including the reference-scenario example of §8.4, and evaluate a 2 MiB document in < 200 ms.
+- [x] AC-6: The three new assertions behave as FR-118-40…44 on fixture documents, including the reference-scenario example of §8.4, and evaluate a 2 MiB document in < 200 ms.
 - [ ] AC-7: A suite with `command` assertions is refused without `--approve-commands`; with it, every argv is printed and approval source `user` is recorded on that suite version only.
 - [ ] AC-8: Without a TTY and without `--yes` the run is refused (exit 2); the plan lists the agent-run count and the cost, data-leaving and Not-sandboxed notices.
 - [ ] AC-9: A `serve` runner polling the same data directory never acquires a job created by `benchmark run`.
@@ -566,7 +566,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 - [ ] AC-21: For a `skill-md` artifact the argv contains `Skill` in `--tools` and only `Skill(<name>)`/`Skill(<name> *)` in `--allowedTools`; instruction types get no `Skill`; from recorded streams each agent run records `skillActivation`; a run without the skill loaded ends `artifact-not-loaded` and stops the run; a loaded but uninvoked candidate run is scored with `artifact-not-invoked` and the summary shows the invocation rate; a `none` baseline invoking `<name>` yields `not-comparable` (FR-118-08/09).
 - [ ] AC-22: The opt-in live check of §15 passes with the exact production argv in both auth modes, including denied outside-workspace reads and writes (FR-118-07) and a second installed skill that stays denied (FR-118-08), and its results (including the field names marked as assumptions) are recorded in SPEC-203 before Phase 4 ships.
 - [ ] AC-23: A candidate **or** baseline version with frontmatter `hooks`, a `` !` `` placeholder, any non-empty `allowed-tools` — including bare `Skill`, `Skill(other-name)` and bare `Edit`, all inside the profile's tool list — or a bundled configuration file is refused with `artifact-executes-code` before any database change, and no `claude` process starts (FR-118-26).
-- [ ] AC-24: An adversarial pattern in any regex-capable assertion ends as an assertion error within `ASSERTION_REGEX_TIMEOUT_MS` (+ margin), the agent run is `infrastructure-error` `assertion-error`, the runner thread stays responsive meanwhile, and cancellation terminates the worker (FR-118-46, NFR-118-02).
+- [x] AC-24: An adversarial pattern in any regex-capable assertion ends as an assertion error within `ASSERTION_REGEX_TIMEOUT_MS` (+ margin), the agent run is `infrastructure-error` `assertion-error`, the runner thread stays responsive meanwhile, and cancellation terminates the worker (FR-118-46, NFR-118-02).
 - [ ] AC-25: A candidate or baseline skill with `model` other than `inherit` or with `context: fork` is refused with `artifact-overrides-model`, before any process starts; an assistant message whose model differs from `executionModel` yields `not-comparable` (`execution-model-mismatch`) in both variants and across repetitions (FR-118-04/06/26).
 - [ ] AC-26: A fixture with `.claude/settings.local.json` containing `{"permissions":{"allow":["Skill"]}}`, and separately one with `.claude/commands/x.md` or `sub/.claude/skills/x/SKILL.md` and a prompt `/x`, is refused with `fixture-contains-claude-config` even with `--approve-commands`, and the fake `claude` never starts; an approved `setup` command that writes `.claude/settings.local.json` ends the first agent run `infrastructure-error` `workspace-contains-claude-config` before `claude` starts and stops the run; an artifact bundle containing a nested `.claude/` directory is refused with `artifact-executes-code` (FR-118-06/26).
 - [ ] AC-27: Adversarial import and link cases are refused with `workspace-imports-outside` and `claude` never starts: (a) fixture `CLAUDE.md` → `@docs/context.md`, which contains `@/etc/hostname` (or `@~/planted-host-file`); (b) a `CLAUDE.md` or other Markdown file bundled inside a skill artifact (candidate or baseline) importing a planted host file; (c) a `setup` command that creates a symlink to a host file (or directory) and a `CLAUDE.md` importing it; (d) an import inside a fenced code block. A token naming a non-existent outside path (`@/components/x`) and imports between workspace files pass; a workspace above `WORKSPACE_SCAN_MAX_FILES`/`WORKSPACE_SCAN_MAX_BYTES` is refused with `workspace-scan-limit`; the scan is linear in workspace size (FR-118-27).
@@ -660,11 +660,26 @@ changed before merge.
 
 ## 20. Implementation status
 
-- **Implemented:** nothing; this is a design-only spec.
+- **Implemented (Phase 1, 2026-10-22, issue #94):** §6.5 FR-118-40…46 in
+  `packages/benchmark-engine`: the assertion plugin registry with the four existing types
+  (existing definitions and the three original examples hash unchanged), `file` target resolution
+  (path, or glob over added/modified files with exactly one match; `resolveInside`), bounded
+  pattern evaluation in a `node:worker_threads` worker with `ASSERTION_REGEX_TIMEOUT_MS` = 2 000 ms
+  for `file-contains` and the new types (terminated on the deadline or the run's `AbortSignal`; an
+  unfinished evaluation is an assertion error with `details.error` and `details.patterns`, and the
+  agent run becomes `infrastructure-error` with error `assertion-error: …`), `markdown-sections`,
+  `required-phrases`, `markdown-table-value` with number parsing, and the specification-only
+  example `examples/benchmarks/document-assertions/` (§8.4). Verified by
+  `test/document-assertions.test.ts`, `markdown.test.ts`, `pattern-worker.test.ts`,
+  `definition.test.ts` and `orchestrator.test.ts` (AC-6, AC-24). Agent-written table text in
+  messages and details is secret-redacted and cut to `MAX_EXCERPT_CHARS` (200) per FR-107-16.
+  NFR-118-02: a 2 MiB document took 65–110 ms per assertion including worker start-up on the
+  development machine; the CI test bounds it at 1 s (plus size-ratio linearity tests) so a loaded
+  runner cannot flake it.
 - **Partially implemented:** none. Existing pieces it builds on: Claude Code detection
   (SPEC-203 §13), RED/GREEN orchestration with the mock agent, suite import, the
   `artifact_benchmark_assignments` table and the artifact detail history (flat list, SPEC-113 §20).
-- **Not implemented:** everything in §6.
+- **Not implemented:** everything else in §6 (§6.1–§6.4, §6.6; Phases 2–5).
 
 ## 21. Phasing and implementation plan
 

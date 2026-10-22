@@ -203,17 +203,22 @@ Owned by `@directivebench/agent-adapters` (`src/contract.ts`): `AgentAdapter { i
 
 ### 8.3 Assertion plugin contract
 
-Bootstrap: a `switch` in `evaluateAssertion`. Target (refactor when adding the first planned type):
+Implemented ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1, `src/assertions.ts`): a typed registry
+`assertionPlugins` with exactly one plugin per assertion type; `evaluateAssertion` dispatches
+through it and never throws. Each type's Zod schema is a member of the discriminated union in
+`definition.ts`, and its static traits (`deterministic`, `executesCommands`) live there in
+`ASSERTION_TYPE_TRAITS`, because the web app imports `definition.ts` and must not load evaluator
+code. Adding a type = a schema in the union, a traits entry and a plugin (the type system rejects
+a registry without it).
 
 ```ts
-interface AssertionPlugin<TDef extends { type: string; id: string; weight: number; required: boolean }> {
-  type: TDef['type'];                       // discriminator in the definition
-  schema: z.ZodType<TDef>;                  // merged into assertionSchema (discriminated union)
+interface AssertionPlugin<T extends AssertionType> {
+  type: T;                                  // discriminator in the definition
   deterministic: boolean;                   // false → affects confidence & UI labels
   executesCommands: boolean;                // true → requires suite execution approval (FR-107-04)
-  requiredCapabilities?: ('network' | 'model-provider' | 'docker')[];
-  evaluate(def: TDef, ctx: AssertionContext): Promise<AssertionResult>; // must not throw
+  evaluate(def: Extract<AssertionDefinition, { type: T }>, ctx: AssertionContext): Promise<AssertionResult>; // must not throw
 }
+// Not yet needed by any type: requiredCapabilities ('network' | 'model-provider' | 'docker').
 
 interface AssertionContext {               // implemented (assertions.ts)
   workspaceDir: string;
@@ -229,7 +234,7 @@ interface AssertionResult {                // implemented; persisted to assertio
   passed: boolean; score: number;          // 0..1 (deterministic: 0 or 1)
   weight: number; required: boolean; deterministic: boolean;
   message: string; details: Record<string, unknown> | null;
-  error?: { code: string; message: string }; // planned (SPEC-118 FR-118-46): evaluation could not finish → agent run infrastructure-error
+  error?: { code: 'pattern-timeout' | 'pattern-worker-failed'; message: string }; // SPEC-118 FR-118-46: evaluation could not finish → agent run infrastructure-error `assertion-error`; also in details.error
 }
 ```
 
@@ -237,11 +242,11 @@ interface AssertionResult {                // implemented; persisted to assertio
 |------|--------|-----------|
 | `command` | Implemented | argv run in workspace without shell; pass iff exit code = `expectExitCode` (default 0); optional `timeoutSeconds`; details: argv, exit code, signal, duration, truncated/redacted stdout/stderr. Executes commands → approval required. |
 | `file-exists` | Implemented | `path` exists (or not, with `exists: false`); path confined to workspace. |
-| `file-contains` | Implemented | regex `pattern` with `flags` (`i`,`m`,`s`,`u`) matches file content (≤ 2 MiB); `negate` inverts. Matching runs synchronously today; planned: in a worker with `ASSERTION_REGEX_TIMEOUT_MS` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46). |
+| `file-contains` | Implemented | regex `pattern` with `flags` (`i`,`m`,`s`,`u`) matches file content (≤ 2 MiB); `negate` inverts. Matching runs in a worker bounded by `ASSERTION_REGEX_TIMEOUT_MS` ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-46). |
 | `changed-files` | Implemented | every agent-changed file matches ≥1 `allowed` glob and none match `forbidden` globs (`node:path` `matchesGlob`). |
-| `markdown-sections` | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-41) | required Markdown headings (text or regex, optional level and order) in a target file. Deterministic. |
-| `required-phrases` | Planned (SPEC-118 FR-118-42) | all/any of a list of literal phrases or regexes occur in a target file. Deterministic. |
-| `markdown-table-value` | Planned (SPEC-118 FR-118-43) | the number in a GFM table cell (row matched by pattern, column by header) lies within `min`/`max`. Deterministic. |
+| `markdown-sections` | Implemented ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-41) | listed headings (literal, case-insensitive and whitespace-folded, or `{ pattern }`) occur as ATX or setext headings of any level in the target file, optionally `ordered`; fenced code does not count. Deterministic. |
+| `required-phrases` | Implemented (SPEC-118 FR-118-42) | every listed phrase occurs in the target file: literals (whitespace runs match any run, `caseSensitive` default false) or `{ pattern }`. Deterministic. |
+| `markdown-table-value` | Implemented (SPEC-118 FR-118-43/44) | the first number in a GFM table cell (first body row whose first cell matches `row`, column by header) lies within `min`/`max`. Deterministic. |
 | `json-schema` | Planned | file parses as JSON and validates against an inline/relative JSON Schema. Deterministic. |
 | `unit-tests` / `integration-tests` | Planned | test-runner wrappers (e.g. `node --test`, `vitest`, `phpunit`, `pytest`) with result parsing for partial credit (`passed/total`). Executes commands. Today expressible via `command`. |
 | `static-analysis` | Planned | linters/analysers (ESLint, PHPStan, PHPCS, Semgrep) with rule/severity thresholds; partial credit by findings. Executes commands. |
@@ -358,5 +363,6 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 - **Implemented (verified by `packages/benchmark-engine/test/engine.test.ts` and `scoring.test.ts` — 31 tests — and `packages/runner/test/runner.test.ts`):** definition schema v1, YAML/JSON parsing, migration hook (rejects newer versions), `loadDefinitionFile` (all repository examples validate), file manifests/snapshots/diff with symlink rejection, `runCommand`/`buildCommandEnv` (no shell, no leaked environment, timeout and cancellation with `SIGTERM` then `SIGKILL` after `killGraceMs`, truncation, spawn errors), assertion types `command`, `file-exists`, `file-contains`, `changed-files` (`isDeterministicAssertion`), scoring (`scoreRun`, `aggregate`, `summarize` with verdict reasons and `nondeterministic`/`conclusive` flags, `confidenceFor`, `displayStatus`, `SCORE_EPSILON`), `prepareSuiteImport`/`suiteContentHash`, `executionBlockers` and `assertRunnable` (unapproved commands and `docker` rejected; capabilities `execution`, `headless` and `artifactInstallation` required), fixture copy verified against the snapshot hash, `comparabilityKey`, `equivalenceIssues`, `runBenchmark` with `onAgentRun` callback, alternating order and cancellation (`src/import.ts`, `src/orchestrator.ts`); Mock Agent adapter and contract in `@directivebench/agent-adapters` (`mock.test.ts`). Subpath exports `./definition`, `./load`, `./scoring`.
 - **Implemented (2026-10-15):** FR-107-07 capability checks including `modelSelection` when `execution.model` is set (`engine.test.ts`, "rejects a model selection the adapter cannot honour").
+- **Implemented (2026-10-22, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1):** the assertion plugin registry of §8.3 (`assertionPlugins`, `ASSERTION_TYPE_TRAITS`), `AssertionResult.error`, `file-contains` matching in a bounded worker, and the `markdown-sections`, `required-phrases` and `markdown-table-value` types; an assertion that cannot finish makes the agent run `infrastructure-error` with error `assertion-error: …` and keeps its results (`test/document-assertions.test.ts`, `pattern-worker.test.ts`, `markdown.test.ts`, `orchestrator.test.ts`).
 - **Partially implemented:** FR-107-14 independence is respected by the package manifest but not enforced by a test or lint rule.
-- **Not implemented (planned):** stage-level progress events (`onEvent` with `stage-started`, `stage-finished`, `command-output`, … — FR-107-09; the current contract is the `onAgentRun(record)` callback), exported `runAgentRun`, assertion plugin registry, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.
+- **Not implemented (planned):** stage-level progress events (`onEvent` with `stage-started`, `stage-finished`, `command-output`, … — FR-107-09; the current contract is the `onAgentRun(record)` callback), exported `runAgentRun`, planned assertion types (json-schema, test-runner, static-analysis, custom-script, llm-judge), docker environment, real-agent execution, static validation suites, version-over-version regression UI.
