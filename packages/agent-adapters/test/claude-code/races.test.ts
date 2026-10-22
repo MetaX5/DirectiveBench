@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * simulated by letting a hook replace one call of the wrapped `node:fs/promises` functions.
  */
 const hooks: {
+  rename?: (
+    from: string,
+    to: string,
+    actual: (a: string, b: string) => Promise<void>,
+  ) => Promise<void>;
   readdir?: (path: string) => Promise<unknown> | undefined;
   lstat?: (path: string) => Promise<unknown> | undefined;
   readlink?: (path: string) => Promise<unknown> | undefined;
@@ -20,6 +25,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return {
     ...actual,
     readdir: (path: string) => hooks.readdir?.(path) ?? actual.readdir(path),
+    rename: (from: string, to: string) =>
+      hooks.rename ? hooks.rename(from, to, actual.rename) : actual.rename(from, to),
     lstat: (path: string) => hooks.lstat?.(path) ?? actual.lstat(path),
     readlink: (path: string) => hooks.readlink?.(path) ?? actual.readlink(path),
     open: async (path: string, flags: string | number) => {
@@ -43,6 +50,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  delete hooks.rename;
   delete hooks.readdir;
   delete hooks.lstat;
   delete hooks.readlink;
@@ -150,6 +158,60 @@ describe('inspectWorkspace under races', () => {
 });
 
 describe('installClaudeArtifact under races', () => {
+  const host = () => join(scratch, 'host');
+
+  it('never writes outside when a setup process links .claude or .claude/rules out before the move', async () => {
+    await mkdir(host());
+    for (const [format, files, planted] of [
+      ['skill-md', { 'SKILL.md': '---\nname: pdf\n---\n' }, '.claude'],
+      ['claude-rule', { 'r.md': 'rule' }, '.claude'],
+    ] as const) {
+      hooks.rename = async (from, to, rename) => {
+        // The interleaving Codex reproduced: the workspace entry is replaced right before the move.
+        await symlink(host(), join(workspace, planted));
+        return rename(from, to);
+      };
+      await expect(installClaudeArtifact(workspace, bundle(format, files))).rejects.toMatchObject({
+        code: 'artifact-install-conflict',
+      });
+      expect(await readdir(host())).toEqual([]);
+      await rm(join(workspace, planted));
+    }
+    await mkdir(join(workspace, '.claude'));
+    await symlink(host(), join(workspace, '.claude', 'rules'));
+    delete hooks.rename;
+    await expect(
+      installClaudeArtifact(workspace, bundle('claude-rule', { 'r.md': 'rule' })),
+    ).rejects.toMatchObject({ code: 'artifact-install-conflict' });
+    expect(await readdir(host())).toEqual([]);
+  });
+
+  it('fails closed when an installed entry is replaced right after the move', async () => {
+    await mkdir(host());
+    for (const [format, files, name] of [
+      ['skill-md', { 'SKILL.md': 'x' }, '.claude'],
+      ['claude-md', { 'CLAUDE.md': 'x' }, 'CLAUDE.md'],
+    ] as const) {
+      hooks.rename = async (from, to, rename) => {
+        await rename(from, to);
+        await rm(to, { recursive: true });
+        await symlink(host(), to);
+      };
+      await expect(installClaudeArtifact(workspace, bundle(format, files))).rejects.toMatchObject({
+        code: 'artifact-install-conflict',
+        message: expect.stringMatching(/replaced after installation/),
+      });
+      await rm(join(workspace, name));
+    }
+  });
+
+  it('propagates a move error that is not an occupied destination', async () => {
+    hooks.rename = () => failing('EXDEV');
+    await expect(
+      installClaudeArtifact(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' })),
+    ).rejects.toMatchObject({ code: 'EXDEV' });
+  });
+
   it('refuses an instruction file replaced between lstat and open', async () => {
     await writeFile(join(workspace, 'CLAUDE.md'), 'fixture');
     hooks.open = (path, handle) =>

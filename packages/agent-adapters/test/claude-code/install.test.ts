@@ -1,4 +1,14 @@
-import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -152,6 +162,12 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     expect((await lstat(join(host, 'r.md')).catch(() => null)) === null).toBe(true);
   });
 
+  it('leaves no staging directory behind, after success and after a refusal', async () => {
+    await installClaudeArtifact(workspace, skill);
+    await installClaudeArtifact(workspace, skill).catch(() => undefined);
+    expect((await readdir(scratch)).sort()).toEqual(['host', 'workspace']);
+  });
+
   it('refuses a .claude entry that is a file', async () => {
     await writeFile(join(workspace, '.claude'), 'file');
     expect(await codeOf(() => installClaudeArtifact(workspace, skill))).toBe(
@@ -170,7 +186,10 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     await writeFile(file, 'x');
     const claudeMd = bundle('claude-md', { 'CLAUDE.md': 'x' });
     expect(await codeOf(() => installClaudeArtifact(file, claudeMd))).toMatch(/ENOTDIR/);
-    expect(await codeOf(() => installClaudeArtifact(file, skill))).toMatch(/ENOTDIR/);
+    // The rename into a workspace that is not a directory reports an occupied destination.
+    expect(await codeOf(() => installClaudeArtifact(file, skill))).toBe(
+      'artifact-install-conflict',
+    );
     const escapingSkill = bundle('skill-md', { 'SKILL.md': 'x', '../../evil.md': 'x' });
     expect(await codeOf(() => installClaudeArtifact(workspace, escapingSkill))).toMatch(
       /PathEscapeError/,

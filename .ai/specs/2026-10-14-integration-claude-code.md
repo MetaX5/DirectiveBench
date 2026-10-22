@@ -127,6 +127,7 @@ Mapping to the `AgentAdapter` capability contract ([SPEC-110 §8](2026-10-14-ben
 | `claude-rule` | `.claude/rules/<name>.md` | Confirmed rules directory (C4) |
 | other formats | Not installable; the run is rejected before execution as "artifact format not compatible with adapter claude-code". | DirectiveBench rule |
 
+- The install is built in a private staging directory next to the workspace and moved in with `rename` per top-level entry (`.claude`, `CLAUDE.md`, `AGENTS.md`), never written through workspace paths a `setup` process could re-link ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) §12).
 - Instruction files (`CLAUDE.md`, `AGENTS.md`) that already exist in the fixture are **appended to**, separated by a blank line. This matches the Mock Agent (`packages/agent-adapters/src/mock.ts`). For skills and rules, an existing target path → `infrastructure-error` (`artifact-install-conflict`). Files are written with exclusive-create and path containment (`writeArtifactFiles`).
 - `.agents/skills/` is **not** documented as a Claude Code skill location (C3 does not mention it). Do not use it for this adapter.
 - The baseline variant receives nothing, except in an A/B run ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-11), where it receives the baseline version of the same artifact through exactly this convention. Both variants get identical flags, model, permission profile and environment.

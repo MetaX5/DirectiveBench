@@ -180,6 +180,26 @@ smaller sizes (ratios measured at three sizes: ≤ 4.3× per 4× size), and the 
 `LOADED_RUNNER_TIMEOUT_MS` (60 s). `taskset -c 0,1 pnpm test --force` passed with the slowest test
 at 20.7 s before the size cut.
 
+### Codex adversarial review (coordinator)
+
+Needs-attention, one **HIGH**, valid: `install.ts` checked the directories with `lstat` and then
+wrote with pathname-based `mkdir`/`writeFile`, so a process left behind by `setup` could replace
+`.claude` or `.claude/rules` with an outward link in between and the write would land outside the
+workspace (Codex reproduced it with a mocked interleaving). Fixed: the install is built in a
+`mkdtemp` (0700) staging directory beside the workspace and moved in with `rename` per top-level
+entry; `rename` replaces a link at the destination itself and fails on an occupied `.claude`, so a
+planted link fails closed (`artifact-install-conflict`); each moved entry is `lstat`ed again (a
+real directory or a single-link regular file directly in the workspace), and the staging
+directory is always removed. Existing instruction files are read with `O_NOFOLLOW` and an
+identity check, then replaced whole by `rename`. Tests (races via the wrapped `node:fs/promises`):
+a link to a host directory planted at `.claude` right before the move (skill and rule), a
+pre-existing `.claude/rules` link, an entry swapped right after the move, a non-occupied `rename`
+error propagated, and no staging directory left behind; the host directory stays empty. The old
+code had no `rename` step, so the new interleaving tests do not apply to it (red-first is Codex's
+own reproduction). Ownership: `runCommand` kills the setup process group only on timeout or
+cancellation, so a background child can outlive `setup`; recorded as a requirement for Phase 3
+step 3 / the orchestrator in SPEC-118 §12, not changed here.
+
 ## Lessons recorded
 
 - [2026-10-21 — Timing tests must survive a loaded CI runner](../lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md) (updated: emulate the 2-core runner, check CI on the current head)
@@ -187,6 +207,8 @@ at 20.7 s before the size cut.
 
 ## Follow-ups
 
+- Orchestrator / Phase 3 step 3: kill each `setup` command's process group when it ends, before
+  installation and the pre-spawn inspection (SPEC-118 §12).
 - Phase 3 step 2–3: wire the builders into a `ClaudeCodeAdapter` (call `inspectWorkspace` with the
   installed paths right before spawn; map codes to `infrastructure-error` and FR-118-15 stops).
 - Phase 4: plan-time calls — `inspectArtifactVersions`, `baselineSkillNameIssue`, a materialised

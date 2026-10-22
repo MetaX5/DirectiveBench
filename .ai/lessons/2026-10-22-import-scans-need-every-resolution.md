@@ -32,8 +32,12 @@ links and hard links themselves, not rely on a later check.
   but refuse (not skip) an over-long token that normalisation could shorten.
 - Check `realpath` of both the lexical and the raw joined path; when the workspace has a link,
   refuse relative tokens that climb above their own directory.
-- In any writer that runs after untrusted commands: `lstat` every existing path component, create
-  with `wx`, append only to a regular file with `nlink === 1` and compare `fstat` with `lstat`.
+- In any writer that runs after untrusted commands, never write through workspace paths after
+  checking them (a surviving process can re-link an ancestor in between — the Codex review of PR
+  #108 reproduced it): build the result in a private `mkdtemp` directory on the same file system
+  and `rename` each top-level entry in, then `lstat` what landed; read existing files with
+  `O_NOFOLLOW` plus an `fstat`/`lstat` identity check. And kill the untrusted command's process
+  group when it ends.
 - Model the consumer's parser, not a regex in isolation: Claude Code lexes memory files as
   Markdown and matches imports per text piece (so `@/etc/hostname*x*` imports `/etc/hostname`),
   and accepts `--- ` as a frontmatter opener that the core parser ignores. Review round 1 of PR

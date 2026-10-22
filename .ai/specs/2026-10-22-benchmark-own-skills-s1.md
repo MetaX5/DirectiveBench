@@ -433,6 +433,15 @@ Additions and residual risks of this slice:
   (§15) proves it for the production flags.
 - **Secrets.** The API key exists only in the agent child's environment; never in argv, job
   payload, database, logs, traces or CLI output; the exact value is added to redaction.
+- **Setup processes must not outlive `setup` (FR-118-06/27).** Installation and the pre-spawn
+  inspection assume nothing a `setup` command started is still running: such a process could change
+  the workspace after the checks. Today `runCommand` (`packages/benchmark-engine/src/commands.ts`)
+  signals the command's process group only on timeout or cancellation, so a backgrounded child that
+  closed its output survives a normal exit. **Requirement for Phase 3 step 3 / the orchestrator:**
+  kill each `setup` command's process group when it ends, before installation and before the
+  pre-spawn inspection. Until then the install itself never writes through the workspace by
+  pathname (staged in a private directory next to it and moved in with `rename`, which fails closed
+  on a planted `.claude`), so a late change cannot redirect an install write outside the workspace.
 - **Import scan residuals (FR-118-27).** The scan covers the workspace at launch. Claude Code also
   loads a subdirectory's `CLAUDE.md` lazily once it touches a file there, and the agent can write
   such a file during the run; whether import expansion of a file written mid-run is confined by
@@ -714,8 +723,9 @@ changed before merge.
   - FR-118-02/03 env (`buildClaudeEnv`, `claudeAuthProfile`): allowlist only; subscription keeps the
     real `HOME` and no `ANTHROPIC_*`/`CLAUDE_CODE_OAUTH_TOKEN`/`CLAUDE_CODE_USE_*`; api-key mode
     sets run-local `HOME`/`CLAUDE_CONFIG_DIR` and the key only as `ANTHROPIC_API_KEY`.
-  - The install convention of SPEC-203 §4.1 (`installClaudeArtifact`), which refuses to write through a
-    symbolic link or onto a hard-linked instruction file a `setup` command planted.
+  - The install convention of SPEC-203 §4.1 (`installClaudeArtifact`), built in a private staging
+    directory beside the workspace and moved in with `rename`, so a symbolic link a `setup` command
+    plants, even after the checks, makes it fail closed instead of writing outside the workspace.
   - FR-118-26 (`inspectArtifactVersions`): candidate and baseline; frontmatter is read as Claude
     Code reads it (an opening `---` with trailing blanks); a SKILL.md that opens a block it never
     closes, or has `---` inside the block, fails closed; AC-23 and the bundle part of

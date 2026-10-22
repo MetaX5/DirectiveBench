@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, mkdtemp, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import type { ArtifactBundle, ArtifactFormat } from '@directivebench/core';
 import type { InstalledArtifact } from '../contract';
 import { writeArtifactFiles } from '../install';
@@ -66,65 +66,59 @@ async function lstatOrNull(path: string) {
 }
 
 /**
- * Throws `artifact-install-conflict` unless every existing component of `relativeDir` below the
- * workspace is a real directory. `setup` commands run before installation, so a symbolic link
- * planted at `.claude` would otherwise redirect the install onto a host directory.
+ * The current content of the instruction file `name` at the workspace root, or null when there is
+ * none. An existing file must be a regular file with a single link that is still the same file
+ * when opened (a link a `setup` command planted is refused, never read through).
  */
-async function assertPlainDirectories(workspaceDir: string, relativeDir: string): Promise<void> {
-  let current = '';
-  for (const segment of relativeDir.split('/')) {
-    current = current ? `${current}/${segment}` : segment;
-    const info = await lstatOrNull(join(workspaceDir, current));
-    if (info === null) return;
-    if (!info.isDirectory()) throw conflict(current, 'it exists and is not a directory');
-  }
-}
-
-async function writeInto(
-  workspaceDir: string,
-  targetDir: string,
-  artifact: ArtifactBundle,
-): Promise<string[]> {
-  await assertPlainDirectories(workspaceDir, targetDir);
-  try {
-    return await writeArtifactFiles(workspaceDir, targetDir, artifact);
-  } catch (error) {
-    if (errorCode(error) === 'EEXIST') throw conflict(targetDir, 'a file already exists there');
-    throw error;
-  }
-}
-
-/**
- * Appends `text` to the instruction file `name` at the workspace root, separated by a blank line
- * from existing content, or creates it (exclusive create). An existing file must be a regular
- * file with a single link that is still the same file when opened, so a link a `setup` command
- * planted can never redirect the write to a host file.
- */
-async function appendInstruction(workspaceDir: string, name: string, text: string): Promise<void> {
+async function existingInstruction(workspaceDir: string, name: string): Promise<string | null> {
   const path = join(workspaceDir, name);
   const before = await lstatOrNull(path);
-  if (before === null) {
-    const handle = await open(path, 'wx');
-    try {
-      await handle.writeFile(text);
-    } finally {
-      await handle.close();
-    }
-    return;
-  }
+  if (before === null) return null;
   if (!before.isFile() || before.nlink !== 1) {
     throw conflict(name, 'it is not a regular file with a single link');
   }
   // O_NOFOLLOW is undefined on Windows and ORs to 0 there; the identity check below covers it.
-  const handle = await open(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
       throw conflict(name, 'it changed while it was being opened');
     }
-    await handle.writeFile(opened.size > 0 ? `\n\n${text}` : text);
+    return await handle.readFile('utf8');
   } finally {
     await handle.close();
+  }
+}
+
+/** `existing` followed by `text`, separated by a blank line when there is existing content. */
+function appended(existing: string | null, text: string): string {
+  return existing ? `${existing}\n\n${text}` : text;
+}
+
+/** Errors of `rename` that mean the destination is occupied or is not a plain path. */
+const OCCUPIED = new Set(['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR']);
+
+/**
+ * Moves every top-level entry of the staging directory into the workspace with `rename`, then
+ * checks what landed. `rename` replaces a link at the destination itself instead of following it
+ * and fails on a non-empty directory, so a `.claude` that a still-running `setup` process planted
+ * (a link, a file or a populated directory) makes the install fail closed and nothing is written
+ * outside the workspace.
+ */
+async function moveIntoPlace(stage: string, workspaceDir: string): Promise<void> {
+  for (const name of (await readdir(stage)).sort()) {
+    try {
+      await rename(join(stage, name), join(workspaceDir, name));
+    } catch (error) {
+      const code = errorCode(error) as string;
+      if (OCCUPIED.has(code)) throw conflict(name, `the destination is occupied (${code})`);
+      throw error;
+    }
+    // A direct child of the workspace that is a real directory or file (not a link) lies inside it.
+    const landed = await lstat(join(workspaceDir, name));
+    const plain = name === '.claude' ? landed.isDirectory() : landed.isFile() && landed.nlink === 1;
+    if (!plain || landed.isSymbolicLink())
+      throw conflict(name, 'it was replaced after installation');
   }
 }
 
@@ -132,43 +126,64 @@ async function appendInstruction(workspaceDir: string, name: string, text: strin
  * Installs one artifact version into a workspace with the Claude Code convention (SPEC-203 §4.1),
  * for the candidate and for an A/B baseline alike (FR-118-11):
  *
- * - `skill-md` → `.claude/skills/<slug>/` with every bundled file (the target must not exist);
- * - `claude-rule` → `.claude/rules/<file>` (an existing file is a conflict);
+ * - `skill-md` → `.claude/skills/<slug>/` with every bundled file;
+ * - `claude-rule` → `.claude/rules/<file>`;
  * - `claude-md` → appended to `./CLAUDE.md`;
  * - `agents-md` → appended to `./AGENTS.md`, plus an `@AGENTS.md` import appended to `./CLAUDE.md`,
  *   so every Claude Code version loads it (versions before 2.1.277 do not read `AGENTS.md`, and
  *   later ones skip it when a `CLAUDE.md` exists).
  *
- * Other formats fail with `artifact-format-unsupported`; a target that exists, is not a plain
- * directory or file, or is reached through a symbolic link fails with `artifact-install-conflict`.
+ * Nothing is written into the workspace by pathname: the complete result is built in a private
+ * staging directory (`mkdtemp`, mode 0700) next to the workspace — so on the same file system,
+ * which the workspace's parent must allow — and moved in by `rename` per top-level entry
+ * (`.claude`, `CLAUDE.md`, `AGENTS.md`). A workspace that already has a `.claude` (which
+ * FR-118-06 forbids anyway) fails closed. Other formats fail with `artifact-format-unsupported`;
+ * an occupied, linked or hard-linked target with `artifact-install-conflict`.
+ *
+ * Precondition: no process a `setup` command started is still running (SPEC-118 FR-118-27). The
+ * staging closes the window between checks and writes, but such a process could still change the
+ * workspace after installation; the pre-spawn inspection then catches what it can.
  */
 export async function installClaudeArtifact(
   workspaceDir: string,
   artifact: ArtifactBundle,
 ): Promise<InstalledArtifact> {
   const format = assertInstallable(artifact);
-  if (format === 'skill-md') {
-    if (!SLUG.test(artifact.slug)) {
-      throw conflict(`.claude/skills/${artifact.slug}`, 'the slug is not a single plain segment');
-    }
-    const targetDir = `.claude/skills/${artifact.slug}`;
-    await assertPlainDirectories(workspaceDir, '.claude/skills');
-    if ((await lstatOrNull(join(workspaceDir, targetDir))) !== null)
-      throw conflict(targetDir, 'it already exists');
-    return { paths: await writeInto(workspaceDir, targetDir, artifact) };
+  if (format === 'skill-md' && !SLUG.test(artifact.slug)) {
+    throw conflict(`.claude/skills/${artifact.slug}`, 'the slug is not a single plain segment');
   }
-  if (format === 'claude-rule') {
-    // A rule is one file in `.claude/rules/`; a nested path could pass through a planted link.
-    const nested = artifact.files.find((file) => file.path.includes('/'));
-    if (nested) throw conflict(`.claude/rules/${nested.path}`, 'a rule file must not be nested');
-    return { paths: await writeInto(workspaceDir, '.claude/rules', artifact) };
+  // A rule is one file in `.claude/rules/`.
+  const nested = artifact.files.find((file) => file.path.includes('/'));
+  if (format === 'claude-rule' && nested) {
+    throw conflict(`.claude/rules/${nested.path}`, 'a rule file must not be nested');
   }
   const text = artifact.files.map((file) => file.content).join('\n\n');
-  if (format === 'claude-md') {
-    await appendInstruction(workspaceDir, 'CLAUDE.md', text);
-    return { paths: ['CLAUDE.md'] };
+  const claudeMd =
+    format === 'claude-md' || format === 'agents-md'
+      ? await existingInstruction(workspaceDir, 'CLAUDE.md')
+      : null;
+  const agentsMd =
+    format === 'agents-md' ? await existingInstruction(workspaceDir, 'AGENTS.md') : null;
+  const stage = await mkdtemp(join(dirname(resolve(workspaceDir)), '.claude-install-'));
+  try {
+    let paths: string[];
+    if (format === 'skill-md') {
+      paths = await writeArtifactFiles(stage, `.claude/skills/${artifact.slug}`, artifact);
+    } else if (format === 'claude-rule') {
+      paths = await writeArtifactFiles(stage, '.claude/rules', artifact);
+    } else if (format === 'claude-md') {
+      await writeFile(join(stage, 'CLAUDE.md'), appended(claudeMd, text), { flag: 'wx' });
+      paths = ['CLAUDE.md'];
+    } else {
+      await writeFile(join(stage, 'AGENTS.md'), appended(agentsMd, text), { flag: 'wx' });
+      await writeFile(join(stage, 'CLAUDE.md'), appended(claudeMd, `${AGENTS_MD_IMPORT}\n`), {
+        flag: 'wx',
+      });
+      paths = ['AGENTS.md', 'CLAUDE.md'];
+    }
+    await moveIntoPlace(stage, workspaceDir);
+    return { paths };
+  } finally {
+    await rm(stage, { recursive: true, force: true });
   }
-  await appendInstruction(workspaceDir, 'AGENTS.md', text);
-  await appendInstruction(workspaceDir, 'CLAUDE.md', `${AGENTS_MD_IMPORT}\n`);
-  return { paths: ['AGENTS.md', 'CLAUDE.md'] };
 }
