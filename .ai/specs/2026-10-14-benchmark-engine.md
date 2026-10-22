@@ -165,7 +165,7 @@ interface RunBenchmarkInput {
   fixtures: Record<string, CaseFixtures>;
   fixtureStore: string;               // <dataDir>/fixtures
   artifact: ArtifactBundle;           // @directivebench/core — the candidate
-  baselineArtifact?: ArtifactBundle;  // planned (SPEC-118): A/B baseline, another version of the same artifact; absent = no artifact
+  baselineArtifact?: ArtifactBundle;  // SPEC-118 FR-118-10…12 (implemented): A/B baseline, another version of the same artifact, installed into every baseline workspace; absent = no artifact; assertRunnable rejects another artifact, the same content or another format
   adapter: AgentAdapter;              // @directivebench/agent-adapters
   workRoot: string;                   // temp workspaces of this run
   keepWorkspaces?: boolean;
