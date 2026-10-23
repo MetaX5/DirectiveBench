@@ -3,7 +3,7 @@ title: Publish current design-system and backlog changes as a PR
 date: 2026-10-23
 agent: OpenAI Codex
 trigger: Maintainer requests a PR for current changes
-status: in-progress
+status: completed
 branch: feat/shadcn-design-system
 specs: [SPEC-119, SPEC-116, SPEC-101, SPEC-118]
 ---
@@ -20,8 +20,8 @@ fixes and backlog updates already committed in this session.
 - [x] Inspect current commits, tracker configuration and existing PRs.
 - [x] Fetch latest main and resolve the lesson-index conflict by retaining both sets of entries.
 - [x] Run format, lint, typecheck, unit tests, build, package verification and browser tests.
-- [ ] Review the final diff, push, open the PR using the house body layout and apply labels.
-- [ ] Read back PR state, labels and head checks; record final publication result.
+- [x] Review the final diff, push, open the PR using the house body layout and apply labels.
+- [x] Read back PR state, labels and head checks; record final publication result.
 
 ## Decisions
 
@@ -45,9 +45,23 @@ The fresh browser report is `/tmp/directivebench-publish-e2e-report.json`.
 `git diff --check` passes; no app or package changes remain relative to main beyond the
 previously implemented UI scope.
 
+Published [PR #125](https://github.com/MetaX5/DirectiveBench/pull/125), ready for review
+(non-draft) against main. The first published code head is aab98c0019f29bcdb20bc1cb643090e80d32b413.
+Read-back confirms OPEN and MERGEABLE, with guarded labels `review`, `feature`, `needs-qa`,
+`priority-medium`, `risk-medium`; one consolidated label-rationale comment was posted.
+Fresh light/dark screenshots with synthetic demo data are linked from the PR body and stored
+on the dedicated evidence branch `qa-evidence-design-system-2026-10-23`.
+
+CI has started: lint/format/typecheck/audit and some CodeQL checks already passed at the
+first published code head; unit/build/browser and another CodeQL job were still running.
+No CI-success, review approval or QA approval is claimed. The final bookkeeping commit
+only finalizes this publication log; it does not change tested product code.
+
 ## Problems and deviations
 
 The merge is included so the PR can be reviewed and checked against the latest main.
+No implementation changes were introduced during publication. The only resolved conflict
+was the lesson index. The existing Turbopack filesystem tracing warning remains unchanged.
 
 ## Lessons recorded
 
