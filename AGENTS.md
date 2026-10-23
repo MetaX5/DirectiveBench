@@ -172,6 +172,12 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   never disable TLS verification, keep commands argv-only with an environment allowlist.
 - The mock agent must always be labelled as a mock; never present mock results as AI results.
 - Incomplete features must be visibly marked as planned or not implemented.
+- App-authored UI copy must not use en dash (U+2013) or em dash (U+2014), including labels,
+  notices, tooltips, accessible names and missing-value placeholders. Use a colon,
+  parentheses, a separate sentence or a normal hyphen where appropriate. Preserve imported
+  content, user data, raw agent output and benchmark evidence verbatim; do not apply a
+  blanket replacement to rendered or stored data. Existing-copy cleanup and automated
+  enforcement are tracked in [issue #123](https://github.com/MetaX5/DirectiveBench/issues/123).
 - Verify all visible text contrast (at least 4.5:1 for normal-size text, 3:1 for large text)
   in both themes, including muted text, navigation, status badges, errors and placeholders
   on their actual backgrounds. Check enabled buttons in rest, hover and focus states;

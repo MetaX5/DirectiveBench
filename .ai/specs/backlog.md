@@ -6,7 +6,7 @@ keeps the source-to-issue map and reserved ids.
 ## .ai/specs/product-brief.md
 
 Backlog source: .ai/specs/product-brief.md
-Last filed: 2026-10-16
+Last filed: 2026-10-23
 
 | Id | Issue | Title | Parent | Depends on | Adopted |
 |---|---|---|---|---|---|
@@ -30,6 +30,7 @@ Last filed: 2026-10-16
 | E04-T03 | [#30](https://github.com/MetaX5/DirectiveBench/issues/30) | Value checkpoint: does the maintainer use the Registry when working on skills? (A02, D07) | #13 | — | no |
 | E04-T04 | [#31](https://github.com/MetaX5/DirectiveBench/issues/31) | Decide how D03 is measured before the comparison work (Q05) | #13 | — | no |
 | E05 | [#14](https://github.com/MetaX5/DirectiveBench/issues/14) | Later | — | — | no |
+| E05-T01 | [#124](https://github.com/MetaX5/DirectiveBench/issues/124) | Specify: repository workflow benchmarks and skill chains (D02/S3) | #14 | - | no |
 
 ## .ai/specs/2026-10-22-benchmark-own-skills-s1.md
 
@@ -50,3 +51,28 @@ Last filed: 2026-10-22
 | E06-S04 | [#97](https://github.com/MetaX5/DirectiveBench/issues/97) | A skill author scaffolds a suite and runs it against a skill version from the CLI, with or without an A/B baseline, and gets a verdict and exit code | #93 | E06-S01 (#94), E06-S02 (#95), E06-S03 (#96) | no |
 | E06-S04-T01 | [#103](https://github.com/MetaX5/DirectiveBench/issues/103) | Opt-in live check in both auth modes; record results in SPEC-203 before S04 ships | #97 | E06-S03 (#96) | no |
 | E06-S05 | [#98](https://github.com/MetaX5/DirectiveBench/issues/98) | A skill author sees runs per skill version, the baseline, comparability and regressions on the artifact page | #93 | E06-S02 (#95) | no |
+
+## Maintainer UI follow-ups (2026-10-23)
+
+Backlog source: [maintainer request and run record](../runs/2026-10-23-backlog-ui-workflows.md)
+Last filed: 2026-10-23
+
+F01 and F02 are reserved follow-up ids. These are deferred tasks, not implemented behavior.
+
+| Id | Issue | Title | Parent | Depends on | Adopted |
+|---|---|---|---|---|---|
+| F01 | [#122](https://github.com/MetaX5/DirectiveBench/issues/122) | Fit the Artifacts table in Full HD without horizontal scrolling | - | - | no |
+| F02 | [#123](https://github.com/MetaX5/DirectiveBench/issues/123) | Ban en/em dashes in app-authored UI copy and add automated enforcement | - | - | no |
+
+F01 targets 1920x1080 at 100% zoom, with all current columns visible. Description width and
+main content width are implementation alternatives to measure; category/status labels must
+remain readable. The issue includes a reproduction screenshot with synthetic mock data.
+
+F02 records the maintainer's standing copy rule in AGENTS.md now. Replacing existing copy
+and adding a regression guard are deferred to #123; imported content and raw evidence remain
+verbatim. No UI implementation is included in this backlog update.
+
+For full repository workflows, D02 already covers chains and the product brief places them
+in S3/Later. E05-T01 (#124, above) makes the missing dedicated specification and implementation
+breakdown explicit. Existing repository fixtures and independent S1 cases are not a complete
+stateful workflow benchmark. This does not reorder the current S1 work (D08).
