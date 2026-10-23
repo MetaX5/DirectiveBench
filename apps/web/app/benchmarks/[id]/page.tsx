@@ -140,7 +140,11 @@ export default async function BenchmarkPage({
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 {error ? (
-                  <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
+                  <p
+                    role="alert"
+                    className="text-xs text-destructive-foreground"
+                    data-testid="enqueue-error"
+                  >
                     {error}
                   </p>
                 ) : null}
@@ -165,12 +169,16 @@ export default async function BenchmarkPage({
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 {error ? (
-                  <p role="alert" className="text-xs text-destructive" data-testid="enqueue-error">
+                  <p
+                    role="alert"
+                    className="text-xs text-destructive-foreground"
+                    data-testid="enqueue-error"
+                  >
                     {error}
                   </p>
                 ) : null}
                 {blockers.map((blocker) => (
-                  <p key={blocker} className="text-xs text-warning">
+                  <p key={blocker} className="text-xs text-warning-foreground">
                     {blocker}
                     {blocker.includes('approved') ? ' Approval in the UI is planned.' : ''}
                   </p>

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Nav } from '@/components/nav';
 import { ThemeProvider, ThemeToggle } from '@/components/theme';
 import './globals.css';
+import '@fontsource-variable/figtree';
 
 export const metadata: Metadata = {
   title: { default: 'DirectiveBench', template: '%s · DirectiveBench' },
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className="font-sans">
       <body className="min-h-screen">
         <ThemeProvider>
           <div className="flex min-h-screen">

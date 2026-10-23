@@ -18,6 +18,12 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-23] **No en/em dashes in app-authored UI copy** — maintainer rule: use ordinary punctuation in labels, messages and placeholders; preserve imported content, raw output and stored evidence verbatim. Cleanup and automated enforcement are backlog work. → [lessons/2026-10-23-ui-copy-no-long-dashes.md](lessons/2026-10-23-ui-copy-no-long-dashes.md)
+
+- [2026-10-23] **Verify preset text and button accessibility** — after maintainer feedback, check all text (muted labels, statuses, errors and placeholders) on real backgrounds in both themes; button checks alone miss failures. Preserve pointer cursors and matching form heights. → [lessons/2026-10-23-verify-preset-button-accessibility.md](lessons/2026-10-23-verify-preset-button-accessibility.md)
+
+- [2026-10-23] **Review shadcn generator output against the existing app** — preserve utilities, semantic variants, native forms and table wrapping; bundle fonts and their licenses locally; compare rendered colours because production CSS can serialize OKLCH as Lab. → [lessons/2026-10-23-shadcn-generators-need-a-compatibility-review.md](lessons/2026-10-23-shadcn-generators-need-a-compatibility-review.md)
+
 - [2026-10-22] **`readline/promises` `question()` never settles on end of input** — race it against the interface's `close` event, and test prompts with an ended stream and Ctrl-D. → [lessons/2026-10-22-readline-question-never-settles-on-eof.md](lessons/2026-10-22-readline-question-never-settles-on-eof.md)
 - [2026-10-22] **A refusal guarantee covers the data directory** — read a migrated database read-only before consent and `initialize()` only after it; test refusals on a missing and an older data directory, and share one function between preflight and execution checks of the same input. → [lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md](lessons/2026-10-22-refusals-start-from-a-fresh-and-an-old-data-dir.md)
 - [2026-10-22] **Review PRs through `om-auto-review-pr`, and never hold its lock on a PR its author is still pushing** — a hand-briefed review skipped the skill's gate and format, and the claim blocked the author's own automation. → [lessons/2026-10-22-review-prs-through-om-auto-review-pr.md](lessons/2026-10-22-review-prs-through-om-auto-review-pr.md)

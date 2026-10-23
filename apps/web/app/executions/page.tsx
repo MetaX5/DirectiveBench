@@ -79,7 +79,9 @@ export default async function ExecutionsPage() {
                           View run
                         </Link>
                       ) : null}
-                      {job.error ? <p className="text-destructive">{job.error}</p> : null}
+                      {job.error ? (
+                        <p className="text-destructive-foreground">{job.error}</p>
+                      ) : null}
                     </TD>
                     <TD>
                       {(job.status === 'pending' || job.status === 'running') &&
