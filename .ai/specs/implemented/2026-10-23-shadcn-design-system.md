@@ -47,6 +47,10 @@ As a contributor, I can add shadcn components using the project's configuration.
    foreground tokens to meet this requirement. Inline form submit buttons MUST match
    the adjacent input height (32 CSS pixels).
 7. Long badges MUST wrap without clipping or horizontally expanding a 390px mobile viewport.
+8. All visible text, including muted descriptions, navigation labels, semantic statuses,
+   errors and placeholders, MUST meet WCAG AA in both themes: 4.5:1 for normal text,
+   3:1 for large text. Check actual background surfaces, including tinted badges and active
+   navigation. Disabled controls are excluded; status fills may use separate text tokens.
 
 ## 7. Non-functional requirements
 
@@ -99,6 +103,7 @@ Run lint, typecheck, full 100% unit coverage, build, verify:pack and the full E2
 - [x] AC-4: Built app assets, including fonts, load locally without remote requests.
 - [x] AC-5: All required quality gates pass and the packed CLI serves the styled app.
 - [x] AC-6: Button contrast, pointer cursors, 32px form alignment and mobile badge wrapping pass browser checks.
+- [x] AC-7: All visible text on existing demo pages and status foregrounds pass contrast checks in both themes.
 
 ## 17. Dependencies
 
@@ -115,6 +120,10 @@ Additional shadcn components as concrete features require them.
 
 ## 20. Implementation status
 
+Follow-up verified on 2026-10-23: the maintainer requested verification of all text, extending
+button checks. Muted text, navigation, semantic statuses, errors and placeholders now pass
+checks in both themes. See [text contrast run](../../runs/2026-10-23-text-contrast.md).
+
 Implemented and verified on 2026-10-23 (Linux, Node 22.22.1):
 
 - `components.json` configures radix-lyra with neutral tokens and lime accent. Source-owned
@@ -123,11 +132,15 @@ Implemented and verified on 2026-10-23 (Linux, Node 22.22.1):
 - The accent fills are unchanged; primary, link and destructive label foregrounds have explicit
   accessibility overrides. All six button variants pass 4.5:1 in rest, hover and focus states
   in both themes (measured minimum 5.81:1). Register and Input are both 32px.
-- Playwright: 48/48 tests pass, including four design-system tests; both themes, loaded font
+- Playwright: 50/50 tests pass, including four design-system and two text-contrast tests; both themes, loaded font
   faces, local assets, native forms, mobile width and cursor feedback are verified.
 - Lint, typecheck, 1,666 unit tests at 100% coverage, build and verify:pack pass. A browser
   smoke check of the installed tarball verifies locally loaded Figtree, cards, font license,
   no remote requests, pointer cursor and 32px form alignment.
+- All measured text on 15 pages per theme plus the semantic surface matrix passes AA:
+  1,439 occurrences per theme, no failures, minimum 5.004:1 light and 5.183:1 dark.
+  Source-owned status fills are preserved; readable success/warning/info foreground tokens
+  and opaque navigation labels fix failures found by the initial wider audit.
 - Independent review findings (table wrapping, palette/font assertions and mobile badges)
   were addressed; dark/light and mobile screenshots were inspected.
 
@@ -136,4 +149,5 @@ The original preset is `b3Rq8QfWi`. Review generator diffs before reapplying it:
 local font imports and accessible foreground overrides must be preserved.
 
 Not verified: other browsers, Windows/macOS and a full WCAG audit (the button checks cover
-text contrast, not a certification of every control or focus indicator).
+text contrast on seeded pages and representative surfaces, not a certification of every
+control, native operating-system popup or focus indicator).

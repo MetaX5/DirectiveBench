@@ -50,7 +50,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             {error ? (
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive-foreground">{error}</p>
             ) : (
               <Pre>{JSON.stringify(config, null, 2)}</Pre>
             )}

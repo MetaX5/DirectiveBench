@@ -172,8 +172,11 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   never disable TLS verification, keep commands argv-only with an environment allowlist.
 - The mock agent must always be labelled as a mock; never present mock results as AI results.
 - Incomplete features must be visibly marked as planned or not implemented.
-- Verify enabled button text contrast (at least 4.5:1 for normal-size text) in both themes
-  and in rest, hover and focus states. Buttons need pointer cursors; inline form buttons
+- Verify all visible text contrast (at least 4.5:1 for normal-size text, 3:1 for large text)
+  in both themes, including muted text, navigation, status badges, errors and placeholders
+  on their actual backgrounds. Check enabled buttons in rest, hover and focus states;
+  button-only checks do not establish contrast for the rest of the UI.
+  Buttons need pointer cursors; inline form buttons
   must match adjacent input heights. A UI preset does not waive these checks.
 - Design generic capabilities. A user's concrete case (one skill, client or document type) is a
   reference scenario to check the design, never a target to special-case: users build their own

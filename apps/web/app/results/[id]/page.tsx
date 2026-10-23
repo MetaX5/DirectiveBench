@@ -230,7 +230,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
 
       {run.error ? (
         <Card className="mb-4 border-destructive/40">
-          <CardContent className="text-sm text-destructive">{run.error}</CardContent>
+          <CardContent className="text-sm text-destructive-foreground">{run.error}</CardContent>
         </Card>
       ) : null}
 
@@ -391,7 +391,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 </summary>
                 <div className="space-y-3 border-t p-3">
                   {agentRun.error ? (
-                    <p className="text-sm text-destructive">{agentRun.error}</p>
+                    <p className="text-sm text-destructive-foreground">{agentRun.error}</p>
                   ) : null}
                   <Table>
                     <THead>

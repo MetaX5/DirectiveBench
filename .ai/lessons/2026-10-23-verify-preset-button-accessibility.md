@@ -27,3 +27,15 @@ choosing readable foreground tokens. Use the default 32px button next to the 32p
 reserve smaller buttons for dense rows. Verify computed colours (compositing transparent
 backgrounds), hover and focus styles, and bounding-box heights in Playwright.
 The standing rule is also recorded in AGENTS.md.
+
+## Follow-up: text outside buttons
+
+The maintainer then asked about all text in light and dark modes. A broader production
+audit found 89 failing occurrences over 28 page/theme combinations: light warning badges
+2.66:1, success 4.02:1, muted 4.35:1, and reduced-opacity navigation labels failing in both
+themes. Passing button tests does not establish contrast for descriptions, statuses or forms.
+
+Use distinct status foreground tokens instead of reusing the brighter fill colour for text.
+Test normal text and placeholders against actual surfaces, including muted backgrounds,
+active navigation and tinted regression rows. The regression tests now cover visible pages
+and a matrix of all badge variants and feedback text roles across six surface classes.

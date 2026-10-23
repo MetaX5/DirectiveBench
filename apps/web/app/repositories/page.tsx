@@ -137,7 +137,7 @@ export default async function RepositoriesPage({
                 id="path-error"
                 role="alert"
                 data-testid="path-error"
-                className="text-xs text-destructive"
+                className="text-xs text-destructive-foreground"
               >
                 {fieldError.message}
               </p>
@@ -171,7 +171,7 @@ export default async function RepositoriesPage({
                 role="status"
                 data-testid="registration-status"
                 data-state={notice.kind}
-                className={notice.kind === 'done' ? 'text-xs text-success' : 'text-xs'}
+                className={notice.kind === 'done' ? 'text-xs text-success-foreground' : 'text-xs'}
               >
                 {notice.message}
               </p>
@@ -180,7 +180,11 @@ export default async function RepositoriesPage({
         </Card>
 
         {scanError ? (
-          <p role="alert" data-testid="scan-request-error" className="text-xs text-destructive">
+          <p
+            role="alert"
+            data-testid="scan-request-error"
+            className="text-xs text-destructive-foreground"
+          >
             {scanError}
           </p>
         ) : null}
@@ -195,9 +199,9 @@ export default async function RepositoriesPage({
                   data-state={scanNotice.kind}
                   className={
                     scanNotice.kind === 'error'
-                      ? 'text-xs text-destructive'
+                      ? 'text-xs text-destructive-foreground'
                       : scanNotice.kind === 'done'
-                        ? 'text-xs text-success'
+                        ? 'text-xs text-success-foreground'
                         : 'text-xs'
                   }
                 >
@@ -291,7 +295,7 @@ export default async function RepositoriesPage({
                       <TD
                         className={
                           repository.syncStatus === 'error'
-                            ? 'max-w-xs truncate text-xs text-destructive'
+                            ? 'max-w-xs truncate text-xs text-destructive-foreground'
                             : 'text-xs'
                         }
                         title={repository.syncError ?? undefined}

@@ -81,7 +81,7 @@ export function Nav() {
                     <item.icon className="size-4" aria-hidden />
                     <span className="flex-1">{item.label}</span>
                     {item.planned ? (
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                         planned
                       </span>
                     ) : null}
