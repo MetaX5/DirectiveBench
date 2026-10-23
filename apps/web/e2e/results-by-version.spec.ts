@@ -191,7 +191,6 @@ test('an artifact without runs shows the planned benchmark init command', async 
     await expect(empty).toContainText(
       'No benchmark runs yet. Create a suite with directivebench benchmark init --artifact e2e98-doc-skill',
     );
-    await expect(empty).toContainText('Planned — the command is not implemented yet');
     await expect(page.getByTestId('version-results')).toHaveCount(0);
   } finally {
     await withDatabase(reseed);

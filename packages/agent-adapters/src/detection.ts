@@ -80,7 +80,9 @@ export async function detectCliAgent(
     ...detection,
     notes: [
       versionLine ? 'Detected on PATH.' : 'Found on PATH but the version command failed.',
-      'Benchmark execution through this agent is not implemented yet.',
+      descriptor.id === 'claude-code'
+        ? 'Runs benchmarks from the CLI: `directivebench benchmark run` (not from the web UI).'
+        : 'Benchmark execution through this agent is not implemented yet.',
     ],
   };
 }

@@ -12,6 +12,8 @@ export const ExitCode = {
   PortInUse: 4,
   DataDir: 5,
   CheckFailed: 6,
+  /** The user cancelled (Ctrl-C) or declined a confirmation (`benchmark run`, SPEC-118 FR-118-38). */
+  Cancelled: 130,
 } as const;
 export type ExitCode = (typeof ExitCode)[keyof typeof ExitCode];
 

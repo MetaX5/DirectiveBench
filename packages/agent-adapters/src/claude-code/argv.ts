@@ -66,7 +66,12 @@ function allowRulesFor(input: ClaudeArgvInput): string[] {
   return rules;
 }
 
-function modelArgs(model: ModelSelection | null): string[] {
+/**
+ * `--model` for `execution.model`, or nothing for the CLI default. A non-Anthropic provider is
+ * `model-provider-unsupported` and an unsafe name `model-invalid`; `benchmark run` calls it at
+ * plan time so such a suite is refused before anything is stored or any `setup` runs.
+ */
+export function claudeModelArgs(model: ModelSelection | null): string[] {
   if (model === null) return [];
   if (model.provider !== 'anthropic') {
     throw new ClaudeCodeError(
@@ -113,7 +118,7 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
     '--output-format',
     'stream-json',
     '--verbose',
-    ...modelArgs(input.model),
+    ...claudeModelArgs(input.model),
     '--tools',
     toolsFor(input).join(','),
     '--permission-mode',

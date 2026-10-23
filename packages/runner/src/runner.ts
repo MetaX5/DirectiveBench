@@ -89,6 +89,11 @@ export interface LocalRunnerOptions {
     'timeouts' | 'cacheLimitBytes' | 'cacheSizePollIntervalMs'
   >;
   adapters: Map<string, AgentAdapter>;
+  /**
+   * The installation's id (`config.json` `installationId`), passed to every benchmark run: runs
+   * in the `user-profile` isolation profile need it in their comparability key (SPEC-118 §8.3).
+   */
+  hostId?: string;
   concurrency?: number;
   keepWorkspaces?: boolean;
   /** Root for temporary workspaces. Default: `<os tmp>/directivebench/workspaces`. */
@@ -125,7 +130,10 @@ const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefin
  */
 export class LocalRunner {
   readonly runnerId = `local-${hostname()}-${process.pid}-${randomBytes(4).toString('hex')}`;
-  private readonly options: Required<Omit<LocalRunnerOptions, 'logger'>> & { logger: RunnerLogger };
+  private readonly options: Required<Omit<LocalRunnerOptions, 'logger' | 'hostId'>> & {
+    logger: RunnerLogger;
+    hostId?: string;
+  };
   private readonly active = new Map<
     string,
     { lane: Lane; controller: AbortController; done: Promise<JobExecutionResult> }
@@ -251,6 +259,18 @@ export class LocalRunner {
       jobId,
     });
     return this.track(job, 'long');
+  }
+
+  /**
+   * Cancels a job this runner is executing, as the user would (`benchmark run` on Ctrl-C,
+   * SPEC-118 FR-118-36): its signal aborts at once instead of at the next heartbeat, and the job
+   * and its benchmark run end `cancelled`. Returns false when the job is not active here.
+   */
+  cancel(jobId: string): boolean {
+    const active = this.active.get(jobId);
+    if (!active) return false;
+    active.controller.abort('cancelled');
+    return true;
   }
 
   /** Processes the queue until no job is pending or running. Used by `directivebench demo` and tests. */
@@ -504,6 +524,7 @@ export class LocalRunner {
           artifact,
           baselineArtifact,
           adapter,
+          ...(this.options.hostId === undefined ? {} : { hostId: this.options.hostId }),
           workRoot: join(this.options.workspaceRoot, runId),
           keepWorkspaces: this.options.keepWorkspaces,
           executionApproved: Boolean(suiteVersion.version.executionApprovedAt),
