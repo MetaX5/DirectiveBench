@@ -72,9 +72,9 @@ export function Nav() {
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent',
+                      'flex items-center gap-2 rounded-none px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring',
                       active
-                        ? 'bg-accent font-medium text-accent-foreground'
+                        ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
                         : 'text-muted-foreground',
                     )}
                   >

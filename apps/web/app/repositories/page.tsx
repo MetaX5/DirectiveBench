@@ -1,3 +1,4 @@
+import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import {
   getRepositoryRegistration,
@@ -116,7 +117,7 @@ export default async function RepositoriesPage({
             <form action={registerRepositoryAction} className="flex flex-wrap items-end gap-2">
               <label className="flex min-w-64 flex-1 flex-col gap-1 text-xs text-muted-foreground">
                 Path or GitHub URL
-                <input
+                <Input
                   name="path"
                   required
                   defaultValue={fieldError?.path ?? ''}
@@ -124,10 +125,10 @@ export default async function RepositoriesPage({
                   aria-invalid={fieldError ? true : undefined}
                   aria-describedby={fieldError ? 'path-error' : undefined}
                   disabled={checking}
-                  className="h-8 rounded-md border bg-background px-2 font-mono text-sm text-foreground aria-[invalid=true]:border-destructive"
+                  className="font-mono"
                 />
               </label>
-              <Button type="submit" size="sm" disabled={checking}>
+              <Button type="submit" disabled={checking}>
                 Register
               </Button>
             </form>
