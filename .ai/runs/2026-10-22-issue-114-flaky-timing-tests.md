@@ -3,7 +3,7 @@ title: One shared linear-time helper and named timeouts for the flaky timing tes
 date: 2026-10-22
 agent: Claude Code / claude-opus-5-5
 trigger: coordinator brief for issue #114 (flaky timing tests on the 2-core CI runner)
-status: in-progress
+status: completed
 branch: fix/issue-114-flaky-timing-tests
 specs: [SPEC-012, SPEC-014]
 ---
@@ -23,12 +23,16 @@ production code.
 1. Inventory every timing-based test and the CI failures behind the issue (`gh run view
    --log-failed`, including the first attempts of rerun runs).
 2. Build one helper (`test-support/linear-time.ts`), self-test it red-first against a quadratic.
-3. Move every ratio test the brief allows onto it; give tests that only need time a named
-   timeout.
+3. Move every ratio test onto it; give tests that only need time a named timeout.
 4. Prove stability (20 iterations under load) and compare with `origin/main` under the same load.
-5. Gate, PR, Codex adversarial review.
+5. Gate, PR, Codex adversarial review (up to three rounds).
 
-Re-planned once: the first helper (wall-clock samples) failed the stability run (see Problems).
+Re-planned three times, each from evidence: the wall-clock helper failed the load run; Codex
+round 1 showed an 8× step cannot see N^1.5; the full gate showed the text baseline's fixed cost
+(see Problems).
+
+Paused 2026-10-22 at the maintainer's request (the coordinator committed the work in progress as
+`aeebdd3`); resumed 2026-10-26 after #118, #119 and #125 merged.
 
 ## Inventory (CI evidence from 2026-10-22 runs)
 
@@ -36,116 +40,124 @@ Re-planned once: the first helper (wall-clock samples) failed the stability run 
 | --- | --- | --- |
 | web `parses pathological input in linear time` | `220 < 110`, `176 < 99` (raw ratio + 50 ms) | helper |
 | web wide-table test (fixed 1 s bound on one parse) | not seen; same pattern | helper (columns and rows both grow) |
-| agent-adapters `import-tokens` linear | 12.2, 13.0, 16.9 against 12; 5 s timeouts | helper |
-| agent-adapters `workspace-inspection` linear scan | 5 s timeouts | helper |
-| agent-adapters `stream-parser` linear | 5 s timeout (before its 60 s timeout) | **not changed** — file outside this brief (issue #117 owns `test/claude-code/` except two files) |
-| benchmark-engine `markdown.test.ts` 27 linear shapes | 10.6 against 10 (older version) | helper (its `ratio` was the template) |
+| agent-adapters `import-tokens` linear | 12.2, 13.0, 16.9 against 12; 5 s timeouts | helper; cut at the scanner's own candidate limit |
+| agent-adapters `workspace-inspection` linear scan | 5 s timeouts | helper (asynchronous: process clock) |
+| agent-adapters `stream-parser` linear | 5 s timeout (before its 60 s timeout) | helper, after #119 merged (baseline: split and `JSON.parse` every line) |
+| benchmark-engine `markdown.test.ts` 27 linear shapes + literal/number | 10.6 against 10 (older version) | helper (its `ratio` was the template) |
 | benchmark-engine document-assertions 2 MiB (5 s bound, NFR-118-02) and adversarial deadline | 1.17 s against an older 1 s bound | kept: bound ~4× a loaded run, orders below a superlinear scan |
 | database `never lets an outside statement join…` | `Test timed out in 5000ms` | named timeout (both offset sweeps) |
 | runner `hosted-git` blob-fetch | `timeout` instead of `git-failed` (fixed on main by 875fb32); **still** `Test timed out in 5000ms` under load on main (reproduced here) | named timeout on the fake-git `describe` |
 | core `artifacts`/`redact` 1 MiB / 10 MiB single-size bounds | none | kept: ms vs minutes |
-| process/worker deadline tests (`commands`, `engine`, `orchestrator`, `pattern-worker`, `process-group`, `claude-code/process`) | none for these (related: #75) | kept: they measure real process deadlines; lower bounds only or seconds of margin; injecting a clock would need production changes |
+| process/worker deadline tests (`commands`, `engine`, `orchestrator`, `pattern-worker`, `process-group`, `claude-code/process`) | none for these (related: #75) | kept: real process deadlines, lower bounds or seconds of margin; a clock would need production changes |
+| #119 `claude-code/adapter.test.ts`, `benchmark-engine/test/claude-code-adapter.test.ts`; #118 `apps/cli/test/benchmark-*.test.ts` | none | no ratio tests; heavy tests already carry 60 s timeouts; added to the load script, all passed |
 
 ## Decisions
 
 - **Helper location: `test-support/linear-time.ts` at the repository root**, next to
   `vitest.shared.ts`, which every package's vitest config already imports by relative path. Test
   files import it by relative path; no package gains a dependency (runtime or workspace), nothing
-  ships it (not in any `src`, `files` or bundle), no dependency-direction rule applies because it
-  is not a package, and no new npm dependency (it uses `vitest`, `node:v8`, `node:vm`). A test-only
-  export of a package was rejected: `apps/web` and `core` would have to depend on, say,
-  `benchmark-engine`. Its self-test lives in `packages/core/test/linear-time.test.ts`, the package
-  at the root of the dependency graph. `benchmark-engine/test/helpers.ts` re-exports its
-  `collectGarbage` instead of keeping a copy.
-- **CPU time, not wall-clock time** (`process.cpuUsage()`, user + system), after the first
-  version failed under load (see Problems).
-- Normalised ratio against a linear baseline on the same inputs, 8× size step, bound 4, one GC
-  after building the inputs, one discarded warm-up round, fastest of 3 interleaved rounds, ≥ 20 ms
-  CPU per sample (short calls repeated), named 60 s timeout. The baseline is explicit per call
-  (`textBaseline` for text; the workspace test reads and splits every file).
+  ships it, no dependency-direction rule applies because it is not a package, and no new npm
+  dependency. A test-only export of a package was rejected: `apps/web` and `core` would have to
+  depend on, say, `benchmark-engine`. Its self-test lives in
+  `packages/core/test/linear-time.test.ts`. `benchmark-engine/test/helpers.ts` re-exports its
+  `collectGarbage`. `turbo.json` lists `test-support/**` and `vitest.shared.ts` as `test` and
+  `typecheck` inputs, so a helper-only change re-runs every consumer (Codex round 3).
+- **Measurement** (each point from a failure, see Problems): normalised ratio against a linear
+  baseline on the same inputs; 32× size step with `size` naming the large input (the size the
+  tests used before); bound 3.5; CPU time, the test thread's (`process.threadCpuUsage`, Node.js
+  ≥ 23.9, else process-wide) for synchronous code and the process's for asynchronous code; calls
+  in doubling batches with one clock read per batch; one GC after building the inputs; one
+  discarded warm-up round; fastest of 3 interleaved rounds; ≥ 20 ms CPU per sample; named 60 s
+  timeout.
+- `textBaseline` = one pass over every character plus split and collapse: the pass grows with
+  short inputs, split and collapse allocate like a parser.
 - Tests that assert outcomes but do real work (database offset sweeps, fake-git spawns) get a
   named timeout rather than an injected clock: they assert ordering and outcomes, not time.
-- `stream-parser.test.ts` left alone per the brief's file ownership; it already has a named 60 s
-  timeout and a raw bound of 30 against a quadratic ~64, so it is low risk (follow-up).
+- Bounded work passes: shapes whose work the code bounds itself (import scan at its candidate
+  limit, `parseFirstNumber` returning the first number) measure near 0, which is correct for "no
+  worse than linear".
 
 ## Work performed
 
-1. `e16a540` test: shared linear-time helper + red-first self-test.
-2. `2b52f41` test: web markdown (both timing tests), benchmark-engine markdown, import-tokens and
-   workspace-inspection onto the helper.
-3. `1f3bafc` test(database,runner): named timeouts for the offset sweeps and the fake-git tests.
-4. docs: lesson update, run log.
+1. `e16a540` shared helper + red-first self-test; `2b52f41` web, benchmark-engine, import-tokens
+   and workspace-inspection onto it; `1f3bafc` named timeouts (database, runner); lesson and run
+   log.
+2. `89d255d` Codex round 1: 32× step, thread CPU time, doubling batches, N^1.5 control.
+3. `f2d6329`, `b22239e` merges of `origin/main` (#119; then #118, #125), no conflicts; `aeebdd3`
+   stream-parser onto the helper.
+4. `6869a2b` Codex round 2: process clock for asynchronous code, thread-pool control.
+5. `789cba0` Codex round 3: Turbo cache inputs.
+6. `8412dbf` text baseline with a per-character pass; import-tokens cut at the scanner's limit.
 
 ## Verification
 
-Stability script (scratchpad `stability.sh`): two `taskset -c 0,1 yes > /dev/null` processes,
-then per iteration one `taskset -c 0,1 npx vitest run <files> --coverage.enabled=false` per package
-started concurrently (web markdown; agent-adapters import-tokens + workspace-inspection +
-stream-parser; database client; runner hosted-git; benchmark-engine markdown +
-document-assertions; core linear-time). `yes` killed by PID afterwards.
+Load script (scratchpad `stability.sh`): two `taskset -c 0,1 yes > /dev/null` processes, then per
+iteration one `taskset -c 0,1 npx vitest run <files> --coverage.enabled=false` per package started
+concurrently: web markdown; agent-adapters import-tokens, workspace-inspection, stream-parser,
+process, adapter; database client; runner hosted-git; benchmark-engine markdown,
+document-assertions, claude-code-adapter; core linear-time; cli benchmark-run (the last four
+targets from 2026-10-26). `yes` killed by PID afterwards; full output kept per package and
+iteration.
 
 | Run | Result |
 | --- | --- |
-| `origin/main`, 10 iterations | **2 failing package runs**: web linear test `78.5 < 74.3`; runner hosted-git `Test timed out in 5000ms` |
-| first helper (wall-clock samples), 16 iterations | 6 failures: self-test quadratic measured 1.98/2.75/3.70; import-tokens `@@@@` 4.95; web backtick runs 4.21 |
-| final helper, 20 iterations (before the hosted-git timeout) | 0 failures / 120 package runs |
-| final branch, 20 iterations | **0 failures / 120 package runs** |
-| `taskset -c 0,1 pnpm test --force` (with coverage) under 2× `yes`, twice | 7/7 tasks, both runs |
-| Red-first: self-test quadratic `countSpacePairs` | ratio ~8 (6.7–10.6 under load; committed test asserts > 4 and that `expectLinearTime` rejects) |
-| Red-first: pre-#56 padded table (rows padded to header width) under load | 22.5 / 19.9 / 20.7 (fixed parser 1.17 / 1.52 / 1.25), bound 4 |
-| Probe under load (4 concurrent processes + 2× `yes`), final helper | linear 0.8–1.2, quadratic 6.3–10.6 |
-| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` | all pass, 100 % coverage |
+| `origin/main` (2026-10-22), 10 iterations | **2 failing package runs**: web linear test `78.5 < 74.3`; runner hosted-git `Test timed out in 5000ms` |
+| first helper (wall-clock samples), 16 iterations | 6 failures: quadratic self-test 1.98 / 2.75 / 3.70; import-tokens `@@@@` 4.95; web backtick runs 4.21 |
+| 8× helper, 2 × 20 iterations (2026-10-22) | 0 / 120 and 0 / 120 |
+| 32× helper after round 1, 20 iterations (2026-10-22) | 0 / 120 |
+| merged head `b22239e`, 20 iterations (7 targets) | 0 / 140 — incl. `process.test.ts` AC-10 and "rejects over-long call ids" |
+| `taskset -c 0,1 pnpm test --force` under 2× `yes` at `b22239e`, three times | 7/7 tasks each |
+| full gate at `789cba0` (cores 4–19) | **failed**: web backtick-runs shape `3.60 < 3.5` → baseline fix `8412dbf` |
+| full gate at `8412dbf`: `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test --force` | pass, 100 % coverage in all 7 packages |
+| **`8412dbf`, 20 iterations (7 targets)** | **0 / 140** |
+| `taskset -c 0,1 pnpm test --force` under 2× `yes` at `8412dbf`, three times | 7/7 tasks each (coverage on) |
+| Calibration under load at `8412dbf` (every ratio logged, twice) | linear shapes ≤ 1.28; N^1.5 control 5.63 / 5.86; quadratic 30–36; thread-pool size² control 31.1 / 33.5 |
+| Red first, round 1: N^1.5 control at 8× | 2.63–3.01 (passes bound 4); at 32×: 5.5–6.4 |
+| Red first, round 2: sparse-file `readv` of size² bytes | thread clock 2.33 (passes 3.5); process clock 37.3 |
+| Red first, round 3: helper-only edit, `turbo run test typecheck --dry=json` | 0 of 14 task hashes changed; with the inputs: 14 of 14 (also for `vitest.shared.ts`) |
+| Red first: pre-#56 padded table under load | 22.5 / 19.9 / 20.7 (fixed parser 1.17 / 1.52 / 1.25) |
 
-Cost: benchmark-engine `markdown.test.ts` 14.3 s → 20.1 s, web `markdown.test.ts` +4 s (4 cores,
-unloaded).
+The two one-off failures seen on 2026-10-22 (`process.test.ts` AC-10, "rejects over-long call
+ids") did **not** reproduce: 0 failures in 20 loaded iterations of their files and in three loaded
+full runs; unloaded they take 5.1 s (5 s grace in a 10 s bound, 30 s timeout) and 65 ms. Their
+original messages were lost to my log filter. No fix made.
 
-Not verified: the GitHub runner itself beyond this PR's CI runs; macOS/Windows `process.cpuUsage`
-granularity (Linux only here).
+Not verified: the GitHub runner beyond this PR's CI runs; macOS and Windows (`threadCpuUsage`
+absent before Node.js 23.9 falls back to process CPU time, untested here).
 
 ## Problems and deviations
 
-- The first helper sampled wall-clock time (fastest of three, GC before each sample, ≥ 10 ms per
-  sample). Under the load script a deliberately quadratic function measured 2.0–3.7 and linear
-  scanners up to 4.95: the scheduler takes whole time slices away from a sample, unevenly.
-  Switching to CPU time fixed it, but a GC before each sample still inflated the next short
-  sample (background sweeping is billed to the process; quadratic ~3), and the first ratio of a
-  process ran before the JIT had optimised the code (quadratic ~2.5–4.4). Final version: one GC
-  after building inputs, one discarded warm-up round.
-- `hosted-git` was not fully fixed on main: the blob-fetch test still hit vitest's 5 s timeout
-  under load (reproduced on `origin/main`).
-- One unloaded `pnpm test --force` run (cores 4–19, while the `origin/main` stability run used
-  cores 0–1) failed `claude-code/process.test.ts` "AC-10 … within 10 s" and
-  `claude-code/stream-parser.test.ts` "rejects over-long call ids"; both passed on every rerun
-  (alone and in the full suite, twice under load). The failure messages were cut off by my filter.
-  Both files are outside this brief (issue #117) — follow-up.
-- Stopping the first stability run with `pkill -f stability.sh` killed my own shell (known
-  lesson 2026-10-14); later runs were left to finish, and the script kills only its own `yes`
-  PIDs.
+- Wall-clock samples (fastest of three, GC before each, ≥ 10 ms) measured a quadratic at 2.0–3.7
+  and linear scanners up to 4.95 under load: the scheduler takes time slices away unevenly.
+- Process-wide CPU time bills V8's helper threads, whose work follows vitest's heap: a linear
+  Markdown shape measured 3.9–15.6 although flat in plain Node.js. Reading the clock after every
+  call (~1 µs) inflated small baselines. A GC before each sample and an unoptimised first round
+  added noise. Fixed by thread CPU time, batches, one GC and a warm-up round.
+- Codex round 1: N^1.5 passes an 8× step. A 32× step with the same large inputs fixed it at the
+  same cost; small inputs quartered from the round-1 sizes first looked too noisy, which turned
+  out to be the per-call clock read and helper threads above.
+- Codex round 2: the thread clock does not see libuv's thread pool → process clock for
+  asynchronous code. The first two thread-pool controls were caught anyway through main-thread
+  work per call; the committed one keeps the main thread's work constant.
+- Codex round 3: Turbo replayed cached consumer tests after a helper-only change.
+- Full gate after round 3: split and collapse cost ~1 µs per call whatever the input, so on short
+  backtick-run inputs the baseline grew 7.6× for 31× and a linear parser measured 3.6. A pure
+  per-character baseline then let an allocation-heavy 3.8 MB line reach 3.36; the baseline now
+  does both.
+- `@/*` makes `importCandidates` yield a quadratic number of candidates (1.8 M at 6 000 chars,
+  86 M at 192 000); production stops at `WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES` (100 000), so the
+  work is bounded. Not changed (production code); follow-up to confirm per-candidate cost is O(1).
+- `pgrep -f`/`pkill -f` with a pattern from my own command line killed my shell twice (known
+  lesson 2026-10-14); two leftover vitest processes were left to finish on their own.
 
 ## Lessons recorded
 
 - Updated `.ai/lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md` and its index
-  entry: use the shared helper, measure CPU time, one GC after building inputs, warm-up round,
-  prove a ratio helper both ways under load, named timeouts for heavy outcome tests.
-
-## Paused 2026-10-22 (maintainer request; resume 2026-10-23)
-
-State when stopped:
-- Codex round 1 is fixed in `89d255d`: a 32× step catches N^1.5 growth, and ratios use the thread's CPU time. `origin/main` (#119) is merged in `f2d6329`.
-- Work in progress, committed as `wip`: `claude-code/stream-parser.test.ts` "is linear in the stream size" moved onto `expectLinearTime`. The file passes alone (37/37) and the package typechecks. The full gate was **not** rerun after this change.
-- Not checked for timing tests yet: the new #119 test files (`agent-adapters/test/claude-code/adapter.test.ts`, `benchmark-engine/test/claude-code-adapter.test.ts`).
-- The one-off failures were being reproduced: unloaded, "rejects over-long call ids" took 65 ms and `process.test.ts` AC-10 took 5.1 s (a 5 s grace inside a 10 s spec bound). The loaded reruns were still pending.
-
-To resume:
-1. Finish checking the #119 test files.
-2. Run the load script for the AC-10 and over-long-ids reproductions.
-3. Run the full gate.
-4. Update the PR body: ⚠️ Decision needed and ## Review (Codex round 1).
-5. Run Codex round 2. Do not merge.
+  entry.
 
 ## Follow-ups
 
-- Move `claude-code/stream-parser.test.ts` "is linear in the stream size" onto the helper once
-  issue #117 no longer owns the file.
-- Investigate the one-off `claude-code/process.test.ts` AC-10 and `stream-parser` over-long ids
-  failures (likely 5 s default timeout on an 8 MiB parse under coverage).
+- `importCandidates` on `@/*`: quadratic candidate count, bounded by the scanner's limit; check
+  the per-candidate cost.
+- `parseFirstNumber` linear test measures bounded work (first number returned at once); an input
+  whose first number is long would exercise growth.

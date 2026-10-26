@@ -65,7 +65,19 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
 - An 8× size step cannot see N^1.5 growth (√8 ≈ 2.8, under any usable bound) — Codex review of
   PR #121. The helper uses a 32× step (N^1.5 ≈ 5.7, quadratic 32) with the large input at the
   size the test used before, so the test costs the same, and a bound of 3.5 (linear shapes
-  measured 0.8–1.9, one code-span shape 2.45; N^1.5 control 5.5–6.4).
+  measure at most 1.3 under load, an N^1.5 control 5.6–5.9, a quadratic one 30–36).
+- The thread clock does not see work on libuv's thread pool (Codex round 2 of PR #121): a read of
+  size² bytes measured 2.3 against size bytes. The helper measures asynchronous code with the
+  process clock; a control for off-thread work must keep the test thread's work constant (one
+  `readv` with a fixed number of buffers), or it is caught by per-call overhead and proves
+  nothing.
+- A baseline needs negligible fixed cost per call: split and collapse cost ~1 µs whatever the
+  input, grew 7.6× for 31× a short input and made a linear parser measure 3.6 in the full gate.
+  A pure character scan, in turn, did not allocate like the parser it normalised (3.4 on a 3.8 MB
+  line). `textBaseline` does both.
+- Shared test code outside the packages must be a Turbo input of every consuming task
+  (`$TURBO_ROOT$/test-support/**` in `turbo.json`), or a helper-only change replays cached
+  results (Codex round 3 of PR #121); check with `turbo run test --dry=json`.
 - A test that asserts outcomes rather than time still needs a named timeout when it does a lot
   of real work: an offset sweep over a file-backed database (20 ms alone) and a fake-git test
   spawning eight Node.js fakes (0.3 s alone) exceeded vitest's 5 s default under load.
