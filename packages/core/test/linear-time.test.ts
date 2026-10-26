@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   expectLinearTime,
   LINEAR_TIME_TEST_TIMEOUT_MS,
@@ -92,4 +96,55 @@ describe('expectLinearTime', () => {
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
+
+  describe('off the test thread', () => {
+    const MiB = 1024 * 1024;
+    const FILE_BYTES = 256 * MiB;
+    const LARGE = 8 * MiB;
+    const IOVECS = 256;
+    const chunk = Buffer.alloc(MiB);
+    let dir: string;
+    let file: FileHandle;
+
+    beforeAll(async () => {
+      dir = mkdtempSync(join(tmpdir(), 'directivebench-linear-time-'));
+      // Sparse: no disk space or write time, and reads are kernel copies of zeros.
+      file = await open(join(dir, 'sparse'), 'w+');
+      await file.truncate(FILE_BYTES);
+    });
+
+    afterAll(async () => {
+      await file.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    /**
+     * Reads `bytes` in one libuv request with a constant number of buffers, so the test thread's
+     * work stays the same and the copying happens on the thread pool.
+     */
+    const read = (bytes: number) =>
+      file.readv(
+        Array.from({ length: IOVECS }, () => chunk.subarray(0, Math.floor(bytes / IOVECS))),
+        0,
+      );
+
+    it(
+      'fails superlinear work done on the thread pool (Codex review round 2 of PR #121)',
+      async () => {
+        // size² bytes against a baseline reading size bytes. With the test thread's clock this
+        // measured 2.3, under the bound; asynchronous code is measured with the process clock.
+        const offThread = {
+          build: (size: number) => ({
+            linear: size,
+            quadratic: (size * size * FILE_BYTES) / LARGE ** 2,
+          }),
+          run: ({ quadratic }: { quadratic: number }) => read(quadratic),
+          baseline: ({ linear }: { linear: number }) => read(linear),
+          size: LARGE,
+        };
+        expect(await linearTimeRatio(offThread)).toBeGreaterThan(MAX_LINEAR_RATIO);
+      },
+      LINEAR_TIME_TEST_TIMEOUT_MS,
+    );
+  });
 });

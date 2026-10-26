@@ -11,8 +11,10 @@
  * Measurement rules, from CI failures and their reproduction under `taskset -c 0,1` with load:
  * - a full garbage collection after building the inputs, so their garbage cannot land inside a
  *   measurement;
- * - samples measure the test thread's CPU time, not wall-clock time, so other processes on the
- *   shared cores cannot stretch a sample (they did, unevenly, by whole scheduler time slices);
+ * - samples measure CPU time, not wall-clock time, so other processes on the shared cores cannot
+ *   stretch a sample (they did, unevenly, by whole scheduler time slices): the test thread's for
+ *   synchronous code, the whole process's for asynchronous code, whose work may run on libuv's
+ *   thread pool;
  * - every sample repeats the call until it has used `MIN_SAMPLE_MS` of CPU time, so timer
  *   resolution cannot dominate a small input;
  * - one discarded warm-up round lets the JIT optimise the code first;
@@ -81,20 +83,28 @@ export interface LinearTimeCase<T> {
   size: number;
 }
 
-/**
- * CPU time of the calling thread, in milliseconds (user and system). Process-wide CPU time also
- * bills V8's helper threads (concurrent marking and sweeping, background compilation), whose work
- * follows the size of vitest's heap rather than the input, and inflated samples of large inputs.
- * `process.threadCpuUsage` exists from Node.js 23.9 (CI runs 24); older versions fall back to the
- * process-wide figure.
- */
-const threadCpuUsage: () => NodeJS.CpuUsage =
-  typeof process.threadCpuUsage === 'function'
-    ? () => process.threadCpuUsage()
-    : () => process.cpuUsage();
+type Clock = () => number;
 
-function cpuMs(): number {
-  const { user, system } = threadCpuUsage();
+/**
+ * CPU time of the calling thread, in milliseconds (user and system), for synchronous code.
+ * Process-wide CPU time also bills V8's helper threads (concurrent marking and sweeping, background
+ * compilation), whose work follows the size of vitest's heap rather than the input, and inflated
+ * samples of large inputs. `process.threadCpuUsage` exists from Node.js 23.9 (CI runs 24); older
+ * versions fall back to the process-wide figure.
+ */
+const threadCpuMs: Clock =
+  typeof process.threadCpuUsage === 'function'
+    ? () => cpuMs(process.threadCpuUsage())
+    : () => cpuMs(process.cpuUsage());
+
+/**
+ * CPU time of the whole process, in milliseconds, for asynchronous code: file-system work runs on
+ * libuv's thread pool, which the thread clock does not see (Codex review round 2 of PR #121: a
+ * read of size² bytes measured 1.1 against size bytes with it).
+ */
+const processCpuMs: Clock = () => cpuMs(process.cpuUsage());
+
+function cpuMs({ user, system }: NodeJS.CpuUsage): number {
   return (user + system) / 1000;
 }
 
@@ -106,10 +116,10 @@ function cpuMs(): number {
  * clock is read once per batch: reading it after every call (a system call of about a
  * microsecond) inflated the baseline on small inputs, where one call takes about as long.
  */
-async function sample<T>(fn: (input: T) => unknown, input: T): Promise<number> {
+async function sample<T>(clock: Clock, fn: (input: T) => unknown, input: T): Promise<number> {
   let calls = 0;
   let batch = 1;
-  const started = cpuMs();
+  const started = clock();
   let elapsed: number;
   do {
     for (let call = 0; call < batch; call += 1) {
@@ -120,7 +130,7 @@ async function sample<T>(fn: (input: T) => unknown, input: T): Promise<number> {
     }
     calls += batch;
     batch *= 2;
-    elapsed = cpuMs() - started;
+    elapsed = clock() - started;
   } while (elapsed < MIN_SAMPLE_MS);
   return elapsed / calls;
 }
@@ -139,13 +149,18 @@ export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<numbe
     [test.baseline, small],
     [test.baseline, large],
   ] as const;
+  // Asynchronous code may do its work off the test thread, so it and its baseline are measured
+  // with the process clock; synchronous code with the thread clock.
+  const probe = test.run(small);
+  const clock = probe instanceof Promise ? processCpuMs : threadCpuMs;
+  await probe;
   // One warm-up round, discarded: the first calls run before the JIT has optimised the code,
   // which made the first ratio of a process unreliable (a quadratic function measured ~2.5).
-  for (const [fn, input] of series) await sample(fn, input);
+  for (const [fn, input] of series) await sample(clock, fn, input);
   const fastest = series.map(() => Number.POSITIVE_INFINITY);
   for (let round = 0; round < LINEAR_TIME_ROUNDS; round += 1) {
     for (const [index, [fn, input]] of series.entries()) {
-      fastest[index] = Math.min(fastest[index] as number, await sample(fn, input));
+      fastest[index] = Math.min(fastest[index] as number, await sample(clock, fn, input));
     }
   }
   const [runSmall, runLarge, baseSmall, baseLarge] = fastest as [number, number, number, number];
