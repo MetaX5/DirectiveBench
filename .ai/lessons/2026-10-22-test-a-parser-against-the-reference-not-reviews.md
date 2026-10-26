@@ -39,3 +39,9 @@ from reviews. Measure a library's worst case at the input limit before adopting 
   reference on each candidate (`cmarkgfm` in a scratch venv).
 - Time each candidate library on the adversarial shapes at the input limit on 2 cores
   (`taskset -c 0,1`) before writing integration code.
+- When a review still finds a false pass, add its whole input class to the generator, not the one
+  line (updated 2026-10-26, issue #116): PR #115's rounds fixed U+00A0, VT and FF at the places the
+  reviewer tried, and generating those characters everywhere found a sibling at once (VT/FF before
+  a row's leading pipe is an empty cell). Compare deliberate under-reports with an explicit,
+  tested subset rule that still fails every over-report, never by leaving the case out of the
+  corpus.

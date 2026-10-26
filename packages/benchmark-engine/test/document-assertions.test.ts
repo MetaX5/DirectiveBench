@@ -310,6 +310,26 @@ describe('markdown structure boundaries (Codex review)', () => {
     expect(result).toMatchObject({ passed: false });
   });
 
+  it('does not read a table or row after a form feed before its leading pipe (issue #116)', async () => {
+    for (const doc of [
+      '>\f| Role | Hours |\n>\f|---|---|\n>\f| Backend | 24 |',
+      '| Role | Hours |\n|---|---|\n\f| Backend | 24 |',
+    ]) {
+      const result = await evaluateAssertion(
+        assertion({
+          type: 'markdown-table-value',
+          file: 'doc.md',
+          row: { pattern: 'Backend' },
+          column: 'Hours',
+          min: 24,
+          max: 24,
+        }),
+        workspace({ 'doc.md': doc }),
+      );
+      expect(result).toMatchObject({ passed: false });
+    }
+  });
+
   it('does not read a row after a body line that is only a pipe (Codex review)', async () => {
     const result = await evaluateAssertion(
       assertion({

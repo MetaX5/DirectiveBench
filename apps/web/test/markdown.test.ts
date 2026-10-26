@@ -285,7 +285,7 @@ describe('parseMarkdown blocks', () => {
     'parses pathological input in linear time',
     async () => {
       // Each input is parsed at two sizes and its growth normalised by a linear baseline on the
-      // same inputs (test-support/linear-time.ts): ~1 for a linear parser, ~8 for a quadratic one.
+      // same inputs (test-support/linear-time.ts): ~1 for a linear parser, ~32 for a quadratic one.
       const shapes: ((size: number) => string)[] = [
         (size) => '['.repeat(size),
         (size) => `${'['.repeat(size)}]`,

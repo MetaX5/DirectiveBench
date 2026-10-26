@@ -15,7 +15,7 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { comparable, generateDocuments } from '../test/markdown-corpus.ts';
 
-const generator = { seed: 110, cases: 5000, tabs: true, depth: 3, listTables: true };
+const generator = { seed: 110, cases: 10000, tabs: true, depth: 3, listTables: true };
 const reference = 'cmark-gfm via cmarkgfm 2025.10.22 (table extension)';
 
 const documents = generateDocuments(generator);
