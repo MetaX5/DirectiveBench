@@ -88,6 +88,10 @@ Paused 2026-10-22 at the maintainer's request (the coordinator committed the wor
 4. `6869a2b` Codex round 2: process clock for asynchronous code, thread-pool control.
 5. `789cba0` Codex round 3: Turbo cache inputs.
 6. `8412dbf` text baseline with a per-character pass; import-tokens cut at the scanner's limit.
+7. CI on the docs-only `4a9ff91` failed runner coverage (`hosted-git.ts` line 822, 99.86 %): the
+   test "fails reading blobs…" gave every case a 200 ms read timeout, so a slowly started fake
+   turned the exit-128 case into a timeout that still passed `ok: false`. Fixed red-first: short
+   timeout only for the timeout case, each case's code asserted.
 
 ## Verification
 
@@ -115,6 +119,8 @@ iteration.
 | Red first, round 1: N^1.5 control at 8× | 2.63–3.01 (passes bound 4); at 32×: 5.5–6.4 |
 | Red first, round 2: sparse-file `readv` of size² bytes | thread clock 2.33 (passes 3.5); process clock 37.3 |
 | Red first, round 3: helper-only edit, `turbo run test typecheck --dry=json` | 0 of 14 task hashes changed; with the inputs: 14 of 14 (also for `vitest.shared.ts`) |
+| Red first: "fails reading blobs…" with a 1 ms read timeout (simulated slow fake start) | old test 45/45 green with lines 821–835 uncovered; new test fails (`timeout` ≠ `git-failed`) |
+| `hosted-git.test.ts` with coverage, 20 loaded iterations after the fix | 20 / 20 green, line 822 covered every time |
 | Red first: pre-#56 padded table under load | 22.5 / 19.9 / 20.7 (fixed parser 1.17 / 1.52 / 1.25) |
 
 The two one-off failures seen on 2026-10-22 (`process.test.ts` AC-10, "rejects over-long call
