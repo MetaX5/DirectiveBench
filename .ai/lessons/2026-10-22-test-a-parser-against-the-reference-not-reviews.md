@@ -45,3 +45,11 @@ from reviews. Measure a library's worst case at the input limit before adopting 
   a row's leading pipe is an empty cell). Compare deliberate under-reports with an explicit,
   tested subset rule that still fails every over-report, never by leaving the case out of the
   corpus.
+- Better than a subset rule: let the parser name where it reports less, and record the
+  reference's reading of exactly that part (updated 2026-10-26, issue #128). A document-wide
+  allowance (any stop once `]:` occurs, any missing one-column table) let 470 early stops and 355
+  dropped tables of a mutated scanner pass; comparing with cmark-gfm's reading of the lines before
+  the named stop line rejects all of them. When the parser itself chooses which reference
+  readings to record, test that the recorded set equals the set it needs now, or a moved stop
+  line can coincide with a recorded prefix and pass. Prove such a test with constructed
+  regressions over the whole corpus, not one example.
