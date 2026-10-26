@@ -297,7 +297,8 @@ export function observedAgentProfile(
 
 /**
  * Puts the agent-run metadata first in the trace (SPEC-118 §8.1): execution and reported models,
- * `skillActivation`, the final error code and warnings, after the rules above were applied.
+ * `skillActivation`, `otherSkillsInvoked`, the final error code and warnings, after the rules
+ * above were applied.
  */
 export function addAgentMetadataEvent(record: AgentRunFacts & { trace: unknown[] }): void {
   if (!record.metadata) return;
@@ -305,6 +306,8 @@ export function addAgentMetadataEvent(record: AgentRunFacts & { trace: unknown[]
     type: 'agent-metadata',
     metadata: record.metadata,
     ...(record.skillActivation ? { skillActivation: record.skillActivation } : {}),
+    // Persisted per run (FR-118-08): which run used which other skill, not only the summary count.
+    ...(record.otherSkillsInvoked ? { otherSkillsInvoked: [...record.otherSkillsInvoked] } : {}),
     errorCode: record.errorCode,
     warnings: [...record.warnings],
   });

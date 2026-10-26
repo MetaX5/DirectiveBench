@@ -14,6 +14,10 @@
  * pre-spawn inspection would refuse (a second project skill, a `!` placeholder) to prove the second
  * line of defence. Redacted streams and a JSON report go to `DIRECTIVEBENCH_LIVE_OUT` (default: a
  * temporary directory, printed) for review before any of them becomes a recorded fixture.
+ *
+ * In Local Subscription Mode the user-level probe skill is planted in the real
+ * `~/.claude/skills/db-live-user-<nonce>` and removed in a `finally` block; a run that is killed
+ * leaves that directory behind, so delete any `db-live-user-*` skill there afterwards.
  */
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';

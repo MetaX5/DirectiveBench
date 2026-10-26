@@ -300,6 +300,18 @@ describe('skill activation rules (FR-118-09, AC-21)', () => {
     expect(outcome.summary.reasons).toEqual([
       'other-skill-invoked: 2 agent run(s) invoked a skill other than the tested one (design, simplify), so the result does not measure the tested skill alone',
     ]);
+    // Each run's own evidence is persisted in its metadata event, not only the summary count.
+    const used = outcome.agentRuns.find(
+      (record) => record.variant === 'candidate' && record.repetition === 1,
+    );
+    expect(used?.trace[0]).toMatchObject({
+      type: 'agent-metadata',
+      otherSkillsInvoked: ['simplify'],
+    });
+    const clean = outcome.agentRuns.find(
+      (record) => record.variant === 'candidate' && record.repetition === 2,
+    );
+    expect(clean?.trace[0]).not.toHaveProperty('otherSkillsInvoked');
   }, 60_000);
 
   it('an A/B run invoking the skill in both variants stays comparable (AC-28)', async () => {
