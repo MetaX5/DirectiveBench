@@ -77,6 +77,8 @@ export interface AgentRunRecord extends RunOutcome {
   metadata?: AgentRunMetadata;
   /** `skill-md` runs of real-agent adapters (FR-118-09). */
   skillActivation?: SkillActivation;
+  /** Skills other than the tested one the agent used (FR-118-08); real-agent adapters only. */
+  otherSkillsInvoked?: string[];
   assertions: AssertionResult[];
 }
 
@@ -459,6 +461,7 @@ async function executeAgentRun(
     base.warnings = [...(agentResult.warnings ?? [])];
     if (agentResult.metadata) base.metadata = agentResult.metadata;
     if (agentResult.skillActivation) base.skillActivation = agentResult.skillActivation;
+    if (agentResult.otherSkillsInvoked) base.otherSkillsInvoked = agentResult.otherSkillsInvoked;
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     // Whatever the agent run's status: a failed or timed-out run that replaced the workspace must
     // still stop the benchmark run, and a code that already stops it keeps precedence.

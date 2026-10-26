@@ -25,11 +25,16 @@ export interface ClaudeArgvInput {
 
 /**
  * Settings passed with `--settings` on every run: skill shell-injection placeholders are disabled
- * (FR-118-26, second line of defence) and the file tools refuse paths outside the working
- * directory in every mode (FR-118-07).
+ * (FR-118-26, second line of defence), the file tools refuse paths outside the working directory
+ * in every mode (FR-118-07), the CLI's bundled skills are off and auto memory is off. The live
+ * check (AC-22, 2.1.302) showed that a `Skill(<name>)` allow rule does not deny other skills, so
+ * the bundled ones are removed here and any other skill a run invokes makes it not comparable
+ * (FR-118-08); auto memory would carry notes from one agent run into the next.
  */
 export const CLAUDE_CODE_RUN_SETTINGS = {
   disableSkillShellExecution: true,
+  disableBundledSkills: true,
+  autoMemoryEnabled: false,
   permissions: { blockReadsOutsideWorkingDirectories: true },
 } as const;
 

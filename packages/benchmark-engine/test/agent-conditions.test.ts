@@ -283,6 +283,37 @@ describe('skill activation rules (FR-118-09, AC-21)', () => {
     ]);
   }, 60_000);
 
+  it('a run that invoked another skill is not comparable (FR-118-08, live check AC-22)', async () => {
+    const { run } = await input((variant, repetition) => ({
+      metadata: metadata(),
+      skillActivation: activation(
+        variant === 'baseline' ? { loaded: false, invoked: false, invocations: 0 } : {},
+      ),
+      ...(variant === 'candidate' && repetition === 1
+        ? { otherSkillsInvoked: ['simplify'] }
+        : variant === 'baseline' && repetition === 3
+          ? { otherSkillsInvoked: ['design'] }
+          : {}),
+    }));
+    const outcome = await runBenchmark(run);
+    expect(outcome.summary.verdict).toBe('not-comparable');
+    expect(outcome.summary.reasons).toEqual([
+      'other-skill-invoked: 2 agent run(s) invoked a skill other than the tested one (design, simplify), so the result does not measure the tested skill alone',
+    ]);
+    // Each run's own evidence is persisted in its metadata event, not only the summary count.
+    const used = outcome.agentRuns.find(
+      (record) => record.variant === 'candidate' && record.repetition === 1,
+    );
+    expect(used?.trace[0]).toMatchObject({
+      type: 'agent-metadata',
+      otherSkillsInvoked: ['simplify'],
+    });
+    const clean = outcome.agentRuns.find(
+      (record) => record.variant === 'candidate' && record.repetition === 2,
+    );
+    expect(clean?.trace[0]).not.toHaveProperty('otherSkillsInvoked');
+  }, 60_000);
+
   it('an A/B run invoking the skill in both variants stays comparable (AC-28)', async () => {
     const { run } = await input(() => ({ metadata: metadata(), skillActivation: activation() }), {
       baselineArtifact: await baselineVersion(),
@@ -476,6 +507,55 @@ describe('parser to engine (Codex review)', () => {
       ['agent-error', 'output-parse-error'],
     ]);
     expect(result.summary.verdict).toBe('error');
+  }, 60_000);
+
+  it('an instruction run that used a skill is not comparable either (Codex review)', async () => {
+    const live = readFileSync(join(streams, 'live-subscription-slash.ndjson'), 'utf8');
+    const { run } = await input(() => {
+      const { trace: _trace, ...rest } = claudeRunOutcome(
+        // An instruction artifact (no tested skill) whose prompt runs the listed skill.
+        parseClaudeStream(live, { prompt: '/db-live-probe create the probe file' }),
+        { exitCode: 0 },
+        {
+          adapterVersion: '2.1.302',
+          authMode: 'subscription',
+          permissionProfile: 'edit-only',
+          requestedModel: MODEL,
+          flagsHash: 'a'.repeat(64),
+          skill: false,
+        },
+      );
+      return rest;
+    });
+    const result = await runBenchmark(run);
+    expect(result.agentRuns[0]).not.toHaveProperty('skillActivation');
+    expect(result.summary.reasons).toContain(
+      'other-skill-invoked: 6 agent run(s) invoked a skill other than the tested one (db-live-probe), so the result does not measure the tested skill alone',
+    );
+  }, 60_000);
+
+  it('a recorded real session that invoked another skill makes the run not comparable (AC-22)', async () => {
+    const live = readFileSync(join(streams, 'live-subscription-confine.ndjson'), 'utf8');
+    const { run } = await input(() => {
+      const { trace: _trace, ...rest } = claudeRunOutcome(
+        parseClaudeStream(live, { skillName: 'db-live-probe', prompt: 'x' }),
+        { exitCode: 0 },
+        {
+          adapterVersion: '2.1.302',
+          authMode: 'subscription',
+          permissionProfile: 'edit-only',
+          requestedModel: MODEL,
+          flagsHash: 'a'.repeat(64),
+          skill: true,
+        },
+      );
+      return rest;
+    });
+    const result = await runBenchmark(run);
+    expect(result.summary.verdict).toBe('not-comparable');
+    expect(result.summary.reasons).toContain(
+      'other-skill-invoked: 6 agent run(s) invoked a skill other than the tested one (db-live-other), so the result does not measure the tested skill alone',
+    );
   }, 60_000);
 
   it('an overloaded API fails that agent run only; the next one still runs (maintainer decision)', async () => {

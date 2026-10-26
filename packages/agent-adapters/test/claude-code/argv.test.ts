@@ -56,7 +56,7 @@ describe('buildClaudeArgv', () => {
       '--no-session-persistence',
       '--strict-mcp-config',
       '--settings',
-      '{"disableSkillShellExecution":true,"permissions":{"blockReadsOutsideWorkingDirectories":true}}',
+      '{"disableSkillShellExecution":true,"disableBundledSkills":true,"autoMemoryEnabled":false,"permissions":{"blockReadsOutsideWorkingDirectories":true}}',
       '--setting-sources',
       'project,local',
     ]);
@@ -119,6 +119,8 @@ describe('buildClaudeArgv', () => {
         expect(JSON.parse(valueOf(argv, '--settings') as string)).toEqual(CLAUDE_CODE_RUN_SETTINGS);
         expect(CLAUDE_CODE_RUN_SETTINGS).toEqual({
           disableSkillShellExecution: true,
+          disableBundledSkills: true,
+          autoMemoryEnabled: false,
           permissions: { blockReadsOutsideWorkingDirectories: true },
         });
       }

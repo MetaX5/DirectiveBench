@@ -56,6 +56,7 @@ describe('parseClaudeStream on recorded-format fixtures', () => {
       skillsListed: true,
       skillListed: true,
       apiKeySource: 'none',
+      slashCommandListed: true,
       laterModels: [],
     });
     expect(parsed.messageModels).toEqual(['claude-sonnet-4-5-20250929']);
@@ -301,6 +302,52 @@ describe('ClaudeStreamParser events', () => {
     expect(parsed.init?.laterModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
+  it('counts a /<other> prompt as another skill unless the session lists it as a built-in command', () => {
+    const used = (prompt: string, extra: Record<string, unknown>) =>
+      parseClaudeStream(lines(init(extra), result()), { ...SKILL, prompt }).otherSkillsInvoked;
+    const listed = { skills: ['pdf', 'deploy'], slash_commands: ['pdf', 'deploy', 'compact'] };
+    expect(used('/deploy now', listed)).toEqual(['deploy']);
+    // A built-in command (listed, but not as a skill) is not a skill.
+    expect(used('/compact now', listed)).toEqual([]);
+    // An alias the init event does not list (`/checkup` for `doctor`) fails closed (Codex review).
+    expect(used('/checkup inspect setup', listed)).toEqual(['checkup']);
+    expect(used('/deploy now', {})).toEqual(['deploy']);
+    expect(used('/compact', { skills: undefined, slash_commands: ['compact'] })).toEqual([]);
+    // The tested skill itself and a prompt without a command are not other skills.
+    expect(used('/pdf x', listed)).toEqual([]);
+    expect(used('plain prompt', listed)).toEqual([]);
+  });
+
+  it('records another skill that ran in a fork (Codex review)', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        init(),
+        JSON.stringify({ type: 'stream_event', parent_tool_use_id: 'forked-command-deploy' }),
+        result(),
+      ),
+      SKILL,
+    );
+    expect(parsed.otherSkillsInvoked).toEqual(['deploy']);
+    expect(parsed.slashExpanded).toBe(false);
+  });
+
+  it('records another skill whose Skill call succeeded (live check AC-22)', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        init(),
+        assistant([{ type: 'tool_use', id: 'a', name: 'Skill', input: { skill: 'design' } }]),
+        user([{ type: 'tool_result', tool_use_id: 'a', content: 'Launching skill: design' }]),
+        assistant([{ type: 'tool_use', id: 'b', name: 'Skill', input: { skill: 'deploy' } }]),
+        user([{ type: 'tool_result', tool_use_id: 'b', is_error: true, content: 'blocked' }]),
+        assistant([{ type: 'tool_use', id: 'c', name: 'Skill', input: { skill: 'loop' } }]),
+        result(),
+      ),
+      SKILL,
+    );
+    expect(parsed.otherSkills).toEqual(['deploy', 'design', 'loop']);
+    expect(parsed.otherSkillsInvoked).toEqual(['design']);
+  });
+
   it('reads an init without skills or apiKeySource, and without a skill name', () => {
     const parsed = parseClaudeStream(
       lines(JSON.stringify({ type: 'system', subtype: 'init', model: 'm1', tools: ['Read'] })),
@@ -312,6 +359,7 @@ describe('ClaudeStreamParser events', () => {
       skillsListed: false,
       skillListed: false,
       apiKeySource: null,
+      slashCommandListed: false,
       laterModels: [],
     });
     expect(parsed.trace[0]).toEqual({
@@ -449,6 +497,16 @@ describe('ClaudeStreamParser events', () => {
     expect(parseClaudeStream(lines(...calls, ...answers), SKILL).skillInvocations).toBe(
       CLAUDE_STREAM_MAX_SKILL_CALLS,
     );
+    // Calls of other skills share the bound: the one past it is attempted, not confirmed.
+    const others = Array.from({ length: CLAUDE_STREAM_MAX_SKILL_CALLS + 1 }, (_, i) =>
+      use(`o${i}`, { skill: `other-${i}` }),
+    );
+    const otherAnswers = Array.from({ length: CLAUDE_STREAM_MAX_SKILL_CALLS + 1 }, (_, i) =>
+      answer(`o${i}`),
+    );
+    const bounded = parseClaudeStream(lines(...others, ...otherAnswers), SKILL);
+    expect(bounded.otherSkillsInvoked).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
+    expect(bounded.otherSkills).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
   it('reads tool results given as text blocks and stops collecting once the kept part is full', () => {

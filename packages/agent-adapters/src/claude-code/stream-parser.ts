@@ -96,6 +96,8 @@ export interface ClaudeInitFacts {
   skillListed: boolean;
   /** `apiKeySource` (L3: `ANTHROPIC_API_KEY`, `apiKeyHelper`, `/login managed key`, `none`). */
   apiKeySource: string | null;
+  /** Whether `slash_commands` lists the installed skill (it can be invoked as `/<name>`). */
+  slashCommandListed: boolean;
   /** Other models reported by later `system/init` events (none expected). */
   laterModels: string[];
 }
@@ -137,8 +139,19 @@ export interface ParsedClaudeStream {
   skillInvocations: number;
   /** Other skill names attempted, sorted (at most {@link CLAUDE_STREAM_MAX_NAMES}). */
   otherSkills: string[];
+  /**
+   * Other skills whose `Skill` call succeeded, sorted. The live check (AC-22) showed that a
+   * `Skill(<name>)` allow rule does not deny them, so such a run is not comparable (FR-118-08).
+   */
+  otherSkillsInvoked: string[];
   /** A `/<name>` prompt whose expansion the stream shows (FR-118-09). */
   slashExpanded: boolean;
+  /**
+   * A `/<name>` prompt for a skill the session lists in `slash_commands`. The CLI expands it
+   * before the first turn without a trace in the print-mode stream (live check, 2.1.302), so the
+   * invocation is inferred (FR-118-09, maintainer decision 2026-10-26).
+   */
+  slashInferred: boolean;
   /** Lines that were not a JSON object or not a valid known event. */
   malformedLines: number;
   /** Lines longer than {@link CLAUDE_STREAM_MAX_LINE_BYTES}, dropped. */
@@ -157,6 +170,7 @@ const initEvent = z.looseObject({
   model: z.string(),
   tools: z.array(z.string()),
   skills: z.array(z.string()).optional(),
+  slash_commands: z.array(z.string()).optional(),
   apiKeySource: z.string().optional(),
 });
 const retryEvent = z.looseObject({
@@ -261,16 +275,27 @@ export class ClaudeStreamParser {
   private ended = false;
   private readonly secrets: readonly string[];
   private readonly slashPrompt: boolean;
+  /** The command a prompt starting with `/<command>` names, when it is not the installed skill. */
+  private readonly otherPromptCommand: string | null;
   private assistantSeen = false;
   private usage: AgentUsage | null = null;
   private readonly messageModels = new BoundedNames();
   private readonly reportedModels = new BoundedNames();
   private readonly otherSkills = new BoundedNames();
+  private readonly otherSkillsInvoked = new BoundedNames();
   /** Pending `Skill` calls of the installed skill, by call id (bounded, see the id limit). */
   private readonly skillCalls = new Set<string>();
+  /** Pending `Skill` calls of other skills: call id → name (same bound). */
+  private readonly otherSkillCalls = new Map<string, string>();
   private readonly state: Omit<
     ParsedClaudeStream,
-    'messageModels' | 'reportedModels' | 'modelsOverflow' | 'otherSkills' | 'usage'
+    | 'messageModels'
+    | 'reportedModels'
+    | 'modelsOverflow'
+    | 'otherSkills'
+    | 'otherSkillsInvoked'
+    | 'slashInferred'
+    | 'usage'
   > = {
     events: 0,
     init: null,
@@ -293,6 +318,11 @@ export class ClaudeStreamParser {
     this.secrets = withJsonForms(options.knownSecrets ?? []);
     this.slashPrompt =
       options.skillName !== undefined && promptInvokesSkill(options.prompt, options.skillName);
+    const command = /^\/([^\s/]+)(?:\s|$)/.exec(options.prompt)?.[1];
+    this.otherPromptCommand =
+      command !== undefined && command !== options.skillName
+        ? command.slice(0, CLAUDE_STREAM_NAME_MAX_CHARS)
+        : null;
   }
 
   /** Adds a chunk of stdout. Splits on `\n` only, so multi-byte characters survive any split. */
@@ -337,6 +367,8 @@ export class ClaudeStreamParser {
       reportedModels: this.reportedModels.sorted(),
       modelsOverflow: this.messageModels.overflow || this.reportedModels.overflow,
       otherSkills: this.otherSkills.sorted(),
+      otherSkillsInvoked: this.otherSkillsInvoked.sorted(),
+      slashInferred: this.slashPrompt && this.state.init?.slashCommandListed === true,
     };
   }
 
@@ -413,13 +445,14 @@ export class ClaudeStreamParser {
 
   private noteForkedParent(event: Record<string, unknown>): void {
     const parent = event.parent_tool_use_id;
-    if (
-      this.slashPrompt &&
-      typeof parent === 'string' &&
-      parent === `${FORKED_SKILL_PARENT_PREFIX}${this.options.skillName}`
-    ) {
-      this.state.slashExpanded = true;
+    if (typeof parent !== 'string' || !parent.startsWith(FORKED_SKILL_PARENT_PREFIX)) return;
+    const forked = parent.slice(FORKED_SKILL_PARENT_PREFIX.length);
+    if (forked === this.options.skillName) {
+      if (this.slashPrompt) this.state.slashExpanded = true;
+      return;
     }
+    // Another skill ran in a fork: it was used, whatever the Skill calls show.
+    this.otherSkillsInvoked.add(this.clip(forked, CLAUDE_STREAM_NAME_MAX_CHARS));
   }
 
   private handleSystem(event: Record<string, unknown>): boolean {
@@ -449,8 +482,24 @@ export class ClaudeStreamParser {
           data.apiKeySource === undefined
             ? null
             : this.clip(data.apiKeySource, CLAUDE_STREAM_NAME_MAX_CHARS),
+        slashCommandListed:
+          skillName !== undefined && (data.slash_commands ?? []).includes(skillName),
         laterModels: [],
       };
+      // A prompt starting with `/<command>` expands it without a trace in the stream (live check
+      // AC-22). Only a command the session lists as a slash command and not as a skill (a built-in
+      // such as `/compact`) is known not to be one; any other name, including an alias the init
+      // event does not list (`/checkup` for `doctor`), counts as another skill used (fail closed,
+      // FR-118-08).
+      const command = this.otherPromptCommand;
+      const builtIn =
+        command !== null &&
+        (data.slash_commands ?? []).includes(command) &&
+        !(data.skills ?? []).includes(command);
+      if (command !== null && !builtIn) {
+        this.otherSkills.add(command);
+        this.otherSkillsInvoked.add(command);
+      }
       this.record({
         type: 'message',
         text: this.clip(
@@ -535,7 +584,11 @@ export class ClaudeStreamParser {
     const parsed = skillInput.safeParse(input);
     const skill = parsed.success ? parsed.data.skill.replace(/^\//, '') : UNNAMED_SKILL;
     if (skill !== this.options.skillName) {
-      this.otherSkills.add(this.clip(skill, CLAUDE_STREAM_NAME_MAX_CHARS));
+      const name = this.clip(skill, CLAUDE_STREAM_NAME_MAX_CHARS);
+      this.otherSkills.add(name);
+      if (this.otherSkillCalls.size < CLAUDE_STREAM_MAX_SKILL_CALLS) {
+        this.otherSkillCalls.set(callId, name);
+      }
       return;
     }
     if (this.skillCalls.size < CLAUDE_STREAM_MAX_SKILL_CALLS) this.skillCalls.add(callId);
@@ -567,6 +620,11 @@ export class ClaudeStreamParser {
         ...(output === '' ? {} : { output: this.clip(output) }),
       });
       if (this.skillCalls.delete(result.data.tool_use_id) && ok) this.state.skillInvocations += 1;
+      const other = this.otherSkillCalls.get(result.data.tool_use_id);
+      if (other !== undefined) {
+        this.otherSkillCalls.delete(result.data.tool_use_id);
+        if (ok) this.otherSkillsInvoked.add(other);
+      }
     }
     return true;
   }

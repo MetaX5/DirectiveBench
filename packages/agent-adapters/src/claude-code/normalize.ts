@@ -239,12 +239,17 @@ export function classifyClaudeRun(
 export function claudeSkillActivation(parsed: ParsedClaudeStream): SkillActivation | undefined {
   const init = parsed.init;
   if (!init) return undefined;
-  const invocations = parsed.skillInvocations + (parsed.slashExpanded ? 1 : 0);
+  const slash = parsed.slashExpanded ? 'observed' : parsed.slashInferred ? 'inferred' : null;
+  const loaded = init.skillTool && (!init.skillsListed || init.skillListed);
+  // An inferred `/<name>` expansion needs the skill loaded: an unlisted skill was not expanded.
+  const counted = slash === 'observed' || (slash === 'inferred' && loaded);
+  const invocations = parsed.skillInvocations + (counted ? 1 : 0);
   return {
-    loaded: init.skillTool && (!init.skillsListed || init.skillListed),
+    loaded,
     invoked: invocations > 0,
     invocations,
     otherSkills: parsed.otherSkills,
+    ...(counted ? { slashInvocation: slash } : {}),
   };
 }
 
@@ -328,5 +333,7 @@ export function claudeRunOutcome(
     warnings: classification.warnings,
     metadata: claudeRunMetadata(parsed, conditions),
     ...(skillActivation ? { skillActivation } : {}),
+    // Every format: an instruction run can use a skill too (e.g. a `/<skill>` prompt).
+    otherSkillsInvoked: parsed.otherSkillsInvoked,
   };
 }

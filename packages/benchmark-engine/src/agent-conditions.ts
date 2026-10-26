@@ -48,6 +48,8 @@ export interface AgentRunFacts {
   warnings: string[];
   metadata?: AgentRunMetadata;
   skillActivation?: SkillActivation;
+  /** Skills other than the tested one the agent used, any artifact format (FR-118-08). */
+  otherSkillsInvoked?: string[];
 }
 
 /** A systematic agent-run failure ended the benchmark run before its remaining agent runs. */
@@ -174,6 +176,15 @@ export function agentConditionIssues(
       );
     }
   }
+  // The profile cannot deny every skill the CLI offers (live check AC-22): a run that used another
+  // skill measured that skill too (FR-118-08).
+  const others = [...new Set(runs.flatMap((run) => run.otherSkillsInvoked ?? []))].sort();
+  if (others.length > 0) {
+    const count = runs.filter((run) => (run.otherSkillsInvoked ?? []).length > 0).length;
+    issues.push(
+      `other-skill-invoked: ${count} agent run(s) invoked a skill other than the tested one (${others.join(', ')}), so the result does not measure the tested skill alone`,
+    );
+  }
   return issues;
 }
 
@@ -286,7 +297,8 @@ export function observedAgentProfile(
 
 /**
  * Puts the agent-run metadata first in the trace (SPEC-118 §8.1): execution and reported models,
- * `skillActivation`, the final error code and warnings, after the rules above were applied.
+ * `skillActivation`, `otherSkillsInvoked`, the final error code and warnings, after the rules
+ * above were applied.
  */
 export function addAgentMetadataEvent(record: AgentRunFacts & { trace: unknown[] }): void {
   if (!record.metadata) return;
@@ -294,6 +306,8 @@ export function addAgentMetadataEvent(record: AgentRunFacts & { trace: unknown[]
     type: 'agent-metadata',
     metadata: record.metadata,
     ...(record.skillActivation ? { skillActivation: record.skillActivation } : {}),
+    // Persisted per run (FR-118-08): which run used which other skill, not only the summary count.
+    ...(record.otherSkillsInvoked ? { otherSkillsInvoked: [...record.otherSkillsInvoked] } : {}),
     errorCode: record.errorCode,
     warnings: [...record.warnings],
   });

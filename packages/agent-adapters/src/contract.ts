@@ -144,8 +144,13 @@ export interface SkillActivation {
   invoked: boolean;
   /** Successful invocations of the installed skill, + 1 for an expanded `/<name>` prompt. */
   invocations: number;
-  /** Other skill names the agent attempted, sorted (all denied by the profile). */
+  /** Other skill names the agent attempted, sorted. */
   otherSkills: string[];
+  /**
+   * How a `/<name>` prompt counted: `observed` when the stream showed the expansion, `inferred`
+   * when the session listed the skill as a slash command (FR-118-09). Absent without such a prompt.
+   */
+  slashInvocation?: 'observed' | 'inferred';
 }
 
 export interface AgentRunResult {
@@ -166,6 +171,12 @@ export interface AgentRunResult {
   metadata?: AgentRunMetadata;
   /** For `skill-md` artifacts, when the harness reported its session start. */
   skillActivation?: SkillActivation;
+  /**
+   * Skills other than the tested one that the agent used, for every artifact format: the
+   * profile cannot deny every skill the CLI offers (live check AC-22), so such a run is not
+   * comparable (FR-118-08). Absent for adapters that cannot report it.
+   */
+  otherSkillsInvoked?: string[];
 }
 
 export interface InstalledArtifact {
