@@ -151,6 +151,12 @@ async function sample<T>(clock: Clock, fn: (input: T) => unknown, input: T): Pro
 
 /** Growth of `run` from `size ÷ LINEAR_SIZE_STEP` to `size`, divided by the baseline's growth. */
 export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<number> {
+  // A fractional small size would reach the builder (`'x'.repeat` truncates it, `new Array` throws).
+  if (!Number.isInteger(test.size / LINEAR_SIZE_STEP)) {
+    throw new Error(
+      `linearTimeRatio: size ${test.size} is not a multiple of LINEAR_SIZE_STEP (${LINEAR_SIZE_STEP})`,
+    );
+  }
   const small = await test.build(test.size / LINEAR_SIZE_STEP);
   const large = await test.build(test.size);
   // One collection before measuring, not one per sample: the garbage of building the inputs must
@@ -163,11 +169,13 @@ export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<numbe
     [test.baseline, small],
     [test.baseline, large],
   ] as const;
-  // Asynchronous code may do its work off the test thread, so it and its baseline are measured
-  // with the process clock; synchronous code with the thread clock.
-  const probe = test.run(small);
-  const clock = probe instanceof Promise ? processCpuMs : threadCpuMs;
-  await probe;
+  // Asynchronous code may do its work off the test thread, so when `run` or its baseline is
+  // asynchronous both are measured with the process clock; otherwise with the thread clock. Both
+  // are probed: an asynchronous baseline measured with the thread clock looked constant (review
+  // of PR #121).
+  const probes = [test.run(small), test.baseline(small)];
+  const clock = probes.some((probe) => probe instanceof Promise) ? processCpuMs : threadCpuMs;
+  await Promise.all(probes);
   // One warm-up round, discarded: the first calls run before the JIT has optimised the code,
   // which made the first ratio of a process unreliable (a quadratic function measured ~2.5).
   for (const [fn, input] of series) await sample(clock, fn, input);

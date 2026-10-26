@@ -761,6 +761,17 @@ changed before merge.
   a paragraph (Codex review of PR #115). NFR-118-02 on 2 cores (`taskset -c 0,1`): 103 / 53 / 91 ms for the three
   assertions on the 2 MiB test document including worker start-up; adversarial 2 MiB shapes scan
   in at most about 300 ms.
+- **Issue #116 (verified on 2026-10-26):** the differential corpus also generates U+00A0, line
+  tabulation and form feed at line ends, after list and quote markers, in delimiter rows and after
+  tags, lone-pipe header and body lines, leading byte order marks and link reference definitions
+  with single- and multi-line labels, also in block quotes and list items; 10 000 documents are
+  recorded. It found one more false-pass class, now fixed with scanner- and assertion-level
+  tests: a line tabulation or form feed before a row's leading pipe is an empty first cell for
+  cmark-gfm (`>\f| Role | Hours |` opens no table; `\f| Backend | 24 |` is a row shifted by one
+  column). A lazy `   |` header is now reported as cmark-gfm's one empty cell. The comparison is
+  exact for everything the scanner reports; only the documented fail-safe under-reports (a scan
+  stopped by a link definition, a table without a pipe) are compared as "scanner ⊆ cmark-gfm"
+  ([ADR-0013](../decisions/0013-hand-written-gfm-block-scanner.md)).
 - **Implemented — Phase 2 (issue #95, verified on 2026-10-22 with the mock agent):**
   - FR-118-10/11: `RunBenchmarkInput.baselineArtifact`; every baseline workspace receives exactly
     the baseline version and every candidate workspace exactly the candidate, through the same

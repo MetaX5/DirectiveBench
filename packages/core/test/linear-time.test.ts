@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   expectLinearTime,
+  LINEAR_SIZE_STEP,
   LINEAR_TIME_TEST_TIMEOUT_MS,
   linearTimeRatio,
   MAX_LINEAR_RATIO,
@@ -97,6 +98,13 @@ describe('expectLinearTime', () => {
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
 
+  it('rejects a size that is not a multiple of the size step (review of PR #121)', async () => {
+    const odd = { build: words, run: countSpaces, baseline: textBaseline, size: 1_000 };
+    await expect(linearTimeRatio(odd)).rejects.toThrow(
+      `size 1000 is not a multiple of LINEAR_SIZE_STEP (${LINEAR_SIZE_STEP})`,
+    );
+  });
+
   describe('off the test thread', () => {
     const MiB = 1024 * 1024;
     const FILE_BYTES = 256 * MiB;
@@ -143,6 +151,23 @@ describe('expectLinearTime', () => {
           size: LARGE,
         };
         expect(await linearTimeRatio(offThread)).toBeGreaterThan(MAX_LINEAR_RATIO);
+      },
+      LINEAR_TIME_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      'measures an asynchronous baseline with the process clock (review of PR #121)',
+      async () => {
+        // A synchronous `run` that does not grow, against a baseline whose copying grows with the
+        // size on the thread pool. Probing only `run` picked the thread clock, which cannot see
+        // the baseline's work: the baseline looked constant and the ratio measured about 1.
+        const ratio = await linearTimeRatio({
+          build: (size: number) => size,
+          run: () => countSpaces('word word'),
+          baseline: (bytes: number) => read(bytes),
+          size: LARGE,
+        });
+        expect(ratio).toBeLessThan(1 / MAX_LINEAR_RATIO);
       },
       LINEAR_TIME_TEST_TIMEOUT_MS,
     );

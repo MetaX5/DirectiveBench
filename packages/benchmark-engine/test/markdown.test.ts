@@ -461,6 +461,30 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     expect(scanMarkdown('| a | b |\n|-\v|-|\f\n| c | d |').tables).toHaveLength(1);
   });
 
+  it('reads line tabulation or form feed before a leading pipe as a first cell (issue #116)', () => {
+    // cmark-gfm skips only spaces and tabs before a row, so `\f|` starts with an empty cell: the
+    // header has one cell more, a delimiter row is none, and a body row shifts by one column.
+    expect(scan(['>\f| a | b |', '>\f|---|---|', '>\f| c | 4 |']).tables).toEqual([]);
+    expect(scan(['| a | b |', '\v|---|---|', '| c | 4 |']).tables).toEqual([]);
+    expect(scan(['a | b', '\f|---|---|', '===']).headings).toEqual(['a | b |---|---|']);
+    expect(scan(['\f| a | b |', '|---|---|---|']).tables).toEqual([[['', 'a', 'b']]]);
+    expect(scan(['| R | H |', '|---|---|', '\f| B | 24 |']).tables).toEqual([
+      [
+        ['R', 'H'],
+        ['', 'B', '24'],
+      ],
+    ]);
+    // `\f|` has one (empty) cell, so it is a row or a header; a lone `|` is neither.
+    expect(scan(['| a |', '|---|', '\v|', '| c |']).tables).toEqual([[['a'], [''], ['c']]]);
+    expect(scan(['\f|', '|-', '| x |']).tables).toEqual([[[''], ['x']]]);
+    // A line of form feeds is one empty cell too: a row, not the end of the table.
+    expect(scan(['| a |', '|---|', '\f', '| c |']).tables).toEqual([[['a'], [''], ['c']]]);
+    // A lazy `   |` header is one empty cell, as for cmark-gfm (formerly not reported).
+    expect(scan(['> a', '   |', '> |-|', '> |1|']).tables).toEqual([[[''], ['1']]]);
+    expect(splitTableRow('\f| a |')).toEqual(['', 'a']);
+    expect(splitTableRow('| \f')).toEqual([]);
+  });
+
   it('ends a table at a body line that is only a pipe, as cmark-gfm does (Codex review)', () => {
     const rows = (line: string) =>
       scanMarkdown(`| R | H |\n|---|---|\n${line}\n| B | 24 |`).tables[0]?.rows.length;
@@ -731,6 +755,11 @@ describe('linear time', () => {
     'underlines below a possible link definition': (n) =>
       `[x\n${'a\n'.repeat(n)}]: /url\n${'=\n'.repeat(n)}`,
     'underlines below bracketed paragraphs': (n) => `${'[x\na\n=\n'.repeat(n)}`,
+    // Issue #116: control whitespace before a leading pipe, lone pipes, definitions in quotes.
+    'rows after form feeds': (n) => `| a | b |\n|---|---|\n${'\f| 1 | 2 |\n'.repeat(n)}`,
+    'lone pipes ending tables': (n) => '| a |\n|-\n|\f\v \n'.repeat(n),
+    'one lone pipe with long whitespace': (n) => `| a |\n|---|\n|${' \f\v'.repeat(n * 4)}\n`,
+    'link definitions in quotes': (n) => `${'> [foo]: /url\n>\f| a |\n'.repeat(n)}> ---\n`,
   };
 
   it.each(Object.keys(shapes))(

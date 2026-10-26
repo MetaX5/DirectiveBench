@@ -83,10 +83,25 @@ function trimWith(text: string, isSpace: (char: string | undefined) => boolean):
   return text.slice(start, end);
 }
 
-/** Splits a table row into trimmed cells; `\|` is a literal pipe. */
+/** `text` without trailing characters for which `isSpace` holds. */
+function trimEndWith(text: string, isSpace: (char: string | undefined) => boolean): string {
+  let end = text.length;
+  while (end > 0 && isSpace(text[end - 1])) end -= 1;
+  return text.slice(0, end);
+}
+
+/**
+ * Splits a table row into trimmed cells as cmark-gfm's `row_from_string` does; `\|` is a literal
+ * pipe. `line` starts where cmark-gfm starts reading the row: after the indentation of spaces and
+ * tabs, or at the line start for a lazy header line. Only a pipe as the very first character is a
+ * leading pipe, so any other whitespace before it (`   |`, `\f|`) makes an empty first cell, and a
+ * line of line tabulations or form feeds is one empty cell. A lone `|` (with optional whitespace)
+ * has no cell and yields none: cmark-gfm reads no row there.
+ */
 export function splitTableRow(line: string): string[] {
-  let text = trimWith(line, isMarkdownSpace);
-  if (text.startsWith('|')) text = text.slice(1);
+  const leadingPipe = line.startsWith('|');
+  if (leadingPipe && trimWith(line.slice(1), isMarkdownSpace) === '') return [];
+  let text = trimEndWith(leadingPipe ? line.slice(1) : line, isMarkdownSpace);
   if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1);
   const cells: string[] = [];
   let cell = '';
@@ -262,7 +277,9 @@ function delimiterRow(line: string, start: number): { columns: number; pipe: boo
     else if (char !== ':' && char !== '-' && !isMarkdownSpace(char)) return null;
   }
   const cells = splitTableRow(line.slice(start));
-  return cells.length <= MAX_TABLE_ROW_CELLS && cells.every((cell) => /^:?-+:?$/.test(cell))
+  return cells.length > 0 &&
+    cells.length <= MAX_TABLE_ROW_CELLS &&
+    cells.every((cell) => /^:?-+:?$/.test(cell))
     ? { columns: cells.length, pipe }
     : null;
 }
@@ -608,12 +625,10 @@ export function scanMarkdown(text: string): MarkdownScan {
           if (delimiter) {
             const paragraph = current as Extract<Leaf, { kind: 'paragraph' }>;
             const last = paragraph.lines.at(-1) as string;
-            // cmark-gfm (GitHub) keeps a lazy line's indentation: `   | a |` has an empty first cell.
-            const header = [...(/^[ \t]+\|/.test(last) ? [''] : []), ...splitTableRow(last)];
-            // A lone pipe has no cell, so cmark-gfm opens no table on it (a lazy, indented one it
-            // reads as one empty cell; not reported either, fail-safe).
-            const lonePipe = trimWith(last, isMarkdownSpace) === '|';
-            if (!paragraph.noTable && !lonePipe && header.length === delimiter.columns) {
+            // cmark-gfm (GitHub) keeps a lazy line's indentation: `   | a |` has an empty first
+            // cell. A lone pipe has no cell, so cmark-gfm opens no table on it.
+            const header = splitTableRow(last);
+            if (!paragraph.noTable && header.length === delimiter.columns) {
               const table: MarkdownTable = { header, rows: [] };
               // Reported only with a pipe in both rows, which every GFM reader accepts; without one
               // it is read as a table (its lines are no paragraph or heading) but not reported.
@@ -657,7 +672,7 @@ export function scanMarkdown(text: string): MarkdownScan {
       const cells = splitTableRow(cursor.rest());
       if (
         // A lone pipe has no cell, so cmark-gfm reads no row: the table ends.
-        trimWith(cursor.rest(), isMarkdownSpace) === '|' ||
+        cells.length === 0 ||
         cells.length > MAX_TABLE_ROW_CELLS ||
         open.autocompleted > MAX_TABLE_AUTOCOMPLETED_CELLS
       ) {

@@ -39,7 +39,15 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
    fences, indented code, every HTML block kind, tables, setext and ATX headings). Their readings by
    cmark-gfm are recorded once with `packages/benchmark-engine/scripts/cmark-gfm-corpus.mjs`
    (Python `cmarkgfm`, development only) into `test/fixtures/cmark-gfm-corpus.json`; the unit test
-   requires the scanner to match all of them. CI needs no reference parser.
+   requires the scanner to match all of them. CI needs no reference parser. Since issue #116 the
+   generator also emits the characters on which cmark-gfm's whitespace differs from JavaScript's
+   (U+00A0, line tabulation, form feed at line ends, after markers, in delimiter rows and after
+   tags), lone-pipe lines, leading byte order marks and link reference definitions, in containers.
+   The comparison stays exact for everything the scanner reports; only the deliberate
+   under-reports of point 2 are compared as "scanner ⊆ cmark-gfm" by a narrow, tested rule
+   (`readingDifference` in `test/markdown-corpus.ts`): after a link definition the headings and
+   tables may stop early but stay a prefix, and a missing table must have one column (a table
+   without a pipe has one).
 
 ## Alternatives considered
 
@@ -67,6 +75,15 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
   40 000 documents from two other seeds found no difference in block structure (one in the text of
   inline HTML inside a heading, which is not compared). The old scanner
   differed on 2 752 of the 5 000 and reported extra headings or rows in 1 788.
+- Issue #116 (2026-10-26): the extended corpus (10 000 documents, seed 110) found one more
+  over-report class: cmark-gfm reads a row from the first character after spaces and tabs, so a
+  line tabulation or form feed before a leading pipe is an empty first cell (a header one cell
+  wider, no delimiter row, a body row shifted by a column, and a line of form feeds is a row). It
+  is fixed; 8 888 readings are equal and 1 112 differ only by the deliberate under-reports. A lazy
+  `   |` header is now reported as cmark-gfm's one empty cell instead of being left out.
+  Offline runs on 80 000 documents from four other seeds found no difference in block structure
+  (three in inline markup inside a heading text: raw inline HTML spanning lines, `*\v*`
+  emphasis).
 - Throughput stays linear: a realistic 2 MiB document scans in about 60–100 ms on 2 cores;
   adversarial shapes (16 nested items then 2 MiB of blank lines, 2 MiB of HTML tag lines) stay
   below 300 ms.
