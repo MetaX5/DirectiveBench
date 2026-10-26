@@ -289,6 +289,7 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
       invoked: true,
       invocations: 1,
       otherSkills: [],
+      otherSkillsInvoked: [],
     });
     const starts = fake.starts();
     expect(starts).toHaveLength(2);

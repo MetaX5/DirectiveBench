@@ -386,55 +386,161 @@ describe('classifyClaudeRun on recorded-format fixtures (SPEC-203 §9)', () => {
   });
 });
 
+describe('recorded live streams (claude 2.1.302, Local Subscription Mode, AC-22)', () => {
+  const live = { skillName: 'db-live-probe' };
+  const conditions = {
+    adapterVersion: '2.1.302',
+    authMode: 'subscription' as const,
+    permissionProfile: 'edit-only' as const,
+    requestedModel: null,
+    flagsHash: 'a'.repeat(64),
+    skill: true,
+  };
+
+  it('reads a real session: skill invoked, another skill invoked too, outside reads and writes denied', () => {
+    const parsed = parseClaudeStream(fixture('live-subscription-confine'), {
+      ...live,
+      prompt: 'Please create the DirectiveBench live probe file in the current directory.',
+    });
+    expect(parsed.init).toMatchObject({
+      skillTool: true,
+      skillsListed: true,
+      skillListed: true,
+      slashCommandListed: true,
+      apiKeySource: 'none',
+    });
+    expect(parsed.malformedLines).toBe(0);
+    const outcome = claudeRunOutcome(parsed, { exitCode: 0 }, conditions);
+    expect(outcome).toMatchObject({
+      status: 'completed',
+      warnings: ['ambient-user-config', 'permission-denied'],
+      skillActivation: {
+        loaded: true,
+        invoked: true,
+        invocations: 1,
+        otherSkills: ['db-live-other'],
+        otherSkillsInvoked: ['db-live-other'],
+      },
+      metadata: { executionModel: 'claude-opus-5-5' },
+    });
+    expect(outcome.usage).not.toHaveProperty('costUsd');
+    expect(
+      parsed.trace.filter((event) => event.type === 'permission-denied').map((e) => e.tool),
+    ).toEqual(['Read', 'Write']);
+  });
+
+  it('infers the invocation of a real /<name> prompt, which leaves no trace in the stream', () => {
+    const parsed = parseClaudeStream(fixture('live-subscription-slash'), {
+      ...live,
+      prompt: '/db-live-probe create the probe file',
+    });
+    expect(parsed.slashExpanded).toBe(false);
+    expect(parsed.slashInferred).toBe(true);
+    expect(claudeSkillActivation(parsed)).toEqual({
+      loaded: true,
+      invoked: true,
+      invocations: 1,
+      otherSkills: [],
+      otherSkillsInvoked: [],
+      slashInvocation: 'inferred',
+    });
+  });
+});
+
 describe('claudeSkillActivation (FR-118-09)', () => {
   it.each([
     [
       'skill-invoked',
       SKILL.prompt,
-      { loaded: true, invoked: true, invocations: 1, otherSkills: [] },
+      { loaded: true, invoked: true, invocations: 1, otherSkills: [], otherSkillsInvoked: [] },
     ],
     [
       'skill-not-invoked',
       SKILL.prompt,
-      { loaded: true, invoked: false, invocations: 0, otherSkills: [] },
+      { loaded: true, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
     ],
     [
       'skill-not-loaded',
       SKILL.prompt,
-      { loaded: false, invoked: false, invocations: 0, otherSkills: [] },
+      { loaded: false, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
     ],
     [
       'skill-tool-missing',
       SKILL.prompt,
-      { loaded: false, invoked: false, invocations: 0, otherSkills: [] },
+      { loaded: false, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
     ],
     [
       'skill-call-denied',
       SKILL.prompt,
-      { loaded: true, invoked: false, invocations: 0, otherSkills: [] },
+      { loaded: true, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
     ],
     [
       'other-skill-denied',
       SKILL.prompt,
-      { loaded: true, invoked: true, invocations: 1, otherSkills: ['deploy'] },
+      {
+        loaded: true,
+        invoked: true,
+        invocations: 1,
+        otherSkills: ['deploy'],
+        otherSkillsInvoked: [],
+      },
     ],
     [
       'slash-expanded',
       '/pdf summarise',
-      { loaded: true, invoked: true, invocations: 1, otherSkills: [] },
+      {
+        loaded: true,
+        invoked: true,
+        invocations: 1,
+        otherSkills: [],
+        otherSkillsInvoked: [],
+        slashInvocation: 'observed',
+      },
     ],
     [
       'slash-forked',
       '/pdf summarise',
-      { loaded: true, invoked: true, invocations: 1, otherSkills: [] },
+      {
+        loaded: true,
+        invoked: true,
+        invocations: 1,
+        otherSkills: [],
+        otherSkillsInvoked: [],
+        slashInvocation: 'observed',
+      },
     ],
     [
+      // No expansion in the stream (as 2.1.302 really prints it, live check AC-22): the skill is a
+      // listed slash command, so the invocation is inferred (maintainer decision 2026-10-26).
       'slash-not-expanded',
       '/pdf summarise',
-      { loaded: true, invoked: false, invocations: 0, otherSkills: [] },
+      {
+        loaded: true,
+        invoked: true,
+        invocations: 1,
+        otherSkills: [],
+        otherSkillsInvoked: [],
+        slashInvocation: 'inferred',
+      },
     ],
   ] as const)('%s with prompt %j', (name, prompt, expected) => {
     expect(claudeSkillActivation(parse(name, prompt))).toEqual(expected);
+  });
+
+  it('infers a /<name> expansion only for a loaded skill listed as a slash command', () => {
+    const notListed = fixture('slash-not-expanded').replace(
+      '"slash_commands": ["pdf", ',
+      '"slash_commands": [',
+    );
+    expect(
+      claudeSkillActivation(parseClaudeStream(notListed, { ...SKILL, prompt: '/pdf x' })),
+    ).toMatchObject({ invoked: false, invocations: 0 });
+    const notLoaded = fixture('slash-not-expanded').replace('"skills": ["pdf", ', '"skills": [');
+    const activation = claudeSkillActivation(
+      parseClaudeStream(notLoaded, { ...SKILL, prompt: '/pdf x' }),
+    );
+    expect(activation).toMatchObject({ loaded: false, invoked: false, invocations: 0 });
+    expect(activation).not.toHaveProperty('slashInvocation');
   });
 
   it('loads by the Skill tool alone when the init event lists no skills', () => {

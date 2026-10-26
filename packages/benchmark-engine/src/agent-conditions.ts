@@ -174,6 +174,19 @@ export function agentConditionIssues(
       );
     }
   }
+  // The profile cannot deny every skill the CLI offers (live check AC-22): a run that used another
+  // skill measured that skill too (FR-118-08).
+  const others = [
+    ...new Set(runs.flatMap((run) => run.skillActivation?.otherSkillsInvoked ?? [])),
+  ].sort();
+  if (others.length > 0) {
+    const count = runs.filter(
+      (run) => (run.skillActivation?.otherSkillsInvoked ?? []).length > 0,
+    ).length;
+    issues.push(
+      `other-skill-invoked: ${count} agent run(s) invoked a skill other than the tested one (${others.join(', ')}), so the result does not measure the tested skill alone`,
+    );
+  }
   return issues;
 }
 

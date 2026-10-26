@@ -52,6 +52,7 @@ describe('parseClaudeStream on recorded-format fixtures', () => {
       skillsListed: true,
       skillListed: true,
       apiKeySource: 'none',
+      slashCommandListed: true,
       laterModels: [],
     });
     expect(parsed.messageModels).toEqual(['claude-sonnet-4-5-20250929']);
@@ -297,6 +298,23 @@ describe('ClaudeStreamParser events', () => {
     expect(parsed.init?.laterModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
+  it('records another skill whose Skill call succeeded (live check AC-22)', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        init(),
+        assistant([{ type: 'tool_use', id: 'a', name: 'Skill', input: { skill: 'design' } }]),
+        user([{ type: 'tool_result', tool_use_id: 'a', content: 'Launching skill: design' }]),
+        assistant([{ type: 'tool_use', id: 'b', name: 'Skill', input: { skill: 'deploy' } }]),
+        user([{ type: 'tool_result', tool_use_id: 'b', is_error: true, content: 'blocked' }]),
+        assistant([{ type: 'tool_use', id: 'c', name: 'Skill', input: { skill: 'loop' } }]),
+        result(),
+      ),
+      SKILL,
+    );
+    expect(parsed.otherSkills).toEqual(['deploy', 'design', 'loop']);
+    expect(parsed.otherSkillsInvoked).toEqual(['design']);
+  });
+
   it('reads an init without skills or apiKeySource, and without a skill name', () => {
     const parsed = parseClaudeStream(
       lines(JSON.stringify({ type: 'system', subtype: 'init', model: 'm1', tools: ['Read'] })),
@@ -308,6 +326,7 @@ describe('ClaudeStreamParser events', () => {
       skillsListed: false,
       skillListed: false,
       apiKeySource: null,
+      slashCommandListed: false,
       laterModels: [],
     });
     expect(parsed.trace[0]).toEqual({
@@ -445,6 +464,16 @@ describe('ClaudeStreamParser events', () => {
     expect(parseClaudeStream(lines(...calls, ...answers), SKILL).skillInvocations).toBe(
       CLAUDE_STREAM_MAX_SKILL_CALLS,
     );
+    // Calls of other skills share the bound: the one past it is attempted, not confirmed.
+    const others = Array.from({ length: CLAUDE_STREAM_MAX_SKILL_CALLS + 1 }, (_, i) =>
+      use(`o${i}`, { skill: `other-${i}` }),
+    );
+    const otherAnswers = Array.from({ length: CLAUDE_STREAM_MAX_SKILL_CALLS + 1 }, (_, i) =>
+      answer(`o${i}`),
+    );
+    const bounded = parseClaudeStream(lines(...others, ...otherAnswers), SKILL);
+    expect(bounded.otherSkillsInvoked).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
+    expect(bounded.otherSkills).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
   it('reads tool results given as text blocks and stops collecting once the kept part is full', () => {

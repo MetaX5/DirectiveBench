@@ -144,8 +144,19 @@ export interface SkillActivation {
   invoked: boolean;
   /** Successful invocations of the installed skill, + 1 for an expanded `/<name>` prompt. */
   invocations: number;
-  /** Other skill names the agent attempted, sorted (all denied by the profile). */
+  /** Other skill names the agent attempted, sorted. */
   otherSkills: string[];
+  /**
+   * Other skills the agent invoked successfully, sorted: the profile cannot deny every skill the
+   * CLI offers (live check AC-22), so such a run is not comparable (FR-118-08). Absent in runs
+   * recorded before this was tracked.
+   */
+  otherSkillsInvoked?: string[];
+  /**
+   * How a `/<name>` prompt counted: `observed` when the stream showed the expansion, `inferred`
+   * when the session listed the skill as a slash command (FR-118-09). Absent without such a prompt.
+   */
+  slashInvocation?: 'observed' | 'inferred';
 }
 
 export interface AgentRunResult {
