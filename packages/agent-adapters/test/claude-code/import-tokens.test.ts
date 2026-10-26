@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   importCandidates,
   IMPORT_TOKEN_MAX_LENGTH,
+  WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES,
   type ImportCandidate,
 } from '../../src/claude-code';
 import {
@@ -156,8 +157,11 @@ describe('importCandidates (FR-118-27)', () => {
         let count = 0;
         for (const candidate of importCandidates(text)) {
           count += candidate.token.length > 0 ? 1 : 0;
-          // Bounded like the scanner, which stops after its candidate limit.
-          if (count > 10_000) break;
+          // Bounded like the scanner, which stops at its candidate limit. The former cut of
+          // 10 000 stopped `@a/../x` (96 000 candidates) at the same point at both sizes. Shapes
+          // whose candidates the scanner bounds itself (`@/`, `@/*`) measure near 0: bounded
+          // work passes, as it should.
+          if (count > WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES) break;
         }
       };
       for (const build of inputs) {

@@ -39,8 +39,9 @@ export const LINEAR_SIZE_STEP = 32;
 
 /**
  * Bound on the normalised growth. Measured under `taskset -c 0,1` with two `yes` processes and
- * four parallel vitest runs: every linear shape 0.8–1.9 (one Markdown code-span shape up to 2.45),
- * an N^1.5 control 5.5–6.4 and a quadratic control 33–39.
+ * four parallel vitest runs: every linear shape at most 1.3 (bounded work, such as a scan that
+ * stops at its limit, near 0), an N^1.5 control 5.6–5.9, a quadratic control 30–36 and work on
+ * the thread pool growing with size² 31–36.
  */
 export const MAX_LINEAR_RATIO = 3.5;
 
@@ -66,10 +67,23 @@ export async function collectGarbage(): Promise<void> {
   gc();
 }
 
-/** A linear baseline for text inputs: split into lines and collapse whitespace. */
-export function textBaseline(text: string): void {
+/**
+ * A linear baseline for text inputs: one pass over every character, then split into lines and
+ * collapse whitespace. The pass has almost no fixed cost per call, so the baseline grows with
+ * the input even when the small input takes a microsecond: split and collapse alone cost about a
+ * microsecond per call whatever the input, grew only 7.6× for 31× a short input of backtick runs
+ * and made a linear parser measure 3.6. Split and collapse stay because they allocate like a
+ * parser: with the pass alone, an allocation-heavy linear scan of a 3.8 MB line measured 3.4.
+ * It returns the hash, so the JIT cannot drop the pass as dead code.
+ */
+export function textBaseline(text: string): number {
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  }
   text.split('\n');
   text.replace(/\s+/g, ' ');
+  return hash;
 }
 
 export interface LinearTimeCase<T> {
