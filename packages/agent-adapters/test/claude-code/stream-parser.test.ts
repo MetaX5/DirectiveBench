@@ -16,6 +16,10 @@ import {
   redactStreamText,
   type ClaudeStreamOptions,
 } from '../../src/claude-code';
+import {
+  expectLinearTime,
+  LINEAR_TIME_TEST_TIMEOUT_MS,
+} from '../../../../test-support/linear-time';
 import { fixture } from './helpers';
 
 const SKILL: ClaudeStreamOptions = { skillName: 'pdf', prompt: 'Summarise report.pdf' };
@@ -825,32 +829,22 @@ describe('promptInvokesSkill', () => {
   });
 });
 
-/** Generous bound for the timing test on a loaded 2-core runner (lesson 2026-10-21). */
-const LINEAR_TIME_TEST_TIMEOUT_MS = 60_000;
-
 describe('ClaudeStreamParser cost', () => {
   it(
     'is linear in the stream size',
-    () => {
+    async () => {
       const message = assistant([
         { type: 'tool_use', id: 't', name: 'Skill', input: { skill: 'deploy' } },
       ]);
-      // Fastest of three, so one GC pause on a loaded runner cannot fake a ratio.
-      const time = (count: number) => {
-        const text = lines(...Array.from({ length: count }, () => message));
-        let best = Infinity;
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-          const started = performance.now();
-          parseClaudeStream(text, SKILL);
-          best = Math.min(best, performance.now() - started);
-        }
-        return best;
-      };
-      time(1_000); // warm-up
-      const small = Math.max(time(2_500), 1);
-      const large = time(20_000);
-      // 8× the input; a quadratic parser would take ~64×.
-      expect(large / small).toBeLessThan(30);
+      await expectLinearTime({
+        build: (count) => lines(...Array.from({ length: count }, () => message)),
+        run: (text) => parseClaudeStream(text, SKILL),
+        // Linear reference with the parser's own per-line work: split and parse every line.
+        baseline: (text) => {
+          for (const line of text.split('\n')) if (line) JSON.parse(line);
+        },
+        size: 20_000,
+      });
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );

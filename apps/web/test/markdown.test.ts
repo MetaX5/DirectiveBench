@@ -8,6 +8,11 @@ import {
   type Block,
   type Inline,
 } from '../lib/markdown';
+import {
+  expectLinearTime,
+  LINEAR_TIME_TEST_TIMEOUT_MS,
+  textBaseline,
+} from '../../../test-support/linear-time';
 
 const text = (value: string): Inline => ({ kind: 'text', text: value });
 const paragraph = (...children: Inline[]): Block => ({ kind: 'paragraph', children });
@@ -239,71 +244,77 @@ describe('parseMarkdown blocks', () => {
     expect(JSON.stringify(parseMarkdown(list.join('\n')))).toContain('- i17');
   });
 
-  it('gives a wide table with many empty rows the header width with linear cells (PR #50 review, #56)', () => {
-    const columns = 25_000;
-    const emptyRows = 2_000;
-    const input = `${'|a'.repeat(columns)}\n${'|-'.repeat(columns)}\n${'|\n'.repeat(emptyRows)}`;
-    const started = performance.now();
-    const [table] = parseMarkdown(input);
-    const elapsed = performance.now() - started;
-    if (table?.kind !== 'table') throw new Error('expected a table');
-    // Every row reaches the header's width: its own cell plus one cell spanning the rest.
-    for (const row of table.rows) {
-      expect(row.cells.length + row.missing).toBe(columns);
-    }
-    // Rendered cells: the row's own cells plus at most one spanning cell, so never more than
-    // two per input line; padding instead would have made 50 million cells.
-    const rendered = table.rows.reduce((n, row) => n + row.cells.length + (row.missing ? 1 : 0), 0);
-    expect(rendered).toBe(2 * emptyRows);
-    expect(rendered).toBeLessThanOrEqual(input.length);
-    // Padding took over 4 s on this input; linear parsing takes milliseconds.
-    expect(elapsed).toBeLessThan(1_000);
-    // Extra cells beyond the header are dropped.
-    expect(parseMarkdown('a |\n- |\nx | y | z')).toEqual([
-      { kind: 'table', header: [[text('a')]], rows: [{ cells: [[text('x')]], missing: 0 }] },
-    ]);
-  });
-
-  it('parses pathological input in linear time', () => {
-    // Each input is parsed at two sizes; quadrupling a linear input quadruples the time, a
-    // quadratic one multiplies it by 16. A ratio holds on a slow CI runner, where a fixed bound
-    // on the total failed although every input was linear.
-    const shapes: ((size: number) => string)[] = [
-      (size) => '['.repeat(size),
-      (size) => `${'['.repeat(size)}]`,
-      (size) => `${'*a'.repeat(size / 2)}*`,
-      (size) => '[a]'.repeat(size / 3),
-      (size) => '`'.repeat(size),
-      // Runs of 1…n backticks, n² / 2 characters, so n grows with the square root of the size:
-      // a search per distinct run length made this one grow with the size to the power 1.5.
-      (size) =>
-        Array.from({ length: Math.round(Math.sqrt(1.6 * size)) }, (_, i) => '`'.repeat(i + 1)).join(
-          ' ',
-        ),
-      (size) => '*a '.repeat(size / 3),
-      (size) => '_'.repeat(size),
-      (size) => '**'.repeat(size / 2),
-      (size) => `# ${' '.repeat(size)}x`,
-      (size) => `- a${'\n'.repeat(size)}`,
-      (size) => `${' '.repeat(size)}\u2028`,
-      (size) => '<'.repeat(size),
-    ];
-    const fastest = (input: string) => {
-      let best = Infinity;
-      for (let run = 0; run < 3; run += 1) {
-        const started = performance.now();
-        parseMarkdown(input);
-        best = Math.min(best, performance.now() - started);
+  it(
+    'gives a wide table with many empty rows the header width with linear cells (PR #50 review, #56)',
+    async () => {
+      const wideTable = (columns: number, emptyRows: number) =>
+        `${'|a'.repeat(columns)}\n${'|-'.repeat(columns)}\n${'|\n'.repeat(emptyRows)}`;
+      const columns = 25_000;
+      const emptyRows = 2_000;
+      const input = wideTable(columns, emptyRows);
+      const [table] = parseMarkdown(input);
+      if (table?.kind !== 'table') throw new Error('expected a table');
+      // Every row reaches the header's width: its own cell plus one cell spanning the rest.
+      for (const row of table.rows) {
+        expect(row.cells.length + row.missing).toBe(columns);
       }
-      return best;
-    };
-    for (const shape of shapes) {
-      const small = fastest(shape(25_000));
-      const large = fastest(shape(100_000));
-      // 8 leaves room for noise below the quadratic 16; 50 ms absorbs timer resolution.
-      expect(large).toBeLessThan(8 * small + 50);
-    }
-  }, 60_000);
+      // Rendered cells: the row's own cells plus at most one spanning cell, so never more than
+      // two per input line; padding instead would have made 50 million cells.
+      const rendered = table.rows.reduce(
+        (n, row) => n + row.cells.length + (row.missing ? 1 : 0),
+        0,
+      );
+      expect(rendered).toBe(2 * emptyRows);
+      expect(rendered).toBeLessThanOrEqual(input.length);
+      // Padding took over 4 s on this input: columns × rows cells, quadratic when both grow.
+      await expectLinearTime({
+        build: (size) => wideTable(size, size / 10),
+        run: parseMarkdown,
+        baseline: textBaseline,
+        size: 16_000,
+      });
+      // Extra cells beyond the header are dropped.
+      expect(parseMarkdown('a |\n- |\nx | y | z')).toEqual([
+        { kind: 'table', header: [[text('a')]], rows: [{ cells: [[text('x')]], missing: 0 }] },
+      ]);
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    'parses pathological input in linear time',
+    async () => {
+      // Each input is parsed at two sizes and its growth normalised by a linear baseline on the
+      // same inputs (test-support/linear-time.ts): ~1 for a linear parser, ~8 for a quadratic one.
+      const shapes: ((size: number) => string)[] = [
+        (size) => '['.repeat(size),
+        (size) => `${'['.repeat(size)}]`,
+        (size) => `${'*a'.repeat(size / 2)}*`,
+        (size) => '[a]'.repeat(size / 3),
+        (size) => '`'.repeat(size),
+        // Runs of 1…n backticks, n² / 2 characters, so n grows with the square root of the size:
+        // a search per distinct run length made this one grow with the size to the power 1.5.
+        (size) =>
+          Array.from({ length: Math.round(Math.sqrt(1.6 * size)) }, (_, i) =>
+            '`'.repeat(i + 1),
+          ).join(' '),
+        (size) => '*a '.repeat(size / 3),
+        (size) => '_'.repeat(size),
+        (size) => '**'.repeat(size / 2),
+        (size) => `# ${' '.repeat(size)}x`,
+        (size) => `- a${'\n'.repeat(size)}`,
+        (size) => `${' '.repeat(size)}\u2028`,
+        (size) => '<'.repeat(size),
+      ];
+      for (const build of shapes) {
+        await expectLinearTime(
+          { build, run: parseMarkdown, baseline: textBaseline, size: 96_000 },
+          build(12).slice(0, 12),
+        );
+      }
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('parseInline', () => {

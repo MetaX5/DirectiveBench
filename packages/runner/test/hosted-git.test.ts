@@ -33,6 +33,7 @@ import {
   readBlobs,
   resolveCaBundle,
   type HostedGitContext,
+  type HostedGitFailure,
 } from '../src/hosted-git';
 import { fakeGit, fakeGitCalls, type FakeAnswer } from './support/hosted-fixtures';
 
@@ -344,7 +345,14 @@ function fakeContext(
   return { git, context };
 }
 
-describePosix('hosted git steps with a fake git', () => {
+/**
+ * Timeout for each fake-git test. Every test spawns one Node.js fake per git call, several per
+ * test; the blob-fetch test (eight fake sequences) took ~0.3 s alone but exceeded vitest's 5 s
+ * default under `taskset -c 0,1` with load (issue #114). The tests assert outcomes, never time.
+ */
+const FAKE_GIT_TEST_TIMEOUT_MS = 60_000;
+
+describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEOUT_MS }, () => {
   it('checks the version: newer majors pass, garbage and old versions do not', async () => {
     for (const [stdout, ok] of [
       ['git version 3.0.0\n', true],
@@ -543,29 +551,42 @@ describePosix('hosted git steps with a fake git', () => {
   it('fails the blob fetch when the cache cannot be checked, the fetch or the limit fails, or blobs stay missing', async () => {
     const target = { cacheDir: dir, location: LOCATION };
     const missing = { stdout: `${OID_A} missing\n` };
-    const cases: [Record<string, FakeAnswer | FakeAnswer[]>, string, number?][] = [
-      [{ 'cat-file': { exit: 128, stderr: 'fatal: bad object\n' } }, 'git-failed'],
-      [{ 'cat-file': { sleepMs: 5_000 } }, 'timeout'],
+    // The short timeout only on the step that is expected to time out: a fake git that starts
+    // slowly on a loaded runner must not turn another case, or an earlier step, into a timeout.
+    // With `read` and `fetch` both short, a slow `cat-file` fake ended the fetch-timeout case
+    // before the fetch, so it still passed but left the fetch's timeout branch uncovered on CI.
+    const cases: [
+      Record<string, FakeAnswer | FakeAnswer[]>,
+      Partial<HostedGitFailure>,
+      Partial<HostedGitContext>?,
+    ][] = [
+      [{ 'cat-file': { exit: 128, stderr: 'fatal: bad object\n' } }, { code: 'git-failed' }],
+      [
+        { 'cat-file': { sleepMs: 5_000 } },
+        { code: 'timeout', message: expect.stringMatching(/^git cat-file did not finish/) },
+        { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } },
+      ],
       [
         { 'cat-file': missing, fetch: { exit: 128, stderr: 'remote: Repository not found.\n' } },
-        'auth-required',
+        { code: 'auth-required' },
       ],
-      [{ 'cat-file': [missing, { exit: 128 }], fetch: {} }, 'git-failed'],
-      [{ 'cat-file': missing, fetch: {} }, 'git-failed'],
-      [{ 'cat-file': missing, fetch: {} }, 'cache-limit-exceeded', 1],
-      [{ 'cat-file': missing, fetch: { sleepMs: 5_000 } }, 'timeout'],
+      [{ 'cat-file': [missing, { exit: 128 }], fetch: {} }, { code: 'git-failed' }],
+      [{ 'cat-file': missing, fetch: {} }, { code: 'git-failed' }],
+      [
+        { 'cat-file': missing, fetch: {} },
+        { code: 'cache-limit-exceeded' },
+        { cacheLimitBytes: 1 },
+      ],
+      [
+        { 'cat-file': missing, fetch: { sleepMs: 5_000 } },
+        { code: 'timeout', message: expect.stringMatching(/^git fetch did not finish/) },
+        { timeouts: { ...HOSTED_GIT_TIMEOUTS, fetch: 200 } },
+      ],
     ];
-    for (const [answers, code, limit] of cases) {
+    for (const [answers, expected, overrides] of cases) {
       rmSync(join(dir, 'bin'), { recursive: true, force: true });
-      // Short timeouts only where a timeout is expected: a fake git that starts slowly on a
-      // loaded runner must not turn the other cases into timeouts.
-      const { context } = fakeContext(answers, {
-        ...(code === 'timeout'
-          ? { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200, fetch: 200 } }
-          : {}),
-        ...(limit === undefined ? {} : { cacheLimitBytes: limit }),
-      });
-      expect(await fetchBlobs(context, target, [OID_A])).toMatchObject({ ok: false, code });
+      const { context } = fakeContext(answers, overrides);
+      expect(await fetchBlobs(context, target, [OID_A])).toMatchObject({ ok: false, ...expected });
     }
     rmSync(join(dir, 'bin'), { recursive: true, force: true });
     const { context } = fakeContext({ 'cat-file': missing, fetch: {} });
@@ -578,20 +599,25 @@ describePosix('hosted git steps with a fake git', () => {
 
   it('fails reading blobs whose output is not what was asked for', async () => {
     const blobs = new Map([[OID_A, 3]]);
-    for (const answer of [
-      { exit: 128, stderr: 'fatal: bad\n' },
-      { sleepMs: 5_000 },
-      { stdout: `${OID_B} blob 3\nabc\n` },
-      { stdout: `${OID_A} blob 3\nab` },
-      { stdout: '' },
-    ]) {
+    const cases: [FakeAnswer, string][] = [
+      [{ exit: 128, stderr: 'fatal: bad\n' }, 'git-failed'],
+      [{ sleepMs: 5_000 }, 'timeout'],
+      [{ stdout: `${OID_B} blob 3\nabc\n` }, 'git-failed'],
+      [{ stdout: `${OID_A} blob 3\nab` }, 'git-failed'],
+      [{ stdout: '' }, 'git-failed'],
+    ];
+    for (const [answer, code] of cases) {
       rmSync(join(dir, 'bin'), { recursive: true, force: true });
+      // The short timeout only where a timeout is expected: with it on every case, a fake that
+      // started slowly on the loaded CI runner turned the exit-128 case into a timeout, which
+      // still passed `ok: false` but left the non-zero-exit branch uncovered (issue #114).
       const { context } = fakeContext(
         { 'cat-file': answer },
-        { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } },
+        code === 'timeout' ? { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } } : {},
       );
       expect(await readBlobs(context, dir, blobs, context.timeouts.read)).toMatchObject({
         ok: false,
+        code,
       });
     }
   });
