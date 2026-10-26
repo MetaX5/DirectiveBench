@@ -31,9 +31,11 @@ the prefix before a stop line and matches pipe-less tables by header line; `mark
 
 - **Prefixes are chosen by the scanner, and the test checks the choice.** The recorder runs
   `scanMarkdown` to learn which prefixes to record (`prefixLineCounts`: lines before a stop, lines
-  up to a pipe-less table's delimiter row). To keep that from being circular, the test requires
-  the recorded prefix line counts of every document to equal the ones the current scanner needs,
-  so a scanner that moves its stop line has no reading to compare with and fails.
+  up to a pipe-less table's delimiter row) and stores its gaps (`notReported` per document). The
+  test requires every document's gaps to equal the recorded ones exactly (lines, reasons, number)
+  and the recorded prefixes to be the ones they need, so a scanner that moves or adds a stop
+  fails (Codex round 1: comparing only the deduplicated prefix line counts let an added stop
+  share a pipe-less table's prefix).
 - **A pipe-less table is identified through cmark-gfm's prefix reading, not source positions**
   (which cmark-gfm 2025.10.22 reports unreliably for tables in paragraphs, run log of #116): the
   reading of lines 1 to L+1 must end with a one-column table without rows, and that table's index
@@ -71,7 +73,8 @@ the prefix before a stop line and matches pipe-less tables by header line; `mark
 | Red first: assertion tests before `describeGaps` | 4 fail |
 | Red first: previous `readingDifference` on the constructed regressions (scratch script) | accepted all 470 scans stopped one block early and all 355 scans missing a piped one-column table |
 | New `readingDifference` on the recorded corpus | 10 000 / 10 000 exact |
-| Constructed regressions in `markdown-reference.test.ts` | fail on every affected document (one block early, earlier stop line, dropped piped one-column table) |
+| Constructed regressions in `markdown-reference.test.ts` | fail on every affected document (one block early, earlier stop line, an added stop sharing a pipe-less table's prefix, dropped piped one-column table) |
+| Red first (Codex round 1): added-stop regression before recording the gaps | fails (case 9 accepted) |
 | `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` | pass, 7/7 tasks, 100 % coverage (benchmark-engine 424 tests) |
 | `pnpm build && pnpm verify:pack` | pass |
 | Linear-time shapes for pipe-less tables and link definitions under `taskset -c 0,1` with two `yes` | pass |

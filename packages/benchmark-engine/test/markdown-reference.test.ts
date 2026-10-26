@@ -7,6 +7,7 @@ import {
   generateDocuments,
   prefixLineCounts,
   readingDifference,
+  type Gap,
   type GeneratorOptions,
   type ReferenceReadings,
   type ScannerReading,
@@ -28,6 +29,7 @@ const corpus = JSON.parse(
   reference: string;
   documentsSha256: string;
   expected: string[][];
+  notReported: Record<string, Gap[]>;
   prefixReadings: Record<string, Record<string, string[]>>;
 };
 
@@ -49,10 +51,14 @@ const referenceOf = (index: number): ReferenceReadings => ({
 
 /**
  * Why the scan of corpus document `index` is not cmark-gfm's reading, or null: the gaps must be
- * the ones the readings were recorded for (another stop line needs another reading), and the
- * reading must pass `readingDifference`.
+ * exactly the ones the readings were recorded for (lines, reasons and their number: another stop
+ * line, or an added stop that shares a pipe-less table's prefix, is a difference), the recorded
+ * prefixes those the gaps need, and the reading must pass `readingDifference`.
  */
 const corpusDifference = (scan: ScannerReading, index: number): string | null => {
+  const gaps = JSON.stringify(scan.notReported);
+  const recordedGaps = JSON.stringify(corpus.notReported[String(index)] ?? []);
+  if (gaps !== recordedGaps) return `gaps ${gaps} differ from the recorded ${recordedGaps}`;
   const reference = referenceOf(index);
   const recorded = Object.keys(reference.prefixes).join(',');
   const needed = [...new Set(prefixLineCounts(scan.notReported))].sort((a, b) => a - b).join(',');
@@ -69,8 +75,9 @@ describe(`scanMarkdown against ${corpus.reference}`, () => {
     const digest = createHash('sha256').update(JSON.stringify(documents)).digest('hex');
     expect(digest).toBe(corpus.documentsSha256);
     expect(corpus.expected).toHaveLength(documents.length);
-    const indices = Object.keys(corpus.prefixReadings).map(Number);
-    expect(indices.every((index) => index < documents.length)).toBe(true);
+    for (const recorded of [corpus.notReported, corpus.prefixReadings]) {
+      expect(Object.keys(recorded).every((index) => Number(index) < documents.length)).toBe(true);
+    }
   });
 
   it(`reads all ${corpus.generator.cases} generated documents as cmark-gfm does (seed ${corpus.generator.seed})`, () => {
@@ -139,6 +146,21 @@ describe(`scanMarkdown against ${corpus.reference}`, () => {
       };
     });
     expect(mutated).toBeGreaterThan(500);
+  });
+
+  it('fails a scanner that adds a stop whose prefix a pipe-less table also needs (Codex review)', () => {
+    const mutated = failsWherever((scan, index) => {
+      const [gap, ...others] = scan.notReported;
+      if (gap?.reason !== 'pipeless-table' || others.length > 0) return null;
+      // A stop two lines below the header needs the same prefix as the table: its reading, less
+      // the pipe-less table it ends with, passes readingDifference.
+      const prefix = referenceOf(index).prefixes[String(gap.line + 1)] as string[];
+      return {
+        reading: prefix.slice(0, -1),
+        notReported: [gap, { line: gap.line + 2, reason: 'link-definition-underline' }],
+      };
+    });
+    expect(mutated).toBeGreaterThan(100);
   });
 
   it('fails a scanner that drops a piped one-column table', () => {

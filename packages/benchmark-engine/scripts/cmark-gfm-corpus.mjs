@@ -5,7 +5,7 @@
  * table rows are stored in their comparable form. Where the scanner deliberately reports less
  * (`MarkdownScan.notReported`, ADR-0013), cmark-gfm's readings of the document prefixes the test
  * compares with are stored too (`prefixLineCounts`): the lines before a stop, and the lines up to
- * a pipe-less table's delimiter row. Run after changing the generator or those gaps:
+ * a pipe-less table's delimiter row; so are the gaps themselves, which the scanner must keep. Run after changing the generator or those gaps:
  *
  *   pip install cmarkgfm==2025.10.22
  *   node packages/benchmark-engine/scripts/cmark-gfm-corpus.mjs   # Node 24 (type stripping)
@@ -23,9 +23,11 @@ const generator = { seed: 110, cases: 10000, tabs: true, depth: 3, listTables: t
 const reference = 'cmark-gfm via cmarkgfm 2025.10.22 (table extension)';
 
 const documents = generateDocuments(generator);
-// The prefixes each document needs, as [document index, line count] pairs, read in one batch.
-const prefixes = documents.flatMap((document, index) =>
-  [...new Set(prefixLineCounts(scanMarkdown(document).notReported))].map((lines) => [index, lines]),
+// The scanner's gaps per document (the test requires exactly these), and the prefixes they need
+// as [document index, line count] pairs, read in one batch.
+const gaps = documents.map((document) => scanMarkdown(document).notReported);
+const prefixes = gaps.flatMap((notReported, index) =>
+  [...new Set(prefixLineCounts(notReported))].map((lines) => [index, lines]),
 );
 const prefixText = (document, lines) =>
   document
@@ -55,6 +57,9 @@ const corpus = {
   reference,
   documentsSha256: createHash('sha256').update(JSON.stringify(documents)).digest('hex'),
   expected: readings.slice(0, documents.length),
+  notReported: Object.fromEntries(
+    gaps.flatMap((notReported, index) => (notReported.length > 0 ? [[index, notReported]] : [])),
+  ),
   prefixReadings,
 };
 const target = new URL('../test/fixtures/cmark-gfm-corpus.json', import.meta.url);
