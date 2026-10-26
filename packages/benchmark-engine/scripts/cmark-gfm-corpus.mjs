@@ -5,7 +5,8 @@
  * table rows are stored in their comparable form. Where the scanner deliberately reports less
  * (`MarkdownScan.notReported`, ADR-0013), cmark-gfm's readings of the document prefixes the test
  * compares with are stored too (`prefixLineCounts`): the lines before a stop, and the lines up to
- * a pipe-less table's delimiter row; so are the gaps themselves, which the scanner must keep. Run after changing the generator or those gaps:
+ * a pipe-less table's delimiter row; so are the gaps themselves, which the scanner must keep.
+ * Run after changing the generator or those gaps:
  *
  *   pip install cmarkgfm==2025.10.22
  *   node packages/benchmark-engine/scripts/cmark-gfm-corpus.mjs   # Node 24 (type stripping)

@@ -55,10 +55,13 @@ function describeGaps(gaps: readonly MarkdownNotReported[]): {
 } {
   if (gaps.length === 0) return { details: {}, failure: (message) => message };
   const pipeless = gaps.filter((gap) => gap.reason === 'pipeless-table');
-  const stops = gaps.filter((gap) => gap.reason !== 'pipeless-table');
+  const stops = gaps.filter(
+    (gap): gap is MarkdownNotReported & { reason: keyof typeof STOP_REASONS } =>
+      gap.reason !== 'pipeless-table',
+  );
   const sentences = stops.map(
     ({ line, reason }) =>
-      ` The document was checked only before line ${line}: ${STOP_REASONS[reason as keyof typeof STOP_REASONS]}.`,
+      ` The document was checked only before line ${line}: ${STOP_REASONS[reason]}.`,
   );
   const first = pipeless[0];
   if (first !== undefined) {
