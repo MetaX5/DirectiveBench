@@ -67,6 +67,9 @@ Run the opt-in live check of SPEC-118 AC-22 with the exact production argv again
 
 - Codex round 2, **high:** instruction artifacts (`claude-md`, `agents-md`, `claude-rule`) report no `skillActivation`, so another skill they used (for example a `/<skill>` prompt) was dropped and the run stayed comparable. `otherSkillsInvoked` now lives on `AgentRunResult` and `AgentRunRecord` for every format, and the engine reads it from there. Red first: the instruction-run regression on the recorded slash stream fails on e1341b2.
 
+- Codex round 3, **high:** a slash alias (`/checkup` for `doctor`, which survives `disableBundledSkills`) is not listed in the init event, so the exact-name check missed it. The rule now fails closed: any `/<command>` prompt that does not name the tested skill counts as another skill used, unless the session lists the command as a slash command and not as a skill (a built-in such as `/compact`). Red first: the alias case fails on 64d382b.
+- CI on 64d382b: web `markdown.test.ts` "parses pathological input in linear time" failed (171 against a bound of 107). This is the known flaky test of #114, which PR #121 fixes; the job was rerun.
+
 ## Lessons recorded
 
 - [An allow rule does not restrict a tool that needs no permission](../lessons/2026-10-26-an-allow-rule-does-not-restrict-a-tool-that-needs-no-permission.md)

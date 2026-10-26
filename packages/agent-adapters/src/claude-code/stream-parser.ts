@@ -486,14 +486,17 @@ export class ClaudeStreamParser {
           skillName !== undefined && (data.slash_commands ?? []).includes(skillName),
         laterModels: [],
       };
-      // A prompt starting with `/<other skill>` expands that skill without a trace in the stream
-      // (live check AC-22), so a listed skill it names counts as used (FR-118-08).
+      // A prompt starting with `/<command>` expands it without a trace in the stream (live check
+      // AC-22). Only a command the session lists as a slash command and not as a skill (a built-in
+      // such as `/compact`) is known not to be one; any other name, including an alias the init
+      // event does not list (`/checkup` for `doctor`), counts as another skill used (fail closed,
+      // FR-118-08).
       const command = this.otherPromptCommand;
-      if (
+      const builtIn =
         command !== null &&
-        (data.skills ?? []).includes(command) &&
-        (data.slash_commands ?? []).includes(command)
-      ) {
+        (data.slash_commands ?? []).includes(command) &&
+        !(data.skills ?? []).includes(command);
+      if (command !== null && !builtIn) {
         this.otherSkills.add(command);
         this.otherSkillsInvoked.add(command);
       }

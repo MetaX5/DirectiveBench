@@ -298,17 +298,20 @@ describe('ClaudeStreamParser events', () => {
     expect(parsed.init?.laterModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
-  it('counts a /<other> prompt only for a skill the session lists as a skill and slash command', () => {
-    const other = { ...SKILL, prompt: '/deploy now' };
-    const used = (extra: Record<string, unknown>) =>
-      parseClaudeStream(lines(init(extra), result()), other).otherSkillsInvoked;
-    expect(used({ skills: ['pdf', 'deploy'], slash_commands: ['pdf', 'deploy'] })).toEqual([
-      'deploy',
-    ]);
-    expect(used({ skills: ['pdf', 'deploy'], slash_commands: ['pdf'] })).toEqual([]);
-    expect(used({ skills: ['pdf'], slash_commands: ['pdf', 'deploy'] })).toEqual([]);
-    expect(used({ skills: undefined, slash_commands: undefined })).toEqual([]);
-    expect(used({ skills: ['pdf', 'deploy'] })).toEqual([]);
+  it('counts a /<other> prompt as another skill unless the session lists it as a built-in command', () => {
+    const used = (prompt: string, extra: Record<string, unknown>) =>
+      parseClaudeStream(lines(init(extra), result()), { ...SKILL, prompt }).otherSkillsInvoked;
+    const listed = { skills: ['pdf', 'deploy'], slash_commands: ['pdf', 'deploy', 'compact'] };
+    expect(used('/deploy now', listed)).toEqual(['deploy']);
+    // A built-in command (listed, but not as a skill) is not a skill.
+    expect(used('/compact now', listed)).toEqual([]);
+    // An alias the init event does not list (`/checkup` for `doctor`) fails closed (Codex review).
+    expect(used('/checkup inspect setup', listed)).toEqual(['checkup']);
+    expect(used('/deploy now', {})).toEqual(['deploy']);
+    expect(used('/compact', { skills: undefined, slash_commands: ['compact'] })).toEqual([]);
+    // The tested skill itself and a prompt without a command are not other skills.
+    expect(used('/pdf x', listed)).toEqual([]);
+    expect(used('plain prompt', listed)).toEqual([]);
   });
 
   it('records another skill that ran in a fork (Codex review)', () => {
