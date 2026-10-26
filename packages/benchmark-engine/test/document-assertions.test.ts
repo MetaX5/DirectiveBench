@@ -10,6 +10,8 @@ import {
   type AssertionResult,
 } from '../src/assertions';
 import { MAX_LISTED_MATCHES, MAX_READ_BYTES } from '../src/assertion-support';
+import { MAX_LISTED_GAPS } from '../src/document-assertions';
+import { MAX_MARKDOWN_NESTING } from '../src/markdown';
 import {
   ASSERTION_TYPE_TRAITS,
   assertionSchema,
@@ -259,7 +261,11 @@ describe('markdown structure boundaries (Codex review)', () => {
       assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['[foo bar]: /url'] }),
       workspace({ 'doc.md': '[foo\nbar]: /url\n---' }),
     );
-    expect(result).toMatchObject({ passed: false, message: 'Missing headings: [foo bar]: /url' });
+    expect(result).toMatchObject({
+      passed: false,
+      message:
+        'Missing headings: [foo bar]: /url. The document was checked only before line 3: a possible link reference definition before a setext underline ends the scan (not parsed).',
+    });
   });
 
   it('does not accept a heading in a list that cannot interrupt a definition paragraph (Codex review)', async () => {
@@ -267,7 +273,11 @@ describe('markdown structure boundaries (Codex review)', () => {
       assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
       workspace({ 'doc.md': '[foo\nbar]: /url\n---\n2. # Fake' }),
     );
-    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+    expect(result).toMatchObject({
+      passed: false,
+      message:
+        'Missing headings: Fake. The document was checked only before line 3: a possible link reference definition before a setext underline ends the scan (not parsed).',
+    });
   });
 
   it('does not read a table whose header row ends in a no-break space (Codex review)', async () => {
@@ -361,7 +371,11 @@ describe('markdown structure boundaries (Codex review)', () => {
       assertion({ type: 'markdown-sections', file: 'doc.md', headings: ['Fake'] }),
       workspace({ 'doc.md': '[foo]: /url\ntext\n---\n<x>\n# Fake' }),
     );
-    expect(result).toMatchObject({ passed: false, message: 'Missing headings: Fake' });
+    expect(result).toMatchObject({
+      passed: false,
+      message:
+        'Missing headings: Fake. The document was checked only before line 3: a possible link reference definition before a setext underline ends the scan (not parsed).',
+    });
   });
 
   it('does not read a row after a table filled in its cell budget (Codex review)', async () => {
@@ -405,6 +419,133 @@ describe('markdown structure boundaries (Codex review)', () => {
       passed: false,
       message: expect.stringMatching(/^No row whose first cell matches/),
     });
+  });
+});
+
+describe('what the Markdown scan did not read (issue #128)', () => {
+  const STOP_AT_DEFINITION =
+    'The document was checked only before line 4: a possible link reference definition before a setext underline ends the scan (not parsed).';
+  const definitionStop =
+    '# Before\n\n[foo]: /url\n---\n# After\n\n| Role | Hours |\n|---|---|\n| QA | 8 |';
+  const sections = (headings: string[], doc: string) =>
+    evaluateAssertion(
+      assertion({ type: 'markdown-sections', file: 'doc.md', headings }),
+      workspace({ 'doc.md': doc }),
+    );
+  const tableValue = (doc: string, min = 1) =>
+    evaluateAssertion(
+      assertion({
+        type: 'markdown-table-value',
+        file: 'doc.md',
+        row: { pattern: 'QA' },
+        column: 'Hours',
+        min,
+      }),
+      workspace({ 'doc.md': doc }),
+    );
+
+  it('names the stop line and reason in a failing markdown-sections message and details', async () => {
+    const result = await sections(['Before', 'After'], definitionStop);
+    expect(result).toMatchObject({
+      passed: false,
+      message: `Missing headings: After. ${STOP_AT_DEFINITION}`,
+      details: {
+        found: ['Before'],
+        missing: ['After'],
+        notReported: [{ line: 4, reason: 'link-definition-underline' }],
+        notReportedCount: 1,
+      },
+    });
+    const misordered = await evaluateAssertion(
+      assertion({
+        type: 'markdown-sections',
+        file: 'doc.md',
+        headings: ['B', 'A'],
+        ordered: true,
+      }),
+      workspace({ 'doc.md': `# A\n# B\n${'> '.repeat(MAX_MARKDOWN_NESTING + 1)}# C` }),
+    );
+    expect(misordered).toMatchObject({
+      passed: false,
+      message: `Headings out of order: A. The document was checked only before line 3: block quotes and list items nested deeper than ${MAX_MARKDOWN_NESTING} end the scan.`,
+      details: { notReported: [{ line: 3, reason: 'nesting-limit' }] },
+    });
+  });
+
+  it('keeps a passing message unchanged and lists the gap in its details', async () => {
+    const result = await sections(['Before'], definitionStop);
+    expect(result).toMatchObject({
+      passed: true,
+      message: 'All 1 heading(s) found in doc.md',
+      details: { notReported: [{ line: 4, reason: 'link-definition-underline' }] },
+    });
+  });
+
+  it('adds nothing when the whole document was read, and markdown-sections ignores pipe-less tables', async () => {
+    const full = await sections(['Missing'], '# A\n\n| a | b |\n|---|---|');
+    expect(full.message).toBe('Missing headings: Missing');
+    expect(full.details).not.toHaveProperty('notReported');
+    const pipeless = await sections(['Missing'], '# A\n\nRole\n:-:\n');
+    expect(pipeless.message).toBe('Missing headings: Missing');
+    expect(pipeless.details).not.toHaveProperty('notReported');
+  });
+
+  it('names the stop and the pipe-less tables in failing markdown-table-value messages', async () => {
+    const belowStop = await tableValue(definitionStop);
+    expect(belowStop).toMatchObject({
+      passed: false,
+      message: `No table has a column "Hours" in doc.md. ${STOP_AT_DEFINITION}`,
+      details: { notReported: [{ line: 4, reason: 'link-definition-underline' }] },
+    });
+    const pipeless = await tableValue('Hours\n:-\nQA 8\n\n| Role | Hours |\n|---|---|\n| PM | 2 |');
+    expect(pipeless).toMatchObject({
+      passed: false,
+      message:
+        'No row whose first cell matches /QA/ in a table with column "Hours". 1 table without a pipe in its header or delimiter row was not read (header on line 1).',
+      details: { notReported: [{ line: 1, reason: 'pipeless-table' }], notReportedCount: 1 },
+    });
+    const both = await tableValue(
+      'Hours\n:-\n\nHours\n-:\n\n| Role | Hours |\n|---|---|\n| QA | 8 |\n\n[a]: /b\n===',
+      10,
+    );
+    expect(both).toMatchObject({
+      passed: false,
+      message:
+        'Hours = 8 is outside 10…∞. The document was checked only before line 12: a possible link reference definition before a setext underline ends the scan (not parsed). 2 tables without a pipe in their header or delimiter row were not read (first header on line 1).',
+      details: {
+        notReported: [
+          { line: 12, reason: 'link-definition-underline' },
+          { line: 1, reason: 'pipeless-table' },
+          { line: 4, reason: 'pipeless-table' },
+        ],
+      },
+    });
+    const noNumber = await tableValue('| Role | Hours |\n|---|---|\n| QA | n/a |\n\nX\n:-');
+    expect(noNumber.message).toBe(
+      'No number in cell "n/a". 1 table without a pipe in its header or delimiter row was not read (header on line 5).',
+    );
+    const passing = await tableValue('| Role | Hours |\n|---|---|\n| QA | 8 |\n\nX\n:-');
+    expect(passing).toMatchObject({
+      passed: true,
+      message: 'Hours = 8 is within 1…∞',
+      details: { notReported: [{ line: 5, reason: 'pipeless-table' }] },
+    });
+  });
+
+  it(`lists at most ${MAX_LISTED_GAPS} gaps in the details, the stop first, and counts all`, async () => {
+    const doc = `${'X\n:-\n\n'.repeat(MAX_LISTED_GAPS + 5)}[a]: /b\n===`;
+    const result = await tableValue(doc);
+    const listed = result.details?.notReported as { line: number; reason: string }[];
+    expect(listed).toHaveLength(MAX_LISTED_GAPS);
+    expect(listed[0]).toEqual({
+      line: 3 * (MAX_LISTED_GAPS + 5) + 2,
+      reason: 'link-definition-underline',
+    });
+    expect(listed[1]).toEqual({ line: 1, reason: 'pipeless-table' });
+    expect(result.details).toMatchObject({ notReportedCount: MAX_LISTED_GAPS + 6 });
+    expect(result.message).toContain(
+      `${MAX_LISTED_GAPS + 5} tables without a pipe in their header or delimiter row were not read (first header on line 1).`,
+    );
   });
 });
 

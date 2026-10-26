@@ -18,10 +18,33 @@ export interface MarkdownTable {
   rows: MarkdownTableRow[];
 }
 
+/**
+ * Why the scanner did not report part of a document (ADR-0013, fail-safe): a setext underline
+ * below a paragraph that may start with a link reference definition, or a line nested deeper than
+ * MAX_MARKDOWN_NESTING, ends the scan; a table without a pipe in its header or delimiter row is
+ * read but not reported.
+ */
+export type MarkdownNotReportedReason =
+  'link-definition-underline' | 'nesting-limit' | 'pipeless-table';
+
+export interface MarkdownNotReported {
+  /**
+   * 1-based line in the scanned text: the line that ended the scan (nothing on or below it is
+   * reported), or the header line of a pipe-less table.
+   */
+  line: number;
+  reason: MarkdownNotReportedReason;
+}
+
 export interface MarkdownScan {
   /** Heading texts in document order, whitespace-collapsed and trimmed. */
   headings: string[];
   tables: MarkdownTable[];
+  /**
+   * What the scan deliberately left out, in line order: one entry per pipe-less table and at
+   * most one stop, which is last (so the list is bounded by the number of tables plus one).
+   */
+  notReported: MarkdownNotReported[];
 }
 
 /** Collapses whitespace runs to one space and trims. */
@@ -448,11 +471,13 @@ function enterQuote(cursor: Cursor): void {
  * are containers, fenced and indented code and HTML blocks hide their content. The algorithm is
  * the reference parsers' line-by-line block phase (CommonMark spec, "A parsing strategy"); inline
  * content is never parsed, and neither are link reference definitions: a setext heading whose
- * paragraph may start with one is not reported. Linear in the input times MAX_MARKDOWN_NESTING.
+ * paragraph may start with one ends the scan. Every such gap is named in `notReported`. Linear
+ * in the input times MAX_MARKDOWN_NESTING.
  */
 export function scanMarkdown(text: string): MarkdownScan {
   const headings: string[] = [];
   const tables: MarkdownTable[] = [];
+  const notReported: MarkdownNotReported[] = [];
   const containers: Container[] = [];
   let leaf: Leaf | null = null;
 
@@ -477,7 +502,15 @@ export function scanMarkdown(text: string): MarkdownScan {
   let afterBlankLine = false;
   // One byte order mark at the start is no content, as in cmark-gfm (`readFile` keeps it).
   const body = text.startsWith('\uFEFF') ? text.slice(1) : text;
-  for (const line of body.split(/\r\n|\r|\n/)) {
+  const lines = body.split(/\r\n|\r|\n/);
+  let lineIndex = 0;
+  /** Ends the scan at the current line: nothing on or below it is reported. */
+  const stop = (reason: MarkdownNotReportedReason): MarkdownScan => {
+    notReported.push({ line: lineIndex + 1, reason });
+    return { headings, tables, notReported };
+  };
+  for (; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex] as string;
     cursor.reset(line);
     const blankLine = onlyWhitespaceFrom(line, 0);
     // 1. Continue the open containers.
@@ -540,7 +573,7 @@ export function scanMarkdown(text: string): MarkdownScan {
           started = true;
         };
         if (!cursor.indented && line[start] === '>') {
-          if (matched >= MAX_MARKDOWN_NESTING) return { headings, tables };
+          if (matched >= MAX_MARKDOWN_NESTING) return stop('nesting-limit');
           openBlock();
           containers.push({ kind: 'quote' });
           matched = containers.length;
@@ -580,7 +613,7 @@ export function scanMarkdown(text: string): MarkdownScan {
             // below is reported. A label may span lines, so `]:` counts on any line.
             const first = paragraph.lines[0] as string;
             if (/^ {0,3}\[/.test(first) && paragraph.lines.some((l) => l.includes(']:'))) {
-              return { headings, tables };
+              return stop('link-definition-underline');
             }
             headings.push(collapseWhitespace(paragraph.lines.join(' ')));
             leaf = null;
@@ -595,7 +628,7 @@ export function scanMarkdown(text: string): MarkdownScan {
           }
           const marker = listMarker(cursor, inParagraph);
           if (marker) {
-            if (matched >= MAX_MARKDOWN_NESTING) return { headings, tables };
+            if (matched >= MAX_MARKDOWN_NESTING) return stop('nesting-limit');
             openBlock();
             cursor.advanceNextNonspace();
             cursor.advance(marker.length);
@@ -632,7 +665,9 @@ export function scanMarkdown(text: string): MarkdownScan {
               const table: MarkdownTable = { header, rows: [] };
               // Reported only with a pipe in both rows, which every GFM reader accepts; without one
               // it is read as a table (its lines are no paragraph or heading) but not reported.
+              // The header is the paragraph's last line, so the line before this delimiter row.
               if (delimiter.pipe && last.includes('|')) tables.push(table);
+              else notReported.push({ line: lineIndex, reason: 'pipeless-table' });
               leaf = { kind: 'table', table, autocompleted: 0 };
               started = true;
               lineDone = true;
@@ -687,7 +722,7 @@ export function scanMarkdown(text: string): MarkdownScan {
       leaf = { kind: 'paragraph', lines: [cursor.rest()], noTable: false };
     }
   }
-  return { headings, tables };
+  return { headings, tables, notReported };
 }
 
 function isDigit(char: string | undefined): boolean {

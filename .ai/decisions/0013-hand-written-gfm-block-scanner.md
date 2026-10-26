@@ -43,11 +43,11 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
    generator also emits the characters on which cmark-gfm's whitespace differs from JavaScript's
    (U+00A0, line tabulation, form feed at line ends, after markers, in delimiter rows and after
    tags), lone-pipe lines, leading byte order marks and link reference definitions, in containers.
-   The comparison stays exact for everything the scanner reports; only the deliberate
-   under-reports of point 2 are compared as "scanner ⊆ cmark-gfm" by a narrow, tested rule
-   (`readingDifference` in `test/markdown-corpus.ts`): after a link definition the headings and
-   tables may stop early but stay a prefix, and a missing table must have one column (a table
-   without a pipe has one).
+   Since issue #128 the comparison is exact: the scanner names its deliberate gaps of point 2
+   (`MarkdownScan.notReported`: the stop line, or a pipe-less table's header line), the recorder
+   also stores cmark-gfm's readings of the lines before a stop and up to a pipe-less table's
+   delimiter row, and `readingDifference` in `test/markdown-corpus.ts` compares a stopped scan
+   with the prefix reading and leaves out only the named pipe-less tables.
 
 ## Alternatives considered
 
@@ -84,6 +84,15 @@ padding, a comment after a table — issue #110). The scanner runs on the runner
   Offline runs on 80 000 documents from four other seeds found no difference in block structure
   (three in inline markup inside a heading text: raw inline HTML spanning lines, `*\v*`
   emphasis).
+- Issue #128 (2026-10-26): the scanner reports what it did not read (`notReported`, one entry
+  per pipe-less table and at most one stop, so bounded by the tables plus one, and no extra
+  scanning), and the document assertions show it in their details and failing messages, so a user
+  sees that nothing below line N was checked. The differential test lost its two allowances (any
+  stop in a document containing `]:`, any missing one-column table); 1 330 prefix readings for
+  1 300 documents were added to the fixture, and the 10 000 full readings are unchanged. The
+  recorder now runs the scanner to know which prefixes to record; the test checks that the
+  recorded prefixes are exactly the ones the scanner needs, so a changed stop line needs a new
+  recording.
 - Throughput stays linear: a realistic 2 MiB document scans in about 60–100 ms on 2 cores;
   adversarial shapes (16 nested items then 2 MiB of blank lines, 2 MiB of HTML tag lines) stay
   below 300 ms.

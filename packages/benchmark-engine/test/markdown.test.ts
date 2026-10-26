@@ -506,6 +506,7 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     expect(scanMarkdown('\uFEFF```\n# Fake\n|a|b|\n|-|-|\n|x|42|')).toEqual({
       headings: [],
       tables: [],
+      notReported: [],
     });
     expect(scanMarkdown('\uFEFF# Real').headings).toEqual(['Real']);
     expect(scanMarkdown('\uFEFF\uFEFF# Not').headings).toEqual([]);
@@ -539,6 +540,53 @@ describe('scanMarkdown GFM block structure (issue #110)', () => {
     // Containers the line leaves do not count: the limit is the depth of the line being read.
     const deepThenShallow = [`${'> '.repeat(MAX_MARKDOWN_NESTING)}a`, '- # Shallow'];
     expect(scan(deepThenShallow).headings).toEqual(['Shallow']);
+  });
+});
+
+describe('scanMarkdown notReported (issue #128)', () => {
+  const notReported = (lines: string[]) => scanMarkdown(lines.join('\n')).notReported;
+
+  it('is empty when the whole document was read and every table reported', () => {
+    expect(notReported(['# A', '', '| a | b |', '|---|---|', '| 1 | 2 |'])).toEqual([]);
+    expect(scanMarkdown('')).toEqual({ headings: [], tables: [], notReported: [] });
+  });
+
+  it('names the setext underline below a possible link definition that ended the scan', () => {
+    expect(notReported(['# Before', '[a]: /url', '===', '# After'])).toEqual([
+      { line: 3, reason: 'link-definition-underline' },
+    ]);
+    // Line numbers count CR LF, lone CR and LF line ends alike, and ignore a byte order mark.
+    expect(scanMarkdown('﻿# A\r\n[foo\rbar]: /url\n---').notReported).toEqual([
+      { line: 4, reason: 'link-definition-underline' },
+    ]);
+  });
+
+  it(`names the line that opens container ${MAX_MARKDOWN_NESTING + 1} and ended the scan`, () => {
+    const nested = (depth: number) => `${'> '.repeat(depth - 1)}- # Deep`;
+    expect(notReported(['# Before', nested(MAX_MARKDOWN_NESTING), '# After'])).toEqual([]);
+    expect(notReported(['# Before', '', nested(MAX_MARKDOWN_NESTING + 1), '# After'])).toEqual([
+      { line: 3, reason: 'nesting-limit' },
+    ]);
+    expect(notReported(['# Before', `${'- '.repeat(MAX_MARKDOWN_NESTING + 1)}x`])).toEqual([
+      { line: 2, reason: 'nesting-limit' },
+    ]);
+  });
+
+  it('names the header line of every pipe-less table, and the scan goes on', () => {
+    const lines = ['Role', '|---|', '', '> Alpha', '> :-:', '', '| a |', '|---|', '', 'Beta', '-:'];
+    expect(scanMarkdown(lines.join('\n'))).toMatchObject({
+      tables: [{ header: ['a'], rows: [] }],
+      notReported: [
+        { line: 1, reason: 'pipeless-table' },
+        { line: 4, reason: 'pipeless-table' },
+        { line: 10, reason: 'pipeless-table' },
+      ],
+    });
+    // A pipe-less table, then a stop: the entries are in line order.
+    expect(notReported(['Role', ':-', '', '[a]: /url', '---'])).toEqual([
+      { line: 1, reason: 'pipeless-table' },
+      { line: 5, reason: 'link-definition-underline' },
+    ]);
   });
 });
 
@@ -760,6 +808,8 @@ describe('linear time', () => {
     'lone pipes ending tables': (n) => '| a |\n|-\n|\f\v \n'.repeat(n),
     'one lone pipe with long whitespace': (n) => `| a |\n|---|\n|${' \f\v'.repeat(n * 4)}\n`,
     'link definitions in quotes': (n) => `${'> [foo]: /url\n>\f| a |\n'.repeat(n)}> ---\n`,
+    // Issue #128: one entry per pipe-less table.
+    'pipe-less tables': (n) => 'Role\n:-\n\n'.repeat(n),
   };
 
   it.each(Object.keys(shapes))(
