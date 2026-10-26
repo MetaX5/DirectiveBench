@@ -6,9 +6,15 @@
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": ["^typecheck"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/test-support/**", "$TURBO_ROOT$/vitest.shared.ts"]
     },
     "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/test-support/**",
+        "$TURBO_ROOT$/vitest.shared.ts"
+      ],
       "outputs": ["coverage/**"]
     },
     "dev": {

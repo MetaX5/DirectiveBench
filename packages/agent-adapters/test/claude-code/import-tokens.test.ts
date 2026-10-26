@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   importCandidates,
   IMPORT_TOKEN_MAX_LENGTH,
+  WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES,
   type ImportCandidate,
 } from '../../src/claude-code';
-
-/** Timeout for the timing test: about a second alone, but CI runs every package on 2 cores. */
-const LOADED_RUNNER_TIMEOUT_MS = 60_000;
+import {
+  expectLinearTime,
+  LINEAR_TIME_TEST_TIMEOUT_MS,
+  textBaseline,
+} from '../../../../test-support/linear-time';
 
 function candidates(text: string): ImportCandidate[] {
   return [...importCandidates(text)];
@@ -139,7 +142,7 @@ describe('importCandidates (FR-118-27)', () => {
 
   it(
     'is linear in the input size, also for adversarial runs of @',
-    () => {
+    async () => {
       const inputs = [
         (n: number) => '@'.repeat(n),
         (n: number) => '@a'.repeat(n / 2),
@@ -150,29 +153,24 @@ describe('importCandidates (FR-118-27)', () => {
         (n: number) => '@/a'.repeat(n / 3),
         (n: number) => `${'@/*'.repeat(n / 3)}`,
       ];
-      for (const make of inputs) {
-        // Fastest of three runs, so a busy runner slows a run down but cannot fake a ratio.
-        const time = (size: number) => {
-          const text = make(size);
-          let fastest = Number.POSITIVE_INFINITY;
-          for (let run = 0; run < 3; run += 1) {
-            const started = performance.now();
-            let count = 0;
-            for (const candidate of importCandidates(text)) {
-              count += candidate.token.length > 0 ? 1 : 0;
-              // Bounded like the scanner, which stops after its candidate limit.
-              if (count > 10_000) break;
-            }
-            fastest = Math.min(fastest, performance.now() - started);
-          }
-          return Math.max(fastest, 1);
-        };
-        const small = time(50_000);
-        const large = time(200_000);
-        // Linear: about 4×; quadratic would be 16×. The bound is wide for a loaded runner.
-        expect(large / small, make(8)).toBeLessThan(12);
+      const scan = (text: string) => {
+        let count = 0;
+        for (const candidate of importCandidates(text)) {
+          count += candidate.token.length > 0 ? 1 : 0;
+          // Bounded like the scanner, which stops at its candidate limit. The former cut of
+          // 10 000 stopped `@a/../x` (96 000 candidates) at the same point at both sizes. Shapes
+          // whose candidates the scanner bounds itself (`@/`, `@/*`) measure near 0: bounded
+          // work passes, as it should.
+          if (count > WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES) break;
+        }
+      };
+      for (const build of inputs) {
+        await expectLinearTime(
+          { build, run: scan, baseline: textBaseline, size: 192_000 },
+          build(8),
+        );
       }
     },
-    LOADED_RUNNER_TIMEOUT_MS,
+    LINEAR_TIME_TEST_TIMEOUT_MS,
   );
 });
