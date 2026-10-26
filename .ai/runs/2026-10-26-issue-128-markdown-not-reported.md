@@ -3,7 +3,7 @@ title: 'Issue #128 - the Markdown scanner reports what it did not read, and the 
 date: 2026-10-26
 agent: Claude Code / claude-opus-5-5
 trigger: 'Issue #128 (nit from the review of PR #127), assigned by the maintainer session'
-status: in-progress
+status: completed
 branch: feat/issue-128-markdown-not-reported
 specs: [SPEC-118]
 ---
@@ -75,7 +75,7 @@ the prefix before a stop line and matches pipe-less tables by header line; `mark
 | New `readingDifference` on the recorded corpus | 10 000 / 10 000 exact |
 | Constructed regressions in `markdown-reference.test.ts` | fail on every affected document (one block early, earlier stop line, an added stop sharing a pipe-less table's prefix, dropped piped one-column table) |
 | Red first (Codex round 1): added-stop regression before recording the gaps | fails (case 9 accepted) |
-| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` | pass, 7/7 tasks, 100 % coverage (benchmark-engine 424 tests) |
+| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` | pass, 7/7 tasks, 100 % coverage (benchmark-engine 425 tests) |
 | `pnpm build && pnpm verify:pack` | pass |
 | Linear-time shapes for pipe-less tables and link definitions under `taskset -c 0,1` with two `yes` | pass |
 
@@ -87,6 +87,15 @@ was not changed.
 - A first mutation test (scanner stops at an earlier line) passed on one corpus document whose
   earlier stop line happened to need a prefix recorded for a pipe-less table; the per-document
   check now compares the recorded prefix line counts with the needed ones, which catches it.
+
+## Codex adversarial review (PR #129)
+
+| Round | Verdict | Findings |
+| --- | --- | --- |
+| 1 | needs-attention | [medium] deduplicated prefix line counts let a fabricated stop two lines below a pipe-less header share its prefix and hide missing headings (125 corpus documents). Fixed red-first in `a15e251`: the fixture records each document's gaps and the test requires them exactly; a regression adds such a stop on every affected document. |
+| 2 | approve | no material finding: 10 000 corpus readings and 1 100 adversarial mutations checked; details and messages consistent, no new en or em dashes. |
+
+Stopped after round 2 on approve.
 
 ## Lessons recorded
 
