@@ -92,6 +92,10 @@ Paused 2026-10-22 at the maintainer's request (the coordinator committed the wor
    test "fails reading blobs…" gave every case a 200 ms read timeout, so a slowly started fake
    turned the exit-128 case into a timeout that still passed `ok: false`. Fixed red-first: short
    timeout only for the timeout case, each case's code asserted.
+8. CI on `08272fb` then failed runner coverage at line 781 (the fetch's timeout branch): in the
+   blob-fetch test the fetch-timeout case shortened `read` and `fetch` to 200 ms, so a slowly
+   started `cat-file` fake timed out first and the case still returned `timeout`. Each timeout
+   case now shortens only its own step and asserts which step timed out.
 
 ## Verification
 
@@ -120,7 +124,9 @@ iteration.
 | Red first, round 2: sparse-file `readv` of size² bytes | thread clock 2.33 (passes 3.5); process clock 37.3 |
 | Red first, round 3: helper-only edit, `turbo run test typecheck --dry=json` | 0 of 14 task hashes changed; with the inputs: 14 of 14 (also for `vitest.shared.ts`) |
 | Red first: "fails reading blobs…" with a 1 ms read timeout (simulated slow fake start) | old test 45/45 green with lines 821–835 uncovered; new test fails (`timeout` ≠ `git-failed`) |
-| `hosted-git.test.ts` with coverage, 20 loaded iterations after the fix | 20 / 20 green, line 822 covered every time |
+| Red first: fetch-timeout case with a 1 ms `read` (simulated slow `cat-file`) | new test fails: `git cat-file did not finish…` instead of `git fetch…` |
+| `hosted-git.test.ts` with coverage, 20 loaded iterations after both fixes | 20 / 20 green, lines 781 and 822 covered every time |
+| full runner suite with the 100 % threshold under load, five times | 5 / 5 green (234 tests) |
 | Red first: pre-#56 padded table under load | 22.5 / 19.9 / 20.7 (fixed parser 1.17 / 1.52 / 1.25) |
 
 The two one-off failures seen on 2026-10-22 (`process.test.ts` AC-10, "rejects over-long call
