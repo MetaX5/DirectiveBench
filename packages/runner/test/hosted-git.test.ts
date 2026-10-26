@@ -585,20 +585,25 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
 
   it('fails reading blobs whose output is not what was asked for', async () => {
     const blobs = new Map([[OID_A, 3]]);
-    for (const answer of [
-      { exit: 128, stderr: 'fatal: bad\n' },
-      { sleepMs: 5_000 },
-      { stdout: `${OID_B} blob 3\nabc\n` },
-      { stdout: `${OID_A} blob 3\nab` },
-      { stdout: '' },
-    ]) {
+    const cases: [FakeAnswer, string][] = [
+      [{ exit: 128, stderr: 'fatal: bad\n' }, 'git-failed'],
+      [{ sleepMs: 5_000 }, 'timeout'],
+      [{ stdout: `${OID_B} blob 3\nabc\n` }, 'git-failed'],
+      [{ stdout: `${OID_A} blob 3\nab` }, 'git-failed'],
+      [{ stdout: '' }, 'git-failed'],
+    ];
+    for (const [answer, code] of cases) {
       rmSync(join(dir, 'bin'), { recursive: true, force: true });
+      // The short timeout only where a timeout is expected: with it on every case, a fake that
+      // started slowly on the loaded CI runner turned the exit-128 case into a timeout, which
+      // still passed `ok: false` but left the non-zero-exit branch uncovered (issue #114).
       const { context } = fakeContext(
         { 'cat-file': answer },
-        { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } },
+        code === 'timeout' ? { timeouts: { ...HOSTED_GIT_TIMEOUTS, read: 200 } } : {},
       );
       expect(await readBlobs(context, dir, blobs, context.timeouts.read)).toMatchObject({
         ok: false,
+        code,
       });
     }
   });
