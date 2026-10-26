@@ -132,6 +132,10 @@ These rules are not optional. A task is not done until the applicable steps are 
   not verified), `## Review` (after review rounds), `## Links`, `## Follow-ups`,
   `## Decisions touched`, then `Closes #N` — even when an `om-*` skill supplies its own template
   (see [`.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md`](.ai/lessons/2026-10-21-pr-bodies-follow-the-house-layout.md)).
+- Review PRs with `om-auto-review-pr <n>` (engine `om-code-review`), also when only asked
+  whether a PR can be approved; never with a hand-briefed agent. Do not claim another author's
+  PR while they are still pushing to it
+  ([lesson](.ai/lessons/2026-10-22-review-prs-through-om-auto-review-pr.md)).
 - Commit the run log, spec updates and lessons together with the code they describe.
 
 ## 5. Repository map
@@ -172,6 +176,18 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   never disable TLS verification, keep commands argv-only with an environment allowlist.
 - The mock agent must always be labelled as a mock; never present mock results as AI results.
 - Incomplete features must be visibly marked as planned or not implemented.
+- App-authored UI copy must not use en dash (U+2013) or em dash (U+2014), including labels,
+  notices, tooltips, accessible names and missing-value placeholders. Use a colon,
+  parentheses, a separate sentence or a normal hyphen where appropriate. Preserve imported
+  content, user data, raw agent output and benchmark evidence verbatim; do not apply a
+  blanket replacement to rendered or stored data. Existing-copy cleanup and automated
+  enforcement are tracked in [issue #123](https://github.com/MetaX5/DirectiveBench/issues/123).
+- Verify all visible text contrast (at least 4.5:1 for normal-size text, 3:1 for large text)
+  in both themes, including muted text, navigation, status badges, errors and placeholders
+  on their actual backgrounds. Check enabled buttons in rest, hover and focus states;
+  button-only checks do not establish contrast for the rest of the UI.
+  Buttons need pointer cursors; inline form buttons
+  must match adjacent input heights. A UI preset does not waive these checks.
 - Design generic capabilities. A user's concrete case (one skill, client or document type) is a
   reference scenario to check the design, never a target to special-case: users build their own
   scenarios, requirements and grading

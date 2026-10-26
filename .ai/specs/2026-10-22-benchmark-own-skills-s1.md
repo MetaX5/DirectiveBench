@@ -127,10 +127,10 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | --- | --- |
 | FR-118-20 | `directivebench benchmark init --artifact <ref>` SHALL create the folder `./<name>-benchmark/` in the current directory containing `benchmark.yaml` and `fixtures/example/README.md`, where `<name>` is the artifact slug normalised to the suite-id pattern of FR-108-06 (lowercase, `[a-z0-9-]`, at most 70 characters; an empty result becomes `artifact`). The target path SHALL be confined to the current directory; it refuses a path that exists and is not an empty directory. It writes nothing to the database. |
 | FR-118-21 | The scaffolded `benchmark.yaml` SHALL validate against the format as written: `id` = `<artifact-slug>-benchmark`, `artifactTypes: [<artifact type>]`, `execution.agent: claude-code`, `execution.model: null`, `repetitions: 3`, one case `example` with a placeholder prompt, `fixture.path: fixtures/example`, and one `markdown-sections` assertion on `output.md` as an editable example; comments explain each field and list the other assertion types. |
-| FR-118-22 | `<ref>` SHALL resolve, in order, to an artifact id or an artifact slug ([SPEC-101](2026-10-14-artifact-registry.md)); for `benchmark run`, `--version <n>` selects a version number (default: latest; `init` binds to the artifact, not a version). An unknown or ambiguous reference fails with exit code 2 and the closest matches. |
+| FR-118-22 | `<ref>` SHALL resolve, in order, to an artifact id or an artifact slug ([SPEC-101](2026-10-14-artifact-registry.md)); for `benchmark run`, `--artifact-version <n>` selects a version number (not `--version`, which is the program's own version flag) (default: latest; `init` binds to the artifact, not a version). An unknown or ambiguous reference fails with exit code 2 and the closest matches. |
 | FR-118-23 | `benchmark run <suite>` SHALL accept a path to a definition file or to a folder containing `benchmark.yaml`, and import it with the existing `prepareSuiteImport` + `importSuiteVersion` path (content-addressed, idempotent: unchanged content reuses the existing suite version). |
 | FR-118-24 | After any benchmark run that reaches status `completed` (whatever its verdict) the CLI SHALL record the assignment artifact ↔ suite (`artifact_benchmark_assignments`, existing table) so the artifact page lists the suite. |
-| FR-118-25 | The artifact type SHALL be in the suite's `artifactTypes` and its format SHALL be installable by the adapter (SPEC-203 §4.1); otherwise the run is refused before any job is created, with the reason. |
+| FR-118-25 | The artifact type SHALL be in the suite's `artifactTypes` and its format SHALL be installable by the adapter (SPEC-203 §4.1), and `execution.model` SHALL be one the adapter can pass (absent, or an `anthropic` model with a name the argv accepts; `model-provider-unsupported` / `model-invalid`); otherwise the run is refused before any job is created, with the reason. |
 | FR-118-26 | **Artifact bundle inspection.** Before readiness and the plan (FR-118-39), the CLI SHALL inspect the stored files of **both** the candidate and the baseline artifact version and refuse the run (exit 2, code `artifact-executes-code`, listing each finding) when a version contains an executable customization: SKILL.md frontmatter `hooks` (registered on invocation even in an untrusted `-p` run, C8); a shell-injection placeholder `` !`…` `` in SKILL.md (run before the content reaches the model, C3), detected by a line scan that fails closed on any `` !` `` sequence; a non-empty frontmatter `allowed-tools` of any value (applied even in an untrusted `-p` run, C3) — a tool inside the profile can still widen it: bare `Skill` or `Skill(other-name)` would let ambient skills run (FR-118-08), bare `Edit` would approve edits outside the workspace (FR-118-07), so S1 does not validate grants and refuses them all; a bundled file Claude Code could load as configuration (`.claude-plugin/`, `plugin.json`, `hooks.json`, `hooks/`, `.mcp.json`, `settings.json`, `settings.local.json`); or a `.claude/` directory at any depth inside the bundle (its skills, commands or agents would load once Claude reads a file there, C3); an `@` import of a host file in any bundled file is refused through FR-118-27. It SHALL also refuse (code `artifact-overrides-model`) a SKILL.md whose `model` is anything other than absent or `inherit`, or that sets `context: fork` (the forked subagent's model is not the execution model), because the task would then run on a model the equivalence check of FR-118-04 does not see. S1 refuses rather than offers approval, because suite approval (FR-118-33) is bound to the suite version, not to artifact versions; approval bound to artifact-version content hashes is future work (§19). Unparsable frontmatter is a finding (fail closed, SPEC-014). As defence in depth the argv always carries `--settings '{"disableSkillShellExecution":true}'` (C3; effect on project skills: Assumption — requires validation by the live check). Both refusals are S1 restrictions; benchmarking such skills needs approval bound to artifact hashes and a per-turn model record (§19). |
 | FR-118-27 | **No path out of the workspace through imports or links.** Claude Code expands `@path` imports in memory files at launch, recursively up to four hops, with relative, absolute and `~` paths, and an imported file can have any name (C4); so an inside file importing another inside file that imports a host file discloses that host file. Instead of walking the import graph, S1 scans **every** file: the scanner reads each file in the workspace byte-wise in one linear pass and treats every `@` followed by a path character as an import token (path up to whitespace, backslash-escaped spaces included; code spans and fences are **not** excluded, which only adds tokens), resolves the token as Claude Code would — relative to the containing file, `~` to the agent process's `HOME` (the real one in subscription mode, the run-local one in api-key mode), absolute as is — canonicalises it (`realpath`, so symlinks and `..` are resolved) and refuses the run when the target lies outside the workspace root **and exists** as something other than a directory (a directory cannot be read as a memory file, so `@/lib` passes even where `/usr/lib` exists) (or its existence cannot be determined, e.g. `EACCES`: fail closed). Because every file is checked and every edge of the import graph starts in some file of the workspace, no edge can lead outside, whatever the depth; a non-existent outside target cannot disclose anything, which keeps code such as `import x from '@/lib'` from refusing ordinary fixtures. The same pass refuses any symlink whose canonical target lies outside the workspace or cannot be resolved, and any regular file with more than one hard link (fixtures and overlays already reject both at snapshot time, SPEC-110 FR-110-03; the pass covers what `setup` commands create). The scan runs (a) at plan time over the fixture and overlay snapshots and both artifact versions placed at their install paths (exit 2), and (b) authoritatively in every agent run right before `claude` is spawned, after setup and installation, over the whole workspace **with no exemption for artifact files** (agent run `infrastructure-error`, stopping further agent runs as in FR-118-15). Code `workspace-imports-outside`, listing file, token and target. Named limits: `WORKSPACE_SCAN_MAX_FILES` (20 000) and `WORKSPACE_SCAN_MAX_BYTES` (256 MiB), above the fixture limits (5 000 files, 100 MiB, SPEC-108) to leave room for `setup` output; exceeding either refuses with `workspace-scan-limit` (fail closed). Every `@` costs O(1) unless its token needs a file system check (absolute, `~`, or with a `..` segment); those are bounded by `WORKSPACE_SCAN_MAX_IMPORT_CANDIDATES` (100 000 per inspection) — with at most `IMPORT_TOKEN_MAX_LENGTH` characters of work each, so a hostile workspace costs a few seconds at worst before it is refused and `IMPORT_TOKEN_MAX_LENGTH` (4 096 characters: a longer token cannot name an openable path, so only its prefixes cut at Markdown split characters within the first 4 096 characters are checked, unless `.`/`..` segments, repeated `/` or escaped spaces could shorten it, which refuses with `workspace-scan-limit`). As a superset of Claude Code's token rule each token is also checked cut at a backslash that does not escape a space, without trailing punctuation, and cut before every character at which a Markdown lexer may split a word (`*`, `_`, `` ` ``, `[`, `]`, `<`, `>`, `!`, `#`, `&`, parentheses, quotes, `~`, `|`, braces — Claude Code runs its import pattern on each lexed text piece), lexically from the canonical and the given workspace path and physically; in a workspace that contains a symbolic link, a relative token that climbs above its own directory is refused, because the file may be read through the link from a shallower place. The overlay is applied after the agent run (SPEC-110 FR-110-11), so it is checked only at plan time. |
 
@@ -138,16 +138,16 @@ Evidence keys C1–C12 and L1 refer to the source table of
 
 | ID | Requirement |
 | --- | --- |
-| FR-118-30 | `directivebench benchmark run <suite> --artifact <ref> [--version <n>] [--baseline none\|v<n>] [--auth subscription\|api-key] [--max-budget-usd <n>] [--approve-commands] [--yes] [--json]`. Defaults: latest version, `--baseline none`, `--auth subscription`. `--max-budget-usd` is accepted only with `--auth api-key` (exit 2 otherwise), because the CLI enforces it only in print mode with an API key (SPEC-203 §4). Subscription mode has no cost cap; the plan (FR-118-31) is the guard. |
+| FR-118-30 | `directivebench benchmark run <suite> --artifact <ref> [--artifact-version <n>] [--baseline none\|v<n>] [--auth subscription\|api-key] [--max-budget-usd <n>] [--approve-commands] [--yes] [--json]`. Defaults: latest version, `--baseline none`, `--auth subscription`. `--max-budget-usd` is accepted only with `--auth api-key` (exit 2 otherwise), because the CLI enforces it only in print mode with an API key (SPEC-203 §4). Subscription mode has no cost cap; the plan (FR-118-31) is the guard. |
 | FR-118-31 | Before starting, the CLI SHALL print the plan: suite (name, version, content hash prefix), candidate and baseline, agent and detected version, auth mode, isolation profile, model (or "CLI default — unpinned"), number of agent runs (`cases × repetitions × 2`), for a skill whether it sets `disable-model-invocation` (FR-118-09), and these notices: runs count against the user's Claude plan (subscription) or API spend (api-key); prompt, fixture files and the artifact are sent to Anthropic; **Not sandboxed**; in subscription mode "may include user-level instructions". |
-| FR-118-32 | On an interactive terminal the CLI SHALL ask for confirmation; `--yes` skips it; without a TTY and without `--yes` it SHALL refuse with exit code 2. |
+| FR-118-32 | On an interactive terminal the CLI SHALL ask for confirmation; `--yes` skips it; without a TTY and without `--yes` it SHALL refuse with exit code 2. A confirmation that gets no answer (Ctrl-C, end of input) is a no. |
 | FR-118-33 | A suite version that runs commands (`definitionRunsCommands`) SHALL run only when execution-approved. Fixture configuration is never approvable in S1 (FR-118-06). `--approve-commands` SHALL print every `setup` and `command` argv of the suite version; approval with source `user` (SPEC-110 FR-110-46) is recorded only after the confirmation of FR-118-32, in the same transaction that creates the job. Without the flag such a suite is refused with exit code 2 and a message naming the flag. Approval is per suite version, so changing the suite requires approving again. |
 | FR-118-34 | The CLI SHALL create the benchmark job **already acquired by its own runner** (one statement inserting `status = 'running'` with its `runner_id`), heartbeat it and execute it in-process, so a concurrently running `serve` runner can never pick it up (SPEC-114). A CLI killed mid-run leaves the job to the existing stale-heartbeat recovery (`interrupted`). |
-| FR-118-35 | Readiness SHALL be checked before the job is created: `claude` found and version ≥ the minimum (SPEC-203 §7); in subscription mode `claude auth status` reports logged in (parsing only the fields needed, never persisting the output); in api-key mode `ANTHROPIC_API_KEY` is non-empty. Failures exit with code 2 and the SPEC-203 §9 error code. |
+| FR-118-35 | Readiness SHALL be checked before the job is created: `claude` found and version ≥ the minimum (SPEC-203 §7); in subscription mode `claude auth status` reports logged in (parsing only the fields needed, never persisting the output); in api-key mode `ANTHROPIC_API_KEY` passes the same structural check the run applies (at least the exact-value redaction minimum of 8 characters, on one line, no NUL), so readiness never accepts a key every run would refuse. Failures exit with code 2 and the SPEC-203 §9 error code. |
 | FR-118-36 | SIGINT during the run SHALL cancel the job through its `AbortSignal` (SPEC-203 cancellation escalation), record `cancelled` and exit with code 130. |
 | FR-118-37 | At the end the CLI SHALL print the same summary as `demo` (baseline, candidate, delta, verdict, confidence, display status, run id) plus, for a skill, the invocation rate per variant (FR-118-09), the execution model, warnings and tokens/cost (cost "n/a (subscription)" in subscription mode, "estimated" in api-key mode, SPEC-203 §4). `--json` prints one JSON object instead. |
 | FR-118-38 | Exit code: 0 when the display status is `passed`; 6 for `failed`, `regression`, `unstable`, `error` and `not-comparable` (roadmap M3: non-zero on regressed/failed); 130 on cancel; 2 for usage and readiness errors. |
-| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline, inspect both versions and scan imports (FR-118-08/26/27) → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged. |
+| FR-118-39 | Order of a `benchmark run`: validate the definition and snapshot fixtures in memory/temporary store → resolve artifact and baseline, inspect both versions and scan imports (FR-118-08/26/27) → readiness (FR-118-35) → plan and confirmation (FR-118-31/32) → one transaction that imports the suite version (if new), records approval (if requested) and creates the acquired job (FR-118-34). Every refusal before that transaction leaves the database unchanged: the checks read an initialised, fully migrated database read-only, a missing database or one with pending migrations is refused (exit 2, naming `directivebench init`) without creating, migrating or seeding it, and the data directory is opened for writing only after the confirmation. |
 
 ### 6.5 Document-oriented assertions
 
@@ -512,7 +512,7 @@ Additions and residual risks of this slice:
 - The baseline version's files are identical to the candidate's under another id: rejected
   (FR-118-12, same content hash).
 - The artifact was rescanned between `init` and `run`: `run` uses the latest version unless
-  `--version` is given; the plan names the version.
+  `--artifact-version` is given; the plan names the version.
 - The scan did not store some files of a skill (e.g. binary supporting files): the install
   writes what the version holds; the author sees the stored files on the artifact page.
 - The fixture already contains a `CLAUDE.md` or `AGENTS.md`: an instruction-type artifact is
@@ -585,26 +585,26 @@ Per [SPEC-012](2026-10-14-testing-strategy.md); no live agent in CI.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: `benchmark init --artifact <slug>` creates a folder whose `benchmark.yaml` validates unchanged, and refuses a non-empty target.
-- [ ] AC-2: `benchmark run <folder> --artifact <slug> --yes` with a fake `claude` completes a RED/GREEN run of `cases × repetitions × 2` agent runs, persists it bound to the artifact's latest version and records the assignment.
-- [ ] AC-3: With `--baseline v<n>` the baseline workspace contains exactly version n and the candidate exactly the chosen version; `benchmark_runs.baseline_artifact_version_id` is set; same-content, other-artifact and other-format baselines are rejected before a job exists.
+- [x] AC-1: `benchmark init --artifact <slug>` creates a folder whose `benchmark.yaml` validates unchanged, and refuses a non-empty target.
+- [x] AC-2: `benchmark run <folder> --artifact <slug> --yes` with a fake `claude` completes a RED/GREEN run of `cases × repetitions × 2` agent runs, persists it bound to the artifact's latest version and records the assignment.
+- [x] AC-3: With `--baseline v<n>` the baseline workspace contains exactly version n and the candidate exactly the chosen version; `benchmark_runs.baseline_artifact_version_id` is set; same-content, other-artifact and other-format baselines are rejected before a job exists.
 - [ ] AC-4: In subscription mode no `ANTHROPIC_*`, `CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_CODE_USE_*` variable reaches the agent and every run carries `ambient-user-config`; in api-key mode `HOME`/`CLAUDE_CONFIG_DIR` are run-local and the key appears in no argv, row, log, trace or CLI output (planted-key test).
 - [ ] AC-5: The comparability key of the bundled mock example is byte-identical before and after this change; two runs differing only in auth mode, isolation profile, permission profile or `hostId` get different keys; baseline choice does not change the key.
 - [x] AC-6: The three new assertions behave as FR-118-40…44 on fixture documents, including the reference-scenario example of §8.4, and evaluate a 2 MiB document in < 200 ms.
-- [ ] AC-7: A suite with `command` assertions is refused without `--approve-commands`; with it, every argv is printed and approval source `user` is recorded on that suite version only.
-- [ ] AC-8: Without a TTY and without `--yes` the run is refused (exit 2); the plan lists the agent-run count and the cost, data-leaving and Not-sandboxed notices.
-- [ ] AC-9: A `serve` runner polling the same data directory never acquires a job created by `benchmark run`.
-- [ ] AC-10: Ctrl-C yields `cancelled` (exit 130) and no `claude` process remains after 10 s (fake CLI ignoring SIGINT).
-- [ ] AC-11: Exit codes follow FR-118-38 for passed, failed, regression, unstable, error and not-comparable fixtures, 130 on cancel and 2 on usage errors.
+- [x] AC-7: A suite with `command` assertions is refused without `--approve-commands`; with it, every argv is printed and approval source `user` is recorded on that suite version only.
+- [x] AC-8: Without a TTY and without `--yes` the run is refused (exit 2); the plan lists the agent-run count and the cost, data-leaving and Not-sandboxed notices.
+- [x] AC-9: A `serve` runner polling the same data directory never acquires a job created by `benchmark run`.
+- [x] AC-10: Ctrl-C yields `cancelled` (exit 130) and no `claude` process remains after 10 s (fake CLI ignoring SIGINT).
+- [x] AC-11: Exit codes follow FR-118-38 for passed, failed, regression, unstable, error and not-comparable fixtures, 130 on cancel and 2 on usage errors.
 - [x] AC-12: The artifact page lists runs per version and comparability group with baseline, auth mode and isolation; the run detail names the baseline and shows the agent profile and the ambient-configuration warning; a non-mock suite has no Run button (Playwright).
 - [ ] AC-13: `pnpm test` keeps 100% coverage; no test needs a credential or network.
-- [ ] AC-14: An unknown or ambiguous artifact reference and an artifact format the adapter cannot install exit with code 2 before any database change; a slug with characters outside the suite-id pattern yields a confined folder name (FR-118-20/22/25).
-- [ ] AC-15: Running the same unchanged suite folder twice reuses one suite version; every refusal before the final transaction (readiness, declined confirmation, missing approval) leaves the database unchanged, including no approval record (FR-118-23/39).
+- [x] AC-14: An unknown or ambiguous artifact reference and an artifact format the adapter cannot install exit with code 2 before any database change; a slug with characters outside the suite-id pattern yields a confined folder name (FR-118-20/22/25).
+- [x] AC-15: Running the same unchanged suite folder twice reuses one suite version; every refusal before the final transaction (readiness, declined confirmation, missing approval) leaves the database unchanged, including no approval record (FR-118-23/39).
 - [ ] AC-16: A fixture or overlay containing any of the FR-118-06 paths at any depth (e.g. `.claude/settings.json`, `.mcp.json`, `sub/.claude/rules/x.md`) is refused with `fixture-contains-claude-config` before any database change, with or without `--approve-commands`; a fixture with only `CLAUDE.md`/`AGENTS.md` and plain files runs; the argv has no bare `Read`/`Edit`/`Write`/`Glob`/`Grep` allow rule and sets `blockReadsOutsideWorkingDirectories`; an attempted read or edit outside the workspace is denied and recorded (FR-118-06/07; live: AC-22).
 - [ ] AC-17: With a fake `claude` returning `rate_limit` (or an expired login) on the first agent run, no further agent run starts and the benchmark run ends `error` (FR-118-15); `--max-budget-usd` without `--auth api-key` exits 2.
 - [ ] AC-18: The flags hash of two agent runs in different workspaces is equal; agent runs whose `system/init` models differ (baseline vs candidate, or between repetitions) yield `not-comparable` with `execution-model-mismatch`, never `improved`/`regressed`; runs that differ only in auxiliary `modelUsage` models stay comparable with warning `auxiliary-models`; two otherwise identical runs on different execution models get different comparability keys (FR-118-04, §8.3).
 - [x] AC-19: The web server action refuses to enqueue a suite whose agent is not `mock` even when called directly (FR-118-05), and version regressions within a comparability group are highlighted on the artifact page (FR-118-51).
-- [ ] AC-20: The summary and the `--json` object contain baseline, candidate, delta, verdict, confidence, display status, run id, warnings and tokens/cost as reported (FR-118-37).
+- [x] AC-20: The summary and the `--json` object contain baseline, candidate, delta, verdict, confidence, display status, run id, warnings and tokens/cost as reported (FR-118-37).
 - [ ] AC-21: For a `skill-md` artifact the argv contains `Skill` in `--tools` and only `Skill(<name>)`/`Skill(<name> *)` in `--allowedTools`; instruction types get no `Skill`; from recorded streams each agent run records `skillActivation`; a run without the skill loaded ends `artifact-not-loaded` and stops the run; a loaded but uninvoked candidate run is scored with `artifact-not-invoked` and the summary shows the invocation rate; a `none` baseline invoking `<name>` yields `not-comparable` (FR-118-08/09).
 - [ ] AC-22: The opt-in live check of §15 passes with the exact production argv in both auth modes, including denied outside-workspace reads and writes (FR-118-07) and a second installed skill that stays denied (FR-118-08), and its results (including the field names marked as assumptions) are recorded in SPEC-203 before Phase 4 ships.
 - [ ] AC-23: A candidate **or** baseline version with frontmatter `hooks`, a `` !` `` placeholder, any non-empty `allowed-tools` — including bare `Skill`, `Skill(other-name)` and bare `Edit`, all inside the profile's tool list — or a bundled configuration file is refused with `artifact-executes-code` before any database change, and no `claude` process starts (FR-118-26).
@@ -871,7 +871,8 @@ changed before merge.
   (`auth-mismatch` for any other or missing method, e.g. a user-level `apiKeyHelper`; `auth-missing`;
   `auth-expired` for the documented "Login expired" text; a timeout, oversized or unreadable
   output and a login reported with a non-zero exit fail closed as `auth-missing`), in api-key mode
-  a non-empty `ANTHROPIC_API_KEY` checked for presence only. Status probes run argv-only with an
+  a non-empty `ANTHROPIC_API_KEY` checked for presence only (since PR #118 the structural check of
+  FR-118-35, `claudeApiKeyIssue`, shared with `buildClaudeEnv`). Status probes run argv-only with an
   environment allowlist (no `ANTHROPIC_*`, `CLAUDE_CODE_*` or `CLAUDE_CONFIG_DIR`), in an empty
   temporary directory, with named timeouts and output caps (`packages/agent-adapters/src/probe.ts`).
   Claude Code detection reports `ready`/`missing` with per-mode readiness, shown by
@@ -1064,16 +1065,77 @@ changed before merge.
     `skillInvocation`, `agent-metadata`, `usage`) follow the Phase 3 step 2 branch (issue #100)
     and the engine types; the dashboard's "recent regressions" does not list version regressions
     yet (FR-111-52, FR-116-12).
+- **Implemented — Phase 4 steps 1–2 (issue #97, verified on 2026-10-22 with a fake `claude` on
+  `PATH`, macOS and Linux; no real `claude` session was started):** `apps/cli`.
+  - FR-118-20/21 `benchmark init --artifact <ref>` (`apps/cli/src/benchmark-init.ts`): the slug
+    normalised to the suite-id pattern (one segment, ≤ 70 characters, empty → `artifact`), the
+    folder confined to the current directory, a non-empty target (or a file) refused, a commented
+    `benchmark.yaml` that validates unchanged and `fixtures/example/README.md`; the database is
+    opened read-only (AC-1, AC-14).
+  - FR-118-22 `resolveArtifactRef` (`packages/database`): id, then slug; unknown → the closest slugs,
+    unknown version → the newest version numbers, exit 2. The version flag is `--artifact-version`:
+    the program's own `-V`/`--version` takes `--version` before the subcommand sees it.
+  - FR-118-23/39 `benchmark run` (`benchmark-plan.ts`, `benchmark-run.ts`) in the order of
+    FR-118-39: suite validated and fixtures snapshotted into a temporary store, copied into the
+    content-addressed `<dataDir>/fixtures` only after the confirmation (if the final transaction
+    then fails, the copies stay, stored once by content and harmless) → candidate and baseline (`--baseline v<n>`; one-version artifact, same
+    content or the candidate itself refused) → agent `claude-code` only, environment, empty
+    `agentOptions`, the model through the adapter's own `claudeModelArgs` (an unsupported provider
+    or invalid name exits 2 before any `setup` runs; Codex review round 2), type in
+    `artifactTypes`, installable format (FR-118-25), bundle inspection of
+    both versions (FR-118-26), one skill name (FR-118-08), `/` prompt only with an A/B baseline
+    (FR-118-12) → a suite that runs commands needs `--approve-commands` unless this suite version
+    was approved before (FR-118-33) → per case the fixture and the overlay alone
+    (`fixture-contains-claude-config`) and the fixture with each version installed, inspected with
+    `~` resolved against the real `HOME` (subscription) or an empty run-local home (api-key)
+    (FR-118-06/27) → readiness (FR-118-35; an API key the run would refuse — shorter than 8
+    characters or multi-line — is `auth-missing` here, through the shared `claudeApiKeyIssue`).
+    Every refusal exits 2 and leaves the database unchanged (row counts of jobs, suites, suite
+    versions, fixture versions, runs and assignments compared in
+    `apps/cli/test/benchmark-run.test.ts`; AC-15). The checks run on a read-only connection
+    (`openInitializedDatabase` in `apps/cli/src/setup.ts`): a fresh data directory is refused
+    without being created, a database with pending migrations without being migrated or seeded
+    (migration and category counts compared), and `initialize` runs only after the confirmation
+    (Codex adversarial review round 1 of PR #118).
+  - FR-118-31/32 plan and confirmation: suite, content hash prefix, candidate, baseline, agent
+    version, auth mode and isolation, model ("CLI default — unpinned"), agent-run count, budget,
+    `disable-model-invocation`, the cost, data-leaving, Not-sandboxed and (subscription)
+    ambient-configuration notices and, for a suite that runs commands, every `setup` and `command`
+    argv; a TTY asks, `--yes` skips, no TTY without `--yes` exits 2; a declined confirmation,
+    Ctrl-C at the prompt, or end of input (Ctrl-D, a closed stdin: readline's close answers the
+    question, which otherwise never settles; Codex review round 2) stores nothing, removes the
+    staged fixture copies and exits 130 (implementation choice: treated as a
+    cancellation) (AC-8).
+  - FR-118-33/34 one transaction, `createBenchmarkRunJob`: fixture versions, the suite version
+    (reused when unchanged, FR-118-23), approval source `user` (`approveSuiteVersion`, one
+    conditional UPDATE) and the job created already acquired by the CLI's runner; a failure rolls
+    all of it back (AC-7, AC-15). The runner gets only `ClaudeCodeAdapter` (FR-118-05; `serve`
+    stays mock-only), `hostId` = `installationId` (§8.3). Like every command, `benchmark run`
+    first runs the idempotent bootstrap (`initialize`: data directory, `installationId` in
+    `config.json`, pending migrations, predefined categories); "database unchanged" means no
+    benchmark data — suites, versions, fixtures, approvals, jobs, runs, assignments.
+  - FR-118-36 Ctrl-C: `LocalRunner.cancel` aborts the job's signal at once; with a fake `claude`
+    that ignores SIGINT and SIGTERM the built CLI exited 130 after 5 s (the kill grace) and no
+    `claude` process remained (AC-10).
+  - FR-118-24/37/38: a completed run records the assignment; the summary (or `--json` on stdout,
+    the plan then on stderr) names baseline, candidate, scores, delta, verdict, confidence, display
+    status, invocation rate, execution model, warnings, tokens and cost ("n/a (subscription)",
+    "estimated", "not reported") and the run id; exit 0 only for `passed`, 6 otherwise, 130 when
+    cancelled (AC-2, AC-11 — `unstable` by the exit-code mapping only, AC-20).
+  - `doctor`, the detection notes, the Agent Connections page, the artifact page's empty state and
+    the benchmark page's "Run from the CLI" card no longer call Claude Code execution planned.
+  - Real app: the built CLI on a fresh data directory — `demo`, `benchmark init --artifact
+    validate-external-input`, `benchmark run … --yes` with a fake `claude` replaying recorded
+    streams: 6 agent runs, `passed`, exit 0; without a TTY and `--yes`: exit 2.
+  - Not verified: a real `claude` in either auth mode (AC-22, issue #103) — required before this
+    slice ships to users; Windows.
 - **Partially implemented:** the adapter contract now carries per-run metadata and
   `runBenchmark` derives `EnvironmentMetadata.agentProfile` from it (Phase 3 step 2);
-  `ClaudeCodeAdapter` reports it (step 5) but is not registered in any runner yet, and no caller passes `installationId` as
-  `RunBenchmarkInput.hostId` (Phase 4, `benchmark run`). AC-3, AC-5 and AC-9 are verified at the engine, repository and
-  runner level; their `benchmark run --baseline` / CLI parts wait for Phase 4. Existing pieces this
+  `ClaudeCodeAdapter` reports it (step 5) and `benchmark run` registers it (Phase 4). Existing pieces this
   slice builds on: Claude Code detection (SPEC-203 §13), RED/GREEN orchestration with the mock
   agent, suite import, the `artifact_benchmark_assignments` table and the artifact detail history
   (flat list, SPEC-113 §20).
-- **Not implemented:** Phase 4 (`benchmark init` / `benchmark run`, which registers
-  `ClaudeCodeAdapter` in its runner) and every
+- **Not implemented:** Phase 4 step 3 (the opt-in live check, AC-22, issue #103) and every
   other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan

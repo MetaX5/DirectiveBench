@@ -1,11 +1,12 @@
+import { MIN_KNOWN_SECRET_LENGTH } from '@directivebench/core';
 import type { AgentModeReadiness } from './contract';
 import { findExecutable, readVersionLine, runProbe } from './probe';
 
 /**
  * Claude Code readiness (SPEC-118 FR-118-02/35, SPEC-203 §3, §7, §9): can `claude` run a
  * benchmark in a given auth mode? It never reads credential files, never prints or stores the
- * API key (only whether it is non-empty) and keeps nothing of the `auth status` output except
- * `loggedIn` and `authMethod`.
+ * API key (only whether it is usable, {@link claudeApiKeyIssue}) and keeps nothing of the
+ * `auth status` output except `loggedIn` and `authMethod`.
  */
 
 export const CLAUDE_EXECUTABLE = 'claude';
@@ -177,15 +178,28 @@ async function subscriptionReadiness(
   );
 }
 
+/**
+ * Why `key` cannot be the API Key Mode credential, or null when it can (FR-118-02/35): absent or
+ * blank, shorter than `MIN_KNOWN_SECRET_LENGTH` (exact-value redaction could not remove it from a
+ * trace), or containing a line break or NUL. Readiness and `buildClaudeEnv` share this check, so
+ * a key readiness accepts is one every run can use.
+ */
+export function claudeApiKeyIssue(key: string | undefined): string | null {
+  const value = key ?? '';
+  if (value.trim() === '') {
+    return `${CLAUDE_API_KEY_VARIABLE} is not set (or empty) in this process's environment.`;
+  }
+  if (value.trim().length < MIN_KNOWN_SECRET_LENGTH || /[\r\n\0]/.test(value)) {
+    return `API Key Mode needs an ${CLAUDE_API_KEY_VARIABLE} of at least ${MIN_KNOWN_SECRET_LENGTH} characters on one line.`;
+  }
+  return null;
+}
+
 function apiKeyReadiness(env: NodeJS.ProcessEnv): ClaudeCodeReadiness {
-  const present = (env[CLAUDE_API_KEY_VARIABLE] ?? '').trim() !== '';
-  return present
+  const issue = claudeApiKeyIssue(env[CLAUDE_API_KEY_VARIABLE]);
+  return issue === null
     ? result('api-key', null, `${CLAUDE_API_KEY_VARIABLE} is set.`)
-    : result(
-        'api-key',
-        'auth-missing',
-        `${CLAUDE_API_KEY_VARIABLE} is not set (or empty) in this process's environment.`,
-      );
+    : result('api-key', 'auth-missing', issue);
 }
 
 /** Whether a located binary can run a benchmark, whatever the auth mode. */

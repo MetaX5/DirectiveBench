@@ -387,6 +387,21 @@ posixOnly('checkClaudeCodeReadiness', () => {
       }
     });
 
+    it('reports auth-missing for a key every run would refuse: short or multi-line', async () => {
+      const fake = fakeClaude();
+      for (const key of ['abc', '  short12  ', 'sk-first\nsk-second', 'sk-planted\0key']) {
+        const report = await checkClaudeCodeReadiness(
+          'api-key',
+          cliEnv(fake.bin, { ANTHROPIC_API_KEY: key }),
+        );
+        expect(report, JSON.stringify(key)).toMatchObject({
+          ready: false,
+          code: 'auth-missing',
+          detail: 'API Key Mode needs an ANTHROPIC_API_KEY of at least 8 characters on one line.',
+        });
+      }
+    });
+
     it('defaults to the process environment', async () => {
       const fake = fakeClaude();
       vi.stubEnv('PATH', fake.bin);

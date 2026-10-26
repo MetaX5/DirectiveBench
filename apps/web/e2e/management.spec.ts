@@ -224,10 +224,10 @@ test.describe('benchmarks and executions', () => {
       );
       expect(count(db, 'select count(*) as n from jobs')).toBe(jobsBefore);
 
-      // Re-rendered for the real agent: no Run button, the planned CLI command instead.
+      // Re-rendered for the real agent: no Run button, the CLI command instead.
       const cli = page.getByTestId('run-from-cli');
       await expect(cli.getByRole('heading', { name: 'Run from the CLI' })).toBeVisible();
-      await expect(cli).toContainText('Planned — not implemented yet');
+      await expect(cli).not.toContainText('Planned');
       await expect(cli).toContainText(
         `directivebench benchmark run <suite-folder> --artifact ${DEMO_ARTIFACT}`,
       );

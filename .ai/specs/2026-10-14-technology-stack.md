@@ -3,7 +3,7 @@ id: SPEC-004
 title: Technology Stack
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-23
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-009, SPEC-010, SPEC-012]
 ---
@@ -36,7 +36,8 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 | Web framework | Next.js (App Router, Turbopack) | 16.4.1 | Server components + server actions + route handlers in one process; `proxy.ts` (replacement for `middleware.ts` in 16) hosts the Host-header allowlist. Served with `next start` from prebuilt output. |
 | UI runtime | React | 19.3 | Required by Next.js 16. |
 | Styling | Tailwind CSS | 4.3 | CSS-first config, no runtime. |
-| Components | shadcn-style copy-in components | no version | Source-owned components in `apps/web/components/ui/primitives.tsx` (`class-variance-authority`, `tailwind-merge`); no Radix dependency yet; no component-library lock-in. |
+| Components | shadcn/ui preset `b3Rq8QfWi` (radix-lyra) | source-owned | Generated components in `apps/web/components/ui`, compatibility exports in `primitives.tsx`, Radix Slot for composition; CVA and tailwind-merge. Configuration in `apps/web/components.json`; see [SPEC-119](implemented/2026-10-23-shadcn-design-system.md). |
+| Typography | Figtree Variable | locally bundled | `@fontsource-variable/figtree`; no remote fonts or build-time Google Fonts download. Font license (SIL OFL 1.1) ships in `public/fonts/figtree-LICENSE.txt`. |
 | Icons | lucide-react | current major | Tree-shakable icon set. |
 | Theming | next-themes | 0.4 | Dark/light theme switching. |
 | ORM / migrations | Drizzle ORM 0.45 + drizzle-kit 0.31 | 0.45.4 / 0.31 | Typed schema, SQL-first generated migrations, supports SQLite and PostgreSQL dialects (portability). |

@@ -17,6 +17,7 @@ import {
 } from '@/components/common';
 import {
   Badge,
+  Button,
   Card,
   CardContent,
   TBody,
@@ -26,6 +27,8 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import {
   MAX_SEARCH_LENGTH,
   invalidParamsNotice,
@@ -39,8 +42,6 @@ import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifacts' };
-
-const selectClass = 'h-8 rounded-md border bg-background px-2 text-sm text-foreground';
 
 export default async function ArtifactsPage({
   searchParams,
@@ -74,54 +75,50 @@ export default async function ArtifactsPage({
           <form className="mb-4 flex flex-wrap items-end gap-2" role="search">
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Search
-              <input
+              <Input
                 name="q"
                 defaultValue={filter.q ?? ''}
                 maxLength={MAX_SEARCH_LENGTH}
                 placeholder="Name or description"
-                className="h-8 w-56 rounded-md border bg-background px-2 text-sm text-foreground"
+                className="w-56"
               />
             </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Repository
-              <select
-                name="repository"
-                defaultValue={filter.repository ?? ''}
-                className={selectClass}
-              >
-                <option value="">All</option>
+              <NativeSelect name="repository" defaultValue={filter.repository ?? ''}>
+                <NativeSelectOption value="">All</NativeSelectOption>
                 {repositories.map((r) => (
-                  <option key={r.value} value={r.value}>
+                  <NativeSelectOption key={r.value} value={r.value}>
                     {r.label}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Type
-              <select name="type" defaultValue={filter.type ?? ''} className={selectClass}>
-                <option value="">All</option>
+              <NativeSelect name="type" defaultValue={filter.type ?? ''}>
+                <NativeSelectOption value="">All</NativeSelectOption>
                 {ARTIFACT_TYPES.map((t) => (
-                  <option key={t} value={t}>
+                  <NativeSelectOption key={t} value={t}>
                     {t}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Category
-              <select name="category" defaultValue={filter.category ?? ''} className={selectClass}>
-                <option value="">All</option>
+              <NativeSelect name="category" defaultValue={filter.category ?? ''}>
+                <NativeSelectOption value="">All</NativeSelectOption>
                 {categories.map((c) => (
-                  <option key={c.slug} value={c.slug}>
+                  <NativeSelectOption key={c.slug} value={c.slug}>
                     {c.name}
-                  </option>
+                  </NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
-            <button type="submit" className="h-8 rounded-md border px-3 text-sm hover:bg-accent">
+            <Button type="submit" variant="outline">
               Filter
-            </button>
+            </Button>
             {filtered || invalid.length ? (
               <Link href="/artifacts" className="h-8 px-2 text-sm leading-8 underline">
                 Clear filters

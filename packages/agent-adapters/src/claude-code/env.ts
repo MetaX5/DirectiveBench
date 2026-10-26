@@ -1,6 +1,5 @@
 import { delimiter, isAbsolute, join } from 'node:path';
-import { MIN_KNOWN_SECRET_LENGTH } from '@directivebench/core';
-import type { ClaudeAuthMode } from '../claude-code-readiness';
+import { claudeApiKeyIssue, type ClaudeAuthMode } from '../claude-code-readiness';
 import { ClaudeCodeError } from './errors';
 
 /** Which user-level configuration the agent can see (SPEC-203 §8, FR-118-03). */
@@ -52,8 +51,8 @@ function absolute(path: string, what: string): string {
  *   the CLI's own login; `USERPROFILE` is kept for the same reason), no `CLAUDE_CONFIG_DIR` (as the
  *   readiness probe, so both see the same login) and no credential variable at all. A missing or relative `HOME` is `auth-missing`.
  * - API Key Mode: `HOME`/`USERPROFILE` are the run-local home, `CLAUDE_CONFIG_DIR` is below it, and
- *   the key is `ANTHROPIC_API_KEY`. A key shorter than `MIN_KNOWN_SECRET_LENGTH` (which redaction
- *   could not remove by value), or one containing a line break or NUL, is `auth-missing`.
+ *   the key is `ANTHROPIC_API_KEY`. A key {@link claudeApiKeyIssue} refuses (too short for
+ *   redaction to remove by value, or containing a line break or NUL) is `auth-missing`.
  */
 export function buildClaudeEnv(input: ClaudeEnvInput): Record<string, string> {
   const env: Record<string, string> = {};
@@ -86,13 +85,8 @@ export function buildClaudeEnv(input: ClaudeEnvInput): Record<string, string> {
     if (profile !== undefined) env.USERPROFILE = profile;
     return env;
   }
-  // A key shorter than the exact-value redaction minimum could not be removed from the trace.
-  if (input.apiKey.trim().length < MIN_KNOWN_SECRET_LENGTH || /[\r\n\0]/.test(input.apiKey)) {
-    throw new ClaudeCodeError(
-      'auth-missing',
-      `API Key Mode needs an ANTHROPIC_API_KEY of at least ${MIN_KNOWN_SECRET_LENGTH} characters on one line.`,
-    );
-  }
+  const keyIssue = claudeApiKeyIssue(input.apiKey);
+  if (keyIssue !== null) throw new ClaudeCodeError('auth-missing', keyIssue);
   const home = absolute(input.isolatedHome, 'isolated home directory');
   env.HOME = home;
   env.USERPROFILE = home;

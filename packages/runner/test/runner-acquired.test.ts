@@ -408,3 +408,69 @@ describe('systematic agent failures (SPEC-118 FR-118-15, AC-17)', () => {
     expect(detail?.agentRuns).toHaveLength(1);
   }, 60_000);
 });
+
+describe('the CLI runner (SPEC-118 FR-118-36, §8.3)', () => {
+  it('cancels an active job at once, as the user would', async () => {
+    const handle = connect();
+    const example = await importBundledExample(handle, examples, join(dataDir, 'fixtures'));
+    const adapter = new BlockingMockAdapter();
+    // No heartbeat during the test: the cancellation must not wait for one.
+    const runner = createRunner(handle, {
+      heartbeatIntervalMs: 3_600_000,
+      adapters: new Map<string, AgentAdapter>([['mock', adapter]]),
+    });
+    const job = await createAcquiredBenchmarkJob(
+      handle.db,
+      { suiteVersionId: example.suite.versionId, artifactVersionId: example.artifact.versionId },
+      runner.runnerId,
+      nowIso(),
+    );
+    expect(runner.cancel(job.id)).toBe(false);
+    const running = runner.runAcquiredJob(job.id);
+    await adapter.running;
+    expect(runner.cancel(job.id)).toBe(true);
+    const result = await running;
+    expect(result).toMatchObject({ status: 'cancelled' });
+    const detail = await getBenchmarkRunDetail(handle.db, result.benchmarkRunId as string);
+    expect(detail?.run).toMatchObject({ status: 'cancelled', error: 'Cancelled by user' });
+  }, 60_000);
+
+  it('passes the installation id to runs of the user-profile isolation profile', async () => {
+    const handle = connect();
+    const example = await importBundledExample(handle, examples, join(dataDir, 'fixtures'));
+    const profiled = new (class extends MockAgentAdapter {
+      override async run(request: AgentRunRequest): Promise<AgentRunResult> {
+        const result = await super.run(request);
+        return {
+          ...result,
+          metadata: {
+            adapterVersion: '2.1.302',
+            authMode: 'subscription',
+            isolationProfile: 'user-profile',
+            permissionProfile: 'edit-only',
+            requestedModel: 'claude-test',
+            executionModel: 'claude-test',
+            reportedModels: ['claude-test'],
+            auxiliaryModels: [],
+            mismatchedMessageModels: [],
+            flagsHash: 'f'.repeat(64),
+          },
+        };
+      }
+    })();
+    const runner = createRunner(handle, {
+      hostId: '00000000-0000-4000-8000-0000000000aa',
+      adapters: new Map<string, AgentAdapter>([['mock', profiled]]),
+    });
+    const job = await createAcquiredBenchmarkJob(
+      handle.db,
+      { suiteVersionId: example.suite.versionId, artifactVersionId: example.artifact.versionId },
+      runner.runnerId,
+      nowIso(),
+    );
+    const result = await runner.runAcquiredJob(job.id);
+    const detail = await getBenchmarkRunDetail(handle.db, result.benchmarkRunId as string);
+    const summary = detail?.run.summary as { environment: { agentProfile?: { hostId?: string } } };
+    expect(summary.environment.agentProfile?.hostId).toBe('00000000-0000-4000-8000-0000000000aa');
+  }, 60_000);
+});

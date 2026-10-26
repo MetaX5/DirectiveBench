@@ -38,9 +38,12 @@ proving the old input still works or fails with a clear, actionable message.
 
 ## 1. CLI — `directivebench` (owner: [SPEC-009](.ai/specs/2026-10-14-cli-architecture.md))
 
-Surface: commands `serve` (default), `init`, `doctor`, `demo`, `--help`, `--version`; global
-`--data-dir`; serve options `--host`, `--port`, `--no-open`, `--allow-network-access`, `--dev`;
-`doctor --json` output `{ "checks": [{ name, status, detail, hint? }] }`; exit codes 0–6
+Surface: commands `serve` (default), `init`, `doctor`, `demo`, `benchmark init`, `benchmark run`,
+`--help`, `--version`; global `--data-dir`; serve options `--host`, `--port`, `--no-open`,
+`--allow-network-access`, `--dev`; `benchmark init --artifact`; `benchmark run` options
+`--artifact`, `--artifact-version`, `--baseline`, `--auth`, `--max-budget-usd`,
+`--approve-commands`, `--yes`, `--json` and its `--json` result object;
+`doctor --json` output `{ "checks": [{ name, status, detail, hint? }] }`; exit codes 0–6 and 130
 (`ExitCode` in `apps/cli/src/runtime.ts`); environment variables `DIRECTIVEBENCH_HOST`,
 `DIRECTIVEBENCH_PORT`, `DIRECTIVEBENCH_DATA_DIR`, `DIRECTIVEBENCH_ALLOWED_HOSTS`; precedence
 flag > env > `config.json` > default; supported Node range (`>=22.16.0`).

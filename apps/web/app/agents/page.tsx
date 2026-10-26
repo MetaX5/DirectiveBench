@@ -116,9 +116,10 @@ export default async function AgentsPage() {
             </TBody>
           </Table>
           <p className="mt-4 text-xs text-muted-foreground">
-            Real agent execution (Local Subscription Mode and API Key Mode) is planned for Milestone
-            4. DirectiveBench will use only officially supported CLI/SDK mechanisms and never copies
-            agent session credentials.
+            Claude Code runs benchmarks from the CLI (<code>directivebench benchmark run</code>) in
+            Local Subscription Mode or API Key Mode; running from the web UI and Codex and Cursor
+            execution are planned. DirectiveBench uses only officially supported CLI mechanisms and
+            never copies agent session credentials.
           </p>
         </CardContent>
       </Card>
