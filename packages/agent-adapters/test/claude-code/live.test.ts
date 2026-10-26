@@ -254,6 +254,7 @@ describe.skipIf(!LIVE)('Claude Code live check (AC-22, opt-in)', () => {
                 errorCode: outcome.errorCode ?? null,
                 warnings: outcome.warnings,
                 skillActivation: outcome.skillActivation,
+                otherSkillsInvoked: outcome.otherSkillsInvoked,
                 executionModel: outcome.metadata?.executionModel,
               },
               permissionDenials: parsed.permissionDenials,
@@ -291,9 +292,7 @@ describe.skipIf(!LIVE)('Claude Code live check (AC-22, opt-in)', () => {
             // A `Skill(<name>)` allow rule does not deny other skills (2.1.302): the run must at
             // least detect it, which makes the benchmark run not comparable (FR-118-08).
             if (report.files.otherTxt !== null) {
-              expect(report.classification.skillActivation?.otherSkillsInvoked).toContain(
-                OTHER_SKILL,
-              );
+              expect(report.classification.otherSkillsInvoked).toContain(OTHER_SKILL);
             }
             expect(report.files.userTxt).toBeNull();
             expect(report.files.outsideTarget).toBe('ORIGINAL\n');

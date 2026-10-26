@@ -249,7 +249,6 @@ export function claudeSkillActivation(parsed: ParsedClaudeStream): SkillActivati
     invoked: invocations > 0,
     invocations,
     otherSkills: parsed.otherSkills,
-    otherSkillsInvoked: parsed.otherSkillsInvoked,
     ...(counted ? { slashInvocation: slash } : {}),
   };
 }
@@ -334,5 +333,7 @@ export function claudeRunOutcome(
     warnings: classification.warnings,
     metadata: claudeRunMetadata(parsed, conditions),
     ...(skillActivation ? { skillActivation } : {}),
+    // Every format: an instruction run can use a skill too (e.g. a `/<skill>` prompt).
+    otherSkillsInvoked: parsed.otherSkillsInvoked,
   };
 }

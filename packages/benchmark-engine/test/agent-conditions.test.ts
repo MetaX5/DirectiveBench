@@ -287,14 +287,13 @@ describe('skill activation rules (FR-118-09, AC-21)', () => {
     const { run } = await input((variant, repetition) => ({
       metadata: metadata(),
       skillActivation: activation(
-        variant === 'candidate' && repetition === 1
-          ? { otherSkills: ['design', 'simplify'], otherSkillsInvoked: ['simplify'] }
-          : variant === 'baseline' && repetition === 3
-            ? { loaded: false, invoked: false, invocations: 0, otherSkillsInvoked: ['design'] }
-            : variant === 'baseline'
-              ? { loaded: false, invoked: false, invocations: 0 }
-              : {},
+        variant === 'baseline' ? { loaded: false, invoked: false, invocations: 0 } : {},
       ),
+      ...(variant === 'candidate' && repetition === 1
+        ? { otherSkillsInvoked: ['simplify'] }
+        : variant === 'baseline' && repetition === 3
+          ? { otherSkillsInvoked: ['design'] }
+          : {}),
     }));
     const outcome = await runBenchmark(run);
     expect(outcome.summary.verdict).toBe('not-comparable');
@@ -496,6 +495,31 @@ describe('parser to engine (Codex review)', () => {
       ['agent-error', 'output-parse-error'],
     ]);
     expect(result.summary.verdict).toBe('error');
+  }, 60_000);
+
+  it('an instruction run that used a skill is not comparable either (Codex review)', async () => {
+    const live = readFileSync(join(streams, 'live-subscription-slash.ndjson'), 'utf8');
+    const { run } = await input(() => {
+      const { trace: _trace, ...rest } = claudeRunOutcome(
+        // An instruction artifact (no tested skill) whose prompt runs the listed skill.
+        parseClaudeStream(live, { prompt: '/db-live-probe create the probe file' }),
+        { exitCode: 0 },
+        {
+          adapterVersion: '2.1.302',
+          authMode: 'subscription',
+          permissionProfile: 'edit-only',
+          requestedModel: MODEL,
+          flagsHash: 'a'.repeat(64),
+          skill: false,
+        },
+      );
+      return rest;
+    });
+    const result = await runBenchmark(run);
+    expect(result.agentRuns[0]).not.toHaveProperty('skillActivation');
+    expect(result.summary.reasons).toContain(
+      'other-skill-invoked: 6 agent run(s) invoked a skill other than the tested one (db-live-probe), so the result does not measure the tested skill alone',
+    );
   }, 60_000);
 
   it('a recorded real session that invoked another skill makes the run not comparable (AC-22)', async () => {

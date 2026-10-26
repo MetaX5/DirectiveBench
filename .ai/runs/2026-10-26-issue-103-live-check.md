@@ -65,6 +65,8 @@ Run the opt-in live check of SPEC-118 AC-22 with the exact production argv again
   - **high:** a prompt `/<other skill>` and a forked run of another skill were not detected as another skill used. The parser now records both. A `/<other>` prompt counts when `system/init` lists the name in both `skills` and `slash_commands`, so built-in commands such as `/compact` do not count. Red first: both new tests fail on d263374.
   - **medium:** the harness ran whenever `DIRECTIVEBENCH_LIVE_TESTS` was set. A set `CI` variable now always vetoes it.
 
+- Codex round 2, **high:** instruction artifacts (`claude-md`, `agents-md`, `claude-rule`) report no `skillActivation`, so another skill they used (for example a `/<skill>` prompt) was dropped and the run stayed comparable. `otherSkillsInvoked` now lives on `AgentRunResult` and `AgentRunRecord` for every format, and the engine reads it from there. Red first: the instruction-run regression on the recorded slash stream fails on e1341b2.
+
 ## Lessons recorded
 
 - [An allow rule does not restrict a tool that needs no permission](../lessons/2026-10-26-an-allow-rule-does-not-restrict-a-tool-that-needs-no-permission.md)

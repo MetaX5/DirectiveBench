@@ -419,8 +419,8 @@ describe('recorded live streams (claude 2.1.302, Local Subscription Mode, AC-22)
         invoked: true,
         invocations: 1,
         otherSkills: ['db-live-other'],
-        otherSkillsInvoked: ['db-live-other'],
       },
+      otherSkillsInvoked: ['db-live-other'],
       metadata: { executionModel: 'claude-opus-5-5' },
     });
     expect(outcome.usage).not.toHaveProperty('costUsd');
@@ -437,8 +437,8 @@ describe('recorded live streams (claude 2.1.302, Local Subscription Mode, AC-22)
     expect(claudeSkillActivation(parsed)).toMatchObject({
       invoked: false,
       otherSkills: ['db-live-probe'],
-      otherSkillsInvoked: ['db-live-probe'],
     });
+    expect(parsed.otherSkillsInvoked).toEqual(['db-live-probe']);
     // A built-in command that is no skill is not counted.
     const builtIn = parseClaudeStream(fixture('live-subscription-slash'), {
       skillName: 'db-live-other',
@@ -459,7 +459,6 @@ describe('recorded live streams (claude 2.1.302, Local Subscription Mode, AC-22)
       invoked: true,
       invocations: 1,
       otherSkills: [],
-      otherSkillsInvoked: [],
       slashInvocation: 'inferred',
     });
   });
@@ -470,27 +469,27 @@ describe('claudeSkillActivation (FR-118-09)', () => {
     [
       'skill-invoked',
       SKILL.prompt,
-      { loaded: true, invoked: true, invocations: 1, otherSkills: [], otherSkillsInvoked: [] },
+      { loaded: true, invoked: true, invocations: 1, otherSkills: [] },
     ],
     [
       'skill-not-invoked',
       SKILL.prompt,
-      { loaded: true, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
+      { loaded: true, invoked: false, invocations: 0, otherSkills: [] },
     ],
     [
       'skill-not-loaded',
       SKILL.prompt,
-      { loaded: false, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
+      { loaded: false, invoked: false, invocations: 0, otherSkills: [] },
     ],
     [
       'skill-tool-missing',
       SKILL.prompt,
-      { loaded: false, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
+      { loaded: false, invoked: false, invocations: 0, otherSkills: [] },
     ],
     [
       'skill-call-denied',
       SKILL.prompt,
-      { loaded: true, invoked: false, invocations: 0, otherSkills: [], otherSkillsInvoked: [] },
+      { loaded: true, invoked: false, invocations: 0, otherSkills: [] },
     ],
     [
       'other-skill-denied',
@@ -500,7 +499,6 @@ describe('claudeSkillActivation (FR-118-09)', () => {
         invoked: true,
         invocations: 1,
         otherSkills: ['deploy'],
-        otherSkillsInvoked: [],
       },
     ],
     [
@@ -511,7 +509,6 @@ describe('claudeSkillActivation (FR-118-09)', () => {
         invoked: true,
         invocations: 1,
         otherSkills: [],
-        otherSkillsInvoked: [],
         slashInvocation: 'observed',
       },
     ],
@@ -523,7 +520,6 @@ describe('claudeSkillActivation (FR-118-09)', () => {
         invoked: true,
         invocations: 1,
         otherSkills: [],
-        otherSkillsInvoked: [],
         slashInvocation: 'observed',
       },
     ],
@@ -537,7 +533,6 @@ describe('claudeSkillActivation (FR-118-09)', () => {
         invoked: true,
         invocations: 1,
         otherSkills: [],
-        otherSkillsInvoked: [],
         slashInvocation: 'inferred',
       },
     ],
