@@ -39,7 +39,10 @@ import {
   runClaudeProcess,
 } from '../../src/claude-code';
 
-const LIVE = (process.env.DIRECTIVEBENCH_LIVE_TESTS ?? '').split(',').includes('claude-code');
+// CI is an unconditional veto: an inherited opt-in must never start real sessions there.
+const LIVE =
+  !process.env.CI &&
+  (process.env.DIRECTIVEBENCH_LIVE_TESTS ?? '').split(',').includes('claude-code');
 const MODES = (process.env.DIRECTIVEBENCH_LIVE_AUTH ?? 'subscription')
   .split(',')
   .filter((mode): mode is ClaudeAuthMode => mode === 'subscription' || mode === 'api-key');

@@ -429,6 +429,24 @@ describe('recorded live streams (claude 2.1.302, Local Subscription Mode, AC-22)
     ).toEqual(['Read', 'Write']);
   });
 
+  it('counts a real /<other skill> prompt as another skill used (Codex review)', () => {
+    const parsed = parseClaudeStream(fixture('live-subscription-slash'), {
+      skillName: 'db-live-other',
+      prompt: '/db-live-probe create the probe file',
+    });
+    expect(claudeSkillActivation(parsed)).toMatchObject({
+      invoked: false,
+      otherSkills: ['db-live-probe'],
+      otherSkillsInvoked: ['db-live-probe'],
+    });
+    // A built-in command that is no skill is not counted.
+    const builtIn = parseClaudeStream(fixture('live-subscription-slash'), {
+      skillName: 'db-live-other',
+      prompt: '/compact now',
+    });
+    expect(builtIn.otherSkillsInvoked).toEqual([]);
+  });
+
   it('infers the invocation of a real /<name> prompt, which leaves no trace in the stream', () => {
     const parsed = parseClaudeStream(fixture('live-subscription-slash'), {
       ...live,

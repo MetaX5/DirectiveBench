@@ -59,6 +59,12 @@ Run the opt-in live check of SPEC-118 AC-22 with the exact production argv again
 
 - While the user-level skill was planted (during a run), it briefly appeared in this Claude Code session's own skill list. The harness removes it in `finally`, and it was confirmed gone afterwards.
 
+## Review
+
+- Codex adversarial review round 1, on PR #126:
+  - **high:** a prompt `/<other skill>` and a forked run of another skill were not detected as another skill used. The parser now records both. A `/<other>` prompt counts when `system/init` lists the name in both `skills` and `slash_commands`, so built-in commands such as `/compact` do not count. Red first: both new tests fail on d263374.
+  - **medium:** the harness ran whenever `DIRECTIVEBENCH_LIVE_TESTS` was set. A set `CI` variable now always vetoes it.
+
 ## Lessons recorded
 
 - [An allow rule does not restrict a tool that needs no permission](../lessons/2026-10-26-an-allow-rule-does-not-restrict-a-tool-that-needs-no-permission.md)

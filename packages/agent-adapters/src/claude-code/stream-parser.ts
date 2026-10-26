@@ -275,6 +275,8 @@ export class ClaudeStreamParser {
   private ended = false;
   private readonly secrets: readonly string[];
   private readonly slashPrompt: boolean;
+  /** The command a prompt starting with `/<command>` names, when it is not the installed skill. */
+  private readonly otherPromptCommand: string | null;
   private assistantSeen = false;
   private usage: AgentUsage | null = null;
   private readonly messageModels = new BoundedNames();
@@ -316,6 +318,11 @@ export class ClaudeStreamParser {
     this.secrets = withJsonForms(options.knownSecrets ?? []);
     this.slashPrompt =
       options.skillName !== undefined && promptInvokesSkill(options.prompt, options.skillName);
+    const command = /^\/([^\s/]+)(?:\s|$)/.exec(options.prompt)?.[1];
+    this.otherPromptCommand =
+      command !== undefined && command !== options.skillName
+        ? command.slice(0, CLAUDE_STREAM_NAME_MAX_CHARS)
+        : null;
   }
 
   /** Adds a chunk of stdout. Splits on `\n` only, so multi-byte characters survive any split. */
@@ -438,13 +445,14 @@ export class ClaudeStreamParser {
 
   private noteForkedParent(event: Record<string, unknown>): void {
     const parent = event.parent_tool_use_id;
-    if (
-      this.slashPrompt &&
-      typeof parent === 'string' &&
-      parent === `${FORKED_SKILL_PARENT_PREFIX}${this.options.skillName}`
-    ) {
-      this.state.slashExpanded = true;
+    if (typeof parent !== 'string' || !parent.startsWith(FORKED_SKILL_PARENT_PREFIX)) return;
+    const forked = parent.slice(FORKED_SKILL_PARENT_PREFIX.length);
+    if (forked === this.options.skillName) {
+      if (this.slashPrompt) this.state.slashExpanded = true;
+      return;
     }
+    // Another skill ran in a fork: it was used, whatever the Skill calls show.
+    this.otherSkillsInvoked.add(this.clip(forked, CLAUDE_STREAM_NAME_MAX_CHARS));
   }
 
   private handleSystem(event: Record<string, unknown>): boolean {
@@ -478,6 +486,17 @@ export class ClaudeStreamParser {
           skillName !== undefined && (data.slash_commands ?? []).includes(skillName),
         laterModels: [],
       };
+      // A prompt starting with `/<other skill>` expands that skill without a trace in the stream
+      // (live check AC-22), so a listed skill it names counts as used (FR-118-08).
+      const command = this.otherPromptCommand;
+      if (
+        command !== null &&
+        (data.skills ?? []).includes(command) &&
+        (data.slash_commands ?? []).includes(command)
+      ) {
+        this.otherSkills.add(command);
+        this.otherSkillsInvoked.add(command);
+      }
       this.record({
         type: 'message',
         text: this.clip(

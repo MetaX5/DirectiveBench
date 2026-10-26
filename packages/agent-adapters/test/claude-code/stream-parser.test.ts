@@ -298,6 +298,32 @@ describe('ClaudeStreamParser events', () => {
     expect(parsed.init?.laterModels).toHaveLength(CLAUDE_STREAM_MAX_NAMES);
   });
 
+  it('counts a /<other> prompt only for a skill the session lists as a skill and slash command', () => {
+    const other = { ...SKILL, prompt: '/deploy now' };
+    const used = (extra: Record<string, unknown>) =>
+      parseClaudeStream(lines(init(extra), result()), other).otherSkillsInvoked;
+    expect(used({ skills: ['pdf', 'deploy'], slash_commands: ['pdf', 'deploy'] })).toEqual([
+      'deploy',
+    ]);
+    expect(used({ skills: ['pdf', 'deploy'], slash_commands: ['pdf'] })).toEqual([]);
+    expect(used({ skills: ['pdf'], slash_commands: ['pdf', 'deploy'] })).toEqual([]);
+    expect(used({ skills: undefined, slash_commands: undefined })).toEqual([]);
+    expect(used({ skills: ['pdf', 'deploy'] })).toEqual([]);
+  });
+
+  it('records another skill that ran in a fork (Codex review)', () => {
+    const parsed = parseClaudeStream(
+      lines(
+        init(),
+        JSON.stringify({ type: 'stream_event', parent_tool_use_id: 'forked-command-deploy' }),
+        result(),
+      ),
+      SKILL,
+    );
+    expect(parsed.otherSkillsInvoked).toEqual(['deploy']);
+    expect(parsed.slashExpanded).toBe(false);
+  });
+
   it('records another skill whose Skill call succeeded (live check AC-22)', () => {
     const parsed = parseClaudeStream(
       lines(
