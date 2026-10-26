@@ -3,7 +3,7 @@ title: 'Issue #116 — extend the Markdown differential corpus with BOM, control
 date: 2026-10-26
 agent: Claude Code / claude-opus-5-5
 trigger: 'Issue #116 (follow-up of the Codex rounds on PR #115), assigned by the maintainer session'
-status: in-progress
+status: completed
 branch: test/issue-116-markdown-corpus
 specs: [SPEC-118]
 ---
@@ -96,6 +96,8 @@ Also: four review nits from PR #121.
 | Offline, fresh seeds 2026 / 7 / 99 / 31337, 20 000 documents each | 0 / 1 / 1 / 1 differences, all inline markup inside heading text (raw inline HTML spanning lines, `*\v*` emphasis); no block-structure difference |
 | Linear-time shapes (31) and helper self-tests under `taskset -c 0,1` with two `yes` | pass |
 | `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test` | pass, 7/7 tasks, 100 % coverage (benchmark-engine 408 tests) |
+| `pnpm build && pnpm verify:pack` (asked for by Codex round 1) | pass |
+| CI on `a9b5c23` (PR #127) | all 8 checks pass |
 
 Not verified: Windows (no platform-specific code); inline Markdown rendering (never parsed).
 
@@ -113,5 +115,20 @@ Not verified: Windows (no platform-specific code); inline Markdown rendering (ne
   review](../lessons/2026-10-22-test-a-parser-against-the-reference-not-reviews.md): generate a
   review's whole input class; compare deliberate under-reports with a tested subset rule.
 
+## Codex adversarial review (PR #127)
+
+| Round | Verdict | Findings |
+| --- | --- | --- |
+| 1 | needs-attention | no material finding: 208 788 targeted delimiter, body-row and container cases matched cmark-gfm 2025.10.22; runtime growth linear. Blocked only because its read-only sandbox could not run `pnpm build` / `verify:pack`; both pass in the worktree. |
+| 2 | approve | no material finding: 88 448 fresh comparisons (link definitions, BOMs, odd whitespace after markers, ATX, setext, tag lines, containers, lazy lines) matched the comparison rules; generator classes, subset rule, comparable form and helper changes checked. |
+
+Stopped after round 2 on approve.
+
 ## Follow-ups
-- Codex adversarial review rounds: see below (in progress).
+
+- Heading levels are not compared; link reference definitions are still not parsed (the fail-safe
+  stop covers 816 of the 10 000 recorded documents).
+- The one-column rule of `readingDifference` cannot tell a pipe-less table from a piped
+  one-column table the scanner failed to report (an under-report, never a false pass); the
+  cmark-gfm 2025.10.22 source positions of tables in paragraphs are unreliable, so the recorder
+  cannot mark pipe-less tables.
