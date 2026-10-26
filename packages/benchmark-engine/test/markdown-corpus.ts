@@ -417,54 +417,89 @@ function grouped(reading: readonly string[]): { headings: string[]; tables: stri
   return { headings, tables };
 }
 
+/** A part of a document the scanner deliberately did not report (`MarkdownScan.notReported`). */
+export interface Gap {
+  line: number;
+  reason: string;
+}
+
+/** The scanner's reading of one document: its comparable form and its gaps. */
+export interface ScannerReading {
+  reading: readonly string[];
+  notReported: readonly Gap[];
+}
+
 /**
- * Why the scanner's comparable reading of `document` is not acceptable against cmark-gfm's, or
- * null when it is. Acceptable is equality, or exactly the scanner's deliberate under-reports
- * (ADR-0013), which can only report less, never more:
+ * cmark-gfm's readings of one document: of the whole document, and of its first N lines (keyed
+ * by N) for every N that `prefixLineCounts` derives from the scanner's gaps.
+ */
+export interface ReferenceReadings {
+  reading: readonly string[];
+  prefixes: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * The line counts of the prefixes whose cmark-gfm readings `readingDifference` needs for these
+ * gaps: the lines before a stop line, and the lines up to a pipe-less table's delimiter row (the
+ * line after its header). Block structure is decided line by line, so cmark-gfm reads the blocks
+ * of a prefix as it reads them in the whole document, except the blocks still open at its end.
+ */
+export function prefixLineCounts(notReported: readonly Gap[]): number[] {
+  return notReported.map(({ line, reason }) => (reason === 'pipeless-table' ? line + 1 : line - 1));
+}
+
+/**
+ * Why the scanner's reading of a document differs from cmark-gfm's, or null when it does not.
+ * The comparison is exact; the scanner's deliberate gaps (ADR-0013) only choose what it is
+ * compared with:
  *
- * - a setext underline below a paragraph that may start with a link reference definition ends the
- *   scan, so in a document with `]:` the scanner's headings and tables may stop early: each is
- *   then a prefix of cmark-gfm's, in order;
- * - a table without a pipe in its header or delimiter row is read but not reported; such a table
- *   has one column, so only one-column tables of cmark-gfm may be missing between the others.
+ * - a scan that stopped at line N is compared with cmark-gfm's reading of lines 1 to N-1, which
+ *   ends with nothing open that the scanner could have reported;
+ * - a pipe-less table with its header on line L is the table that cmark-gfm's reading of lines 1
+ *   to L+1 ends with (a header, one column, no row yet); that table, and only it, is left out.
  *
- * Everything the scanner does report must equal cmark-gfm's at its position: an extra, changed or
- * reordered heading, table or row is a difference (a possible false pass).
+ * So an extra, changed, reordered or missing heading, table or row is a difference, also before
+ * a stop, and a stop at a line other than the recorded one has no reading to be compared with.
  */
 export function readingDifference(
-  document: string,
-  scanner: readonly string[],
-  reference: readonly string[],
+  scanner: ScannerReading,
+  reference: ReferenceReadings,
 ): string | null {
-  if (JSON.stringify(scanner) === JSON.stringify(reference)) return null;
-  const stopped = document.includes(']:');
-  const actual = grouped(scanner);
-  const expected = grouped(reference);
-  for (const [index, heading] of actual.headings.entries()) {
-    if (expected.headings[index] !== heading) return `heading ${index} differs: ${heading}`;
-  }
-  const missing = expected.headings[actual.headings.length];
-  if (missing !== undefined && !stopped) return `heading missing: ${missing}`;
-  const oneColumn = (table: readonly string[]) => !(table[0] as string).includes(' ¦ ');
-  const same = (a: readonly string[], b: readonly string[]) => a.join('\n') === b.join('\n');
-  let next = 0;
-  for (const table of actual.tables) {
-    while (
-      next < expected.tables.length &&
-      !same(expected.tables[next] as string[], table) &&
-      oneColumn(expected.tables[next] as string[])
+  const prefix = (lines: number) => reference.prefixes[String(lines)];
+  const unrecorded = (lines: number) => `no cmark-gfm reading of lines 1-${lines} is recorded`;
+  const stop = scanner.notReported.find(({ reason }) => reason !== 'pipeless-table');
+  const base = stop === undefined ? reference.reading : prefix(stop.line - 1);
+  if (base === undefined) return unrecorded((stop as Gap).line - 1);
+  const expected = grouped(base);
+  const skipped = new Set<number>();
+  for (const { line, reason } of scanner.notReported) {
+    if (reason !== 'pipeless-table') continue;
+    const before = prefix(line + 1);
+    if (before === undefined) return unrecorded(line + 1);
+    const { tables } = grouped(before);
+    const index = tables.length - 1;
+    const header = before.at(-1) as string;
+    if (
+      tables[index]?.length !== 1 ||
+      tables[index]?.[0] !== header ||
+      header.includes(' ¦ ') ||
+      expected.tables[index]?.[0] !== header ||
+      skipped.has(index)
     ) {
-      next += 1;
+      return `cmark-gfm reads no pipe-less table with its header on line ${line}`;
     }
-    const counterpart = expected.tables[next];
-    if (counterpart === undefined || !same(counterpart, table)) {
-      return `table differs: ${table.join(' / ')}`;
-    }
-    next += 1;
+    skipped.add(index);
   }
-  const rest = expected.tables.slice(next);
-  if (!stopped && !rest.every(oneColumn)) {
-    return `table missing: ${(rest.find((table) => !oneColumn(table)) as string[]).join(' / ')}`;
+  const wanted = [
+    ...expected.headings,
+    ...expected.tables.filter((_, index) => !skipped.has(index)).flat(),
+  ];
+  const length = Math.max(wanted.length, scanner.reading.length);
+  for (let index = 0; index < length; index += 1) {
+    const [actual, expectedLine] = [scanner.reading[index], wanted[index]];
+    if (actual !== expectedLine) {
+      return `entry ${index} differs: scanner ${actual ?? '(none)'}, cmark-gfm ${expectedLine ?? '(none)'}`;
+    }
   }
   return null;
 }
