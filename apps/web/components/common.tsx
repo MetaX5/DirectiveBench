@@ -16,9 +16,9 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div className="mb-section flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-page-title tracking-tight">{title}</h1>
         {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? <div className="flex min-w-0 max-w-full items-center gap-2">{actions}</div> : null}
@@ -99,7 +99,7 @@ export function NotInitialized() {
   return (
     <Card>
       <CardContent className="flex items-start gap-3 py-6">
-        <DatabaseZap className="mt-0.5 size-5 text-warning" aria-hidden />
+        <DatabaseZap className="mt-0.5 size-5 text-warning-foreground" aria-hidden />
         <div className="text-sm">
           <p className="font-medium">The local database has not been initialised.</p>
           <p className="mt-1 text-muted-foreground">

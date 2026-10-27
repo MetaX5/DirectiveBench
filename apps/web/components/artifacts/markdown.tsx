@@ -23,7 +23,7 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
         );
       case 'code':
         return (
-          <code key={index} className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+          <code key={index} className="rounded-surface bg-muted px-1 py-0.5 font-mono text-xs">
             {node.text}
           </code>
         );
@@ -58,7 +58,7 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
             key={index}
             data-inert-image=""
             title={`Image not loaded: ${node.destination}`}
-            className="rounded border px-1 text-xs text-muted-foreground"
+            className="rounded-surface border px-1 text-xs text-muted-foreground"
           >
             [image: {node.alt || node.destination}]
           </span>
@@ -84,7 +84,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
           <pre
             key={index}
             data-frontmatter=""
-            className="overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap"
+            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap"
           >
             {block.text}
           </pre>
@@ -104,7 +104,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
           <pre
             key={index}
             data-language={block.language ?? undefined}
-            className="overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs whitespace-pre"
+            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-xs whitespace-pre"
           >
             <code>{block.text}</code>
           </pre>

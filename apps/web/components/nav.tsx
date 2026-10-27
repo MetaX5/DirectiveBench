@@ -60,7 +60,7 @@ export function Nav() {
     <nav aria-label="Main" className="flex flex-col gap-4">
       {sections.map((section) => (
         <div key={section.title}>
-          <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="px-2 pb-1 text-caption font-medium uppercase tracking-wide text-muted-foreground">
             {section.title}
           </p>
           <ul className="flex flex-col gap-0.5">
@@ -81,7 +81,7 @@ export function Nav() {
                     <item.icon className="size-4" aria-hidden />
                     <span className="flex-1">{item.label}</span>
                     {item.planned ? (
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <span className="text-caption uppercase tracking-wide text-muted-foreground">
                         planned
                       </span>
                     ) : null}

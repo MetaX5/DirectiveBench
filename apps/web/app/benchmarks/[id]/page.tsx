@@ -75,7 +75,7 @@ export default async function BenchmarkPage({
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-grid lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Cases</CardTitle>
@@ -87,7 +87,7 @@ export default async function BenchmarkPage({
           </CardHeader>
           <CardContent className="space-y-4">
             {definition?.cases.map((c) => (
-              <div key={c.id} className="rounded-md border p-3">
+              <div key={c.id} className="rounded-surface border p-3">
                 <p className="text-sm font-medium">
                   {c.name} <span className="font-mono text-xs text-muted-foreground">{c.id}</span>
                 </p>

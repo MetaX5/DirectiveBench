@@ -9,6 +9,23 @@ describe('cn', () => {
   });
 });
 
+describe('cn with design tokens', () => {
+  it('treats the text-* tokens as font sizes, so a text colour does not replace them', () => {
+    expect(cn('text-caption text-muted-foreground')).toBe('text-caption text-muted-foreground');
+    expect(cn('text-metric', 'text-xs')).toBe('text-xs');
+    expect(cn('text-sm', 'text-page-title')).toBe('text-page-title');
+  });
+
+  it('lets later spacing, radius and width tokens replace the classes they stand for', () => {
+    expect(cn('h-8', 'h-control')).toBe('h-control');
+    expect(cn('gap-4', 'gap-grid')).toBe('gap-grid');
+    expect(cn('px-2', 'px-page-inline')).toBe('px-page-inline');
+    expect(cn('w-56', 'w-sidebar')).toBe('w-sidebar');
+    expect(cn('rounded-md', 'rounded-surface')).toBe('rounded-surface');
+    expect(cn('max-w-6xl', 'max-w-content')).toBe('max-w-content');
+  });
+});
+
 describe('formatDate', () => {
   it('renders an ISO timestamp in UTC, independent of the local time zone', () => {
     expect(formatDate('2026-10-15T08:05:00.000Z')).toBe('15 Oct 2026, 08:05 UTC');

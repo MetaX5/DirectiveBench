@@ -146,7 +146,7 @@ export default async function RepositoriesPage({
               <div
                 role="alert"
                 data-testid="registration-confirmation"
-                className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
+                className="space-y-2 rounded-surface border border-warning/40 bg-warning/10 p-3 text-xs"
               >
                 <p className="font-medium">{confirmation.message}</p>
                 <ul className="list-disc space-y-1 pl-4">

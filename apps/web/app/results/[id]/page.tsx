@@ -51,9 +51,18 @@ export const metadata: Metadata = { title: 'Benchmark run' };
 function ScoreBar({ value, tone }: { value: number | null; tone: 'red' | 'green' }) {
   const pct = value === null ? 0 : Math.round(value * 100);
   return (
-    <div className="h-2 w-full overflow-hidden rounded bg-muted" aria-hidden>
+    <div
+      className="h-2 w-full overflow-hidden rounded-surface bg-scorebar-track"
+      data-slot="score-bar"
+      aria-hidden
+    >
       <div
-        className={cn('h-full', tone === 'red' ? 'bg-destructive/70' : 'bg-success/80')}
+        className={cn(
+          'h-full',
+          tone === 'red' ? 'bg-scorebar-red-phase' : 'bg-scorebar-green-phase',
+        )}
+        data-slot="score-bar-fill"
+        data-tone={tone}
         style={{ width: `${pct}%` }}
       />
     </div>
@@ -82,7 +91,7 @@ function VariantCard({
         <CardDescription>{subtitle}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <p className="text-2xl font-semibold tabular-nums" data-testid={testId}>
+        <p className="text-metric tabular-nums" data-testid={testId}>
           {formatScore(data?.meanScore)}
         </p>
         <ScoreBar value={data?.meanScore ?? null} tone={tone} />
@@ -261,7 +270,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <CardTitle>Comparison</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p className="text-2xl font-semibold tabular-nums" data-testid="score-delta">
+              <p className="text-metric tabular-nums" data-testid="score-delta">
                 {formatDelta(summary.delta)}
               </p>
               <dl className="grid grid-cols-2 gap-1 text-xs">
@@ -349,7 +358,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             const usage = usageText(agentRun.usage, profile);
             const counts = traceCounts(agentRun.trace);
             return (
-              <details key={agentRun.id} className="rounded-md border" data-testid="agent-run">
+              <details key={agentRun.id} className="rounded-surface border" data-testid="agent-run">
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
                   <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
                     {agentRun.variant === 'baseline' ? baselineName : candidateName}

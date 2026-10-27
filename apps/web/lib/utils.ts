@@ -1,5 +1,30 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+// tailwind-merge only knows Tailwind's default scales: without these design tokens (SPEC-120,
+// app/globals.css) it reads `text-caption` as a text colour and drops it next to one.
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      text: ['caption', 'ui', 'body', 'page-title', 'metric'],
+      spacing: [
+        'page-inline',
+        'page-block',
+        'section',
+        'grid',
+        'stack',
+        'inline',
+        'inline-tight',
+        'control',
+        'control-sm',
+        'control-xs',
+        'sidebar',
+      ],
+      radius: ['surface'],
+      container: ['content'],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));

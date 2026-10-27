@@ -56,7 +56,7 @@ function FileTree({
               href={artifactHref(artifactId, { tab: 'content', version, file: node.path })}
               aria-current={node.path === selected ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-1 rounded px-1 hover:bg-accent',
+                'flex items-center gap-1 rounded-surface px-1 hover:bg-accent',
                 node.path === selected && 'bg-accent font-medium',
               )}
             >
@@ -108,7 +108,7 @@ export function ContentTab({
                   })}
                   aria-current={v.id === version.id ? 'page' : undefined}
                   className={cn(
-                    'rounded-md border px-2 py-0.5 hover:bg-accent',
+                    'rounded-surface border px-2 py-0.5 hover:bg-accent',
                     v.id === version.id && 'bg-accent font-medium',
                   )}
                 >
