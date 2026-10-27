@@ -39,3 +39,11 @@ Use distinct status foreground tokens instead of reusing the brighter fill colou
 Test normal text and placeholders against actual surfaces, including muted backgrounds,
 active navigation and tinted regression rows. The regression tests now cover visible pages
 and a matrix of all badge variants and feedback text roles across six surface classes.
+
+## Follow-up: non-text contrast (2026-10-27)
+
+Text-only checks passed while UI elements failed [WCAG 1.4.11](https://www.w3.org/WAI/WCAG21/Understanding/non-text-contrast):
+input and select borders 1.26:1, focus rings at 50% alpha 1.54:1 and a warning icon in the
+status fill colour 2.97:1. Check control boundaries, focus indicators (measure the solid
+border and every box-shadow ring layer) and meaningful icons at 3:1 in both themes;
+`e2e/ui-contrast.spec.ts` does this ([SPEC-120](../specs/2026-10-27-design-tokens.md)).
