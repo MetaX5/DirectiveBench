@@ -1,7 +1,7 @@
 ---
 id: SPEC-120
 title: Three-layer design tokens
-status: draft
+status: implemented
 created: 2026-10-27
 updated: 2026-10-27
 category: feature
@@ -13,9 +13,9 @@ related: [SPEC-119, SPEC-004, ADR-0001]
 ## 1. Summary
 
 The web UI gets a complete design-token system in three layers (raw palette and scales,
-semantic tokens, component tokens), recorded in [`apps/web/tokeny.md`](../../apps/web/tokeny.md)
+semantic tokens, component tokens), recorded in [`apps/web/tokeny.md`](../../../apps/web/tokeny.md)
 and implemented in `apps/web/app/globals.css`. It extends the shadcn preset of
-[SPEC-119](implemented/2026-10-23-shadcn-design-system.md) and fixes the non-text contrast
+[SPEC-119](2026-10-23-shadcn-design-system.md) and fixes the non-text contrast
 failures that SPEC-119's text-only checks did not cover.
 
 ## 2. Motivation and problem statement
@@ -131,14 +131,14 @@ None.
 ## 19. Future extensions
 
 Migrate existing `text-xs`/`text-sm` and `gap-*`/`space-y-*` utilities to `text-ui`/`text-body`
-and the `space-*` tokens; add a token export for design tools if needed.
+and the `space-*` tokens ([#132](https://github.com/MetaX5/DirectiveBench/issues/132)); add a
+token export for design tools if needed.
 
 ## 20. Implementation status
 
 Implemented and verified on 2026-10-27 (Linux, Node 22, Chromium); details in the run log
-[`2026-10-27-design-tokens`](../runs/2026-10-27-design-tokens.md). The spec stays `draft`
-until the maintainer approves it; all acceptance criteria are verified, so it can then move to
-`implemented/`.
+[`2026-10-27-design-tokens`](../../runs/2026-10-27-design-tokens.md). Merged in #130;
+the maintainer approved the spec on 2026-10-27 and it moved to `implemented/`.
 
 - `globals.css` has the raw palette, semantic tokens pointing at it and the component tokens;
   a unit test confirms no literal colour outside `--palette-*`.
