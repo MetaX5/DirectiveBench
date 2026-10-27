@@ -2,7 +2,7 @@
 
 Approved by the maintainer on 2026-10-27. This file records the token system for `apps/web`;
 [`app/globals.css`](app/globals.css) implements it
-([SPEC-120](../../.ai/specs/2026-10-27-design-tokens.md)).
+([SPEC-120](../../.ai/specs/implemented/2026-10-27-design-tokens.md)).
 
 How the tokens appear in code:
 
