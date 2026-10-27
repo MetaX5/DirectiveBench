@@ -48,7 +48,10 @@ const BRANCH_QUERY = ['symbolic-ref', '--quiet', '--short', 'HEAD'] as const;
 /** `--show-cdup` prints only `../` segments; anything else is not a top-level answer. */
 const CDUP_PATTERN = /^(?:\.\.\/)*$/;
 
-/** git's discovery failure. A broken `.git` file prints "not a git repository: <path>" instead. */
+/**
+ * git's discovery failure. A broken `.git` file prints "not a git repository: <path>" (or, in
+ * newer git, "gitfile does not point to a valid repository: <path>") instead, and fails closed.
+ */
 const NOT_A_REPOSITORY = 'not a git repository (or any';
 
 /**

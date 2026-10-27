@@ -266,7 +266,11 @@ describe('inspectLocalPath', () => {
     expect(await inspectLocalPath(dir, options())).toMatchObject({
       ok: false,
       code: 'git-failed',
-      message: expect.stringMatching(/^git could not inspect this path: not a git repository: /),
+      // Older git says "not a git repository: <path>", newer git (CI image 20261025)
+      // "gitfile does not point to a valid repository: <path>"; either way it must fail closed.
+      message: expect.stringMatching(
+        /^git could not inspect this path: (?:not a git repository|gitfile does not point to a valid repository): /,
+      ),
     });
   });
 
