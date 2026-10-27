@@ -39,3 +39,11 @@ must be proven armed, or the test proves nothing.
   offline.
 - Assert the fixture first (e.g. `ls-tree` shows `160000 commit`), and commit special index
   entries with `git commit`, not after `git add -A`.
+
+## Follow-up (2026-10-27): git wording changes between versions
+
+The CI image update `ubuntu24/20261025` brought a git that reports a broken `.git` file as
+`gitfile does not point to a valid repository: <path>` instead of `not a git repository: <path>`.
+The code kept failing closed (it only special-cases the discovery message), but a test that
+pinned the old wording went red on every branch. Classify only the messages the code acts on,
+and let tests of fail-closed paths accept each known wording of the same git error.
