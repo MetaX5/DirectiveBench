@@ -84,7 +84,7 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
   const { artifact, occurrences, categories, evaluations } = detail;
   const latestEval = evaluations[0];
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid gap-grid lg:grid-cols-3">
       <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle>Occurrences</CardTitle>
@@ -445,7 +445,7 @@ function ResultsByVersionTab({
           <div className="space-y-2 text-sm" data-testid="no-runs">
             <p className="text-muted-foreground">
               No benchmark runs yet. Create a suite with{' '}
-              <code className="select-all rounded bg-muted px-1 font-mono">
+              <code className="select-all rounded-surface bg-muted px-1 font-mono">
                 directivebench benchmark init --artifact {slug}
               </code>
             </p>

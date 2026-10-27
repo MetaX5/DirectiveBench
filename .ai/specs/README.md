@@ -90,7 +90,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 ## Index
 
 Specifications are drafts except SPEC-119, implemented and verified on 2026-10-23. They were created on 2026-10-14 during the bootstrap, except
-SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22) and SPEC-119 (2026-10-23).
+SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23) and SPEC-120 (2026-10-27).
 `implemented/` contains verified specifications; `archive/` is currently empty.
 
 ### Foundation
@@ -135,6 +135,7 @@ SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22) and SPEC-119 (2026-10-
 | SPEC-117 | [Optional PostgreSQL Backend](2026-10-15-postgresql-backend.md) | draft |
 | SPEC-118 | [Benchmark own skills with Claude Code against registry artifacts (S1)](2026-10-22-benchmark-own-skills-s1.md) | draft |
 | SPEC-119 | [Shadcn preset design system](implemented/2026-10-23-shadcn-design-system.md) | implemented |
+| SPEC-120 | [Three-layer design tokens](2026-10-27-design-tokens.md) | draft |
 
 ### Integrations
 

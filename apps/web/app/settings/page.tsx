@@ -30,7 +30,7 @@ export default function SettingsPage() {
         description="Read-only view of the resolved data directory and effective configuration. Edit config.json or use CLI flags."
         actions={<Badge variant="muted">Planned — not implemented: settings editor</Badge>}
       />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-grid lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Data directory</CardTitle>

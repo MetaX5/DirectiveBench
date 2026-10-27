@@ -31,12 +31,12 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
       <CardContent>
         <p className="text-xs text-muted-foreground">{label}</p>
         <p
-          className="mt-1 text-2xl font-semibold tabular-nums"
+          className="mt-1 text-metric tabular-nums"
           data-testid={`stat-${label.toLowerCase().replaceAll(/[^a-z]+/g, '-')}`}
         >
           {value}
         </p>
-        {hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null}
+        {hint ? <p className="mt-1 text-caption text-muted-foreground">{hint}</p> : null}
       </CardContent>
     </Card>
   );
