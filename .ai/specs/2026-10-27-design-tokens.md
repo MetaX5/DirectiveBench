@@ -143,7 +143,8 @@ until the maintainer approves it; all acceptance criteria are verified, so it ca
 - `globals.css` has the raw palette, semantic tokens pointing at it and the component tokens;
   a unit test confirms no literal colour outside `--palette-*`.
 - Measured in Chromium (light / dark): control borders 4.74 / 3.78, focus rings 10.37 / 6.94,
-  navigation focus 9.93 / 6.94, ScoreBar fills 3.44 and 3.07 / 3.26 and 4.62. Before the change
+  navigation focus 9.93 / 6.94, destructive button focus 9.33 / 5.79 (was 1.42 / 1.94 before the
+  review fix), ScoreBar fills 3.44 and 3.07 / 3.26 and 4.62. Before the change
   the same test measured 1.26 / 1.58, 1.54 / 1.87 and 2.48 / 3.79.
 - Text contrast, button and design-system suites pass unchanged; full E2E 52/52.
 - Not migrated (§19): existing `text-xs`/`text-sm` and most `gap-*`/`space-y-*` utilities.

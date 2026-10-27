@@ -99,6 +99,20 @@ for (const theme of ['light', 'dark'] as const) {
     await keyboardFocus(page, register);
     await record(results, 'primary button focus ring', contrast(register, 'ring'));
 
+    // The home directory needs a confirmation (D05), whose submit is the destructive button;
+    // it is cancelled below, so nothing is registered.
+    await input.fill('~');
+    await register.click();
+    const confirmation = page.getByTestId('registration-confirmation');
+    const registerAnyway = confirmation.getByRole('button', { name: 'Register anyway' });
+    await expect(registerAnyway).toBeVisible({ timeout: 30_000 });
+    await page.addStyleTag({ content: '* { transition: none !important; }' });
+    await keyboardFocus(page, registerAnyway);
+    await record(results, 'destructive button focus border', contrast(registerAnyway, 'border'));
+    await record(results, 'destructive button focus ring', contrast(registerAnyway, 'ring'));
+    await confirmation.getByRole('link', { name: 'Cancel' }).click();
+    await expect(confirmation).toHaveCount(0);
+
     await page.goto('/artifacts');
     await page.addStyleTag({ content: '* { transition: none !important; }' });
     const select = page.locator('select[name="type"]');
@@ -121,13 +135,16 @@ for (const theme of ['light', 'dark'] as const) {
     await run.click();
     const bars = page.locator('[data-slot="score-bar"]');
     await expect(bars.first()).toBeVisible();
+    let measuredBars = 0;
     for (const bar of await bars.all()) {
       const fill = bar.locator('[data-slot="score-bar-fill"]');
       const tone = await fill.getAttribute('data-tone');
       if ((await fill.boundingBox())?.width) {
+        measuredBars += 1;
         await record(results, `score bar ${tone} fill`, contrast(fill, 'background', bar));
       }
     }
+    expect(measuredBars, 'score bars with a visible fill').toBeGreaterThan(0);
 
     await testInfo.attach('ui-contrast-ratios', {
       body: JSON.stringify(results, null, 2),

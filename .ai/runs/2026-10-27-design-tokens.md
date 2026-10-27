@@ -65,6 +65,20 @@ every used colour pair in both themes) into code. Acceptance criteria: SPEC-120 
 Not verified: browsers other than Chromium, Windows and macOS, forced-colours mode, and the
 pages not covered by the demo data beyond the existing text-contrast scan.
 
+## Review round 1 (om-auto-review-pr)
+
+- Finding: the destructive Button variant overrode the solid focus ring with
+  `ring-destructive/20` and `border-destructive/40`; measured red-first in
+  `e2e/ui-contrast.spec.ts` at 1.42:1 ring / 2.05:1 border (light) and 1.94:1 / 1.94:1 (dark).
+  Fixed by dropping the variant's focus overrides (Button and Badge) so the base solid `ring`
+  applies; the e2e spec now focuses "Register anyway" on the home-directory confirmation and
+  measures 9.33:1 (light) and 5.79:1 (dark).
+- The unit rule now forbids any translucent `focus-visible:ring-*`/`border-*` colour (it failed
+  on the old Button) and every non-`none`/`surface` `rounded*` form, and a `cn merge config`
+  test checks every `@theme` text, spacing, radius and container token against `cn` (it failed
+  with a token removed from `lib/utils.ts`).
+- The ScoreBar check now fails if no bar with a visible fill was measured.
+
 ## Problems and deviations
 
 - tailwind-merge dropped `text-caption` next to a text colour (lesson recorded).

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { cn } from '../lib/utils';
 
 // Static checks for the token rules in tokeny.md (SPEC-120): raw values stay in globals.css and
 // app code uses only semantic and component tokens.
@@ -26,10 +27,13 @@ const forbidden: Array<[rule: string, pattern: RegExp]> = [
     'status fill used as text or icon colour; use *-foreground (D5)',
     /\btext-(?:success|warning|info|destructive)(?![-\w])/,
   ],
-  ['translucent focus ring; focus uses solid ring (D4)', /\bring-(?:sidebar-)?ring\/\d/],
+  [
+    'translucent focus ring or border; focus uses solid ring (D4)',
+    /\bring-(?:sidebar-)?ring\/\d|focus-visible:(?:ring|border)-[\w-]+\/\d/,
+  ],
   [
     'rounded corner; surfaces are square (D7)',
-    /\brounded(?:-(?:xs|sm|md|lg|xl|[234]xl|full))?(?![-\w])/,
+    /\brounded(?:-[\w[\].]+)*(?<!-none|-surface)(?![-\w[\].])/,
   ],
 ];
 
@@ -76,5 +80,32 @@ describe('globals.css token layers', () => {
     expect(light).toMatch(/--ring: var\(--palette-neutral-700\);/);
     expect(dark).toMatch(/--ring: var\(--palette-neutral-400\);/);
     expect(dark).toMatch(/--success-foreground: var\(--palette-green-72\);/);
+  });
+});
+
+describe('cn merge config', () => {
+  // Every custom size, spacing, radius and width token in @theme must be registered with
+  // tailwind-merge (lib/utils.ts), or cn() drops or fails to merge it.
+  const theme = readFileSync(join(root, 'app', 'globals.css'), 'utf8');
+  const tokens = (namespace: string) =>
+    [...theme.matchAll(new RegExp(`^\\s*--${namespace}-([a-z][\\w-]*?):`, 'gm'))]
+      .map((match) => match[1]!)
+      .filter((name) => !name.includes('--'));
+
+  it.each(tokens('text'))('merges text-%s as a font size', (name) => {
+    expect(cn('text-xs', `text-${name}`)).toBe(`text-${name}`);
+    expect(cn(`text-${name}`, 'text-muted-foreground')).toBe(`text-${name} text-muted-foreground`);
+  });
+
+  it.each(tokens('spacing'))('merges %s as a spacing value', (name) => {
+    expect(cn('p-1', `p-${name}`)).toBe(`p-${name}`);
+  });
+
+  it.each(tokens('radius'))('merges rounded-%s as a radius', (name) => {
+    expect(cn('rounded-none', `rounded-${name}`)).toBe(`rounded-${name}`);
+  });
+
+  it.each(tokens('container'))('merges max-w-%s as a width', (name) => {
+    expect(cn('max-w-6xl', `max-w-${name}`)).toBe(`max-w-${name}`);
   });
 });

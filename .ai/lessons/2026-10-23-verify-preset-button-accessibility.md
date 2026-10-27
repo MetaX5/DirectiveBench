@@ -47,3 +47,6 @@ input and select borders 1.26:1, focus rings at 50% alpha 1.54:1 and a warning i
 status fill colour 2.97:1. Check control boundaries, focus indicators (measure the solid
 border and every box-shadow ring layer) and meaningful icons at 3:1 in both themes;
 `e2e/ui-contrast.spec.ts` does this ([SPEC-120](../specs/2026-10-27-design-tokens.md)).
+
+Check every variant, not only the default: a variant's own `focus-visible:ring-*/N` wins over
+the base solid ring through `cn`, which left the destructive button at 1.42:1 (SPEC-120 review).
