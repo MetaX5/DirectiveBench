@@ -204,7 +204,11 @@ its reason in the story's parameters.
 - `Nav` and `AutoRefresh` need App Router mocks. Set globally, `parameters.nextjs.appDirectory`
   breaks every story on Next 16.4 (stage 1,
   [lesson](../lessons/2026-10-28-storybook-nextjs-vite-app-directory-breaks-on-next-16-4.md)),
-  so stage 3 sets it per story or mocks `next/navigation`.
+  and per story as well; stage 3 stubs `usePathname` from
+  `@storybook/nextjs-vite/navigation.mock` instead.
+- `ContentTab` cannot render in the browser: `lib/artifacts.ts` imports `ARTIFACT_TYPES` from
+  `@directivebench/core`, whose index pulls Node modules (`node:buffer`). It moves to "What is
+  missing" with that reason; the Markdown it renders is documented on its own.
 - `ThemeToggle` needs `ThemeProvider` with `forcedTheme`, so it does not fight the decorator.
 - `components/ui/table.tsx` carries `'use client'` without a reason (proposal P2).
 - `tsconfig` includes `**/*.tsx`, so a broken story fails `pnpm typecheck` and `next build`.
@@ -288,7 +292,8 @@ stage 2; P7, P8 and P10 are documentation rules):
   the AI symbol) cite the prompt file as their source; confirm that counts as a source under
   prompt rule 3.
 
-Proposals from stage 2, waiting for the maintainer (none is implemented):
+Proposals from stage 2, accepted by the maintainer on 2026-10-28 (P13 implemented in stage 3;
+P11 and P12 are documentation rules):
 
 - P11: loading state. No component has one. Disable the control and say what is happening in
   a `role="status"` message, as `/repositories` does while it checks a path; no spinner.
@@ -334,8 +339,20 @@ Proposals from stage 2, waiting for the maintainer (none is implemented):
     `motion-reduce:transition-none` and the button press shift is `motion-safe:`. P2: `table.tsx`
     has no `'use client'`. Guard tests cover the heading level and the motion pairing, both
     shown red first. Verified by `pnpm test:e2e` (52 passed).
-- **Not implemented:** stages 3 to 5 (product components, patterns, teaching pages,
-  `design-system.md`). The CI job runs only once the PR is open.
+- **Implemented and verified (stage 3, 2026-10-28):**
+  - P13: `Pre` and the `Table` scroll container are tab stops with the focus ring; a named
+    table's container is a region with that name. The stage 2 exceptions are gone. Verified
+    by the story tests and `pnpm test:e2e` (52 passed).
+  - Product pages with 13 sections and stories for PageHeader, Nav, ThemeToggle, EmptyState,
+    NotInitialized, PlannedSection, StatusBadge, JobStatusBadge, MockBadge, NotSandboxedBadge
+    and Markdown (11 of the 12 planned; ContentTab is on "What is missing", §14).
+  - Six patterns, each state its own story: Form (idle, pending, field error, general error,
+    success, double submit blocked), Filtered list, Detail view, Risky-action confirmation,
+    RED/GREEN result (mock labelled) and Job progress (AC-3).
+  - Verified by `pnpm test:storybook`: 106 stories, 212 tests in both themes, also on a cold
+    cache; `build-storybook` and a look at the built pages.
+- **Not implemented:** stages 4 and 5 (teaching pages, "What is missing",
+  `design-system.md`, the final report). The CI job runs only once the PR is open.
 
 ## 📋 Implementation Plan
 
@@ -355,7 +372,7 @@ Proposals from stage 2, waiting for the maintainer (none is implemented):
 6. Button, Badge, Card, Input, NativeSelect, Table, Pre: 13-section pages, state matrices and
    play functions.
 
-### Stage 3: product components and patterns
+### Stage 3: product components and patterns (done 2026-10-28)
 
 7. Product components from §11, with data states.
 8. Patterns from §11, each state as its own story.
