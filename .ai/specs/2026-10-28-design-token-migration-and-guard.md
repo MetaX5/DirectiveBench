@@ -204,16 +204,16 @@ runtime.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: no `text-xs`/`text-sm` remains in scoped files, and the unit test enforces it.
-- [ ] AC-2: spacing utilities follow FR-121-2. Remaining raw `gap-*`/`space-y-*` uses are
+- [x] AC-1: no `text-xs`/`text-sm` remains in scoped files, and the unit test enforces it.
+- [x] AC-2: spacing utilities follow FR-121-2. Remaining raw `gap-*`/`space-y-*` uses are
       intentional (no matching purpose).
-- [ ] AC-3: each guard (raw element, arbitrary value, token missing from `tokeny.md` or from
+- [x] AC-3: each guard (raw element, arbitrary value, token missing from `tokeny.md` or from
       `globals.css`, `text-xs`) is shown failing red first, then passing.
-- [ ] AC-4: both guards read `design-system-scope.json`.
-- [ ] AC-5: `tokeny.md` has the CSS property column and decision D11, and the sync test passes.
-- [ ] AC-6: the pixel comparison (same database, fixed clock, listed masks) is identical in
+- [x] AC-4: both guards read `design-system-scope.json`.
+- [x] AC-5: `tokeny.md` has the CSS property column and decision D11, and the sync test passes.
+- [x] AC-6: the pixel comparison (same database, fixed clock, listed masks) is identical in
       both themes, or each difference is explained in the PR.
-- [ ] AC-7: `pnpm lint && pnpm typecheck && pnpm test` (100% coverage), `pnpm build`,
+- [x] AC-7: `pnpm lint && pnpm typecheck && pnpm test` (100% coverage), `pnpm build`,
       `pnpm verify:pack` and `pnpm test:e2e` pass.
 
 ## 17. Dependencies
@@ -255,6 +255,13 @@ None blocking. The defaults are listed under Resolved assumptions.
 
 ## 20. Implementation status
 
-- **Implemented:** none.
-- **Partially implemented:** none.
-- **Not implemented:** all of the above. This spec is a draft.
+- **Implemented (verified 2026-10-28, Linux, Node 22, Chromium; run log
+  [`2026-10-28-design-token-migration-and-guard`](../runs/2026-10-28-design-token-migration-and-guard.md)):**
+  every acceptance criterion. Guards: `apps/web/test/design-tokens.test.ts` (type utilities,
+  arbitrary values with allowlist, `tokeny.md` sync) and the `designSystemComponents` block in
+  `eslint.config.mjs`, both reading `apps/web/design-system-scope.json`; each shown red first.
+  Migration: no `text-xs`/`text-sm` left; spacing tokens by purpose; 40 before/after screenshots
+  (10 demo pages, 1440 and 390 px, both themes) byte-identical. Full gate and 52 E2E tests pass.
+- **Not verified visually:** states the demo data does not reach (repository registration
+  confirmation, scan status). Their changed utilities have values equal to the tokens.
+- The spec stays in `.ai/specs/` until the maintainer approves the move to `implemented/`.
