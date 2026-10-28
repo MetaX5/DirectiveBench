@@ -1,0 +1,74 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as ColourStories from './colour.stories';
+
+<Meta of={ColourStories} />
+
+# Colour
+
+Colour in DirectiveBench is a neutral surface with one lime accent, from the shadcn preset
+Lyra `b3Rq8QfWi` (SPEC-119 AC-1). Every value is a token in `app/globals.css`, documented in
+`apps/web/tokeny.md` (SPEC-120). This page reads both files: the tables below are generated
+from `tokeny.md` and previewed with the stored CSS values, so they cannot drift from the code.
+
+## Three layers
+
+| Layer       | What it holds                                                                       | Where it may appear      | Source       |
+| ----------- | ----------------------------------------------------------------------------------- | ------------------------ | ------------ |
+| Raw palette | Literal OKLCH values (`--palette-*`)                                                | `app/globals.css` only   | tokeny.md D2 |
+| Semantic    | Purpose names: `background`, `muted-foreground`, `destructive`, `border-control`, … | Every component and page | tokeny.md D1 |
+| Component   | A value one component needs: `button-secondary-hover`, `scorebar-*`                 | That component only      | SPEC-120     |
+
+## Rules
+
+1. Pick a colour by purpose, from the semantic layer. Never write a Tailwind palette class
+   (`bg-zinc-900`, `text-white`), a hex value or an arbitrary colour. Source: tokeny.md D2;
+   `test/design-tokens.test.ts` fails on each of them.
+2. Status colours (`success`, `warning`, `info`, `destructive`) are fills (/10 to /30) and
+   borders (/30 to /40) only. Text and icons on them use the matching `*-foreground` token.
+   Source: tokeny.md D5.
+3. Form controls draw their border with `border-control`. `input` is a fill, never a border.
+   Source: tokeny.md D3, WCAG 1.4.11.
+4. Focus is `border-ring` plus a solid `ring-1 ring-ring`, never a translucent ring.
+   Source: tokeny.md D4.
+5. Links and link buttons use `primary-text`. `primary` is a fill: as text it reaches only
+   1.54:1 on white. Source: tokeny.md, `primary` and `primary-text` rows.
+6. Colour is never the only carrier of meaning. A status badge always carries a word
+   ("Passed", "Regression"), and the score bar prints its value as text. Source: WCAG 1.4.1,
+   tokeny.md U11.
+7. `popover`, `sidebar-primary` and `chart-1` to `chart-5` are reserved for the shadcn
+   generator and stay unused without a separate decision. Source: tokeny.md decision 17.
+8. Text reaches 4.5:1 and large text and UI elements 3:1, in both themes, measured on the
+   real composited surface. Disabled elements are exempt. Source: AGENTS.md §7, tokeny.md
+   decision 10, SPEC-119 FR-8.
+
+## Semantic and component tokens
+
+<Canvas of={ColourStories.ColourTokens} sourceState="none" />
+
+## Measured contrast
+
+Every pair of the `tokeny.md` contrast table, measured in the theme selected in the toolbar.
+The browser resolves each token and composites translucent layers on the surface below them,
+as `e2e/ui-contrast.spec.ts` does. The story test runs this table in both themes and fails
+when a pair falls below its threshold, or when a measurement differs from `tokeny.md` by more
+than 0.25.
+
+On 2026-10-28 every pair met its threshold in both themes. The dark-theme values of the
+translucent outline, ghost and `muted` surfaces (T14 to T17, T29, T30, T32, T33) measure 0.06
+to 0.20 higher than `tokeny.md` records; Chromium composites in sRGB, so the table errs on
+the safe side.
+
+<Canvas of={ColourStories.MeasuredContrast} sourceState="none" />
+
+## How to choose
+
+| If you need                                 | Use                                                                         | Not                                         |
+| ------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------- |
+| Page text                                   | `text-foreground` (inherited from `body`)                                   | `text-black`                                |
+| A description or supporting text            | `text-muted-foreground`                                                     | `text-muted`                                |
+| A link                                      | `text-primary-text`                                                         | `text-primary`                              |
+| An error message                            | `text-destructive-foreground`                                               | `text-destructive`                          |
+| A success, warning or info notice           | `bg-success/10` and `text-success-foreground` (or the warning or info pair) | `text-success`                              |
+| A subtle surface (selected row, code block) | `bg-muted` or `bg-muted/40`                                                 | `bg-accent` (reserved for shadcn internals) |
+| A separator or card outline                 | `border` (the default border colour)                                        | `border-control`                            |
+| A field border                              | `border-control`                                                            | `border-input`                              |

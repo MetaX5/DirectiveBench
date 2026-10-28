@@ -1,0 +1,81 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/artifacts/markdown.stories';
+
+<Meta of={Stories} />
+
+# Markdown
+
+`import { Markdown } from '@/components/artifacts/markdown'`
+
+## 1. Purpose
+
+Renders untrusted Markdown from artifacts safely: as React elements only, so raw HTML stays
+text, only absolute http(s) and mailto links are links, and images never load. Source:
+SPEC-101 FR-101-18, SPEC-007 T1.
+
+## 2. When to use
+
+The rendered view of a Markdown artifact file (`/artifacts/[id]?tab=content`).
+
+## 3. When not to use
+
+| Situation                | Use instead      |
+| ------------------------ | ---------------- |
+| App-authored text        | JSX              |
+| The exact stored content | `Pre` (raw view) |
+
+## 4. Anatomy
+
+A `text-body` block with headings, paragraphs, lists, tables, quotes and code from
+`parseMarkdown` (`lib/markdown.ts`). Inert links and images show their target in a `title`.
+
+## 5. Variants
+
+None.
+
+<Canvas of={Stories.Skill} />
+
+## 6. States
+
+- Untrusted content: shown as text, never run.
+- Empty: renders nothing; the caller decides what to say.
+- Too large: the caller (ContentTab) shows a sentence instead.
+
+<Canvas of={Stories.UntrustedContent} />
+
+## 7. Accessibility
+
+Heading levels come from the file; real links open in a new tab with
+`rel="noopener noreferrer nofollow"`.
+
+## 8. Content
+
+Imported content is shown verbatim, en and em dashes included (AGENTS.md §7).
+
+## 9. Responsiveness
+
+Text wraps; wrap the block in `max-w-prose` (SPEC-122 P7).
+
+<Canvas of={Stories.LongTextNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+## 11. Code
+
+```tsx
+<Markdown source={file.content} />
+```
+
+## 12. Do and don't
+
+| Do                            | Don't                     |
+| ----------------------------- | ------------------------- |
+| `Markdown` for artifact files | `dangerouslySetInnerHTML` |
+
+## 13. Related
+
+`Pre`. `ContentTab` is on "What is missing": it imports `lib/artifacts.ts`, which pulls
+`@directivebench/core` and its Node modules, so it cannot render in the browser without a code
+change.

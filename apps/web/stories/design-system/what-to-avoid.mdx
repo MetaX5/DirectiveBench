@@ -1,0 +1,49 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Design system/What to avoid" />
+
+# What to avoid
+
+For each point: how to spot it in code, why it is a problem, what to use instead.
+
+## 1. DirectiveBench anti-patterns
+
+| Anti-pattern                    | How to spot it                                                                     | Why it is a problem                                           | Instead                                                       |
+| ------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- |
+| A mock result without its label | A score or `StatusBadge` where `isMockAgent(...)` is true and no `MockBadge`       | Users read a pipeline demo as an AI evaluation (AGENTS.md §7) | `MockBadge` next to every mock result                         |
+| A fake feature                  | A button or page that does nothing, or a "coming soon" with no spec                | Breaks "Honesty over appearance" (SPEC-001)                   | `PlannedSection`, or a muted "Planned: not implemented" badge |
+| An en or em dash in app text    | U+2013 or U+2014 in a `.tsx` string (the Storybook test catches it in stories)     | Maintainer copy rule (AGENTS.md §7, lesson 2026-10-23)        | Colon, parentheses, a new sentence                            |
+| Rewriting imported content      | `.replace(` on artifact text, agent output or traces                               | Evidence must stay verbatim (AGENTS.md §7)                    | Show it in `Pre` or `Markdown` as stored                      |
+| Running work from the web app   | `child_process`, `node:sqlite` or the runner imported in `apps/web` (ESLint fails) | The web app reads and enqueues only (SPEC-003)                | Enqueue a job through a repository function                   |
+| Designing for one user's case   | A component or variant named after one skill or client                             | Users build their own scenarios (lesson 2026-10-22)           | A generic component; the case is an example                   |
+| Raw `FormData` in an action     | `formData.get(...)` used without the Zod schema                                    | Untrusted input (SPEC-014)                                    | The Zod-parsed value                                          |
+
+## 2. The generic AI look
+
+| Look                         | How to spot it                                           | Why it is a problem                      | Instead                                |
+| ---------------------------- | -------------------------------------------------------- | ---------------------------------------- | -------------------------------------- |
+| Gradients                    | `bg-gradient-*`, `from-*`, `linear-gradient`             | Not in the preset; noise in a dense tool | Flat semantic fills                    |
+| Glass and blur               | `backdrop-blur`, translucent cards over images           | Lowers contrast, unpredictable in dark   | `bg-card`                              |
+| Glow                         | Coloured `shadow-*`, `drop-shadow`                       | Lyra is flat (Shape and depth)           | A 1px border or ring                   |
+| Emoji instead of icons       | Emoji in labels, headings or buttons                     | Inconsistent, read aloud oddly           | lucide icons with a word (Icons)       |
+| Sparkles as the AI symbol    | `Sparkles` icon for "AI"                                 | Promises magic; the product measures     | Say what happens: "Run benchmark"      |
+| Three identical cards        | A row of three cards with an icon, a title and two lines | Filler, no information                   | A table or the real numbers            |
+| Everything in pills          | Badges for plain values or as buttons                    | Badges lose meaning                      | Text; Badge only for status or type    |
+| Card inside a card           | `Card` nested in `CardContent`                           | Double borders, unclear structure        | One card; h3 and spacing inside        |
+| Shadow as the only separator | `shadow-*` on surfaces                                   | Not in the system                        | `border`, `ring`, surface colour       |
+| Everything centred           | `text-center`, `mx-auto` on content blocks               | Hard to scan                             | Left aligned; centre only `EmptyState` |
+
+## 3. Implementation mistakes
+
+| Mistake                                  | How to spot it                                                          | Why it is a problem                                     | Instead                                                                           |
+| ---------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| A value outside the tokens               | Hex, `bg-zinc-*`, `text-sm`, `p-[13px]`, `h-8`                          | Drifts from the system; the guard fails on most of them | Semantic, type and spacing tokens                                                 |
+| A variant added on the side              | `className` that recolours a `Button` or `Badge`                        | Variants exist so meaning stays consistent              | An existing variant, or a new one in `components/ui` with a reason (Contributing) |
+| A `div` instead of a button              | `<div onClick>`, `<span role="button">`                                 | No keyboard, no focus, no name                          | `Button`                                                                          |
+| A placeholder instead of a label         | `<Input placeholder="Path">` with no label                              | Disappears when typing; not a name (WCAG 3.3.2)         | A visible `<label>`                                                               |
+| Status shown only by colour              | A coloured dot or cell with no word                                     | Fails WCAG 1.4.1                                        | `StatusBadge`                                                                     |
+| A disabled button with no reason         | `disabled` with nothing next to it                                      | The user cannot find out why                            | The reason next to it, `aria-describedby`                                         |
+| A toast for an error that needs action   | A transient message for a field error                                   | It disappears before it is fixed                        | The error under the field                                                         |
+| A tooltip with information needed to act | `title` holding the only explanation                                    | Touch and keyboard users never see it                   | Visible text; `title` only adds detail                                            |
+| A raw form element                       | `<button>`, `<input>`, `<select>`, `<table>` in `app/` or `components/` | ESLint fails (SPEC-121)                                 | The `components/ui` component                                                     |
+| Rounded corners                          | `rounded-md` and friends                                                | Lyra is square (D7); the guard fails                    | `rounded-surface` or nothing                                                      |

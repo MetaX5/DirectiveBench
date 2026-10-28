@@ -1,5 +1,5 @@
 {
-  "roots": ["app", "components"],
-  "extensions": [".ts", ".tsx"],
+  "roots": ["app", "components", "stories", ".storybook"],
+  "extensions": [".ts", ".tsx", ".mdx"],
   "componentLibrary": "components/ui"
 }

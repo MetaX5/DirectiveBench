@@ -1,0 +1,75 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/theme-toggle.stories';
+
+<Meta of={Stories} />
+
+# ThemeToggle
+
+`import { ThemeProvider, ThemeToggle } from '@/components/theme'`
+
+## 1. Purpose
+
+Switches between the light and the dark theme and stores the choice (SPEC-119 FR-5).
+
+## 2. When to use
+
+Only in the app shell, next to the product name (sidebar and mobile header).
+
+## 3. When not to use
+
+A theme choice inside a settings form: a `NativeSelect` with Light, Dark and System, once the
+settings editor exists (SPEC-115, planned).
+
+## 4. Anatomy
+
+A ghost icon `Button` (32px) with Sun (shown in dark) and Moon (shown in light); both icons
+are `aria-hidden`.
+
+## 5. Variants
+
+None.
+
+## 6. States
+
+Rest, hover (`muted` fill), focus (solid ring), pressed; it is never disabled. The icon shows
+the theme it switches to.
+
+<Canvas of={Stories.Toggles} />
+
+## 7. Accessibility
+
+- Name "Toggle colour theme" (`aria-label`) and the same `title`. Source: WCAG 4.1.2.
+- Enter and Space press it. The change is visible at once; nothing is announced, because the
+  whole page changes.
+
+## 8. Content
+
+The accessible name says the action, not the current state.
+
+## 9. Responsiveness
+
+Same size everywhere; it sits in the sidebar from 768px and in the header below.
+
+## 10. API
+
+No props. It needs `ThemeProvider` (next-themes, `attribute="class"`, default `system`) above
+it, as `app/layout.tsx` sets up.
+
+## 11. Code
+
+```tsx
+<ThemeProvider>
+  <ThemeToggle />
+</ThemeProvider>
+```
+
+## 12. Do and don't
+
+| Do                                      | Don't                                 |
+| --------------------------------------- | ------------------------------------- |
+| One toggle in the shell                 | A toggle on each page                 |
+| Let next-themes set `.dark` on `<html>` | Toggle a class on `body` or a wrapper |
+
+## 13. Related
+
+Themes (Foundations), `Button` (`ghost`, `size="icon"`), Icons.

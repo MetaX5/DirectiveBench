@@ -1,0 +1,111 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as BadgeStories from '../../components/ui/badge.stories';
+
+<Meta of={BadgeStories} />
+
+# Badge
+
+`import { Badge } from '@/components/ui/badge'` (or from `@/components/ui/primitives`).
+
+## 1. Purpose
+
+A short, static label for a status or a property: a run's outcome, a job's state, an
+artifact's type, a category.
+
+## 2. When to use
+
+- Outcome of a run or assertion: Passed, Regression, Unstable (`StatusBadge`, `/results`).
+- State of a job: pending, running, completed (`JobStatusBadge`, `/executions`).
+- A property: artifact type (`skill`), version (`v3`), category (`security`).
+- A warning that must stay visible: the mock agent, "Not sandboxed", "Planned: not
+  implemented".
+
+## 3. When not to use
+
+| Situation                        | Use instead                                                      |
+| -------------------------------- | ---------------------------------------------------------------- |
+| Something the user clicks to act | `Button`                                                         |
+| A sentence or an explanation     | Text in `text-body` or `text-ui` next to the item                |
+| An error that needs action       | An error message (`role="alert"`, `text-destructive-foreground`) |
+| A number to compare              | Text with `tabular-nums`; a badge only for its verdict           |
+
+## 4. Anatomy
+
+A `<span>` with `data-slot="badge"` and `data-variant`; an optional decorative icon (12px)
+before the word.
+
+<Canvas of={BadgeStories.WithIcon} />
+
+## 5. Variants
+
+| Variant                    | Meaning in DirectiveBench                                      | Examples                                          |
+| -------------------------- | -------------------------------------------------------------- | ------------------------------------------------- |
+| `success`                  | A good outcome                                                 | Passed, completed, improved                       |
+| `warning`                  | Needs attention, the result is not reliable, or the mock agent | Unstable, Not comparable, interrupted, Mock agent |
+| `info`                     | In progress                                                    | running                                           |
+| `destructive`              | A bad outcome                                                  | Failed, Regression, Error, failed job             |
+| `muted`                    | Neutral, not yet, or planned                                   | Not tested, pending, Planned: not implemented     |
+| `outline`                  | A property that classifies an item                             | `skill`, `v3`, `Not sandboxed`, cancelled job     |
+| `secondary`                | A user-defined label or format                                 | category names, `markdown`                        |
+| `default`, `ghost`, `link` | Available in the preset, unused (P3)                           |                                                   |
+
+Status colours are fills and borders; the text uses the `*-foreground` token (tokeny.md D5).
+Colour never carries the meaning alone: the word does (WCAG 1.4.1).
+
+<Canvas of={BadgeStories.Variants} />
+
+## 6. States
+
+A badge is not interactive, so it has no hover, focus, pressed, disabled, loading, selected
+or error state of its own. Rendered as a link with `asChild`, the preset adds hover and focus;
+no page does this.
+
+<Canvas of={BadgeStories.States} sourceState="none" />
+
+## 7. Accessibility
+
+- Not focusable and has no role: a screen reader reads the word in the flow of the row.
+- The word is the content. Icons are `aria-hidden`.
+- When a `title` adds detail (MockBadge, NotSandboxedBadge), the visible word must still make
+  sense alone, because touch and keyboard users never see the title. Source: WCAG 1.3.1.
+- Text contrast is measured on the badge fill in both themes (Colour page, T05, T22 to T27).
+
+## 8. Content
+
+- One to three words; lower case for machine values (`running`, `skill`), sentence case for
+  verdicts (Passed, Not tested). Source: inventory of `components/common.tsx`.
+- No en or em dash: "Mock agent: not an AI evaluation" (AGENTS.md §7).
+- Long text wraps inside the badge; it never clips.
+
+## 9. Responsiveness
+
+Badges wrap to the next line and wrap their own text, with nothing clipped at a 390px
+viewport. Source: SPEC-119 FR-7, tokeny.md decision 13.
+
+<Canvas of={BadgeStories.LongTextNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={BadgeStories} />
+
+## 11. Code
+
+```tsx
+<Badge variant="success">Passed</Badge>
+```
+
+For outcomes and job states use the product components `StatusBadge` and `JobStatusBadge`,
+which map the value to the variant (Product, stage 3).
+
+## 12. Do and don't
+
+| Do                                                        | Don't                                                                       |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `<StatusBadge status="regression" />`                     | `<Badge variant="destructive">regression</Badge>` written by hand in a page |
+| `variant="warning"` with `text-warning-foreground` inside | `text-warning` for the text (2.97:1)                                        |
+| "Mock agent: not an AI evaluation"                        | A flask icon alone                                                          |
+| A row of badges with `gap-inline-tight` and `flex-wrap`   | Badges in a fixed-width row that clips                                      |
+
+## 13. Related
+
+`StatusBadge`, `JobStatusBadge`, `MockBadge`, `NotSandboxedBadge` (Product), `Button`.

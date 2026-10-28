@@ -149,7 +149,7 @@ export function ContentTab({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <h4 className="mb-2 text-ui font-medium text-muted-foreground">Rendered</h4>
+            <h3 className="mb-2 text-ui font-medium text-muted-foreground">Rendered</h3>
             <div data-testid="artifact-rendered">
               {!markdown ? (
                 <p className="text-body text-muted-foreground">

@@ -1,0 +1,82 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/planned-section.stories';
+
+<Meta of={Stories} />
+
+# PlannedSection
+
+`import { PlannedSection } from '@/components/common'`
+
+## 1. Purpose
+
+The honest page for a section that is specified but not built: it says so, says when, and
+links the specifications. Source: AGENTS.md §7, project overview principle "Honesty over
+appearance".
+
+## 2. When to use
+
+As the whole page of a planned route: `/builder`, `/providers`.
+
+## 3. When not to use
+
+| Situation                          | Use instead                                                           |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| One planned part of a working page | A muted Badge "Planned: not implemented: …" in the PageHeader actions |
+| A built page with no data          | `EmptyState`                                                          |
+
+## 4. Anatomy
+
+`PageHeader` (h1) and a `Card` with a Construction icon, the "Planned: not implemented" badge,
+a summary, the milestone and the list of spec paths.
+
+## 5. Variants
+
+None; the spec list has one or more paths.
+
+<Canvas of={Stories.SeveralSpecs} />
+
+## 6. States
+
+Static, and with no buttons: a planned page has nothing to press. The story test checks it.
+
+<Canvas of={Stories.Default} />
+
+## 7. Accessibility
+
+The badge text says "Planned: not implemented" in words; the icon is `aria-hidden`.
+
+## 8. Content
+
+- Summary: what the section will do, in one or two sentences.
+- No en or em dash in the label (SPEC-122 Q4).
+
+## 9. Responsiveness
+
+Spec paths wrap.
+
+<Canvas of={Stories.NarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+## 11. Code
+
+```tsx
+<PlannedSection
+  title="Benchmark Builder"
+  summary="Build a benchmark suite in the browser."
+  milestone="M4"
+  specs={['.ai/specs/2026-10-14-benchmark-builder.md']}
+/>
+```
+
+## 12. Do and don't
+
+| Do                                     | Don't                               |
+| -------------------------------------- | ----------------------------------- |
+| A planned page that says it is planned | A page with buttons that do nothing |
+
+## 13. Related
+
+`Nav` ("planned" tag), `Badge` (`muted`), `EmptyState`.

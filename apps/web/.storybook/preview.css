@@ -1,0 +1,34 @@
+/* Documentation styles only. Tailwind's preflight in globals.css removes list markers, which
+   MDX pages need for numbered rules. Only lists written in MDX (direct children of the docs
+   content) are restored; stories and blocks inside the page keep the app's styles. */
+.sbdocs-content > ol {
+  list-style: decimal;
+}
+.sbdocs-content > ul {
+  list-style: disc;
+}
+.sbdocs-content > :is(ol, ul) ul {
+  list-style: disc;
+}
+/* At 320px, documentation tables, code and story blocks scroll or wrap inside the page instead
+   of widening it. Tables and code inside a story keep the app's own styles. */
+.sbdocs-content table:not(.docs-story table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.sbdocs-content :not(pre) > code:not(.docs-story code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.sbdocs-content pre:not(.docs-story pre) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.sbdocs-content .docs-story > div {
+  overflow-x: auto;
+}
+.sbdocs-content .docblock-source {
+  max-width: 100%;
+  overflow-x: auto;
+}

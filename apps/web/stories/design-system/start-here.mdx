@@ -1,0 +1,61 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Design system/Start here" />
+
+# Start here: how to build a screen
+
+This Storybook is the operating manual of the DirectiveBench design system: which component to
+use and why, how to combine them, which tokens to use, how every state behaves and what to
+avoid. It documents the code in `apps/web`; nothing here is a separate copy. A short version
+for agents is `apps/web/design-system.md`.
+
+## The product in three sentences
+
+DirectiveBench is a local-first workbench for people who write AI agent skills, instructions
+and rules: it finds them in their repositories and shows them in one place. Its main job is
+benchmarking: it runs an agent with and without a skill (RED/GREEN) and says whether a change
+made the agent's work better or worse. It is a dense, quiet tool for developers that is honest
+about what it knows: mock results and planned features are always labelled.
+
+Sources: product brief (Vision, D04, D08), SPEC-001, AGENTS.md §7.
+
+## Five steps
+
+1. **Find the pattern.** Most screens are a Form, a Filtered list, a Detail view, a
+   Risky-action confirmation, a RED/GREEN result or Job progress (Patterns). Start from the
+   closest one and its states.
+2. **Pick components with "How to choose".** Use the components below, nothing hand-made: a raw
+   `<button>`, `<input>`, `<select>` or `<table>` fails ESLint (SPEC-121).
+3. **Use semantic tokens.** Colours by purpose (`text-muted-foreground`, `bg-success/10`),
+   sizes from the five type tokens, spacing by relation (`gap-inline`, `space-y-stack`,
+   `gap-grid`, `space-y-section`). No hex, palette class or arbitrary value
+   (`test/design-tokens.test.ts`).
+4. **Design the data states.** Loading (disabled plus a status line), empty ("nothing yet" and
+   "no results" differ), error (what happened and what to do), partial data, a lot of data,
+   long text, 320px.
+5. **Check "What to avoid"** and run `pnpm lint && pnpm test && pnpm test:storybook`.
+
+## Components
+
+| Component         | Import                                   | Use when                                       | Do not use when                                  |
+| ----------------- | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
+| Button            | `@/components/ui/button`                 | Starting an action on this page                | Going to another page (use a link)               |
+| Badge             | `@/components/ui/badge`                  | A status or property in one to three words     | Something clickable, or a sentence               |
+| Card              | `@/components/ui/card`                   | One section of a page                          | Inside another card                              |
+| Input             | `@/components/ui/input`                  | A single-line text value, with a visible label | A choice from a known list                       |
+| NativeSelect      | `@/components/ui/native-select`          | One value from a short known list              | Many options that need search (missing)          |
+| Table             | `@/components/ui/table`                  | Rows with the same columns                     | Label and value pairs of one item                |
+| Pre               | `@/components/ui/primitives`             | JSON, code, raw output                         | A path inside a sentence (use `font-mono`)       |
+| PageHeader        | `@/components/common`                    | The top of every page, once                    | A section title (use CardTitle)                  |
+| EmptyState        | `@/components/common`                    | A list with nothing to show                    | An error                                         |
+| NotInitialized    | `@/components/common`                    | No local database                              | An empty list                                    |
+| PlannedSection    | `@/components/common`                    | A whole page that is not built                 | One planned part of a working page (muted Badge) |
+| StatusBadge       | `@/components/common`                    | A run's outcome                                | A job's queue state                              |
+| JobStatusBadge    | `@/components/common`                    | A job's queue state                            | A run's outcome                                  |
+| MockBadge         | `@/components/common`                    | Every mock-agent result                        | Real agents                                      |
+| NotSandboxedBadge | `@/components/common`                    | A local-process suite                          | Sandboxed runs (not built)                       |
+| Markdown          | `@/components/artifacts/markdown`        | Rendering an artifact's Markdown               | App-authored text                                |
+| Nav, ThemeToggle  | `@/components/nav`, `@/components/theme` | Only in the app shell                          | Anywhere else                                    |
+
+Pages may import the primitives from `@/components/ui/primitives`, which re-exports them
+(SPEC-122 P1).

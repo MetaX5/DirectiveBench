@@ -1,0 +1,44 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as SpacingStories from './spacing.stories';
+
+<Meta of={SpacingStories} />
+
+# Spacing and layout
+
+Spacing tokens are named by relation, not by size. Their values come from how often each value
+appeared in the code before the tokens existed (tokeny.md D9).
+
+## The relation rule
+
+| Relation                                                   | Token                                                                  | Utility                           | Example                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------- | ----------------------------- |
+| Inside a group: a row of controls                          | `space-inline` (8px)                                                   | `gap-inline`                      | Field and its Register button |
+| Inside a group: an icon next to its label, a row of badges | `space-inline-tight` (4px)                                             | `gap-inline-tight`                | Artifact type badges          |
+| Between items inside a panel                               | `space-stack` (8px)                                                    | `space-y-stack`                   | Lines of a card body          |
+| Inside a card                                              | `card-spacing` (16px, 12px for `size="sm"`)                            | set by `Card`                     | Every card                    |
+| Between panels                                             | `space-grid` (16px)                                                    | `gap-grid`                        | Card grid                     |
+| Between the page header and sections, and between sections | `space-section` (24px)                                                 | `mb-section`, `space-y-section`   | Every page                    |
+| Page padding                                               | `space-page-inline` (16px, 32px from 768px), `space-page-block` (24px) | `px-page-inline`, `py-page-block` | `main` in `app/layout.tsx`    |
+
+Choose the token for the relation, even when another token has the same value: `space-stack`
+and `space-inline` are both 8px, but they change for different reasons. Source: tokeny.md D9.
+
+<Canvas of={SpacingStories.Relations} />
+
+## Controls
+
+Controls are 32px high (`h-control`), with 28px (`control-sm`) and 24px (`control-xs`) for
+dense rows. A button next to a field matches the field height. Source: SPEC-119 FR-6,
+tokeny.md decision 11.
+
+## Layout
+
+| Width        | What changes                                                                                                                                                 | Source                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| 320px        | No sidebar: a header with the product name and theme toggle, then a "Navigation" disclosure. Page padding 16px. Badges wrap and nothing is clipped at 390px. | `app/layout.tsx`, SPEC-119 FR-7                |
+| 768px (`md`) | The 224px sidebar (`w-sidebar`) appears and stays in view while the page scrolls. Page padding becomes 32px. Two-column card grids start.                    | `app/layout.tsx`, tokeny.md D9                 |
+| 1440px       | `main` stops growing at 72rem (`max-w-content`) and centres in the space beside the sidebar.                                                                 | `app/layout.tsx`, tokeny.md `size-content-max` |
+
+## Spacing, size and width tokens
+
+<Canvas of={SpacingStories.SpacingTokens} sourceState="none" />

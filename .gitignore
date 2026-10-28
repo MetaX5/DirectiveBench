@@ -19,6 +19,7 @@ next-env.d.ts
 # Test artifacts
 test-results/
 playwright-report/
+storybook-static/
 *.tgz
 
 .DS_Store

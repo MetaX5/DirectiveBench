@@ -1,11 +1,18 @@
-'use client';
-
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+// The container scrolls sideways when the table is wider than the screen, so it is a tab stop
+// and, when the table is named, a region with the same name (SPEC-122 P13).
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
+  const name = props['aria-label'];
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      tabIndex={0}
+      role={name ? 'region' : undefined}
+      aria-label={name}
+      className="relative w-full overflow-x-auto outline-none focus-visible:ring-1 focus-visible:ring-ring"
+    >
       <table
         data-slot="table"
         className={cn('w-full caption-bottom text-ui', className)}
@@ -44,7 +51,7 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot="table-row"
       className={cn(
-        'border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted',
+        'border-b transition-colors motion-reduce:transition-none hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted',
         className,
       )}
       {...props}

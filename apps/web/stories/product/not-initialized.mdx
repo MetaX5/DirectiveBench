@@ -1,0 +1,71 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/not-initialized.stories';
+
+<Meta of={Stories} />
+
+# NotInitialized
+
+`import { NotInitialized } from '@/components/common'`
+
+## 1. Purpose
+
+Explains that the local database does not exist yet and how to create it.
+
+## 2. When to use
+
+On any page that reads the database, when `getDatabase()` (`lib/db.ts`) returns nothing.
+
+## 3. When not to use
+
+An empty list in an existing database: `EmptyState`.
+
+## 4. Anatomy
+
+A `Card` with a 20px DatabaseZap icon in `warning-foreground` (tokeny.md U07), a sentence
+in medium weight and the commands in `font-mono`.
+
+## 5. Variants
+
+None.
+
+## 6. States
+
+Static. Data states: not applicable; it is itself the "no database" state.
+
+<Canvas of={Stories.Default} />
+
+## 7. Accessibility
+
+The icon is `aria-hidden`; the sentence carries the meaning. Commands are `<code>`, readable
+as text.
+
+## 8. Content
+
+What happened, then what to do: the two commands that create the database.
+
+## 9. Responsiveness
+
+The icon stays at the top left; the text wraps.
+
+<Canvas of={Stories.NarrowScreen} />
+
+## 10. API
+
+No props.
+
+## 11. Code
+
+```tsx
+const handle = getDatabase();
+if (!handle) return <NotInitialized />;
+```
+
+## 12. Do and don't
+
+| Do                | Don't                  |
+| ----------------- | ---------------------- |
+| Name the commands | "Something went wrong" |
+
+## 13. Related
+
+`EmptyState`, `PlannedSection`.

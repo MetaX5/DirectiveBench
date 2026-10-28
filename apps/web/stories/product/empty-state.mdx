@@ -1,0 +1,80 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/empty-state.stories';
+
+<Meta of={Stories} />
+
+# EmptyState
+
+`import { EmptyState } from '@/components/common'`
+
+## 1. Purpose
+
+Says that a list or section has nothing to show, why, and what to do next.
+
+## 2. When to use
+
+- Nothing exists yet: "No artifacts yet" on `/artifacts`, with where artifacts come from.
+- No results for the current filters: "No artifacts match the filters", with a way to clear them.
+
+## 3. When not to use
+
+| Situation                | Use instead                       |
+| ------------------------ | --------------------------------- |
+| The database is missing  | `NotInitialized`                  |
+| The feature is not built | `PlannedSection`                  |
+| An error                 | An error message (`role="alert"`) |
+
+## 4. Anatomy
+
+A dashed `Card` with a centred title (`text-body font-medium`) and an optional explanation
+with a link.
+
+## 5. Variants
+
+Two uses with different text: "nothing yet" and "no results for these filters".
+
+<Canvas of={Stories.NothingYet} />
+<Canvas of={Stories.NoResultsForFilters} />
+
+## 6. States
+
+Static. The explanation may hold a link, which has its own hover and focus.
+
+## 7. Accessibility
+
+The title is a paragraph, not a heading; the surrounding card or page header names the
+section. The link text names the destination ("Repositories").
+
+## 8. Content
+
+- Title: what is missing, in words ("No runs yet").
+- Explanation: why, and the next step with a link. Source: SPEC-122 §18 Q1.
+
+## 9. Responsiveness
+
+Centred text wraps; padding stays.
+
+<Canvas of={Stories.LongTextNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+## 11. Code
+
+```tsx
+<EmptyState title="No artifacts yet">
+  Register and scan a repository on the <Link href="/repositories">Repositories</Link> page.
+</EmptyState>
+```
+
+## 12. Do and don't
+
+| Do                                                | Don't                            |
+| ------------------------------------------------- | -------------------------------- |
+| Different text for "nothing yet" and "no results" | One "No data" message for both   |
+| A link to the next step                           | An empty table with headers only |
+
+## 13. Related
+
+`NotInitialized`, `PlannedSection`, the Filtered list pattern.

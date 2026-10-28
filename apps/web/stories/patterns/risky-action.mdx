@@ -1,0 +1,31 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './risky-action.stories';
+
+<Meta of={Stories} />
+
+# Risky-action confirmation
+
+Modelled on "Register anyway" (`/repositories`): registering the home directory or a path
+that overlaps a registered repository asks first. Related to product decision D05 (user-level
+skill folders are opt-in).
+
+## Structure
+
+An inline warning panel (`role="alert"`, `warning` fill and border) under the form: the question
+naming the object, the reasons as a list, then the destructive action and Cancel.
+
+## Rules
+
+1. The question names the object ("Register /home/dev?"). Source: SPEC-122 prompt (stage 3).
+2. Each reason is a sentence. Source: `app/repositories/page.tsx`.
+3. The confirming button is `destructive`, `size="sm"`, named with a verb ("Register anyway"),
+   never "OK" or "Yes". Source: SPEC-122 §18 Q1.
+4. Leaving is easy and changes nothing: a Cancel link next to it. Source: SPEC-122 prompt.
+5. The panel is inline, not a modal. A Dialog primitive is on "What is missing" for actions
+   that need one.
+
+## States
+
+<Canvas of={Stories.OneReason} />
+<Canvas of={Stories.SeveralReasons} />
+<Canvas of={Stories.NarrowScreen} />

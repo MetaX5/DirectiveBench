@@ -87,7 +87,8 @@ These rules are not optional. A task is not done until the applicable steps are 
 
 13. Run the quality gate and fix failures:
     `pnpm lint && pnpm typecheck && pnpm test` — plus `pnpm build && pnpm verify:pack` when you
-    touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` for UI changes.
+    touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` and
+    `pnpm test:storybook` for UI changes.
 14. **Prove the change works and review it critically.** Exercise the changed behaviour for real
     (run the CLI, open the page, run `directivebench demo`) and review your own diff as a
     sceptical reviewer would; do not open a PR until it passes that review. If a fix works but is
@@ -165,6 +166,7 @@ pnpm lint             # ESLint
 pnpm typecheck        # tsc / next typegen for every package
 pnpm test             # Vitest unit and integration tests, 100% coverage threshold
 pnpm test:e2e         # Playwright smoke test (builds required)
+pnpm test:storybook   # every Storybook story in both themes, with axe (Chromium required)
 pnpm build            # build web app and CLI bundle
 pnpm verify:pack      # pack, install and smoke-test the npm tarball
 ```
@@ -188,6 +190,10 @@ pnpm verify:pack      # pack, install and smoke-test the npm tarball
   button-only checks do not establish contrast for the rest of the UI.
   Buttons need pointer cursors; inline form buttons
   must match adjacent input heights. A UI preset does not waive these checks.
+- Before building or changing UI in `apps/web`, read
+  [`apps/web/design-system.md`](apps/web/design-system.md) and the Storybook
+  (`pnpm --filter @directivebench/web storybook`). Use its components, tokens and patterns;
+  a new component or variant follows its "Contributing" page and gets stories and a page.
 - Design generic capabilities. A user's concrete case (one skill, client or document type) is a
   reference scenario to check the design, never a target to special-case: users build their own
   scenarios, requirements and grading

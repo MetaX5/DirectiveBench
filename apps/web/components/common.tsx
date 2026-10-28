@@ -22,7 +22,7 @@ export function PageHeader({
         {description ? <p className="mt-1 text-body text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? (
-        <div className="flex min-w-0 max-w-full items-center gap-inline">{actions}</div>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-inline">{actions}</div>
       ) : null}
     </div>
   );
@@ -70,7 +70,7 @@ export function MockBadge() {
       title="Results come from the deterministic mock agent, not from an AI model"
     >
       <FlaskConical className="size-3" aria-hidden />
-      Mock agent — not an AI evaluation
+      Mock agent: not an AI evaluation
     </Badge>
   );
 }
@@ -134,7 +134,7 @@ export function PlannedSection({
           <Construction className="mt-0.5 size-5 text-muted-foreground" aria-hidden />
           <div className="space-y-stack text-body">
             <p>
-              <Badge variant="muted">Planned — not implemented</Badge>
+              <Badge variant="muted">Planned: not implemented</Badge>
             </p>
             <p>{summary}</p>
             <p className="text-muted-foreground">

@@ -102,7 +102,7 @@ test('navigation reaches every section and marks the active item', async ({ page
     await expect(link).toHaveAttribute('aria-current', 'page');
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     if ('planned' in item) {
-      await expect(page.getByText('Planned — not implemented')).toBeVisible();
+      await expect(page.getByText('Planned: not implemented')).toBeVisible();
       await expect(
         page
           .getByRole('main')
@@ -116,7 +116,7 @@ test('navigation reaches every section and marks the active item', async ({ page
 
 test('planned sections are labelled as not implemented', async ({ page }) => {
   await page.goto('/builder');
-  await expect(page.getByText('Planned — not implemented')).toBeVisible();
+  await expect(page.getByText('Planned: not implemented')).toBeVisible();
   await expect(page.getByText('.ai/specs/2026-10-14-benchmark-builder.md')).toBeVisible();
 });
 

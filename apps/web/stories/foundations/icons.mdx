@@ -1,0 +1,40 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as IconStories from './icons.stories';
+
+<Meta of={IconStories} />
+
+# Icons
+
+Icons come from `lucide-react` only. Source: maintainer decision of 2026-10-28, SPEC-122 §18
+Q3.
+
+## Rules
+
+1. Size: 16px (`size-4`) by default, which `Button` applies to any icon without a size class.
+   12px to 14px (`size-3`, `size-3.5`) inside small controls, badges and file trees. 20px
+   (`size-5`) for the icon beside a notice paragraph. Source: SPEC-122 §18 Q3; current use in
+   `components/`.
+2. An icon next to text is decorative: give it `aria-hidden`. Source: WAI-ARIA, `aria-hidden`.
+3. An icon-only control has an accessible name (`aria-label`) and a `title` for pointer users,
+   as `ThemeToggle` does. Source: WCAG 4.1.2.
+4. An icon never carries a status alone: the word is always there ("Mock agent", "Not
+   sandboxed"). Source: WCAG 1.4.1, SPEC-122 §18 Q3.
+5. Supporting icons use `text-muted-foreground`. Status icons use the status `*-foreground`
+   token, never the fill. Source: tokeny.md D5, U07, U08.
+6. Interactive targets are at least 24 by 24px; icon buttons are 32px (`size="icon"`).
+   Source: WCAG 2.5.8, SPEC-119 FR-6.
+7. No emoji in place of icons, and no sparkles as a symbol for AI. Source: the maintainer's
+   prompt for this documentation (`.ai/specs/briefs/2026-10-27-design-system-storybook.md`,
+   stage 4 "What to avoid").
+
+## Icons in use
+
+<Canvas of={IconStories.InUse} sourceState="none" />
+
+## Sizes
+
+<Canvas of={IconStories.Sizes} />
+
+## Icon-only control
+
+<Canvas of={IconStories.IconOnlyControl} />

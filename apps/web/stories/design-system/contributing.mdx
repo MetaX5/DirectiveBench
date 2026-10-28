@@ -1,0 +1,69 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Design system/Contributing" />
+
+# Contributing
+
+## When to add a component
+
+- **A new component** when the same need appears in at least two places, or when a planned
+  screen needs a primitive listed on "What is missing". Never for one page's special case.
+  Source: SPEC-119 §19, AGENTS.md §7 ("Design generic capabilities", no speculative
+  abstractions).
+- **A new variant** when an existing component needs a new meaning that several places share,
+  for example a new status. Not to change a colour in one place.
+- **Nothing** when an existing component and tokens do the job. Three similar lines beat a
+  premature helper (AGENTS.md §7).
+
+Primitives come from the shadcn generator with the preset `b3Rq8QfWi`. A generator run is
+reviewed before merge (lesson 2026-10-23): its output must use the tokens (tokeny.md D11),
+keep square corners (D7), keep `CardTitle` an h2 (P6) and pair every transition with
+`motion-reduce:transition-none` (P9). `test/design-tokens.test.ts` checks the last three.
+
+## What a new component needs
+
+1. The component in `components/ui` (primitive) or `components/` (product), using tokens only.
+2. A story file next to it: Playground, every variant, a state matrix (hover, focus and
+   pressed frozen with `stateProps` from `stories/blocks/state-matrix.tsx`), long content at
+   320px, and a play function for the main behaviour.
+3. A page in `stories/primitives/` or `stories/product/` with the 13 sections: purpose, when
+   to use, when not to use, anatomy, variants, states, accessibility, content,
+   responsiveness, API, code, do and don't, related.
+4. A row in the catalogue (`stories/blocks/catalogue.tsx`), in "Start here" and in
+   `design-system.md`; remove it from "What is missing".
+5. No a11y violations in either theme, or a documented exception in the story parameters with
+   the finding and where it is tracked.
+
+## When a token changes
+
+1. Change `tokeny.md` and `app/globals.css` together; the sync test fails otherwise
+   (SPEC-121 FR-121-6).
+2. Recompute the contrast pairs: the Colour page measures them, and its story test fails below
+   a threshold or when `tokeny.md` and the stored value differ by more than 0.25.
+3. A new `--text-*`, `--spacing-*`, `--radius-*` or `--container-*` token goes into
+   `extendTailwindMerge` in `lib/utils.ts` (lesson 2026-10-27).
+4. Tokens, themes and `tokeny.md` change only with the maintainer's consent (SPEC-122 prompt
+   rule 11).
+
+## Who approves
+
+The maintainer approves new components, variants and token changes, through the spec and the
+PR (AGENTS.md §2, §4).
+
+## Commands
+
+```bash
+pnpm --filter @directivebench/web storybook        # Storybook on http://localhost:6006
+pnpm --filter @directivebench/web build-storybook  # static build in apps/web/storybook-static
+pnpm test:storybook   # every story in both themes: render, play functions, axe
+pnpm test             # unit tests, including the token guard (test/design-tokens.test.ts)
+pnpm lint             # ESLint, including the design-system component rule
+```
+
+## Technical note
+
+The documentation runs on Storybook 10 (storybook.js.org) with `@storybook/nextjs-vite`; its UI
+is branded "DirectiveBench" (`.storybook/manager.ts`). Telemetry, what's-new notices and the
+onboarding checklists are off (`.storybook/main.ts`). Stories are not published and never
+enter the npm package. `Nav` stubs `usePathname` because Storybook's App Router mock does not
+work with Next 16.4 (lesson 2026-10-28).

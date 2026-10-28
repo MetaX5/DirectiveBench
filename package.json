@@ -17,6 +17,7 @@
     "format:check": "prettier --check .",
     "test": "turbo run test",
     "test:e2e": "pnpm --filter @directivebench/web test:e2e",
+    "test:storybook": "pnpm --filter @directivebench/web test-storybook",
     "db:generate": "pnpm --filter @directivebench/database db:generate",
     "verify:pack": "node scripts/verify-pack.mjs"
   },
