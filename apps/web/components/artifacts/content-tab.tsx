@@ -82,7 +82,7 @@ export function ContentTab({
 }) {
   const { version, file } = selection;
   if (!version || !file) {
-    return <p className="text-sm text-muted-foreground">This artifact has no stored content.</p>;
+    return <p className="text-body text-muted-foreground">This artifact has no stored content.</p>;
   }
   const markdown = isMarkdownPath(file.path);
   const tooLarge = file.content.length > MAX_RENDERED_MARKDOWN_CHARS;
@@ -96,7 +96,7 @@ export function ContentTab({
             <CardTitle>Version</CardTitle>
           </CardHeader>
           <CardContent>
-            <nav aria-label="Versions" className="flex flex-wrap gap-1 text-xs">
+            <nav aria-label="Versions" className="flex flex-wrap gap-1 text-ui">
               {versions.map((v) => (
                 <Link
                   key={v.id}
@@ -125,7 +125,7 @@ export function ContentTab({
               {version.files.length} file(s) in version {version.version}
             </CardDescription>
           </CardHeader>
-          <CardContent className="font-mono text-xs" data-testid="file-tree">
+          <CardContent className="font-mono text-ui" data-testid="file-tree">
             <FileTree
               nodes={buildFileTree(version.files.map((f) => f.path))}
               artifactId={artifactId}
@@ -149,15 +149,15 @@ export function ContentTab({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <h4 className="mb-2 text-xs font-medium text-muted-foreground">Rendered</h4>
+            <h4 className="mb-2 text-ui font-medium text-muted-foreground">Rendered</h4>
             <div data-testid="artifact-rendered">
               {!markdown ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   Only Markdown is rendered. This file is shown as text only, in the raw view below;
                   DirectiveBench never runs or loads supporting files.
                 </p>
               ) : tooLarge ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   This file is too large to render ({formatBytes(file.size)}); the raw view below
                   shows all of it.
                 </p>
@@ -177,7 +177,7 @@ export function ContentTab({
           </CardHeader>
           <CardContent>
             {crNotice ? (
-              <p className="mb-2 text-xs text-muted-foreground" data-testid="raw-notice">
+              <p className="mb-2 text-ui text-muted-foreground" data-testid="raw-notice">
                 {crNotice}
               </p>
             ) : null}

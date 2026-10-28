@@ -62,9 +62,9 @@ export default async function CategoriesPage() {
                       </Badge>
                     ) : null}
                   </TD>
-                  <TD className="font-mono text-xs text-muted-foreground">{c.slug}</TD>
+                  <TD className="font-mono text-ui text-muted-foreground">{c.slug}</TD>
                   <TD className="text-muted-foreground">{c.description ?? '—'}</TD>
-                  <TD className="text-xs">{c.predefined ? 'Predefined' : 'User-defined'}</TD>
+                  <TD className="text-ui">{c.predefined ? 'Predefined' : 'User-defined'}</TD>
                   <TD className="text-right tabular-nums">{Number(c.artifactCount)}</TD>
                 </TR>
               ))}

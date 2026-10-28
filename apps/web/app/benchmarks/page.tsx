@@ -73,7 +73,7 @@ export default async function BenchmarksPage() {
                           </Link>
                         </TD>
                         <TD>v{latestVersion?.version}</TD>
-                        <TD className="font-mono text-xs">{definition?.execution?.agent}</TD>
+                        <TD className="font-mono text-ui">{definition?.execution?.agent}</TD>
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             {definition?.technologies?.map((t) => (
@@ -89,7 +89,7 @@ export default async function BenchmarksPage() {
                           {lastRun ? (
                             <span className="flex items-center gap-2">
                               <StatusBadge status={runDisplayStatus(lastRun)} />
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-ui text-muted-foreground">
                                 {formatDate(lastRun.startedAt)}
                               </span>
                             </span>

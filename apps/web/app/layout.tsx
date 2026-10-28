@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <div className="flex min-h-screen">
             <aside className="sticky top-0 hidden h-screen w-sidebar shrink-0 flex-col gap-6 border-r bg-sidebar p-3 md:flex">
               <div className="flex items-center justify-between px-2 pt-1">
-                <Link href="/" className="text-sm font-semibold tracking-tight">
+                <Link href="/" className="text-body font-semibold tracking-tight">
                   DirectiveBench
                 </Link>
                 <ThemeToggle />
@@ -34,13 +34,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </aside>
             <div className="flex min-w-0 flex-1 flex-col">
               <header className="flex items-center justify-between border-b px-4 py-2 md:hidden">
-                <Link href="/" className="text-sm font-semibold">
+                <Link href="/" className="text-body font-semibold">
                   DirectiveBench
                 </Link>
                 <ThemeToggle />
               </header>
               <details className="border-b px-4 py-2 md:hidden">
-                <summary className="cursor-pointer text-sm text-muted-foreground">
+                <summary className="cursor-pointer text-body text-muted-foreground">
                   Navigation
                 </summary>
                 <div className="pt-2">

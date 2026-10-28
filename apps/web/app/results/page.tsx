@@ -67,23 +67,23 @@ export default async function ResultsPage() {
                         <Link className="font-medium hover:underline" href={`/results/${run.id}`}>
                           {artifact.name}
                         </Link>{' '}
-                        <span className="text-xs text-muted-foreground">v{artifact.version}</span>
+                        <span className="text-ui text-muted-foreground">v{artifact.version}</span>
                       </TD>
                       <TD className="text-muted-foreground">
-                        {suite.name} <span className="text-xs">v{suite.version}</span>
+                        {suite.name} <span className="text-ui">v{suite.version}</span>
                       </TD>
                       <TD>
                         {isMockAgent(run.agentAdapterId) ? (
                           <MockBadge />
                         ) : (
-                          <span className="font-mono text-xs">{run.agentAdapterId}</span>
+                          <span className="font-mono text-ui">{run.agentAdapterId}</span>
                         )}
                       </TD>
                       <TD>
                         {run.status === 'running' ? (
                           'running…'
                         ) : run.status === 'cancelled' || run.status === 'interrupted' ? (
-                          <span className="text-xs">{run.status}</span>
+                          <span className="text-ui">{run.status}</span>
                         ) : (
                           <StatusBadge status={runDisplayStatus(run)} />
                         )}
@@ -95,8 +95,8 @@ export default async function ResultsPage() {
                         {formatScore(s?.candidate?.meanScore)}
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(s?.delta)}</TD>
-                      <TD className="text-xs">{s?.confidence?.level ?? '—'}</TD>
-                      <TD className="text-xs text-muted-foreground">{formatDate(run.startedAt)}</TD>
+                      <TD className="text-ui">{s?.confidence?.level ?? '—'}</TD>
+                      <TD className="text-ui text-muted-foreground">{formatDate(run.startedAt)}</TD>
                     </TR>
                   );
                 })}

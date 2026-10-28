@@ -36,7 +36,7 @@ export default function SettingsPage() {
             <CardTitle>Data directory</CardTitle>
             <CardDescription>Override with --data-dir or DIRECTIVEBENCH_DATA_DIR.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-1 font-mono text-xs">
+          <CardContent className="space-y-1 font-mono text-ui">
             <p>{layout.root}</p>
             <p className="text-muted-foreground">database: {layout.database}</p>
             <p className="text-muted-foreground">fixtures: {layout.fixtures}</p>
@@ -50,7 +50,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             {error ? (
-              <p className="text-sm text-destructive-foreground">{error}</p>
+              <p className="text-body text-destructive-foreground">{error}</p>
             ) : (
               <Pre>{JSON.stringify(config, null, 2)}</Pre>
             )}
@@ -64,7 +64,7 @@ export default function SettingsPage() {
               <span className="font-mono">.ai/specs/2026-10-14-settings-and-configuration.md</span>
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2 text-sm">
+          <CardContent className="flex flex-wrap gap-2 text-body">
             {[
               'Settings editor',
               'Secret storage (OS keychain)',

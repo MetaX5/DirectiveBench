@@ -95,7 +95,7 @@ function VariantCard({
           {formatScore(data?.meanScore)}
         </p>
         <ScoreBar value={data?.meanScore ?? null} tone={tone} />
-        <dl className="grid grid-cols-2 gap-1 text-xs">
+        <dl className="grid grid-cols-2 gap-1 text-ui">
           <dt className="text-muted-foreground">Pass rate</dt>
           <dd className="tabular-nums">{formatScore(data?.passRate)}</dd>
           <dt className="text-muted-foreground">Valid runs</dt>
@@ -108,7 +108,7 @@ function VariantCard({
           <dd className="tabular-nums">{formatDuration(data?.meanDurationMs)}</dd>
         </dl>
         {invocation ? (
-          <p className="text-xs" data-testid={`${testId}-invocation`}>
+          <p className="text-ui" data-testid={`${testId}-invocation`}>
             {invocation}
           </p>
         ) : null}
@@ -148,7 +148,7 @@ function AgentProfileCard({
         <CardHeader>
           <CardTitle>Agent profile</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
+        <CardContent className="text-body text-muted-foreground">
           The deterministic mock agent reports no agent profile: no auth mode, isolation or model.
         </CardContent>
       </Card>
@@ -164,7 +164,7 @@ function AgentProfileCard({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <dl className="grid gap-1 text-xs md:grid-cols-2">
+        <dl className="grid gap-1 text-ui md:grid-cols-2">
           <dt className="text-muted-foreground">Auth mode</dt>
           <dd data-testid="profile-auth-mode">{value(profile?.authMode)}</dd>
           <dt className="text-muted-foreground">Isolation profile</dt>
@@ -239,7 +239,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
 
       {run.error ? (
         <Card className="mb-4 border-destructive/40">
-          <CardContent className="text-sm text-destructive-foreground">{run.error}</CardContent>
+          <CardContent className="text-body text-destructive-foreground">{run.error}</CardContent>
         </Card>
       ) : null}
 
@@ -269,11 +269,11 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <CardHeader>
               <CardTitle>Comparison</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+            <CardContent className="space-y-2 text-body">
               <p className="text-metric tabular-nums" data-testid="score-delta">
                 {formatDelta(summary.delta)}
               </p>
-              <dl className="grid grid-cols-2 gap-1 text-xs">
+              <dl className="grid grid-cols-2 gap-1 text-ui">
                 <dt className="text-muted-foreground">Verdict</dt>
                 <dd data-testid="verdict">{summary.verdict}</dd>
                 <dt className="text-muted-foreground">Candidate outcome</dt>
@@ -290,9 +290,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                   Real agent — results vary between runs
                 </Badge>
               )}
-              <p className="text-xs text-muted-foreground">{summary.confidence.reason}</p>
+              <p className="text-ui text-muted-foreground">{summary.confidence.reason}</p>
               {summary.reasons?.length ? (
-                <ul className="list-inside list-disc text-xs" data-testid="verdict-reasons">
+                <ul className="list-inside list-disc text-ui" data-testid="verdict-reasons">
                   {summary.reasons.map((reason) => (
                     <li key={reason}>{reason}</li>
                   ))}
@@ -306,7 +306,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </div>
       ) : (
         <Card>
-          <CardContent className="text-sm text-muted-foreground">
+          <CardContent className="text-body text-muted-foreground">
             {run.status === 'running'
               ? 'Run in progress — results appear as agent runs complete.'
               : 'No summary was recorded for this run.'}
@@ -330,10 +330,10 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <CardTitle>Warnings and uncontrolled differences</CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="list-inside list-disc space-y-1 text-sm text-muted-foreground">
+            <ul className="list-inside list-disc space-y-1 text-body text-muted-foreground">
               {warnings.map((w) => (
                 <li key={w.text} data-code={w.code ?? ''}>
-                  <span className={w.code ? 'font-mono text-xs' : undefined}>{w.text}</span>
+                  <span className={w.code ? 'font-mono text-ui' : undefined}>{w.text}</span>
                   {w.explanation ? (
                     <span className="text-foreground"> — {w.explanation}</span>
                   ) : null}
@@ -359,11 +359,11 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             const counts = traceCounts(agentRun.trace);
             return (
               <details key={agentRun.id} className="rounded-surface border" data-testid="agent-run">
-                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-body">
                   <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
                     {agentRun.variant === 'baseline' ? baselineName : candidateName}
                   </Badge>
-                  <span className="font-mono text-xs">
+                  <span className="font-mono text-ui">
                     {agentRun.caseId} · rep {agentRun.repetition}
                   </span>
                   <span className="tabular-nums">{formatScore(agentRun.score)}</span>
@@ -394,13 +394,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                           : 'Skill not loaded'}
                     </Badge>
                   ) : null}
-                  <span className="ml-auto text-xs text-muted-foreground">
+                  <span className="ml-auto text-ui text-muted-foreground">
                     {formatDuration(agentRun.durationMs)}
                   </span>
                 </summary>
                 <div className="space-y-3 border-t p-3">
                   {agentRun.error ? (
-                    <p className="text-sm text-destructive-foreground">{agentRun.error}</p>
+                    <p className="text-body text-destructive-foreground">{agentRun.error}</p>
                   ) : null}
                   <Table>
                     <THead>
@@ -415,7 +415,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                     <TBody>
                       {agentRun.assertions.map((a) => (
                         <TR key={a.id}>
-                          <TD className="font-mono text-xs">
+                          <TD className="font-mono text-ui">
                             {a.assertionId}
                             {a.required ? ' *' : ''}
                           </TD>
@@ -433,7 +433,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                             </Badge>
                           </TD>
                           <TD className="text-right tabular-nums">{a.weight}</TD>
-                          <TD className="text-xs text-muted-foreground">
+                          <TD className="text-ui text-muted-foreground">
                             <p>{a.message}</p>
                             <AssertionDetails lines={assertionDetailLines(a.type, a.details)} />
                           </TD>
@@ -441,7 +441,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                       ))}
                     </TBody>
                   </Table>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-ui text-muted-foreground">
                     Changed files:{' '}
                     {agentRun.changedFiles.length
                       ? agentRun.changedFiles.map((f) => `${f.path} (${f.change})`).join(', ')
@@ -449,7 +449,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                     · fixture{' '}
                     <span className="font-mono">{agentRun.fixtureVersionId.slice(0, 12)}…</span>
                   </p>
-                  <p className="text-xs text-muted-foreground" data-testid="agent-run-usage">
+                  <p className="text-ui text-muted-foreground" data-testid="agent-run-usage">
                     Tokens: {usage.tokens} · Cost: {usage.cost}
                     {mock
                       ? null
@@ -458,13 +458,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                         : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
                   </p>
                   <details>
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-ui text-muted-foreground">
                       Execution trace
                     </summary>
                     <Pre className="mt-2">{JSON.stringify(agentRun.trace, null, 2)}</Pre>
                   </details>
                   <details>
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-ui text-muted-foreground">
                       Assertion details (raw)
                     </summary>
                     <Pre className="mt-2">
@@ -480,7 +480,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             );
           })}
           {agentRuns.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No agent runs recorded.</p>
+            <p className="text-body text-muted-foreground">No agent runs recorded.</p>
           ) : null}
         </CardContent>
       </Card>
@@ -491,7 +491,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           <CardDescription>Every result references exact, immutable versions.</CardDescription>
         </CardHeader>
         <CardContent>
-          <dl className="grid gap-1 text-xs md:grid-cols-2">
+          <dl className="grid gap-1 text-ui md:grid-cols-2">
             <dt className="text-muted-foreground">Artifact version</dt>
             <dd>
               <Link className="underline" href={`/artifacts/${artifact.id}`}>

@@ -88,8 +88,8 @@ export default async function BenchmarkPage({
           <CardContent className="space-y-4">
             {definition?.cases.map((c) => (
               <div key={c.id} className="rounded-surface border p-3">
-                <p className="text-sm font-medium">
-                  {c.name} <span className="font-mono text-xs text-muted-foreground">{c.id}</span>
+                <p className="text-body font-medium">
+                  {c.name} <span className="font-mono text-ui text-muted-foreground">{c.id}</span>
                 </p>
                 <Pre className="mt-2 max-h-40">{c.prompt}</Pre>
                 <Table className="mt-2">
@@ -105,9 +105,9 @@ export default async function BenchmarkPage({
                     {c.assertions.map((a) => (
                       <TR key={a.id}>
                         <TD>
-                          <span className="font-mono text-xs">{a.id}</span>
+                          <span className="font-mono text-ui">{a.id}</span>
                           {a.description ? (
-                            <p className="text-xs text-muted-foreground">{a.description}</p>
+                            <p className="text-ui text-muted-foreground">{a.description}</p>
                           ) : null}
                         </TD>
                         <TD>
@@ -138,11 +138,11 @@ export default async function BenchmarkPage({
                   only mock-agent suites; real agents run from the CLI.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
+              <CardContent className="space-y-3 text-body">
                 {error ? (
                   <p
                     role="alert"
-                    className="text-xs text-destructive-foreground"
+                    className="text-ui text-destructive-foreground"
                     data-testid="enqueue-error"
                   >
                     {error}
@@ -167,24 +167,24 @@ export default async function BenchmarkPage({
                   process executes it.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
+              <CardContent className="space-y-3 text-body">
                 {error ? (
                   <p
                     role="alert"
-                    className="text-xs text-destructive-foreground"
+                    className="text-ui text-destructive-foreground"
                     data-testid="enqueue-error"
                   >
                     {error}
                   </p>
                 ) : null}
                 {blockers.map((blocker) => (
-                  <p key={blocker} className="text-xs text-warning-foreground">
+                  <p key={blocker} className="text-ui text-warning-foreground">
                     {blocker}
                     {blocker.includes('approved') ? ' Approval in the UI is planned.' : ''}
                   </p>
                 ))}
                 {detail.assignedArtifacts.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-ui text-muted-foreground">
                     No artifacts are assigned to this suite.
                   </p>
                 ) : null}
@@ -211,7 +211,7 @@ export default async function BenchmarkPage({
             <CardHeader>
               <CardTitle>Configuration</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-1 text-xs">
+            <CardContent className="space-y-1 text-ui">
               <p>
                 <span className="text-muted-foreground">Agent:</span>{' '}
                 <span className="font-mono">{definition?.execution.agent}</span>
@@ -254,7 +254,7 @@ export default async function BenchmarkPage({
           </CardHeader>
           <CardContent>
             {runs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No runs yet.</p>
+              <p className="text-body text-muted-foreground">No runs yet.</p>
             ) : (
               <Table>
                 <THead>
@@ -270,7 +270,7 @@ export default async function BenchmarkPage({
                   {runs.map(({ run, artifact }) => (
                     <TR key={run.id}>
                       <TD>
-                        <Link className="font-mono text-xs underline" href={`/results/${run.id}`}>
+                        <Link className="font-mono text-ui underline" href={`/results/${run.id}`}>
                           {run.id}
                         </Link>
                       </TD>
@@ -287,7 +287,7 @@ export default async function BenchmarkPage({
                       <TD className="text-right tabular-nums">
                         {formatDelta((run.summary as { delta?: number } | null)?.delta)}
                       </TD>
-                      <TD className="text-xs text-muted-foreground">{formatDate(run.startedAt)}</TD>
+                      <TD className="text-ui text-muted-foreground">{formatDate(run.startedAt)}</TD>
                     </TR>
                   ))}
                 </TBody>

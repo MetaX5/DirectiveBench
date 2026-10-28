@@ -115,7 +115,7 @@ export default async function RepositoriesPage({
           </CardHeader>
           <CardContent className="space-y-2">
             <form action={registerRepositoryAction} className="flex flex-wrap items-end gap-2">
-              <label className="flex min-w-64 flex-1 flex-col gap-1 text-xs text-muted-foreground">
+              <label className="flex min-w-64 flex-1 flex-col gap-1 text-ui text-muted-foreground">
                 Path or GitHub URL
                 <Input
                   name="path"
@@ -137,7 +137,7 @@ export default async function RepositoriesPage({
                 id="path-error"
                 role="alert"
                 data-testid="path-error"
-                className="text-xs text-destructive-foreground"
+                className="text-ui text-destructive-foreground"
               >
                 {fieldError.message}
               </p>
@@ -146,7 +146,7 @@ export default async function RepositoriesPage({
               <div
                 role="alert"
                 data-testid="registration-confirmation"
-                className="space-y-2 rounded-surface border border-warning/40 bg-warning/10 p-3 text-xs"
+                className="space-y-2 rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
               >
                 <p className="font-medium">{confirmation.message}</p>
                 <ul className="list-disc space-y-1 pl-4">
@@ -160,7 +160,7 @@ export default async function RepositoriesPage({
                   <Button type="submit" size="sm" variant="destructive">
                     Register anyway
                   </Button>
-                  <Link href="/repositories" className="text-xs underline">
+                  <Link href="/repositories" className="text-ui underline">
                     Cancel
                   </Link>
                 </form>
@@ -171,7 +171,7 @@ export default async function RepositoriesPage({
                 role="status"
                 data-testid="registration-status"
                 data-state={notice.kind}
-                className={notice.kind === 'done' ? 'text-xs text-success-foreground' : 'text-xs'}
+                className={notice.kind === 'done' ? 'text-ui text-success-foreground' : 'text-ui'}
               >
                 {notice.message}
               </p>
@@ -183,7 +183,7 @@ export default async function RepositoriesPage({
           <p
             role="alert"
             data-testid="scan-request-error"
-            className="text-xs text-destructive-foreground"
+            className="text-ui text-destructive-foreground"
           >
             {scanError}
           </p>
@@ -199,10 +199,10 @@ export default async function RepositoriesPage({
                   data-state={scanNotice.kind}
                   className={
                     scanNotice.kind === 'error'
-                      ? 'text-xs text-destructive-foreground'
+                      ? 'text-ui text-destructive-foreground'
                       : scanNotice.kind === 'done'
-                        ? 'text-xs text-success-foreground'
-                        : 'text-xs'
+                        ? 'text-ui text-success-foreground'
+                        : 'text-ui'
                   }
                 >
                   {scanNotice.message}
@@ -217,19 +217,19 @@ export default async function RepositoriesPage({
                 ) : null}
               </div>
               {scanNotice.info ? (
-                <p data-testid="scan-info" className="text-xs text-muted-foreground">
+                <p data-testid="scan-info" className="text-ui text-muted-foreground">
                   {scanNotice.info}
                 </p>
               ) : null}
               {scanNotice.errors.length > 0 ? (
                 <div data-testid="scan-errors" className="space-y-1">
-                  <p className="text-xs font-medium">
+                  <p className="text-ui font-medium">
                     Discovery errors
                     {scanNotice.errorCount > scanNotice.errors.length
                       ? ` (first ${scanNotice.errors.length} of ${scanNotice.errorCount})`
                       : ''}
                   </p>
-                  <ul className="space-y-0.5 text-xs">
+                  <ul className="space-y-0.5 text-ui">
                     {scanNotice.errors.map((error) => (
                       <li key={`${error.path}:${error.code}`}>
                         <span className="font-mono">{error.path}</span>{' '}
@@ -283,20 +283,20 @@ export default async function RepositoriesPage({
                       <TD className="font-medium">{repository.name}</TD>
                       <TD>{providerLabel(repository.provider)}</TD>
                       <TD
-                        className="max-w-md truncate font-mono text-xs"
+                        className="max-w-md truncate font-mono text-ui"
                         title={repository.location}
                       >
                         {repository.location}
                       </TD>
-                      <TD className="font-mono text-xs">{branchLabel(repository) ?? '—'}</TD>
+                      <TD className="font-mono text-ui">{branchLabel(repository) ?? '—'}</TD>
                       <TD className="text-right tabular-nums">
                         {Number(repository.artifactCount)}
                       </TD>
                       <TD
                         className={
                           repository.syncStatus === 'error'
-                            ? 'max-w-xs truncate text-xs text-destructive-foreground'
-                            : 'text-xs'
+                            ? 'max-w-xs truncate text-ui text-destructive-foreground'
+                            : 'text-ui'
                         }
                         title={repository.syncError ?? undefined}
                       >

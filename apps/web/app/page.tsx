@@ -29,7 +29,7 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
   return (
     <Card>
       <CardContent>
-        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="text-ui text-muted-foreground">{label}</p>
         <p
           className="mt-1 text-metric tabular-nums"
           data-testid={`stat-${label.toLowerCase().replaceAll(/[^a-z]+/g, '-')}`}
@@ -133,7 +133,7 @@ export default async function DashboardPage() {
                         <Link className="font-medium hover:underline" href={`/results/${run.id}`}>
                           {artifact.name}
                         </Link>
-                        <span className="ml-1 text-xs text-muted-foreground">
+                        <span className="ml-1 text-ui text-muted-foreground">
                           v{artifact.version}
                         </span>
                       </TD>
@@ -143,7 +143,7 @@ export default async function DashboardPage() {
                       </TD>
                       <TD>
                         {run.status === 'running' ? (
-                          <span className="text-xs">running…</span>
+                          <span className="text-ui">running…</span>
                         ) : (
                           <StatusBadge status={runDisplayStatus(run)} />
                         )}
@@ -155,7 +155,7 @@ export default async function DashboardPage() {
                         {formatScore(summary?.candidate?.meanScore)}
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(summary?.delta)}</TD>
-                      <TD className="text-xs text-muted-foreground">{formatDate(run.startedAt)}</TD>
+                      <TD className="text-ui text-muted-foreground">{formatDate(run.startedAt)}</TD>
                     </TR>
                   );
                 })}
@@ -169,7 +169,7 @@ export default async function DashboardPage() {
         <CardHeader>
           <CardTitle>Recent regressions</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
+        <CardContent className="text-body text-muted-foreground">
           {regressions.length === 0
             ? 'No regressions among the recent runs.'
             : regressions.map(({ run, artifact }) => (

@@ -23,6 +23,7 @@ const files = scope.roots.flatMap(sources);
 const forbidden: Array<[rule: string, pattern: RegExp]> = [
   ['raw palette token outside globals.css (D2)', /palette-/],
   ['arbitrary font size; use a text-* token (D2, D8)', /\btext-\[\d/],
+  ['raw text-xs or text-sm; use text-ui or text-body (FR-121-1)', /\btext-(?:xs|sm)\b/],
   [
     'Tailwind palette colour; use a semantic token (D2)',
     /\b(?:bg|text|border|ring|outline|fill|stroke|from|to|divide|decoration)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)\b/,
