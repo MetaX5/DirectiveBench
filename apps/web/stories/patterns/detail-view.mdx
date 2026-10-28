@@ -1,0 +1,32 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './detail-view.stories';
+
+<Meta of={Stories} />
+
+# Detail view
+
+Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
+
+## Structure
+
+`PageHeader` (the item's name as h1, its description, type and version badges, the main action)
+
+> an overview `Card` with the key facts > further cards.
+
+## Rules
+
+1. The name, the key facts and the main action are visible without scrolling at 1440 by 900.
+   Source: SPEC-122 prompt (stage 3). The Default story test checks the action.
+2. Missing values are said in words ("Not tested yet", "No description in the artifact"),
+   never left blank or shown as a dash. Source: AGENTS.md §7, issue 123.
+3. An item that does not exist gets a page with the title "… not found", the likely reason and
+   a link back to the list. Source: SPEC-122 prompt.
+4. Key facts are a description list (`dl`); a DescriptionList primitive is on "What is
+   missing", so pages build it by hand today.
+
+## States
+
+<Canvas of={Stories.Default} />
+<Canvas of={Stories.PartialData} />
+<Canvas of={Stories.NotFound} />
+<Canvas of={Stories.LongTextNarrowScreen} />

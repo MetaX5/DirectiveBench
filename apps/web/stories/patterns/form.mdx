@@ -1,0 +1,40 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './form.stories';
+
+<Meta of={Stories} />
+
+# Form
+
+Modelled on "Register a repository" (`/repositories`). The app posts forms to server actions
+and re-renders the page; the stories show each submit state through props.
+
+## Structure
+
+`Card` > `CardHeader` (what the form does, in the title and description) > `CardContent` >
+general error, the form row (labelled fields, then the one `default` button), the field error,
+the status message.
+
+## Rules
+
+1. The label is always visible; the placeholder is an example. Source: WCAG 3.3.2, Input page.
+2. A field error sits under its field, is linked with `aria-describedby`, uses
+   `aria-invalid` and `role="alert"`. Source: WCAG 3.3.1, `app/repositories/page.tsx`.
+3. After a submit with errors, focus moves to the first invalid field. Source: SPEC-122 prompt
+   (stage 3); WCAG 3.3.1. The app does not do this yet: on "What is missing".
+4. Entered data is kept after an error (`defaultValue` from the server's answer). Source:
+   `app/repositories/page.tsx`.
+5. While the submit runs, the field and the button are disabled and a `role="status"` line says
+   what is happening; a second press does nothing. Source: SPEC-122 §18 P11.
+6. An error that is not about one field goes above the form, says what happened and what to do.
+   Source: SPEC-122 §18 Q1.
+7. Success is a `role="status"` line that names the result and the next step; no toast.
+8. One `default` button per form. Source: SPEC-122 §18 P12.
+
+## States
+
+<Canvas of={Stories.Idle} />
+<Canvas of={Stories.Pending} />
+<Canvas of={Stories.FieldError} />
+<Canvas of={Stories.GeneralError} />
+<Canvas of={Stories.Success} />
+<Canvas of={Stories.BlocksDoubleSubmit} />

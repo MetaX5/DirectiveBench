@@ -1,0 +1,34 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './job-progress.stories';
+
+<Meta of={Stories} />
+
+# Job progress
+
+Modelled on `/executions` and the scan status on `/repositories`. Benchmarks and scans run in
+the background runner (SPEC-008); the web page only reads their state.
+
+## Structure
+
+`PageHeader` > an optional status line for the job the user just started > a `Card` with the
+jobs `Table`: target and kind, `JobStatusBadge`, progress in words, and Cancel for pending and
+running jobs.
+
+## Rules
+
+1. While a job is active the page re-renders every 2 seconds (`AutoRefresh`), and stops when
+   none is. Source: `components/auto-refresh.tsx`, `app/executions/page.tsx`.
+2. Progress is text in a `role="status"` line, so it is announced without moving focus. Source:
+   WCAG 4.1.3.
+3. Only pending and running jobs can be cancelled; each Cancel names its job. Source:
+   `app/executions/page.tsx`, WCAG 2.4.6.
+4. A failed job says why in its row, in `destructive-foreground`.
+5. No spinner and no progress bar: the words say where the job is (SPEC-122 §18 P11).
+
+## States
+
+<Canvas of={Stories.Queue} />
+<Canvas of={Stories.ScanRunning} />
+<Canvas of={Stories.Failed} />
+<Canvas of={Stories.NoJobs} />
+<Canvas of={Stories.ManyJobsNarrowScreen} />

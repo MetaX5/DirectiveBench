@@ -1,0 +1,70 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/not-sandboxed-badge.stories';
+
+<Meta of={Stories} />
+
+# NotSandboxedBadge
+
+`import { NotSandboxedBadge } from '@/components/common'`
+
+## 1. Purpose
+
+Warns that a suite runs commands as the user, without isolation (the `local-process`
+environment).
+
+## 2. When to use
+
+On a benchmark and its results when `execution.environment.kind` is `local-process`.
+
+## 3. When not to use
+
+Sandboxed environments (not built yet).
+
+## 4. Anatomy
+
+An outline `Badge` "Not sandboxed" with a `title`: "Commands run as your user without isolation
+(local-process environment)".
+
+## 5. Variants
+
+None.
+
+<Canvas of={Stories.InABenchmarkHeader} />
+
+## 6. States
+
+Static.
+
+## 7. Accessibility
+
+The words carry the warning; the title is extra.
+
+## 8. Content
+
+Fixed text.
+
+## 9. Responsiveness
+
+As Badge.
+
+## 10. API
+
+No props.
+
+## 11. Code
+
+```tsx
+{
+  definition.execution.environment.kind === 'local-process' ? <NotSandboxedBadge /> : null;
+}
+```
+
+## 12. Do and don't
+
+| Do                                       | Don't                             |
+| ---------------------------------------- | --------------------------------- |
+| Show it whenever commands run unisolated | Hide it once the user has seen it |
+
+## 13. Related
+
+`MockBadge`, `StatusBadge`.

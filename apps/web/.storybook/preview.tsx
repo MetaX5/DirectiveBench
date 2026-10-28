@@ -53,7 +53,15 @@ const preview: Preview = {
     controls: { expanded: true },
     options: {
       storySort: {
-        order: ['Design system', 'Foundations', 'Primitives', 'Product', 'Patterns'],
+        order: [
+          'Design system',
+          'Foundations',
+          'Primitives',
+          ['Parameters in force', '*'],
+          'Product',
+          ['App shell', 'States', 'Benchmarking', 'Registry'],
+          'Patterns',
+        ],
       },
     },
   },

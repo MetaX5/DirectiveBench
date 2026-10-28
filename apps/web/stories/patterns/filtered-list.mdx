@@ -1,0 +1,36 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './filtered-list.stories';
+
+<Meta of={Stories} />
+
+# Filtered list
+
+Modelled on `/artifacts`. Filters are a GET form (`role="search"`), so the URL holds them and
+the back button works.
+
+## Structure
+
+`PageHeader` > `Card` > the filter form (labelled Search field, NativeSelects with "All"
+first, an outline Filter button) > the result count and active filters > the `Table`, or an
+`EmptyState`.
+
+## Rules
+
+1. Show how many results there are, and "x of y" while filtered, in a `role="status"` line.
+   Source: SPEC-122 prompt (stage 3). The app does not show a count yet: on "What is missing".
+2. Every active filter is visible and removable on its own, plus "Clear all filters" when more
+   than one is set. Source: SPEC-122 prompt. The app has only "Clear filters" today.
+3. "No results for these filters" and "nothing here yet" are different states with different
+   text and actions. Source: `app/artifacts/page.tsx`, EmptyState page.
+4. Results are a `Table` with a name; the status column uses `StatusBadge`, plus `MockBadge`
+   for mock results (AGENTS.md §7).
+5. Invalid filter values in the URL are dropped with a `role="status"` notice
+   (`invalidParamsNotice`, `lib/artifacts.ts`).
+
+## States
+
+<Canvas of={Stories.Results} />
+<Canvas of={Stories.ActiveFilters} />
+<Canvas of={Stories.NoResultsForFilters} />
+<Canvas of={Stories.NothingYet} />
+<Canvas of={Stories.ManyResults} />

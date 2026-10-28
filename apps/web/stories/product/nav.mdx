@@ -1,0 +1,80 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/nav.stories';
+
+<Meta of={Stories} />
+
+# Nav
+
+`import { Nav } from '@/components/nav'`. Rendered once by `app/layout.tsx`, in the sidebar
+from 768px and in the "Navigation" disclosure below that.
+
+## 1. Purpose
+
+The main navigation: every top-level page, grouped as Registry, Evaluation and Configuration
+(SPEC-116).
+
+## 2. When to use
+
+Only in the app shell. To add a page, add an item to `sections` in `components/nav.tsx`.
+
+## 3. When not to use
+
+| Situation                                        | Use instead                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------- |
+| Moving between views of one page (artifact tabs) | Links with `aria-current`; a Tabs primitive is on "What is missing" |
+| Breadcrumbs                                      | Not built; on "What is missing"                                     |
+
+## 4. Anatomy
+
+`nav` (`aria-label="Main"`) > section label (`text-caption`, upper case) > list of links with a
+16px icon, the label and an optional "planned" tag.
+
+## 5. Variants
+
+None. Item states below.
+
+## 6. States
+
+- Active: `aria-current="page"`, `sidebar-accent` fill and medium weight. A detail page keeps
+  its section active (prefix match).
+- Hover: `sidebar-accent` fill. Focus: solid 1px `sidebar-ring` (tokeny.md U05).
+- Planned: the item stays, with a "planned" tag (AGENTS.md §7).
+
+<Canvas of={Stories.ActivePage} />
+<Canvas of={Stories.PlannedSectionActive} />
+
+## 7. Accessibility
+
+- One landmark named "Main"; the current page is announced as "current page".
+- Tab moves through the links in order; Enter follows a link.
+- Icons are `aria-hidden`; labels are words.
+
+## 8. Content
+
+Labels are nouns in title case as they are today ("Agent Connections"); one or two words.
+
+## 9. Responsiveness
+
+From 768px a 224px sidebar that stays in view; below, inside a "Navigation" disclosure under
+the header (`app/layout.tsx`).
+
+## 10. API
+
+No props. It reads the current path with `usePathname`.
+
+## 11. Code
+
+In Storybook, `usePathname` is stubbed per story (`usePathname.mockReturnValue('/artifacts')`
+from `@storybook/nextjs-vite/navigation.mock`), because the App Router mock does not work with
+Next 16.4 (lesson of 2026-10-28).
+
+## 12. Do and don't
+
+| Do                                            | Don't                                      |
+| --------------------------------------------- | ------------------------------------------ |
+| Keep planned pages in the menu with "planned" | Hide planned pages, or link to a dead page |
+| One active item                               | Two items with `aria-current`              |
+
+## 13. Related
+
+`ThemeToggle`, `PlannedSection`, Spacing and layout (Foundations).

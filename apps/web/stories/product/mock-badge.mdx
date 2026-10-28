@@ -1,0 +1,75 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/mock-badge.stories';
+
+<Meta of={Stories} />
+
+# MockBadge
+
+`import { MockBadge } from '@/components/common'`
+
+## 1. Purpose
+
+Labels every result produced by the deterministic mock agent, so a mock result is never
+mistaken for an AI evaluation. Source: AGENTS.md §7, SPEC-101 FR-101-14, SPEC-112 FR-112-15.
+
+## 2. When to use
+
+Next to every score, verdict or run that comes from the mock agent: lists, details, the
+dashboard, a benchmark whose agent is `mock`. Check with `isMockAgent` from
+`lib/mock-agent.ts`.
+
+## 3. When not to use
+
+Never omit it for a mock result. Never show it for a real agent.
+
+## 4. Anatomy
+
+A warning `Badge` with a FlaskConical icon (`aria-hidden`), the words "Mock agent: not an AI
+evaluation" and a `title` with the longer explanation.
+
+## 5. Variants
+
+None.
+
+<Canvas of={Stories.NextToAResult} />
+
+## 6. States
+
+Static.
+
+## 7. Accessibility
+
+The words say it; the title only adds detail. Contrast: T25 (6.89:1 light, 7.83:1 dark).
+
+## 8. Content
+
+Fixed text. It changed in SPEC-122 (Q4) from an em dash to a colon.
+
+## 9. Responsiveness
+
+Wraps inside the badge.
+
+<Canvas of={Stories.NarrowScreen} />
+
+## 10. API
+
+No props.
+
+## 11. Code
+
+```tsx
+{
+  isMockAgent(run.agentAdapterId) ? <MockBadge /> : null;
+}
+```
+
+## 12. Do and don't
+
+| Do                             | Don't                          |
+| ------------------------------ | ------------------------------ |
+| MockBadge on every mock result | A mock score without the label |
+| The full words                 | The flask icon alone           |
+
+## 13. Related
+
+`StatusBadge`, `NotSandboxedBadge`, the RED/GREEN result pattern.

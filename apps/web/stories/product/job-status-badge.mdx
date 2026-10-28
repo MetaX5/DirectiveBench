@@ -1,0 +1,75 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/job-status-badge.stories';
+
+<Meta of={Stories} />
+
+# JobStatusBadge
+
+`import { JobStatusBadge } from '@/components/common'`
+
+## 1. Purpose
+
+Shows where a job is in the runner queue (SPEC-008): pending, running, completed, failed,
+cancelled or interrupted.
+
+## 2. When to use
+
+`/executions` and wherever a job is listed.
+
+## 3. When not to use
+
+A run's outcome: `StatusBadge`.
+
+## 4. Anatomy
+
+A `Badge` with the status word in lower case, as stored.
+
+## 5. Variants
+
+| Status      | Variant       | Meaning                         |
+| ----------- | ------------- | ------------------------------- |
+| pending     | `muted`       | Waiting in the queue            |
+| running     | `info`        | In progress                     |
+| completed   | `success`     | Finished                        |
+| failed      | `destructive` | Stopped with an error           |
+| cancelled   | `outline`     | Stopped by the user             |
+| interrupted | `warning`     | Stopped when the runner stopped |
+
+<Canvas of={Stories.AllStatuses} />
+
+## 6. States
+
+Static; the statuses are its states.
+
+## 7. Accessibility
+
+The word carries the status (WCAG 1.4.1). "running" changes over time: the page announces
+progress in a `role="status"` line, not through the badge (Job progress pattern).
+
+## 8. Content
+
+The stored word, lower case.
+
+## 9. Responsiveness
+
+As Badge.
+
+## 10. API
+
+`status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'`.
+
+## 11. Code
+
+```tsx
+<JobStatusBadge status={job.status} />
+```
+
+## 12. Do and don't
+
+| Do                        | Don't                   |
+| ------------------------- | ----------------------- |
+| `JobStatusBadge` for jobs | `StatusBadge` for a job |
+
+## 13. Related
+
+`StatusBadge`, the Job progress pattern.

@@ -1,0 +1,74 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/status-badge.stories';
+
+<Meta of={Stories} />
+
+# StatusBadge
+
+`import { StatusBadge } from '@/components/common'`
+
+## 1. Purpose
+
+Shows the display status of a benchmark run (SPEC-111): the one word a user needs to judge a
+result.
+
+## 2. When to use
+
+Wherever a run's outcome appears: dashboard, `/results`, `/results/[id]`, the Latest score
+column of `/artifacts`. Derive the status with `runDisplayStatus(run)`.
+
+## 3. When not to use
+
+| Situation           | Use instead                                                  |
+| ------------------- | ------------------------------------------------------------ |
+| A job's queue state | `JobStatusBadge`                                             |
+| A single assertion  | `Badge` `success` or `destructive` with "passed" or "failed" |
+
+## 4. Anatomy
+
+A `Badge` with `data-status` set to the machine value and a human label.
+
+## 5. Variants
+
+One per status, below, with the meaning each carries. The mapping lives in
+`components/common.tsx`; pages never pick the variant themselves.
+
+<Canvas of={Stories.AllStatuses} sourceState="none" />
+
+## 6. States
+
+Static (a Badge). The statuses are its states.
+
+## 7. Accessibility
+
+The label is a word; colour only repeats it (WCAG 1.4.1). Text contrast on each fill passes in
+both themes (Colour page, T22 to T27, T05).
+
+## 8. Content
+
+Sentence case labels: "Passed", "Not comparable". Never invent a label in a page.
+
+## 9. Responsiveness
+
+As Badge: wraps, never clips.
+
+## 10. API
+
+`status: DisplayStatus` (from `@directivebench/benchmark-engine/scoring`).
+
+## 11. Code
+
+```tsx
+<StatusBadge status={runDisplayStatus(run)} />
+```
+
+## 12. Do and don't
+
+| Do                                       | Don't                                 |
+| ---------------------------------------- | ------------------------------------- |
+| `StatusBadge` with `runDisplayStatus`    | Mapping verdicts to colours in a page |
+| Add `MockBadge` next to it for mock runs | A mock result with only a status      |
+
+## 13. Related
+
+`JobStatusBadge`, `MockBadge`, the RED/GREEN result pattern.
