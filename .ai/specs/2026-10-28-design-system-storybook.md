@@ -225,18 +225,18 @@ its reason in the story's parameters.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: Storybook starts and builds from `apps/web` with the add-ons in FR-122-1. MDX
+- [x] AC-1: Storybook starts and builds from `apps/web` with the add-ons in FR-122-1. MDX
       tables render.
 - [ ] AC-2: every primitive and product component in §11 has a page with the 13 sections and
       a state matrix.
-- [ ] AC-3: every pattern in §11 has all its data states, and the form pattern also has its
+- [x] AC-3: every pattern in §11 has all its data states, and the form pattern also has its
       submit states.
 - [ ] AC-4: story tests pass in both themes with no a11y violations, or each one is a
       documented exception. They run in CI.
-- [ ] AC-5: the token guard covers Storybook files and finds no value outside the tokens.
-- [ ] AC-6: "What is missing" lists the missing screens and components with reasons.
-- [ ] AC-7: `apps/web/design-system.md` exists, and the AGENTS.md diff has been proposed.
-- [ ] AC-8: the quality gate passes. Storybook files stay out of the tarball and out of the
+- [x] AC-5: the token guard covers Storybook files and finds no value outside the tokens.
+- [x] AC-6: "What is missing" lists the missing screens and components with reasons.
+- [x] AC-7: `apps/web/design-system.md` exists, and the AGENTS.md diff has been proposed.
+- [x] AC-8: the quality gate passes. Storybook files stay out of the tarball and out of the
       coverage scope.
 - [ ] AC-9: the agent test is prepared in the run log, and the maintainer runs it in a new
       session.
@@ -303,6 +303,11 @@ P11 and P12 are documentation rules):
   container `tabIndex={0}` with `role="region"` and the table's name. Until then two stories
   carry a documented exception (`stories/blocks/a11y.ts`).
 
+Proposal from stage 5, waiting for the maintainer (not implemented):
+
+- P14: `PageHeader` actions use `flex` without `flex-wrap` (`components/common.tsx`), so three
+  badges in the actions overflow at 320 px, as on a mock benchmark's page. Add `flex-wrap`.
+
 ## 19. Future extensions
 
 - Extracting presentational components from pages, which needs a separate spec.
@@ -363,8 +368,22 @@ P11 and P12 are documentation rules):
     (`formatScore`, `formatDelta`).
   - Verified by `pnpm test:storybook` (214 tests), `build-storybook` (40 docs pages, 107
     stories, every catalogue link resolves) and a look at the built pages.
-- **Not implemented:** stage 5 (final verification, browser pass at 320, 768 and 1440 px,
-  the agent test description, the PR). The CI job runs only once the PR is open.
+- **Verified in stage 5 (2026-10-28):**
+  - Full gate on a cold cache: format, lint, typecheck, `pnpm test` (100% coverage),
+    `pnpm test:storybook` (214 tests), `build-storybook`, `pnpm build`, `pnpm verify:pack`
+    (no Storybook file in the tarball) and `pnpm test:e2e` (52 passed).
+  - Token guard: no value outside the tokens beyond the six documented allowlist entries of
+    SPEC-121. Values on the Tailwind scale that no guard covers are counted in the run log.
+  - a11y: no violations and no exceptions in 107 stories in both themes.
+  - Browser pass over all 147 entries at 320, 768 and 1440 px in both themes: no page errors;
+    keyboard focus visible on all 354 elements reached by Tab; no horizontal page scroll
+    except the RED/GREEN result stories at 320 px (PageHeader actions do not wrap, proposal
+    P14) and one docs page (NotSandboxedBadge, 33 px from a code block).
+  - The AGENTS.md change (design-system rule, `pnpm test:storybook` in the gate and the
+    commands) was applied after the maintainer accepted it.
+- **Not verified:** AC-2 is met for 18 of the 19 components in §11 (ContentTab is on "What is
+  missing"); AC-4's CI run happens only once the PR is open; AC-9's agent test is prepared in
+  the run log and waits for the maintainer. The spec stays `draft` until those are done.
 
 ## 📋 Implementation Plan
 
@@ -394,7 +413,7 @@ P11 and P12 are documentation rules):
 9. The eight Design system pages and `apps/web/design-system.md`, plus the AGENTS.md diff as
    a proposal.
 
-### Stage 5: verification and report
+### Stage 5: verification and report (done 2026-10-28; PR after the maintainer's "dalej")
 
 10. Full gate and story tests in both themes; guard and a11y report; browser pass; counts.
 11. Write the agent test into the run log. Update the spec status, the run log and lessons.

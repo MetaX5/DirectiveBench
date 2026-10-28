@@ -12,15 +12,17 @@ specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 
 ## State
 
-- **Completed stages:** 0 (inventory and plan), 1 (foundations), 2 (primitives), 3 (product components and patterns), 4 (pages that teach).
+- **Completed stages:** 0 (inventory and plan), 1 (foundations), 2 (primitives), 3 (product components and patterns), 4 (pages that teach), 5 (verification and report).
 - **Approved by the maintainer:** the stage 0 plan, Q1–Q5 and P1–P5 (2026-10-28; Q4: fix the
   two em dashes here; Q5: the Storybook CI job becomes required). #132 was merged first, as
   the prompt requires.
 - **Approved in stage 1 review:** P6 to P10 (2026-10-28).
 - **Approved in stage 2 review:** P11 to P13 (2026-10-28).
-- **Open questions:** the AGENTS.md diff below (accept, change or reject).
-- **Next step:** wait for "dalej" and the decision on the AGENTS.md diff, then stage 5
-  (verification, report, PR).
+- **Approved in stage 4 review:** the AGENTS.md diff (applied in stage 5).
+- **Open questions:** proposal P14 (PageHeader actions wrap).
+- **Next step:** wait for "dalej", then push the branch and open the PR. After merge: the
+  maintainer makes the "Storybook (browser, both themes)" check required (Q5) and runs the
+  agent test below.
 
 ## Objective
 
@@ -171,8 +173,68 @@ Stage 4: lint, the token guard (59 tests), `pnpm test:storybook` (60 files, 214 
 `build-storybook` pass; the built index has 40 docs pages and 107 stories, and every
 catalogue link resolves.
 
+Stage 5, all on 2026-10-28, cold cache:
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check && pnpm lint && pnpm typecheck` | pass |
+| `pnpm test` | pass, 100% coverage, 7 tasks |
+| `pnpm test:storybook` | 60 files, 214 tests, 0 a11y violations, 0 exceptions |
+| `pnpm --filter @directivebench/web build-storybook` | pass, 40 docs pages, 107 stories |
+| `pnpm build && pnpm verify:pack` | pass; no Storybook file in the tarball |
+| `pnpm test:e2e` | 52 passed |
+| Browser pass (Playwright, 147 entries × 3 widths × 2 themes) | 0 page errors, 354 focus stops all visible, overflow only as listed above |
+
 Not verified: the CI job itself (it runs once the PR exists); the pages at 320 and 768px
 (stage 5); keyboard use of the Storybook UI.
+
+Stage 5:
+- Applied the accepted AGENTS.md diff (§2 step 13, §6, §7).
+- Browser pass with Playwright over the built Storybook (all 147 entries, 320/768/1440 px,
+  both themes): fixed two findings. Narrow-screen story frames were 320 px inside a padded
+  canvas (now `w-full max-w-80`), and MDX tables, inline code and code blocks widened the docs
+  pages at 320 px (now scroll or wrap through `.storybook/preview.css`, limited to
+  documentation, never stories).
+- Remaining: RED/GREEN result stories at 320 px overflow because PageHeader actions do not
+  wrap (P14, also true in the app); the NotSandboxedBadge docs page is 33 px wider than 320 px
+  because of its code block, cause not found.
+- Token report. The guard (hex, palette classes, `text-xs`/`text-sm`, radius, status text,
+  arbitrary values) finds nothing outside its six documented allowlist entries:
+  `native-select.tsx` (Canvas colours), `card.tsx` (card-spacing token, header grid tracks),
+  `results/[id]/page.tsx` (label grid tracks), `primitives.tsx` (Pre 28rem limit) and
+  `content-tab.tsx` (40rem limit). Not covered by any guard: 229 uses of Tailwind scale
+  values (`gap-1`, `mt-4`, `p-3`, `h-8`, `size-4`, …) in 46 files: 99 in `app/`, 81 in
+  `components/` (generated files included) and 49 in Storybook files (mostly `max-w-80`
+  frames and label gaps copied from the app). tokeny.md allows the scale where no `space-*`
+  token fits; a stricter rule needs a separate decision.
+- Counts: 40 documentation pages (8 Design system, 7 Foundations, 8 Primitives, 11 Product,
+  6 Patterns), 18 components documented (7 primitives, 11 product), 6 patterns, 30 story
+  files, 107 stories, 54 play functions, 214 story tests (both themes).
+
+## Agent test (prepared, not run)
+
+The maintainer runs this in a new session, with no other context than the repository. Every
+place where the agent had to guess is either filled in on the Storybook pages or added to
+"What is missing" (SPEC-122 AC-9).
+
+**Prompt for the agent:**
+
+> Read `apps/web/design-system.md` and the Storybook under `apps/web/stories/`. Then design
+> and build, in `apps/web` only, the editing UI of issue 64 on the artifact detail page
+> (`/artifacts/[id]`): add and remove tags, edit the notes, and assign or unassign one
+> benchmark suite. Writes go through `@directivebench/database` with Zod-validated server
+> actions. Do not change tokens or `components/ui` without asking. Before you write code,
+> list every decision the documentation did not settle (component, state, wording, spacing).
+> When you finish, run `pnpm lint && pnpm typecheck && pnpm test && pnpm test:storybook` and
+> say which Storybook pages you used.
+
+**Why this screen:** the app does not have it; it needs a form (Form pattern), a list of
+removable values (Filtered list chips), a long text field and a choice from a list, so it
+touches three primitives on "What is missing" (Textarea, Combobox or tag input, Checkbox for
+"unassign"). It shows whether the agent reuses documented patterns or improvises.
+
+**What to record afterwards:** each guess the agent listed, whether the documentation answered
+it, and the fix (a page update or a "What is missing" row).
 
 ## Problems and deviations
 
@@ -185,6 +247,8 @@ Not verified: the CI job itself (it runs once the PR exists); the pages at 320 a
   the materials do not fully settle: proposals P7 to P9.
 
 ## Lessons recorded
+
+- `.ai/lessons/2026-10-28-storybook-mdx-file-name-sets-the-docs-id.md`
 
 - `.ai/lessons/2026-10-28-storybook-nextjs-vite-app-directory-breaks-on-next-16-4.md`
 - `.ai/lessons/2026-10-28-tailwind-preflight-strips-mdx-list-markers.md`
