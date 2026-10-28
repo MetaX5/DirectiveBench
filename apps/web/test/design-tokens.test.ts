@@ -269,7 +269,7 @@ describe('CardTitle', () => {
 
 describe('form controls', () => {
   it('draw their boundary with border-control (D3)', () => {
-    for (const control of ['input.tsx', 'native-select.tsx']) {
+    for (const control of ['input.tsx', 'native-select.tsx', 'textarea.tsx']) {
       const source = readFileSync(join(root, 'components', 'ui', control), 'utf8');
       expect(source, control).toMatch(/\bborder-control\b/);
       expect(source, control).not.toMatch(/\bborder-input\b/);

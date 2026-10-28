@@ -20,6 +20,7 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | Badge | `@/components/ui/badge` | A status or property in one to three words | Anything clickable or a sentence |
 | Card | `@/components/ui/card` | One page section; `CardTitle` is the h2 | Inside another card |
 | Input | `@/components/ui/input` | Single-line text, inside a visible `<label>` | Choosing from a list |
+| Textarea | `@/components/ui/textarea` | Text over several lines, inside a visible `<label>` | A single-line value |
 | NativeSelect | `@/components/ui/native-select` | One value from a short list, "All" first in filters | Search in many options |
 | Table | `@/components/ui/table` | Rows with the same columns; give it an `aria-label` | Facts of one item (`dl`) |
 | Pre | `@/components/ui/primitives` | JSON, code, raw output | A path in a sentence (`font-mono`) |
@@ -34,7 +35,7 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | Markdown | `@/components/artifacts/markdown` | Rendering artifact Markdown safely | App-authored text |
 
 Raw `<button>`, `<input>` (except hidden), `<select>`, `<textarea>` and `<table>` in `app/`
-or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Textarea, Combobox, Toast,
+or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Combobox, Toast,
 Tabs, Pagination, Tooltip, DescriptionList) are listed in Storybook under "What is missing":
 do not improvise one; ask.
 

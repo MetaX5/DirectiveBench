@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 
 // The component catalogue of the "Components" page (SPEC-122 stage 4): a small live preview of
 // the real component, its group, one sentence and a link to its page.
@@ -66,6 +67,13 @@ const entries: Entry[] = [
     docs: 'primitives-input--docs',
     description: 'A single-line text field with a visible label.',
     preview: <Input aria-label="Catalogue search" placeholder="Name" className="w-40" />,
+  },
+  {
+    name: 'Textarea',
+    group: 'Primitive',
+    docs: 'primitives-textarea--docs',
+    description: 'A multi-line text field with a visible label.',
+    preview: <Textarea aria-label="Catalogue notes" placeholder="Notes" className="w-40" />,
   },
   {
     name: 'NativeSelect',
