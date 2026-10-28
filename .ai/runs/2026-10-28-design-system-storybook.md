@@ -13,10 +13,11 @@ specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 ## State
 
 - **Completed stages:** 0 (inventory and plan).
-- **Approved by the maintainer:** nothing yet for this work. #132 was merged first, as the
-  prompt requires.
-- **Open questions:** SPEC-122 §18 Q1–Q5 and proposals P1–P5.
-- **Next step:** wait for "dalej" and the answers, then start stage 1 (foundations).
+- **Approved by the maintainer:** the stage 0 plan, Q1–Q5 and P1–P5 (2026-10-28; Q4: fix the
+  two em dashes here; Q5: the Storybook CI job becomes required). #132 was merged first, as
+  the prompt requires.
+- **Open questions:** none.
+- **Next step:** wait for "dalej", then start stage 1 (foundations).
 
 ## Objective
 
@@ -30,7 +31,7 @@ See SPEC-122, Implementation Plan.
 
 ## Decisions
 
-None yet; stage 0 only proposes.
+- SPEC-122 §18 records the maintainer's answers to Q1–Q5 and the accepted proposals P1–P5.
 
 ## Work performed
 

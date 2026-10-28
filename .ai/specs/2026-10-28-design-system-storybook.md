@@ -239,26 +239,23 @@ its reason in the story's parameters.
 - Related to #123 (dash ban).
 - New dev dependencies: §10.
 
-## 18. Open questions
+## 18. Resolved questions
 
-For the maintainer (stage 0):
+The maintainer answered on 2026-10-28 and accepted every proposal.
 
-1. Q1 Tone of messages. The materials say nothing. Proposal: plain and factual, no
-   exclamation marks. Errors say what happened and what to do; buttons are a verb plus an
-   object.
-2. Q2 Motion. The app only uses colour transitions. Proposal: transitions of colour and
-   opacity only, up to 150 ms, none under `prefers-reduced-motion`, and no decorative
-   animation.
-3. Q3 Icons beyond lucide. Proposal: lucide only. 16 px by default, 12 to 14 px inside small
-   controls. An icon-only control needs an accessible name. An icon never carries status
-   alone.
-4. Q4 Existing em dashes in component copy (`MockBadge` "Mock agent — not an AI evaluation",
-   `PlannedSection` "Planned — not implemented"). Stories would show them. Fix the two
-   strings here (`components/common.tsx` plus the E2E constant), or leave them to #123?
-5. Q5 Should the CI job "Storybook (browser, both themes)" become a required check?
-   Branch protection is a repository setting the maintainer changes.
+1. Q1 Tone of messages: plain and factual, no exclamation marks. Errors say what happened
+   and what to do; buttons are a verb plus an object.
+2. Q2 Motion: transitions of colour and opacity only, up to 150 ms, none under
+   `prefers-reduced-motion`, and no decorative animation.
+3. Q3 Icons: lucide only. 16 px by default, 12 to 14 px inside small controls. An icon-only
+   control needs an accessible name. An icon never carries status alone.
+4. Q4 Em dashes in component copy: fixed in this work. `MockBadge` and `PlannedSection` in
+   `components/common.tsx` and the E2E constant change in stage 1. The rest of the cleanup
+   stays with #123.
+5. Q5 The CI job "Storybook (browser, both themes)" becomes a required check. The maintainer
+   changes branch protection after the job exists on `main`.
 
-Proposals for the maintainer's decision:
+Accepted proposals:
 
 - P1: keep `primitives.tsx` re-exports as the import path pages use, and document
   `components/ui/*` as the source.
@@ -267,8 +264,7 @@ Proposals for the maintainer's decision:
   `TableCaption`, `NativeSelectOptGroup`), documented as available but unused.
 - P4: colocate component stories (`components/**/x.stories.tsx`). MDX pages, patterns and
   blocks go in `apps/web/stories/`.
-- P5: use our own theme decorator instead of `@storybook/addon-themes`, to save one
-  dependency.
+- P5: use our own theme decorator instead of `@storybook/addon-themes`.
 
 ## 19. Future extensions
 
@@ -280,8 +276,8 @@ Proposals for the maintainer's decision:
 ## 20. Implementation status
 
 - **Implemented:** none.
-- **Not implemented:** all. Stage 0 (inventory and plan) is complete and waits for the
-  maintainer's "dalej".
+- **Not implemented:** all. Stage 0 (inventory and plan) is complete and its questions are
+  resolved (§18).
 
 ## 📋 Implementation Plan
 
@@ -293,6 +289,7 @@ Proposals for the maintainer's decision:
    stored values, and stop if any pair fails.
 3. Write the seven Foundations pages, using real CSS variables and blocks.
 4. Extend `design-system-scope.json` and the guards to the Storybook files.
+5. Replace the em dashes in `MockBadge` and `PlannedSection` copy and the E2E constant (Q4).
 
 ### Stage 2: primitives, in batches of about six
 
