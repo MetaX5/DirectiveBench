@@ -12,15 +12,15 @@ specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 
 ## State
 
-- **Completed stages:** 0 (inventory and plan), 1 (foundations), 2 (primitives), 3 (product components and patterns).
+- **Completed stages:** 0 (inventory and plan), 1 (foundations), 2 (primitives), 3 (product components and patterns), 4 (pages that teach).
 - **Approved by the maintainer:** the stage 0 plan, Q1–Q5 and P1–P5 (2026-10-28; Q4: fix the
   two em dashes here; Q5: the Storybook CI job becomes required). #132 was merged first, as
   the prompt requires.
 - **Approved in stage 1 review:** P6 to P10 (2026-10-28).
 - **Approved in stage 2 review:** P11 to P13 (2026-10-28).
-- **Open questions:** none.
-- **Next step:** wait for "dalej", then start stage 4 (pages that teach, "What is missing",
-  `design-system.md`).
+- **Open questions:** the AGENTS.md diff below (accept, change or reject).
+- **Next step:** wait for "dalej" and the decision on the AGENTS.md diff, then stage 5
+  (verification, report, PR).
 
 ## Objective
 
@@ -106,6 +106,34 @@ Stage 3:
 - While iterating, Vite re-optimised newly found dependencies and reloaded the test run, which
   failed some stories once; a rerun and a cold-cache run pass. CI starts cold.
 
+Stage 4:
+- Eight MDX pages in `stories/design-system/`, a catalogue block
+  (`stories/blocks/catalogue.tsx`) with a story, and `apps/web/design-system.md`.
+- Found while writing Content: the app shows scores as percentages and changes in points
+  (`formatScore`, `formatDelta` in `lib/utils.ts`). The stories of stages 2 and 3 used
+  decimals; they now use the formatters.
+- A docs page whose MDX file name differs from its CSF file gets the file name as its id
+  (`status-badges.mdx` became `--status-badges`, breaking the catalogue link); renamed to
+  `status-badge.mdx`.
+- Proposed AGENTS.md change, not applied (prompt stage 4):
+
+```diff
+@@ §2 Before you finish
+-    `pnpm lint && pnpm typecheck && pnpm test` — plus `pnpm build && pnpm verify:pack` when you
+-    touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` for UI changes.
++    `pnpm lint && pnpm typecheck && pnpm test` — plus `pnpm build && pnpm verify:pack` when you
++    touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` and
++    `pnpm test:storybook` for UI changes.
+@@ §6 Commands
+ pnpm test:e2e         # Playwright smoke test (builds required)
++pnpm test:storybook   # every Storybook story in both themes, with axe (Chromium required)
+@@ §7 Conventions
++- Before building or changing UI in `apps/web`, read
++  [`apps/web/design-system.md`](apps/web/design-system.md) and the Storybook
++  (`pnpm --filter @directivebench/web storybook`). Use its components, tokens and patterns;
++  a new component or variant follows its "Contributing" page and gets stories and a page.
+```
+
 ## Verification
 
 Stage 0 produced documents only. Stage 1, all on 2026-10-28:
@@ -138,6 +166,10 @@ pages render, ArgTypes tables included, and the frozen states show in both theme
 Stage 3: format, lint, typecheck, `pnpm test` (100% coverage) and `pnpm test:storybook`
 (58 files, 212 tests, 106 stories × 2 themes, also on a cold cache) pass; `build-storybook`
 passes; `pnpm build` and `pnpm test:e2e` (52 passed) ran after P13.
+
+Stage 4: lint, the token guard (59 tests), `pnpm test:storybook` (60 files, 214 tests) and
+`build-storybook` pass; the built index has 40 docs pages and 107 stories, and every
+catalogue link resolves.
 
 Not verified: the CI job itself (it runs once the PR exists); the pages at 320 and 768px
 (stage 5); keyboard use of the Storybook UI.

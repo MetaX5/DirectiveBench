@@ -351,8 +351,20 @@ P11 and P12 are documentation rules):
     RED/GREEN result (mock labelled) and Job progress (AC-3).
   - Verified by `pnpm test:storybook`: 106 stories, 212 tests in both themes, also on a cold
     cache; `build-storybook` and a look at the built pages.
-- **Not implemented:** stages 4 and 5 (teaching pages, "What is missing",
-  `design-system.md`, the final report). The CI job runs only once the PR is open.
+- **Implemented and verified (stage 4, 2026-10-28):**
+  - The eight Design system pages: Start here (character, five steps, component table),
+    Components (live catalogue linked to every page; its story test checks the 18 links),
+    How to choose, Usage and accessibility, Content, What to avoid, What is missing (locked
+    and missing components, pattern gaps, backlog coverage) and Contributing (with the
+    technical note on the Storybook base, FR-122-6).
+  - `apps/web/design-system.md` for agents (FR-122-8). The AGENTS.md reference is proposed as
+    a diff in the run log, not applied (AC-7).
+  - Number formats corrected in the stories and pages to the app's formatters
+    (`formatScore`, `formatDelta`).
+  - Verified by `pnpm test:storybook` (214 tests), `build-storybook` (40 docs pages, 107
+    stories, every catalogue link resolves) and a look at the built pages.
+- **Not implemented:** stage 5 (final verification, browser pass at 320, 768 and 1440 px,
+  the agent test description, the PR). The CI job runs only once the PR is open.
 
 ## 📋 Implementation Plan
 
@@ -377,7 +389,7 @@ P11 and P12 are documentation rules):
 7. Product components from §11, with data states.
 8. Patterns from §11, each state as its own story.
 
-### Stage 4: pages that teach
+### Stage 4: pages that teach (done 2026-10-28)
 
 9. The eight Design system pages and `apps/web/design-system.md`, plus the AGENTS.md diff as
    a proposal.
