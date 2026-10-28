@@ -14,7 +14,7 @@ makes a remote font request (SPEC-119 §7, ADR-0001). Monospace text uses the sy
 | Role                                                  | Token and classes                             | Component                                   | Source                          |
 | ----------------------------------------------------- | --------------------------------------------- | ------------------------------------------- | ------------------------------- |
 | Page title                                            | `text-page-title` (20px, weight 600)          | `PageHeader` (h1)                           | tokeny.md D8                    |
-| Section or card title                                 | `text-body font-medium`                       | `CardTitle` (h3)                            | shadcn generator, tokeny.md D11 |
+| Section or card title                                 | `text-body font-medium`                       | `CardTitle` (h2)                            | shadcn generator, tokeny.md D11 |
 | Body: descriptions, navigation, messages              | `text-body` (14px)                            | `PageHeader` description, notices           | tokeny.md D8                    |
 | Controls, tables, badges, card text                   | `text-ui` (12px)                              | `Button`, `Input`, `Table`, `Badge`, `Card` | SPEC-119 FR-6, Lyra density     |
 | Caption: nav section labels, hints, the "planned" tag | `text-caption` (11px)                         | `Nav` section labels                        | tokeny.md D8, D10               |
@@ -33,11 +33,11 @@ makes a remote font request (SPEC-119 §7, ADR-0001). Monospace text uses the sy
    `text-metric` row.
 4. Do not add a second typeface. `font-heading` is the same family as `font-sans`. Source:
    tokeny.md `font-heading` row.
-5. **Proposal (not yet approved):** running text is at most about 65 characters per line
-   (`max-w-prose`). The materials do not set a line length; the prompt asks for one.
-6. **Finding:** every page jumps from the `PageHeader` h1 to the `CardTitle` h3 with no h2,
-   which axe reports as `heading-order`. Stories that compose a page carry a documented
-   exception until the maintainer decides proposal P6 in SPEC-122 §18.
+5. Running text is at most about 65 characters per line (`max-w-prose`). Source: SPEC-122 §18
+   P7.
+6. Headings follow the page outline: `PageHeader` is the h1, `CardTitle` the h2, a heading
+   inside a card the h3. Never skip a level. Source: WCAG 1.3.1, SPEC-122 §18 P6;
+   `test/design-tokens.test.ts` checks that `CardTitle` is an h2.
 
 ## Size and font tokens
 

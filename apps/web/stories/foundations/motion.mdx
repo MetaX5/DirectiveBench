@@ -18,16 +18,14 @@ SPEC-122 §18 Q2.
 | --------------------------------------------- | ---------------------------------------------------------- | --------------------------- | ---------------------------------------------------- |
 | Navigation links, fields, selects, table rows | Colour on hover and focus (`transition-colors`)            | 150ms, the Tailwind default | `components/nav.tsx`, `components/ui/*`              |
 | Button, Badge                                 | Every animatable property (`transition-all`)               | 150ms                       | Lyra preset, `components/ui/button.tsx`, `badge.tsx` |
-| Button, while pressed                         | Moves down 1px (`active:translate-y-px`)                   | instant                     | Lyra preset, `components/ui/button.tsx`              |
+| Button, while pressed                         | Moves down 1px (`motion-safe:active:translate-y-px`)       | instant                     | Lyra preset, `components/ui/button.tsx`              |
 | Theme switch                                  | Nothing: transitions are suspended while the theme changes | none                        | `components/theme.tsx` (`disableTransitionOnChange`) |
 
 `tw-animate-css` is imported in `globals.css` for the shadcn generator; no component uses its
 animations.
 
-## Gap against the rule
+## Reduced motion
 
-`transition-all` on Button and Badge, and the 1px press shift on Button, keep running under
-`prefers-reduced-motion`. **Proposal (not yet approved):** add `motion-reduce:transition-none`
-to `components/ui/button.tsx` and `badge.tsx`, and `motion-reduce:active:translate-y-0` to
-Button. It is
-listed on "What is missing" until the maintainer decides; this stage changes no component.
+Every transition in `components/` is paired with `motion-reduce:transition-none`, and the
+Button press shift is `motion-safe:` only. `test/design-tokens.test.ts` fails when a file adds
+a `transition-*` class without the reduced-motion pair. Source: SPEC-122 §18 Q2 and P9.

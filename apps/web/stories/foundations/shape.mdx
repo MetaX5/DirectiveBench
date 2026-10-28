@@ -22,9 +22,9 @@ DirectiveBench is flat and square, as the Lyra preset is (SPEC-119 AC-1).
    - a card sits on `background` with the `card` fill, a code block on `muted` at 40%.
 4. No surface uses a drop shadow today. The story test checks that no element in the
    composition below has a blurred or offset shadow. Source: inventory of 2026-10-28.
-5. **Proposal (not yet approved):** overlays that are not built yet (Dialog, menus, Toast,
-   see "What is missing") separate with a `border` and the `popover` fill, without a shadow,
-   to stay flat. The materials do not decide overlay elevation.
+5. Overlays that are not built yet (Dialog, menus, Toast, see "What is missing") separate
+   with a `border` and the `popover` fill, without a shadow, to stay flat. Source: SPEC-122
+   §18 P8.
 
 <Canvas of={ShapeStories.Surfaces} />
 

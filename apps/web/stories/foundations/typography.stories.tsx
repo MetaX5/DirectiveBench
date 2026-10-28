@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Pre } from '@/components/ui/primitives';
-import { headingOrderException } from '../blocks/a11y';
 import { TokenTable } from '../blocks/token-table';
 
 const meta = {
@@ -18,7 +17,6 @@ type Story = StoryObj<typeof meta>;
 
 /** The type roles as the real components render them. */
 export const Roles: Story = {
-  parameters: headingOrderException,
   render: () => (
     <div className="max-w-content">
       <PageHeader

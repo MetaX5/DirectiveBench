@@ -242,6 +242,31 @@ describe('arbitrary Tailwind values', () => {
   });
 });
 
+// Transitions stop under prefers-reduced-motion (SPEC-122 §18 Q2, P9): a file that animates
+// with a transition-* class also turns it off with motion-reduce:transition-none.
+describe('motion', () => {
+  it('turns every transition off under prefers-reduced-motion', () => {
+    const hits = files.flatMap((file) => {
+      const source = checkedText(file, readFileSync(file, 'utf8'))
+        .map(([, text]) => text)
+        .join('\n');
+      const transitions = source.match(/(?<![\w:-])transition(?:-[a-z]+)?(?![\w-])/g) ?? [];
+      const reduced = source.match(/motion-reduce:transition-none/g) ?? [];
+      return transitions.length > reduced.length ? [relative(root, file)] : [];
+    });
+    expect(hits).toEqual([]);
+  });
+});
+
+// Pages put CardTitle straight under the PageHeader h1, so it is an h2 (SPEC-122 §18 P6). A
+// shadcn generator re-run writes h3 again and must be migrated (tokeny.md D11).
+describe('CardTitle', () => {
+  it('is the second heading level', () => {
+    const source = readFileSync(join(root, 'components', 'ui', 'card.tsx'), 'utf8');
+    expect(source).toMatch(/function CardTitle[^]*?<h2\b/);
+  });
+});
+
 describe('form controls', () => {
   it('draw their boundary with border-control (D3)', () => {
     for (const control of ['input.tsx', 'native-select.tsx']) {

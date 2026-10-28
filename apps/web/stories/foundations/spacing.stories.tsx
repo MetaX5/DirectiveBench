@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { headingOrderException } from '../blocks/a11y';
 import { TokenTable } from '../blocks/token-table';
 
 const meta = {
@@ -22,7 +21,6 @@ type Story = StoryObj<typeof meta>;
  * padding (page-inline, page-block).
  */
 export const Relations: Story = {
-  parameters: headingOrderException,
   render: () => (
     <main className="mx-auto w-full max-w-content px-page-inline py-page-block">
       <PageHeader title="Repositories" description="Local folders and GitHub repositories." />
