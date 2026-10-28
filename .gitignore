@@ -24,6 +24,8 @@ playwright-report/
 .DS_Store
 *.log
 apps/cli/LICENSE
+# Written by `next dev` when agentRules is on; disabled in apps/web/next.config.mjs
+apps/web/AGENTS.md
 
 # Agent pipeline QA state (generated per run)
 .ai/qa/artifacts_*/
