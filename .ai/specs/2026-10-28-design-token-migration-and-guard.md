@@ -184,8 +184,9 @@ runtime.
 
 - `text-xs/relaxed` in `components/ui/card.tsx`: the token form must keep the 1.625 line
   height. Verify it with computed styles.
-- Class strings split across lines or built with `cn()` and template literals: the line-based
-  test still sees each literal token, because the regexes match words, not whole attributes.
+- Class strings split across lines or built with `cn()` and template literals: the test reads
+  string and template literal nodes with the TypeScript parser, so a literal that spans lines,
+  or follows an apostrophe in JSX text, is still read word by word.
 - `<input type="hidden">` in server-action forms stays allowed. A computed `type` that is not
   a literal is reported, and the fix is an explicit exception comment.
 - Tailwind arbitrary properties (`[mask-type:luminance]`) and CSS-variable shorthand

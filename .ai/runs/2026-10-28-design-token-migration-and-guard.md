@@ -90,6 +90,16 @@ value to the tokens.
 - A `pkill -f`/`pgrep -f` pattern matched the agent's own shell and killed it (a known
   lesson); the server was then stopped with a pattern that cannot match the shell.
 
+## Review (om-auto-review-pr --autofix, 2026-10-28)
+
+- Major, fixed: the arbitrary-value reader paired quotes per line, so a JSX string or template
+  literal spanning lines, or a class after an apostrophe in JSX text, passed the guard (probe:
+  47 of 47 green). It now reads literal nodes with the TypeScript parser; the same probe fails
+  with `app/zz-probe.tsx:5 p-[13px]`, `:8 mt-[7px]`, `:9 m-[3px]`. Unit cases added.
+- Minor, fixed: the ESLint `files` glob used `*{.ts,.tsx}`, which matches nothing with a single
+  extension; it is now one glob per root and extension.
+- Nit, fixed: the Markdown table disable comment carries its reason with `--`.
+
 ## Lessons recorded
 
 - [Pixel comparisons need the same data-directory path](../lessons/2026-10-28-pixel-comparisons-need-the-same-data-dir.md)
