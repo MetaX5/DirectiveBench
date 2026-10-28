@@ -383,7 +383,7 @@ Proposal from stage 5, accepted by the maintainer on 2026-10-28 and implemented:
   - The AGENTS.md change (design-system rule, `pnpm test:storybook` in the gate and the
     commands) was applied after the maintainer accepted it.
 - **Not verified:** AC-2 is met for 18 of the 19 components in §11 (ContentTab is on "What is
-  missing"); AC-4's CI run happens only once the PR is open; AC-9's agent test is prepared in
+  missing"); AC-4's CI run passed on PR #140 (the job is now a required check, Q5), but AC-4 stays open until the PR merges; AC-9's agent test is prepared in
   the run log and waits for the maintainer. The spec stays `draft` until those are done.
 
 ## 📋 Implementation Plan

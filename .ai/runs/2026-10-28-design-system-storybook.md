@@ -185,7 +185,11 @@ Stage 5, all on 2026-10-28, cold cache:
 | `pnpm test:e2e` | 52 passed |
 | Browser pass (Playwright, 147 entries × 3 widths × 2 themes) | 0 page errors, 354 focus stops all visible, overflow only as listed above |
 
-Not verified: the CI job itself (it runs once the PR exists); the pages at 320 and 768px
+PR #140: all CI checks pass, including the first run of "Storybook (browser, both themes)"
+(1m17s). At the maintainer's request (Q5) it is now a required status check on `main`
+(branch protection, added through the GitHub API on 2026-10-28).
+
+Not verified before the PR: the CI job itself (it runs once the PR exists); the pages at 320 and 768px
 (stage 5); keyboard use of the Storybook UI.
 
 Stage 5:
