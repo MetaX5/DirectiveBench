@@ -3,17 +3,22 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { cn } from '../lib/utils';
 
-// Static checks for the token rules in tokeny.md (SPEC-120): raw values stay in globals.css and
-// app code uses only semantic and component tokens.
+// Static checks for the token rules in tokeny.md (SPEC-120, SPEC-121): raw values stay in
+// globals.css and app code uses only semantic and component tokens. The checked files come
+// from design-system-scope.json, which the ESLint design-system rule reads too.
 const root = join(import.meta.dirname, '..');
+const scope = JSON.parse(readFileSync(join(root, 'design-system-scope.json'), 'utf8')) as {
+  roots: string[];
+  extensions: string[];
+};
 
 function sources(dir: string): string[] {
   return readdirSync(join(root, dir), { recursive: true, encoding: 'utf8' })
-    .filter((file) => file.endsWith('.tsx') || file.endsWith('.ts'))
+    .filter((file) => scope.extensions.some((extension) => file.endsWith(extension)))
     .map((file) => join(root, dir, file));
 }
 
-const files = [...sources('app'), ...sources('components')];
+const files = scope.roots.flatMap(sources);
 
 const forbidden: Array<[rule: string, pattern: RegExp]> = [
   ['raw palette token outside globals.css (D2)', /palette-/],
