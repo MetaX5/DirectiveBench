@@ -6,6 +6,9 @@ const monorepoRoot = fileURLToPath(new URL('../..', import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
+  // Next 16.4 writes apps/web/AGENTS.md when `next dev` detects an AI coding agent; the
+  // repository keeps its agent instructions in the root AGENTS.md.
+  agentRules: false,
   // Workspace packages export TypeScript source ("just-in-time" packages).
   transpilePackages: [
     '@directivebench/core',
