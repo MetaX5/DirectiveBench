@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 export const DEMO_ARTIFACT = 'validate-external-input';
 export const DEMO_SUITE = 'Input validation (mock agent demo)';
-export const MOCK_LABEL = 'Mock agent — not an AI evaluation';
+export const MOCK_LABEL = 'Mock agent: not an AI evaluation';
 
 export function escapeRegExp(value: string): string {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
