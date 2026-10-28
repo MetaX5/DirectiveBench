@@ -96,8 +96,8 @@ const designSystemScope = JSON.parse(
 const designSystemMessage =
   'Use the design-system component from components/ui (Button, NativeSelect, Input, Table) or add one there (SPEC-121).';
 const designSystemComponents = {
-  files: designSystemScope.roots.map(
-    (root) => `apps/web/${root}/**/*{${designSystemScope.extensions.join(',')}}`,
+  files: designSystemScope.roots.flatMap((root) =>
+    designSystemScope.extensions.map((extension) => `apps/web/${root}/**/*${extension}`),
   ),
   ignores: [`apps/web/${designSystemScope.componentLibrary}/**`],
   rules: {

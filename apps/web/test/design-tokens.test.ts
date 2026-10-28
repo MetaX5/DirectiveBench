@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { cn } from '../lib/utils';
 
@@ -58,15 +59,30 @@ describe('design token usage in app and components', () => {
   }
 });
 
-// Arbitrary Tailwind values (FR-121-5). Only class-like words inside string literals are read,
-// so JS indexing such as versions[0] never matches. The variant prefix (has-data-[…]:,
-// [.border-b]:, …) is a selector and is stripped; what remains is reported when it is an
-// arbitrary value (p-[13px]), CSS-variable shorthand (px-(--x)) or arbitrary property ([--x:…]).
-function arbitraryValues(line: string): string[] {
-  const words = [...line.matchAll(/(['"`])((?:(?!\1).)*)\1/g)].flatMap((literal) =>
-    literal[2]!.split(/\s+/),
-  );
-  return words.filter((word) => {
+// Arbitrary Tailwind values (FR-121-5). Only class-like words inside string and template
+// literals are read, found with the TypeScript parser so that literals spanning lines and
+// apostrophes in JSX text cannot hide a class, and JS indexing such as versions[0] never matches.
+// The variant prefix (has-data-[…]:, [.border-b]:, …) is a selector and is stripped; what remains
+// is reported when it is an arbitrary value (p-[13px]), CSS-variable shorthand (px-(--x)) or
+// arbitrary property ([--x:…]). The file name selects TS or TSX parsing. Returns [line, word].
+function arbitraryValues(
+  source: string,
+  fileName = 'source.tsx',
+): Array<[line: number, word: string]> {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
+  const words: Array<[line: number, word: string]> = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) {
+      const start = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
+      for (const match of node.text.matchAll(/\S+/g)) {
+        const line = start + (node.text.slice(0, match.index).match(/\n/g)?.length ?? 0);
+        words.push([line, match[0]]);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return words.filter(([, word]) => {
     let depth = 0;
     let variantEnd = 0;
     for (const [index, char] of [...word].entries()) {
@@ -116,8 +132,18 @@ describe('arbitrary Tailwind values', () => {
     ['`px-(--gutter)`', ['px-(--gutter)']],
     ["'[mask-type:luminance]'", ['[mask-type:luminance]']],
     ["'has-data-[slot=x]:-mt-[2px]'", ['has-data-[slot=x]:-mt-[2px]']],
-  ])('finds the arbitrary value in %s', (line, expected) => {
-    expect(arbitraryValues(line)).toEqual(expected);
+    ['const x = <div className="flex\n  p-[13px]" />;', ['p-[13px]']],
+    ['const x = `gap-inline\n  mt-[7px]`;', ['mt-[7px]']],
+    ['const x = `gap-inline ${y} mt-[7px]`;', ['mt-[7px]']],
+    ['const x = <p>Don\'t <b className="m-[3px]">it\'s</b></p>;', ['m-[3px]']],
+  ])('finds the arbitrary value in %j', (source, expected) => {
+    expect(arbitraryValues(source).map(([, word]) => word)).toEqual(expected);
+  });
+
+  it('reports the line of a word inside a literal that spans lines', () => {
+    expect(arbitraryValues('const a = 1;\nconst x = `flex\n  p-[13px]`;')).toEqual([
+      [3, 'p-[13px]'],
+    ]);
   });
 
   it.each([
@@ -126,34 +152,32 @@ describe('arbitrary Tailwind values', () => {
     "className='has-data-[slot=x]:gap-inline [&_svg]:size-4 aria-[invalid]:border-destructive'",
     "import page from './results/[id]/page';",
     "'See [docs] for details'",
-  ])('ignores %s', (line) => {
-    expect(arbitraryValues(line)).toEqual([]);
+    '<p>Use [brackets] in text</p>;',
+    "// a comment with 'p-[13px]'",
+  ])('ignores %s', (source) => {
+    expect(arbitraryValues(source)).toEqual([]);
   });
 
   it('appear only as documented exceptions (FR-121-5)', () => {
     const hits = files.flatMap((file) => {
       const path = relative(root, file);
-      return readFileSync(file, 'utf8')
-        .split('\n')
-        .flatMap((line, index) =>
-          arbitraryValues(line)
-            .filter(
-              (word) =>
-                !arbitraryAllowlist.some(
-                  ([allowed, pattern]) => allowed === path && pattern.test(word),
-                ),
-            )
-            .map((word) => `${path}:${index + 1} ${word}`),
-        );
+      return arbitraryValues(readFileSync(file, 'utf8'), file)
+        .filter(
+          ([, word]) =>
+            !arbitraryAllowlist.some(
+              ([allowed, pattern]) => allowed === path && pattern.test(word),
+            ),
+        )
+        .map(([line, word]) => `${path}:${line} ${word}`);
     });
     expect(hits).toEqual([]);
   });
 
   it('keeps no stale allowlist entry', () => {
     for (const [file, pattern] of arbitraryAllowlist) {
-      const words = readFileSync(join(root, file), 'utf8').split('\n').flatMap(arbitraryValues);
+      const words = arbitraryValues(readFileSync(join(root, file), 'utf8'), file);
       expect(
-        words.some((word) => pattern.test(word)),
+        words.some(([, word]) => pattern.test(word)),
         `${file} ${pattern}`,
       ).toBe(true);
     }
