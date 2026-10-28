@@ -40,66 +40,67 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 
 ## Tokens
 
-| Token | Layer | Value (light / dark) | Provenance | Use for | Do not use for |
-|---|---|---|---|---|---|
-| `palette-white` | raw | oklch(1 0 0) | P1 | `app/globals.css` only | anything outside `app/globals.css` (applies to the whole raw layer) |
-| `palette-neutral-{50,100,200,400,500,550,700,800,900,950}` | raw | L = .985 / .97 / .922 / .708 / .556 / .5 / .371 / .269 / .205 / .145, C = 0 | P1; 550 from FR-8 (contrast override); 700 from D4 | `app/globals.css` | components and pages |
-| `palette-zinc-{100,800,900}` | raw | (.967 .001 286.375) / (.274 .006 286.033) / (.21 .006 285.885) | P1 | `app/globals.css` | components and pages |
-| `palette-lime-{50,300,400,500,600,700,800,900,950}` | raw | Tailwind lime scale, L .986 to .274 | P1 | `app/globals.css` | components and pages |
-| `palette-red-{300,400,600,800}` | raw | Tailwind red scale | P1, FR-6 | `app/globals.css` | components and pages |
-| `palette-green-{45,55,72}` | raw | (.45 .12 150) / (.55 .14 150) / (.72 .15 150) | FR-4, FR-8, D6 | `app/globals.css` | components and pages |
-| `palette-amber-{45,68,80}` | raw | (.45 .10 70) / (.68 .15 70) / (.80 .14 75) | FR-4, FR-8 | `app/globals.css` | components and pages |
-| `palette-blue-{45,55,72}` | raw | (.45 .12 250) / (.55 .13 250) / (.72 .12 250) | FR-4, FR-8 | `app/globals.css` | components and pages |
-| `scale-spacing` | raw | 0.25rem × n (Tailwind `--spacing`) | Tailwind 4 | source for `space-*` | new code where a `space-*` token fits |
-| `scale-radius` | raw | `--radius` .625rem and its sm to 4xl steps | P1 | the shadcn generator only | components (see D7) |
-| `scale-text` | raw | .6875 / .75 / .875 / 1 / 1.125 / 1.25 / 1.5 rem | Tailwind, D8 | source for `text-*` | arbitrary `text-[Npx]` |
-| `background` (page surface) | semantic | white / neutral-950 | P1 | `body` and `main` background | cards, sidebar |
-| `foreground` (default text) | semantic | neutral-950 / neutral-50 | P1 | text on background, card, muted | text on primary or status fills |
-| `card`, `card-foreground` | semantic | white / neutral-900; text = foreground | P1 | Card, base of Pre | page background |
-| `popover`, `popover-foreground` | semantic | same as card | P1 | reserved for shadcn menus | currently unused; not a card substitute |
-| `primary` (primary action) | semantic | lime-400 / lime-500 | P1 | primary button fill, default badge, text selection | text colour (1.54:1 on white) |
-| `primary-foreground` | semantic | zinc-900 / zinc-900 | P1, FR-6 | text on `primary` | other backgrounds |
-| `primary-text` (link) | semantic | lime-900 / lime-400 | FR-6 (override) | links, link button and badge | fills |
-| `secondary`, `secondary-foreground` | semantic | zinc-100 / zinc-800; zinc-900 / neutral-50 | P1 | secondary button and badge | layout surfaces |
-| `muted` (subtle surface) | semantic | neutral-100 / neutral-800 | P1 | muted badge, ghost hover, selected row, ScoreBar track, Pre (/40) | text, borders |
-| `muted-foreground` (muted text) | semantic | neutral-550 / neutral-400 | P1, FR-8 | descriptions, placeholders, nav labels, supporting icons | text on solid status fills; disabled fields |
-| `accent`, `accent-foreground` | semantic | neutral-100 / neutral-800; neutral-900 / neutral-50 | P1 | hover inside shadcn components | own surfaces (use `muted`) |
-| `destructive` (error fill) | semantic | red-600 / red-400 | P1 | background /10 to /30, invalid field border, red ScoreBar bar | text |
-| `destructive-foreground` (error text) | semantic | red-800 / red-300 | FR-6, FR-8 | error messages, text on destructive /10 to /30 | text on solid `destructive` |
-| `success` | semantic | green-55 / green-72 | FR-4 | background /10, border /30, green ScoreBar bar | text, icons |
-| `success-foreground` | semantic | green-45 / **green-72** | FR-8, D6 | success text and icons | fills |
-| `warning` | semantic | amber-68 / amber-80 | FR-4 | background /10, border /40 | text and icons (2.97:1 in light) |
-| `warning-foreground` | semantic | amber-45 / amber-80 | FR-8, D5 | warning text and icons | fills |
-| `info`, `info-foreground` | semantic | blue-55 / blue-72; blue-45 / blue-72 | FR-4, FR-8 | as the success pair | as the success pair |
-| `border` (subtle outline) | semantic | neutral-200 / white 10% | P1 | separators, card outline, table rows | form control borders |
-| `input` (control fill) | semantic | neutral-200 / white 15% | P1 | light: disabled field fill (/50); dark: control fill (/30, hover /50) | borders (D3) |
-| **`border-control`** | semantic | neutral-500 / neutral-500 | D3, A§7, WCAG 1.4.11 | input, select and future checkbox borders | separators, cards |
-| `ring` (focus indicator) | semantic | **neutral-700 / neutral-400** (was 400 / 500) | D4 | `border-ring` plus solid `ring-1` on focus | decoration |
-| `sidebar`, `sidebar-foreground` | semantic | neutral-50 / neutral-900; neutral-950 / neutral-50 | P1 | side panel, app name | page content |
-| `sidebar-accent`, `sidebar-accent-foreground` | semantic | neutral-100 / neutral-800; neutral-900 / neutral-50 | P1 | active and hovered nav item | outside navigation |
-| `sidebar-ring` | semantic | **neutral-700 / neutral-400** | D4 | focus in navigation | outside the sidebar |
-| `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-border` | semantic | lime-600 / lime-500; lime-50 / lime-950; as `border` | P1 | reserved for the generator | currently unused |
-| `chart-1` to `chart-5` | semantic | lime-300 / 500 / 600 / 700 / 800 (both themes) | P1 | series in future charts | statuses; currently unused |
-| `font-sans` (body font) | semantic | Figtree Variable, system fallbacks | P1, SPEC-119 §7, ADR-0001 | the whole UI | |
-| `font-mono` (code font) | semantic | ui-monospace stack | P1 | code, paths, identifiers | prose |
-| **`text-page-title`** | semantic | 1.25rem / 600 | D8 (PageHeader) | page h1 | cards |
-| **`text-metric`** | semantic | 1.5rem / 600, tabular numerals | D8 | numeric stat tiles | headings |
-| **`text-body`** | semantic | .875rem | D8 | page descriptions, navigation, messages | controls |
-| **`text-ui`** | semantic | .75rem | P1 (Lyra, dense) | controls, cards, tables, badges | titles |
-| **`text-caption`** | semantic | .6875rem (11px) | D8, D10 | nav section labels, hints, "planned" tag | errors, main content |
-| **`space-page-inline`** | semantic | 1rem, 2rem from `md` | D9 (`app/layout.tsx`) | horizontal padding of `main` | card interiors |
-| **`space-page-block`** | semantic | 1.5rem | D9 | vertical padding of `main` | |
-| **`space-section`** | semantic | 1.5rem | D9 | gap between page header and sections | card interiors |
-| **`space-grid`** | semantic | 1rem | D9 | card grids (`gap-4`) | lists inside a card |
-| **`space-stack`** | semantic | 0.5rem | D9 | vertical stack inside a card | gaps between sections |
-| **`space-inline`**, **`space-inline-tight`** | semantic | 0.5rem; 0.25rem | D9 | a row of controls; icon next to a label | page layout |
-| **`radius-surface`** | semantic | 0 | P1 (Lyra), D7 | all surfaces and controls | |
-| **`size-content-max`** | semantic | 72rem | `app/layout.tsx` | maximum width of `main` | |
-| `card-spacing` | component | 1rem, .75rem for size `sm` | P1 (already in `components/ui/card.tsx`) | Card | other components |
-| **`control-height`**, **`control-height-sm`**, **`control-height-xs`** | component | 2rem / 1.75rem / 1.5rem | FR-6 (32px) | Button, Input, NativeSelect | |
-| **`button-secondary-hover`** | component | color-mix(in oklch, secondary, foreground 5%) | FR-6 (currently an inline class) | secondary button hover | |
-| **`sidebar-width`** | component | 14rem | `app/layout.tsx` | aside | |
-| **`scorebar-red-phase`**, **`scorebar-green-phase`**, **`scorebar-track`** | component | destructive 70%; success 80%; muted | RED/GREEN evaluation spec, D5 | ScoreBar on result pages | statuses outside ScoreBar |
+| Token | CSS property | Layer | Value (light / dark) | Provenance | Use for | Do not use for |
+|---|---|---|---|---|---|---|
+| `palette-white` | `--palette-white` | raw | oklch(1 0 0) | P1 | `app/globals.css` only | anything outside `app/globals.css` (applies to the whole raw layer) |
+| `palette-neutral-{50,100,200,400,500,550,700,800,900,950}` | `--palette-neutral-{50,100,200,400,500,550,700,800,900,950}` | raw | L = .985 / .97 / .922 / .708 / .556 / .5 / .371 / .269 / .205 / .145, C = 0 | P1; 550 from FR-8 (contrast override); 700 from D4 | `app/globals.css` | components and pages |
+| `palette-zinc-{100,800,900}` | `--palette-zinc-{100,800,900}` | raw | (.967 .001 286.375) / (.274 .006 286.033) / (.21 .006 285.885) | P1 | `app/globals.css` | components and pages |
+| `palette-lime-{50,300,400,500,600,700,800,900,950}` | `--palette-lime-{50,300,400,500,600,700,800,900,950}` | raw | Tailwind lime scale, L .986 to .274 | P1 | `app/globals.css` | components and pages |
+| `palette-red-{300,400,600,800}` | `--palette-red-{300,400,600,800}` | raw | Tailwind red scale | P1, FR-6 | `app/globals.css` | components and pages |
+| `palette-green-{45,55,72}` | `--palette-green-{45,55,72}` | raw | (.45 .12 150) / (.55 .14 150) / (.72 .15 150) | FR-4, FR-8, D6 | `app/globals.css` | components and pages |
+| `palette-amber-{45,68,80}` | `--palette-amber-{45,68,80}` | raw | (.45 .10 70) / (.68 .15 70) / (.80 .14 75) | FR-4, FR-8 | `app/globals.css` | components and pages |
+| `palette-blue-{45,55,72}` | `--palette-blue-{45,55,72}` | raw | (.45 .12 250) / (.55 .13 250) / (.72 .12 250) | FR-4, FR-8 | `app/globals.css` | components and pages |
+| `scale-spacing` | none | raw | 0.25rem × n (Tailwind `--spacing`) | Tailwind 4 | source for `space-*` | new code where a `space-*` token fits |
+| `scale-radius` | `--radius`, `--radius-{sm,md,lg,xl,2xl,3xl,4xl}` | raw | `--radius` .625rem and its sm to 4xl steps | P1 | the shadcn generator only | components (see D7) |
+| `scale-text` | none | raw | .6875 / .75 / .875 / 1 / 1.125 / 1.25 / 1.5 rem | Tailwind, D8 | source for `text-*` | arbitrary `text-[Npx]` |
+| `background` (page surface) | `--background` | semantic | white / neutral-950 | P1 | `body` and `main` background | cards, sidebar |
+| `foreground` (default text) | `--foreground` | semantic | neutral-950 / neutral-50 | P1 | text on background, card, muted | text on primary or status fills |
+| `card`, `card-foreground` | `--card`, `--card-foreground` | semantic | white / neutral-900; text = foreground | P1 | Card, base of Pre | page background |
+| `popover`, `popover-foreground` | `--popover`, `--popover-foreground` | semantic | same as card | P1 | reserved for shadcn menus | currently unused; not a card substitute |
+| `primary` (primary action) | `--primary` | semantic | lime-400 / lime-500 | P1 | primary button fill, default badge, text selection | text colour (1.54:1 on white) |
+| `primary-foreground` | `--primary-foreground` | semantic | zinc-900 / zinc-900 | P1, FR-6 | text on `primary` | other backgrounds |
+| `primary-text` (link) | `--primary-text` | semantic | lime-900 / lime-400 | FR-6 (override) | links, link button and badge | fills |
+| `secondary`, `secondary-foreground` | `--secondary`, `--secondary-foreground` | semantic | zinc-100 / zinc-800; zinc-900 / neutral-50 | P1 | secondary button and badge | layout surfaces |
+| `muted` (subtle surface) | `--muted` | semantic | neutral-100 / neutral-800 | P1 | muted badge, ghost hover, selected row, ScoreBar track, Pre (/40) | text, borders |
+| `muted-foreground` (muted text) | `--muted-foreground` | semantic | neutral-550 / neutral-400 | P1, FR-8 | descriptions, placeholders, nav labels, supporting icons | text on solid status fills; disabled fields |
+| `accent`, `accent-foreground` | `--accent`, `--accent-foreground` | semantic | neutral-100 / neutral-800; neutral-900 / neutral-50 | P1 | hover inside shadcn components | own surfaces (use `muted`) |
+| `destructive` (error fill) | `--destructive` | semantic | red-600 / red-400 | P1 | background /10 to /30, invalid field border, red ScoreBar bar | text |
+| `destructive-foreground` (error text) | `--destructive-foreground` | semantic | red-800 / red-300 | FR-6, FR-8 | error messages, text on destructive /10 to /30 | text on solid `destructive` |
+| `success` | `--success` | semantic | green-55 / green-72 | FR-4 | background /10, border /30, green ScoreBar bar | text, icons |
+| `success-foreground` | `--success-foreground` | semantic | green-45 / **green-72** | FR-8, D6 | success text and icons | fills |
+| `warning` | `--warning` | semantic | amber-68 / amber-80 | FR-4 | background /10, border /40 | text and icons (2.97:1 in light) |
+| `warning-foreground` | `--warning-foreground` | semantic | amber-45 / amber-80 | FR-8, D5 | warning text and icons | fills |
+| `info`, `info-foreground` | `--info`, `--info-foreground` | semantic | blue-55 / blue-72; blue-45 / blue-72 | FR-4, FR-8 | as the success pair | as the success pair |
+| `border` (subtle outline) | `--border` | semantic | neutral-200 / white 10% | P1 | separators, card outline, table rows | form control borders |
+| `input` (control fill) | `--input` | semantic | neutral-200 / white 15% | P1 | light: disabled field fill (/50); dark: control fill (/30, hover /50) | borders (D3) |
+| **`border-control`** | `--border-control` | semantic | neutral-500 / neutral-500 | D3, A§7, WCAG 1.4.11 | input, select and future checkbox borders | separators, cards |
+| `ring` (focus indicator) | `--ring` | semantic | **neutral-700 / neutral-400** (was 400 / 500) | D4 | `border-ring` plus solid `ring-1` on focus | decoration |
+| `sidebar`, `sidebar-foreground` | `--sidebar`, `--sidebar-foreground` | semantic | neutral-50 / neutral-900; neutral-950 / neutral-50 | P1 | side panel, app name | page content |
+| `sidebar-accent`, `sidebar-accent-foreground` | `--sidebar-accent`, `--sidebar-accent-foreground` | semantic | neutral-100 / neutral-800; neutral-900 / neutral-50 | P1 | active and hovered nav item | outside navigation |
+| `sidebar-ring` | `--sidebar-ring` | semantic | **neutral-700 / neutral-400** | D4 | focus in navigation | outside the sidebar |
+| `sidebar-primary`, `sidebar-primary-foreground`, `sidebar-border` | `--sidebar-primary`, `--sidebar-primary-foreground`, `--sidebar-border` | semantic | lime-600 / lime-500; lime-50 / lime-950; as `border` | P1 | reserved for the generator | currently unused |
+| `chart-1` to `chart-5` | `--chart-{1,2,3,4,5}` | semantic | lime-300 / 500 / 600 / 700 / 800 (both themes) | P1 | series in future charts | statuses; currently unused |
+| `font-sans` (body font) | `--font-sans` | semantic | Figtree Variable, system fallbacks | P1, SPEC-119 §7, ADR-0001 | the whole UI | |
+| `font-heading` (heading font) | `--font-heading` | semantic | same as `font-sans` | P1 | Card title (shadcn generator) | a second typeface |
+| `font-mono` (code font) | `--font-mono` | semantic | ui-monospace stack | P1 | code, paths, identifiers | prose |
+| **`text-page-title`** | `--text-page-title` | semantic | 1.25rem / 600 | D8 (PageHeader) | page h1 | cards |
+| **`text-metric`** | `--text-metric` | semantic | 1.5rem / 600, tabular numerals | D8 | numeric stat tiles | headings |
+| **`text-body`** | `--text-body` | semantic | .875rem | D8 | page descriptions, navigation, messages | controls |
+| **`text-ui`** | `--text-ui` | semantic | .75rem | P1 (Lyra, dense) | controls, cards, tables, badges | titles |
+| **`text-caption`** | `--text-caption` | semantic | .6875rem (11px) | D8, D10 | nav section labels, hints, "planned" tag | errors, main content |
+| **`space-page-inline`** | `--spacing-page-inline` | semantic | 1rem, 2rem from `md` | D9 (`app/layout.tsx`) | horizontal padding of `main` | card interiors |
+| **`space-page-block`** | `--spacing-page-block` | semantic | 1.5rem | D9 | vertical padding of `main` | |
+| **`space-section`** | `--spacing-section` | semantic | 1.5rem | D9 | gap between page header and sections | card interiors |
+| **`space-grid`** | `--spacing-grid` | semantic | 1rem | D9 | card grids (`gap-4`) | lists inside a card |
+| **`space-stack`** | `--spacing-stack` | semantic | 0.5rem | D9 | vertical stack inside a card | gaps between sections |
+| **`space-inline`**, **`space-inline-tight`** | `--spacing-inline`, `--spacing-inline-tight` | semantic | 0.5rem; 0.25rem | D9 | a row of controls; icon next to a label | page layout |
+| **`radius-surface`** | `--radius-surface` | semantic | 0 | P1 (Lyra), D7 | all surfaces and controls | |
+| **`size-content-max`** | `--container-content` | semantic | 72rem | `app/layout.tsx` | maximum width of `main` | |
+| `card-spacing` | none (inline in `components/ui/card.tsx`) | component | 1rem, .75rem for size `sm` | P1 (already in `components/ui/card.tsx`) | Card | other components |
+| **`control-height`**, **`control-height-sm`**, **`control-height-xs`** | `--spacing-control`, `--spacing-control-sm`, `--spacing-control-xs` | component | 2rem / 1.75rem / 1.5rem | FR-6 (32px) | Button, Input, NativeSelect | |
+| **`button-secondary-hover`** | `--button-secondary-hover` | component | color-mix(in oklch, secondary, foreground 5%) | FR-6 (currently an inline class) | secondary button hover | |
+| **`sidebar-width`** | `--spacing-sidebar` | component | 14rem | `app/layout.tsx` | aside | |
+| **`scorebar-red-phase`**, **`scorebar-green-phase`**, **`scorebar-track`** | `--scorebar-red-phase`, `--scorebar-green-phase`, `--scorebar-track` | component | destructive 70%; success 80%; muted | RED/GREEN evaluation spec, D5 | ScoreBar on result pages | statuses outside ScoreBar |
 
 ## Colour pairs and contrast
 

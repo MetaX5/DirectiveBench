@@ -88,6 +88,43 @@ describe('globals.css token layers', () => {
   });
 });
 
+describe('tokeny.md', () => {
+  // Every token custom property in globals.css is documented in the "CSS property" column of
+  // the tokeny.md token table, and the reverse (FR-121-6). Out of scope: the --color-* bridge
+  // aliases, --*--line-height style sub-properties and --page-inline, the source of
+  // --spacing-page-inline.
+  const css = readFileSync(join(root, 'app', 'globals.css'), 'utf8');
+  const defined = new Set(
+    [...css.matchAll(/^\s*--([\w-]+):/gm)]
+      .map((match) => match[1]!)
+      .filter((name) => !name.startsWith('color-') && !name.includes('--'))
+      .filter((name) => name !== 'page-inline'),
+  );
+
+  const expand = (name: string): string[] => {
+    const group = /\{([^}]+)\}/.exec(name);
+    if (!group) return [name];
+    return group[1]!.split(',').flatMap((part) => expand(name.replace(group[0], part)));
+  };
+  const lines = readFileSync(join(root, 'tokeny.md'), 'utf8').split('\n');
+  const header = lines.findIndex((line) => line.startsWith('| Token | CSS property |'));
+  const end = lines.findIndex((line, index) => index > header && !line.startsWith('|'));
+  const rows = lines.slice(header + 2, end);
+  const documented = new Set(
+    rows.flatMap((row) =>
+      [...row.split('|')[2]!.matchAll(/`--([\w{},-]+)`/g)].flatMap((match) => expand(match[1]!)),
+    ),
+  );
+
+  it('documents every token defined in globals.css', () => {
+    expect([...defined].filter((name) => !documented.has(name))).toEqual([]);
+  });
+
+  it('documents no token that globals.css does not define', () => {
+    expect([...documented].filter((name) => !defined.has(name))).toEqual([]);
+  });
+});
+
 describe('cn merge config', () => {
   // Every custom size, spacing, radius and width token in @theme must be registered with
   // tailwind-merge (lib/utils.ts), or cn() drops or fails to merge it.
