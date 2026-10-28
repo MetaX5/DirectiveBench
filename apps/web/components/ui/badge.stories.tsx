@@ -94,7 +94,7 @@ export const States: Story = {
 /** Badges wrap instead of clipping, down to a 390px viewport (SPEC-119 FR-7). */
 export const LongTextNarrowScreen: Story = {
   render: () => (
-    <div className="flex w-80 flex-wrap gap-inline-tight border border-dashed p-2">
+    <div className="flex w-full max-w-80 flex-wrap gap-inline-tight border border-dashed p-2">
       <Badge variant="muted">
         Planned: not implemented: private repositories, GitLab, marking deleted artifacts as missing
       </Badge>
@@ -103,7 +103,7 @@ export const LongTextNarrowScreen: Story = {
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const frame = canvasElement.querySelector<HTMLElement>('.w-80')!;
+    const frame = canvasElement.querySelector<HTMLElement>('.max-w-80')!;
     for (const badge of frame.querySelectorAll<HTMLElement>('[data-slot="badge"]')) {
       await expect(badge.scrollWidth).toBeLessThanOrEqual(badge.clientWidth);
       await expect(badge.getBoundingClientRect().right).toBeLessThanOrEqual(

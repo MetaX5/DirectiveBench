@@ -96,7 +96,7 @@ export const LongValueNarrowScreen: Story = {
     className: 'font-mono',
   },
   render: (args) => (
-    <label className="flex w-80 flex-col gap-1 text-ui text-muted-foreground">
+    <label className="flex w-full max-w-80 flex-col gap-1 text-ui text-muted-foreground">
       Path or GitHub URL
       <Input {...args} />
     </label>

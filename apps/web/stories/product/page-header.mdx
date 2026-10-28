@@ -53,8 +53,10 @@ data has none (Detail view pattern); a missing item gets the title "… not foun
 
 ## 9. Responsiveness
 
-Title and actions wrap (`flex-wrap`); actions move under the title on narrow screens and
-badges wrap inside them.
+The title and the actions block wrap: the actions move under the title on narrow screens.
+**Finding:** the actions themselves do not wrap (`flex` without `flex-wrap` in
+`components/common.tsx`), so three badges in the actions overflow at 320px, as the RED/GREEN
+result pattern shows. Proposal P14: add `flex-wrap` to the actions.
 
 <Canvas of={Stories.LongTextNarrowScreen} />
 

@@ -10,3 +10,25 @@
 .sbdocs-content > :is(ol, ul) ul {
   list-style: disc;
 }
+/* At 320px, documentation tables, code and story blocks scroll or wrap inside the page instead
+   of widening it. Tables and code inside a story keep the app's own styles. */
+.sbdocs-content table:not(.docs-story table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.sbdocs-content :not(pre) > code:not(.docs-story code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.sbdocs-content pre:not(.docs-story pre) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.sbdocs-content .docs-story > div {
+  overflow-x: auto;
+}
+.sbdocs-content .docblock-source {
+  max-width: 100%;
+  overflow-x: auto;
+}

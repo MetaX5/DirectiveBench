@@ -85,7 +85,7 @@ export const NarrowScreen: Story = {
   args: { path: '/home/dev/code/acme-engineering/agent-rules-and-skills-for-every-team' },
   decorators: [
     (Story) => (
-      <div className="w-80 break-words">
+      <div className="w-full max-w-80 break-words">
         <Story />
       </div>
     ),

@@ -22,7 +22,7 @@ export const Default: Story = {
 export const NarrowScreen: Story = {
   decorators: [
     (Story) => (
-      <div className="w-80">
+      <div className="w-full max-w-80">
         <Story />
       </div>
     ),

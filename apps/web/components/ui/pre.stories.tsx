@@ -48,7 +48,7 @@ export const LongLinesNarrowScreen: Story = {
       'Error: ENOENT: no such file or directory, open /home/dev/code/acme-engineering/agent-rules/.claude/skills/validate-external-input/fixtures/expected-output.json',
   },
   render: (args) => (
-    <div className="w-80">
+    <div className="w-full max-w-80">
       <Pre {...args} />
     </div>
   ),

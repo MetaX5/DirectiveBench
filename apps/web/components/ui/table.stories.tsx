@@ -160,7 +160,7 @@ export const Empty: Story = {
 /** At 320px the table scrolls sideways inside its container; the page does not. */
 export const NarrowScreen: Story = {
   render: () => (
-    <div className="w-80 border border-dashed">
+    <div className="w-full max-w-80 border border-dashed">
       <RecentRuns />
     </div>
   ),

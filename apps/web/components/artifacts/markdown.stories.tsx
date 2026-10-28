@@ -76,7 +76,7 @@ export const LongTextNarrowScreen: Story = {
   },
   decorators: [
     (Story) => (
-      <div className="w-80 break-words">
+      <div className="w-full max-w-80 break-words">
         <Story />
       </div>
     ),

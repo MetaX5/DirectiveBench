@@ -76,7 +76,7 @@ export const WithGroups: Story = {
 /** The select is as wide as its longest option; a long option widens it. */
 export const LongOptionsNarrowScreen: Story = {
   render: () => (
-    <label className="flex w-80 flex-col gap-1 text-ui text-muted-foreground">
+    <label className="flex w-full max-w-80 flex-col gap-1 text-ui text-muted-foreground">
       Repository
       <NativeSelect defaultValue="" className="w-full">
         <NativeSelectOption value="">All</NativeSelectOption>

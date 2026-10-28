@@ -178,7 +178,7 @@ export const InlineWithField: Story = {
 /** Labels never wrap; a long label widens the button, so keep labels short. */
 export const LongLabelNarrowScreen: Story = {
   render: (args) => (
-    <div className="w-80 space-y-stack border border-dashed p-2">
+    <div className="w-full max-w-80 space-y-stack border border-dashed p-2">
       <Button {...args}>Run all assigned benchmark suites again</Button>
       <Button {...args} className="w-full">
         Register

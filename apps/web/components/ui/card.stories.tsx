@@ -118,7 +118,7 @@ export const ContentStates: Story = {
 /** Long titles wrap; paths and identifiers use font-mono and break anywhere. */
 export const LongContentNarrowScreen: Story = {
   render: () => (
-    <div className="w-80">
+    <div className="w-full max-w-80">
       <Card>
         <CardHeader>
           <CardTitle className="font-mono break-all">
