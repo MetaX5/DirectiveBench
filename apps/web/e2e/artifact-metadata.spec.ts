@@ -208,3 +208,29 @@ test('browser QA findings: long tags wrap, drafts and focus survive, errors clea
     );
   }
 });
+
+test('a slow save does not take focus from a field the user moved to', async ({ page }) => {
+  const artifactId = await demoArtifactId();
+  await page.goto(`/artifacts/${artifactId}`);
+  await page.route(`**/artifacts/${artifactId}`, async (route) => {
+    if (route.request().method() === 'POST') await new Promise((r) => setTimeout(r, 1000));
+    await route.continue();
+  });
+  const tags = card(page, 'Tags');
+  const notes = card(page, 'Notes').getByRole('textbox', { name: 'Notes' });
+  try {
+    await tags.getByRole('textbox', { name: 'Tag' }).fill('slow');
+    await tags.getByRole('textbox', { name: 'Tag' }).press('Enter');
+    await expect(tags.getByRole('status')).toHaveText('Saving the tags.');
+    await notes.click();
+    await expect(tags.getByRole('status')).toHaveText('Added tag slow.');
+    await page.keyboard.type('typed while saving');
+    await expect(notes).toBeFocused();
+    await expect(notes).toHaveValue('typed while saving');
+  } finally {
+    await page.unrouteAll();
+    await withDatabase((db) =>
+      db.prepare("update artifacts set tags = '[]', notes = null where id = ?").run(artifactId),
+    );
+  }
+});

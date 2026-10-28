@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useActionState, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
   Badge,
   Button,
@@ -43,12 +43,16 @@ const assignOrUnassignSuite = byIntent(assignArtifactSuiteAction, unassignArtifa
 
 /**
  * Focuses the card's field, or `fallback()` when the field is gone or disabled (the last suite
- * was assigned, the last free tag slot was taken), so focus never drops to the page body.
+ * was assigned, the last free tag slot was taken), so focus never drops to the page body. Focus
+ * the user moved outside the card while the save ran stays where it is.
  */
 function focusField(
-  field: HTMLInputElement | HTMLSelectElement | null,
-  fallback: () => HTMLElement | null | undefined,
+  card: HTMLElement | null,
+  field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null,
+  fallback: () => HTMLElement | null | undefined = () => null,
 ): void {
+  const active = document.activeElement;
+  if (active && active !== document.body && !card?.contains(active)) return;
   if (field && !field.disabled) field.focus();
   else fallback()?.focus();
 }
@@ -87,16 +91,18 @@ function Messages({
 }
 
 function Section({
+  card,
   title,
   description,
   children,
 }: {
+  card: RefObject<HTMLDivElement | null>;
   title: string;
   description: string;
   children: ReactNode;
 }) {
   return (
-    <Card>
+    <Card ref={card}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>
@@ -118,6 +124,7 @@ export function TagsCard({
   maxTagLength: number;
 }) {
   const [state, dispatch, pending] = useActionState(addOrRemoveTag, idle);
+  const card = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const full = tags.length >= maxTags;
@@ -129,13 +136,17 @@ export function TagsCard({
   // the limit the field is disabled: the focus goes to the Remove button of the newest tag.
   useEffect(() => {
     if (state.kind === 'idle') return;
-    focusField(field.current, () =>
+    focusField(card.current, field.current, () =>
       list.current?.querySelector<HTMLElement>('li:last-child button'),
     );
   }, [state]);
 
   return (
-    <Section title="Tags" description="Your own labels for this artifact. A rescan keeps them.">
+    <Section
+      card={card}
+      title="Tags"
+      description="Your own labels for this artifact. A rescan keeps them."
+    >
       {tags.length ? (
         <ul ref={list} aria-label="Tags" className="flex flex-wrap gap-inline">
           {tags.map((tag) => (
@@ -213,6 +224,7 @@ export function NotesCard({
   maxLength: number;
 }) {
   const [state, dispatch, pending] = useActionState(saveArtifactNotesAction, idle);
+  const card = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   // The error stays until the value changes (Input page, Do and don't).
   const [editedAfter, setEditedAfter] = useState<MetadataFormState | null>(null);
@@ -220,11 +232,12 @@ export function NotesCard({
 
   useEffect(() => {
     // The Save button is disabled while saving, which drops its focus: return it to the field.
-    if (state.kind !== 'idle') field.current?.focus();
+    if (state.kind !== 'idle') focusField(card.current, field.current);
   }, [state]);
 
   return (
     <Section
+      card={card}
       title="Notes"
       description="Kept on this machine. A rescan does not change them. Leave empty to clear."
     >
@@ -276,6 +289,7 @@ export function SuitesCard({
     },
     idle,
   );
+  const card = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLSelectElement>(null);
   const list = useRef<HTMLUListElement>(null);
 
@@ -283,7 +297,7 @@ export function SuitesCard({
   // last free suite is assigned the field is gone: the focus moves to that suite's Unassign.
   useEffect(() => {
     if (state.kind === 'idle') return;
-    focusField(field.current, () =>
+    focusField(card.current, field.current, () =>
       [...(list.current?.querySelectorAll<HTMLElement>('li[data-suite-id]') ?? [])]
         .find((item) => item.dataset.suiteId === submitted.current)
         ?.querySelector('button'),
@@ -292,6 +306,7 @@ export function SuitesCard({
 
   return (
     <Section
+      card={card}
       title="Assigned benchmarks"
       description="Suites this artifact is benchmarked with. Run a benchmark from its suite page."
     >
