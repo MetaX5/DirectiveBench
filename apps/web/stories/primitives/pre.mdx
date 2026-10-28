@@ -1,0 +1,85 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as PreStories from '../../components/ui/pre.stories';
+
+<Meta of={PreStories} />
+
+# Pre
+
+`import { Pre } from '@/components/ui/primitives'`. Not a shadcn component: DirectiveBench's
+own block for code and raw output.
+
+## 1. Purpose
+
+Shows text exactly as it is: JSON, a benchmark definition, a prompt, raw agent output, an
+error.
+
+## 2. When to use
+
+- Raw data: the parsed metadata on `/artifacts/[id]`, the definition on `/benchmarks/[id]`,
+  traces and environment on `/results/[id]`, the configuration on `/settings`.
+- Validation issues of a definition (`path: message` per line).
+
+## 3. When not to use
+
+| Situation                                      | Use instead                                  |
+| ---------------------------------------------- | -------------------------------------------- |
+| A path or identifier inside a sentence or cell | `font-mono` on the text                      |
+| Rendered Markdown                              | `Markdown` (Product)                         |
+| A diff between versions                        | A diff view, on "What is missing" (SPEC-113) |
+
+## 4. Anatomy
+
+A `<pre>` with a 1px border, `muted` at 40%, 12px padding, `font-mono text-ui`, wrapping
+lines and a 28rem scroll limit.
+
+## 5. Variants
+
+One look. Pages lower the limit with `max-h-40` for prompts in a list.
+
+## 6. States
+
+None interactive. Long content scrolls inside the block.
+
+<Canvas of={PreStories.LongOutput} />
+
+## 7. Accessibility
+
+- Text contrast on `muted` at 40% is 19.12:1 (light) and 16.13:1 (dark), tokeny.md T29.
+- **Finding:** a block taller than 28rem scrolls but is not a tab stop (axe
+  `scrollable-region-focusable`). Documented exception; proposal P13.
+- Raw output is shown verbatim, never rewritten: imported and agent text keep their own
+  punctuation (AGENTS.md §7).
+
+## 8. Content
+
+Format JSON with two-space indentation (`JSON.stringify(value, null, 2)`). Do not translate or
+reflow raw output.
+
+## 9. Responsiveness
+
+Lines wrap and break inside long words, so the block never widens the page.
+
+<Canvas of={PreStories.LongLinesNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={PreStories} />
+
+All props of `<pre>`.
+
+## 11. Code
+
+```tsx
+<Pre>{JSON.stringify(definition, null, 2)}</Pre>
+```
+
+## 12. Do and don't
+
+| Do                            | Don't                                           |
+| ----------------------------- | ----------------------------------------------- |
+| `Pre` for JSON and raw output | A `div` with `font-mono` and manual line breaks |
+| Raw agent output as recorded  | Replacing characters in recorded evidence       |
+
+## 13. Related
+
+`Markdown`, `ContentTab` (Product), `Card`.

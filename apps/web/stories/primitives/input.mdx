@@ -1,0 +1,101 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as InputStories from '../../components/ui/input.stories';
+
+<Meta of={InputStories} />
+
+# Input
+
+`import { Input } from '@/components/ui/input'`
+
+## 1. Purpose
+
+A single-line text field.
+
+## 2. When to use
+
+- A path or URL: "Path or GitHub URL" on `/repositories`.
+- A search term: Search on `/artifacts`.
+
+## 3. When not to use
+
+| Situation                               | Use instead                      |
+| --------------------------------------- | -------------------------------- |
+| Choosing from a known list              | `NativeSelect`                   |
+| Several lines (a prompt, a description) | A Textarea, on "What is missing" |
+| A yes or no                             | A Checkbox, on "What is missing" |
+| Showing a value that cannot change      | Text, or `Pre` for code          |
+
+## 4. Anatomy
+
+A native `<input>` (`data-slot="input"`), always inside a visible `<label>` that names it.
+The app wraps the field in the label (`flex flex-col gap-1 text-ui text-muted-foreground`).
+
+<Canvas of={InputStories.WithLabel} />
+
+## 5. Variants
+
+One look. Width comes from the container or a width class (`w-56` for the search field).
+`font-mono` for paths and URLs. Height is 32px (`h-control`) to match the buttons in the row.
+
+## 6. States
+
+<Canvas of={InputStories.States} sourceState="none" />
+
+- **Hover:** no change. **Focus:** solid ring (tokeny.md D4).
+- **Disabled:** while the app works on the submitted value (the path check on
+  `/repositories`), with a `role="status"` message saying so (proposal P11).
+- **Invalid:** `aria-invalid` plus the message under the field, linked with
+  `aria-describedby` and announced with `role="alert"`. The value is kept.
+
+<Canvas of={InputStories.WithError} />
+
+## 7. Accessibility
+
+- Name: the visible label. A placeholder is never the name. Source: WCAG 1.3.1, 3.3.2.
+- Errors: `aria-invalid` and `aria-describedby` point at the message (WCAG 3.3.1).
+- Keyboard: Tab reaches it; typing, selection and paste are native.
+- The border reaches 3:1 (`border-control`, tokeny.md U01, U02).
+
+## 8. Content
+
+- Label: a noun, sentence case ("Path or GitHub URL", "Search").
+- Placeholder: an example of the value ("~/code/my-skills or https://github.com/owner/repo"),
+  in `muted-foreground` (6.00:1).
+- Error: what is wrong and what to do ("The filesystem root cannot be registered. Choose the
+  folder that holds your skills."). Source: SPEC-122 §18 Q1.
+- Set `maxLength` when the server limits the value, as Search does.
+
+## 9. Responsiveness
+
+The field shrinks to its container (`min-w-0`); long values scroll inside it. In a form row it
+takes the free space (`flex-1`) and the row wraps at 320px.
+
+<Canvas of={InputStories.LongValueNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={InputStories} />
+
+All props of `<input>`.
+
+## 11. Code
+
+```tsx
+<label className="flex flex-col gap-1 text-ui text-muted-foreground">
+  Path or GitHub URL
+  <Input name="path" required placeholder="~/code/my-skills" className="font-mono" />
+</label>
+```
+
+## 12. Do and don't
+
+| Do                                                      | Don't                                    |
+| ------------------------------------------------------- | ---------------------------------------- |
+| A visible label around the field                        | A placeholder as the only label          |
+| The error under the field, kept until the value changes | A toast for a field error                |
+| `aria-invalid` with `aria-describedby`                  | A red border alone                       |
+| `<Input>`                                               | A raw `<input>` (ESLint fails, SPEC-121) |
+
+## 13. Related
+
+`Button` (same height in a row), `NativeSelect`, the Form pattern (stage 3).

@@ -1,5 +1,5 @@
 import '@fontsource-variable/figtree';
-import '../app/globals.css';
+import './states.css';
 import './preview.css';
 import { DocsContainer, type DocsContainerProps } from '@storybook/addon-docs/blocks';
 import type { Decorator, Preview } from '@storybook/nextjs-vite';

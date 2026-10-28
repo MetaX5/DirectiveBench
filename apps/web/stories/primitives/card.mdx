@@ -1,0 +1,101 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as CardStories from '../../components/ui/card.stories';
+
+<Meta of={CardStories} />
+
+# Card
+
+`import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'`
+(the five are also exported from `@/components/ui/primitives`).
+
+## 1. Purpose
+
+Groups one section of a page: a form, a list, a summary. Every page is a stack of cards under
+its `PageHeader`.
+
+## 2. When to use
+
+- A form: "Register a repository" on `/repositories`.
+- A list or table with its title: Recent runs on `/`, the job list on `/executions`.
+- A summary or detail block: Configuration on `/benchmarks/[id]`, RED and GREEN variants on
+  `/results/[id]`.
+- A stat tile on the dashboard.
+
+## 3. When not to use
+
+| Situation                           | Use instead                                                                        |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| A card inside a card                | A heading (h3) and spacing inside the one card                                     |
+| A notice inside a section           | A notice paragraph (an Alert primitive is on "What is missing")                    |
+| A clickable tile                    | A link around content, or a Button in the card; the card itself is not interactive |
+| Decoration around a single sentence | The sentence                                                                       |
+
+## 4. Anatomy
+
+`Card` (surface, 1px ring) > `CardHeader` (`CardTitle` h2, `CardDescription`, optional
+`CardAction` at the right) > `CardContent` > optional `CardFooter`. `CardAction` and
+`CardFooter` are available and unused (P3).
+
+<Canvas of={CardStories.Anatomy} />
+
+## 5. Variants
+
+`size="default"` (16px inside) for page sections; `size="sm"` (12px) for dense tiles and
+nested lists. No colour variants: a card is always `bg-card`. Source: tokeny.md
+`card-spacing`.
+
+<Canvas of={CardStories.Sizes} />
+
+## 6. States
+
+A card has no interactive states. Its content carries the data states: loading, empty and
+error are shown inside the card, in its body, with the title kept. See the Filtered list and
+Detail view patterns (stage 3).
+
+<Canvas of={CardStories.ContentStates} />
+
+## 7. Accessibility
+
+- `CardTitle` is an h2, under the page's h1. Headings inside a card are h3. Source: WCAG
+  1.3.1, SPEC-122 P6.
+- The card is a plain `<div>`: no role, no tab stop. Give a section a landmark only with
+  `<section aria-label>`, as version blocks on `/artifacts/[id]` do.
+- The ring is decorative (tokeny.md U12); the title identifies the section.
+
+## 8. Content
+
+- Title: a noun phrase in sentence case ("Recent runs", "Register a repository"). Paths and
+  identifiers in `font-mono`.
+- Description: one or two sentences in `text-ui`, `text-muted-foreground`. Longer guidance
+  belongs in the content.
+- Body text inside a card is `text-ui` (inherited); messages use `text-body`.
+
+## 9. Responsiveness
+
+Cards fill their column. Grids are one column below 768px and two or three from `md` with
+`gap-grid`. Long titles wrap; identifiers use `break-all`.
+
+<Canvas of={CardStories.LongContentNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={CardStories} />
+
+All parts accept the props of their element (`div`, `h2`, `p`).
+
+## 11. Code
+
+<Canvas of={CardStories.Playground} />
+
+## 12. Do and don't
+
+| Do                                                   | Don't                                              |
+| ---------------------------------------------------- | -------------------------------------------------- |
+| One card per section, stacked with `space-y-section` | A card inside a card                               |
+| `CardTitle` for the section name                     | An extra `<h3>` as the first line of `CardContent` |
+| The empty state inside the card, with the title      | Hiding the card when its list is empty             |
+| `size="sm"` for a dense tile                         | Overriding the padding with `p-*` classes          |
+
+## 13. Related
+
+`PageHeader`, `EmptyState`, `Table`; Spacing and layout (Foundations).

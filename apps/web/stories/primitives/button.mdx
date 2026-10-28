@@ -1,0 +1,139 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as ButtonStories from '../../components/ui/button.stories';
+
+<Meta of={ButtonStories} />
+
+# Button
+
+`import { Button } from '@/components/ui/button'` (pages may also import it from
+`@/components/ui/primitives`).
+
+## 1. Purpose
+
+Starts an action on the current page: submits a form, starts a run, confirms a risky step.
+
+## 2. When to use
+
+- Submitting a form: Register on `/repositories`, Filter on `/artifacts`, Scan in the
+  repository table.
+- Starting or stopping work: Run on a benchmark (`/benchmarks/[id]`), Cancel on a job
+  (`/executions`), Cancel scan.
+- Confirming a risky step: "Register anyway" after the home-directory warning.
+
+## 3. When not to use
+
+| Situation                                | Use instead                                                                                    |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Going to another page                    | A link (`next/link`); styled as a button only when it is the page's main next step (`asChild`) |
+| Showing a status                         | `Badge`                                                                                        |
+| Switching a view on the same page (tabs) | A link with `aria-current`; a Tabs primitive is on "What is missing"                           |
+| Choosing one of several values           | `NativeSelect`                                                                                 |
+
+## 4. Anatomy
+
+A native `<button>` with `data-slot="button"`, `data-variant` and `data-size`. Content is a
+label and, optionally, one icon before it (`data-icon="inline-start"`) or after it
+(`data-icon="inline-end"`). Icons without a size class become 16px (12px for `xs`, 14px for
+`sm`).
+
+<Canvas of={ButtonStories.WithIcon} />
+
+## 5. Variants
+
+| Variant       | Choose it for                                                           | In the app                        |
+| ------------- | ----------------------------------------------------------------------- | --------------------------------- |
+| `default`     | The one main action of a form or section                                | Register, Run                     |
+| `outline`     | A secondary action, or one action repeated per row                      | Filter, Scan, Cancel, Cancel scan |
+| `secondary`   | A neutral action that is not the main one, when an outline is too light | available, unused                 |
+| `ghost`       | An action inside dense UI where a frame is noise: the theme toggle      | ThemeToggle                       |
+| `destructive` | An action that cannot be undone or overrides a warning                  | Register anyway                   |
+| `link`        | An action that reads as text inside a sentence                          | available, unused                 |
+
+**Proposal P12 (not yet approved):** at most one `default` button per form or section, as on
+every current page.
+
+<Canvas of={ButtonStories.Variants} />
+
+Sizes: `default` (32px) in forms, `sm` (28px) in table rows and dense cards, `xs` (24px) only
+where 28px does not fit. `lg` and `icon-lg` (36px) are available and unused. Source:
+SPEC-119 FR-6, "Parameters in force".
+
+<Canvas of={ButtonStories.Sizes} />
+
+## 6. States
+
+<Canvas of={ButtonStories.States} sourceState="none" />
+
+- **Disabled:** say why next to the button. The Run button on a benchmark is disabled while
+  the suite has blockers, and the blockers are listed above it. Link the reason with
+  `aria-describedby`, as the story below does, so a screen reader hears it on the button; the
+  app does not do that yet (on "What is missing"). A disabled button without a reason is on
+  "What to avoid". Source: WCAG 3.3.2, `app/benchmarks/[id]/page.tsx`.
+- **Loading:** none built in; see proposal P11 on "Parameters in force".
+- **Invalid:** `aria-invalid` exists in the preset; buttons in the app never use it.
+- **Selected:** `aria-expanded` when the button opens something; no button does so today.
+
+<Canvas of={ButtonStories.DisabledWithReason} />
+
+## 7. Accessibility
+
+- Keyboard: Tab reaches it; Enter and Space activate it (native `<button>`). The Playground
+  story tests both. Source: WCAG 2.1.1.
+- Focus: visible solid ring (tokeny.md D4); the order follows the DOM.
+- ARIA: the label is the accessible name. An icon-only button needs `aria-label` (Icons page).
+  A screen reader announces "Run benchmark, button"; when disabled, "dimmed" or
+  "unavailable", followed by the description.
+- Target: 24px or larger in every size. Source: WCAG 2.5.8.
+- Always set `type`: `type="submit"` in forms, `type="button"` elsewhere, so a button outside
+  the intended form never submits it. Source: HTML, inventory of `app/`.
+
+## 8. Content
+
+- A verb plus an object: "Register repository", "Run benchmark", "Cancel job". One word is
+  enough when the object is obvious from the form ("Register", "Filter"). Source: SPEC-122
+  §18 Q1.
+- Sentence case, no full stop, no exclamation mark.
+- Labels do not wrap (`whitespace-nowrap`); keep them under about 30 characters. In a longer
+  language the button grows, so leave room in the row.
+
+<Canvas of={ButtonStories.LongLabelNarrowScreen} />
+
+## 9. Responsiveness
+
+Buttons keep their size at every width. At 320px a form row wraps (`flex-wrap`) so the
+button moves under the field; a full-width button (`className="w-full"`) is allowed only in
+narrow, single-column forms.
+
+## 10. API
+
+<ArgTypes of={ButtonStories} />
+
+All other props go to the `<button>` element. `asChild` renders the single child (a link)
+with the button classes.
+
+## 11. Code
+
+Minimal:
+
+```tsx
+<Button type="submit">Register</Button>
+```
+
+Typical, a form row on `/repositories`:
+
+<Canvas of={ButtonStories.InlineWithField} />
+
+## 12. Do and don't
+
+| Do                                                        | Don't                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------ |
+| One `default` button per section (P12)                    | Two green buttons side by side                               |
+| `variant="destructive"` for "Register anyway"             | A red `className` on a `default` button                      |
+| A disabled Run button with its blocker written next to it | A disabled button with no reason                             |
+| `<Button asChild><Link …>` for a page's next step         | `onClick={() => router.push(…)}` on a button                 |
+| `<Button>`                                                | `<div onClick>` or a raw `<button>` (ESLint fails, SPEC-121) |
+
+## 13. Related
+
+`Input` and `NativeSelect` (same height in a form row), `Badge` (status, not action), the
+Form and Risky-action confirmation patterns (stage 3).

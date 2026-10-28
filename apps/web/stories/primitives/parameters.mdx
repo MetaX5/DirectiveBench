@@ -1,0 +1,48 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Primitives/Parameters in force" />
+
+# Parameters in force
+
+Shape, density and state parameters shared by the primitives, as the components implement
+them on 2026-10-28. Each has a source. "P1" is the shadcn preset Lyra `b3Rq8QfWi` (SPEC-119
+AC-1); its values live in the generated `components/ui` files.
+
+## Shape and density
+
+| Parameter                             | Value                                                                     | Utility                                              | Source                                        |
+| ------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| Corner radius                         | 0 everywhere                                                              | `rounded-none` (generated), `rounded-surface` (app)  | tokeny.md D7                                  |
+| Control height, default               | 32px                                                                      | `h-control`                                          | SPEC-119 FR-6                                 |
+| Control height, small and extra small | 28px, 24px                                                                | `h-control-sm`, `h-control-xs`                       | SPEC-119 FR-6                                 |
+| Control height, large                 | 36px                                                                      | `h-9`                                                | P1. Unused in the app; available, not a token |
+| Icon button                           | square, the control height                                                | `size-control`, `size-control-sm`, `size-control-xs` | P1, SPEC-119 FR-6                             |
+| Control text                          | 12px, weight 500 on buttons and badges                                    | `text-ui`, `font-medium`                             | SPEC-119 FR-6, tokeny.md D11                  |
+| Button padding                        | 10px inline (8px for `xs`), 6px between icon and label                    | `px-2.5`, `gap-1.5`                                  | P1                                            |
+| Field padding                         | 10px inline, 4px block; select leaves 32px for the chevron                | `px-2.5 py-1`, `pr-8`                                | P1                                            |
+| Badge                                 | at least 20px high, 8px inline, wraps                                     | `min-h-5 px-2 py-0.5 whitespace-normal`              | P1, SPEC-119 FR-7                             |
+| Table                                 | header 40px; cells 8px                                                    | `h-10 px-2`, `p-2`                                   | P1                                            |
+| Card                                  | 16px inside, 12px for `size="sm"`                                         | `card-spacing`                                       | tokeny.md `card-spacing`                      |
+| Border                                | 1px; fields `border-control`, outline button `border`, others transparent | `border`                                             | tokeny.md D3                                  |
+| Minimum target                        | 24 by 24px; the smallest control is 24px                                  |                                                      | WCAG 2.5.8                                    |
+
+## States
+
+| State                                        | How it looks                                                                                                                                                                                      | Source                                   |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Hover                                        | Fill change per variant (`primary/80`, `muted`, `button-secondary-hover`, `destructive/20`); links underline                                                                                      | P1, tokeny.md `button-secondary-hover`   |
+| Focus (keyboard)                             | `border-ring` plus a solid 1px `ring-ring`; only on `:focus-visible`                                                                                                                              | tokeny.md D4                             |
+| Pressed                                      | Button moves down 1px, only when motion is allowed                                                                                                                                                | P1, SPEC-122 P9                          |
+| Disabled                                     | 50% opacity, `cursor-not-allowed`, no pointer events; fields also take the `input` fill. Exempt from contrast                                                                                     | P1, tokeny.md decision 10                |
+| Invalid (`aria-invalid`)                     | `border-destructive` plus a `destructive/20` ring (`/40` in dark)                                                                                                                                 | P1                                       |
+| Expanded (`aria-expanded`)                   | `outline`, `ghost` and `secondary` buttons keep their hover fill                                                                                                                                  | P1                                       |
+| Selected table row (`data-state="selected"`) | `bg-muted`                                                                                                                                                                                        | P1                                       |
+| Cursor                                       | `pointer` on every enabled button, `not-allowed` when disabled                                                                                                                                    | SPEC-119 FR-6, tokeny.md decision 11     |
+| Motion                                       | Colour transitions of 150ms, none under `prefers-reduced-motion`                                                                                                                                  | SPEC-122 §18 Q2, P9                      |
+| Loading                                      | No component has one. **Proposal P11 (not yet approved):** disable the control and say what is happening in a `role="status"` message, as `/repositories` does while it checks a path; no spinner | inventory of `app/repositories/page.tsx` |
+
+## Frozen previews
+
+Hover, focus and pressed cannot be held while reading a page, so the state matrices freeze them
+with `data-preview-state="hover"`, `"focus"` or `"pressed"`. Only the Storybook CSS
+(`.storybook/states.css`) reads that attribute; the app never sets it.

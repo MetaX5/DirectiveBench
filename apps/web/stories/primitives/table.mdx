@@ -1,0 +1,98 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as TableStories from '../../components/ui/table.stories';
+
+<Meta of={TableStories} />
+
+# Table
+
+`import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'`.
+Pages also import them from `@/components/ui/primitives` as `THead`, `TBody`, `TR`, `TH`
+and `TD` (P1).
+
+## 1. Purpose
+
+Rows of items with the same columns, to scan and compare.
+
+## 2. When to use
+
+- Every list page: repositories, artifacts, benchmarks, executions, results.
+- Assertions of a suite, files of an artifact version.
+
+## 3. When not to use
+
+| Situation                             | Use instead                                     |
+| ------------------------------------- | ----------------------------------------------- |
+| Label and value pairs of one item     | A description list (`dl`), on "What is missing" |
+| Fewer than three items with long text | Cards or a list                                 |
+| Layout                                | Grid or flex; never a table for layout          |
+
+## 4. Anatomy
+
+`Table` (a scroll container plus `<table>`) > `TableHeader` > `TableRow` > `TableHead`;
+`TableBody` > `TableRow` > `TableCell`. `TableCaption` and `TableFooter` are available and
+unused (P3).
+
+<Canvas of={TableStories.WithCaptionAndFooter} />
+
+## 5. Variants
+
+One look. Column alignment: text left, numbers right with `tabular-nums`. Identifiers and
+paths in `font-mono`.
+
+## 6. States
+
+<Canvas of={TableStories.RowStates} sourceState="none" />
+
+- Row hover: `muted` at 50%. Selected row: `data-state="selected"`, `muted`.
+- Empty: do not show an empty table; show a sentence that says why and what to do.
+- Loading: none; pages render on the server.
+
+<Canvas of={TableStories.Empty} />
+
+## 7. Accessibility
+
+- A table has a name: `aria-label`, or the card title it sits under.
+- Header cells are `<th>`. A per-row action names its row ("Scan acme/agent-rules"), because
+  "Scan" repeated is ambiguous out of context. Source: WCAG 2.4.6, `app/repositories/page.tsx`.
+- **Finding:** a table wider than the screen scrolls inside its container, which is not a tab
+  stop (axe `scrollable-region-focusable`). Documented exception; proposal P13.
+
+<Canvas of={TableStories.RowAction} />
+
+## 8. Content
+
+- Column headings: one or two words, sentence case.
+- A missing value is shown as words or left empty with a reason; the current em dash
+  placeholders are tracked by issue 123.
+- Dates follow `formatDate` ("28 Oct 2026, 12:00 UTC").
+
+## 9. Responsiveness
+
+The table keeps its columns; below its width it scrolls sideways inside the container, never
+the page. Put the most important columns first.
+
+<Canvas of={TableStories.NarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={TableStories} />
+
+Each part takes the props of its element.
+
+## 11. Code
+
+<Canvas of={TableStories.Playground} />
+
+## 12. Do and don't
+
+| Do                                         | Don't                                    |
+| ------------------------------------------ | ---------------------------------------- |
+| `StatusBadge` in a status column           | A coloured cell background for status    |
+| Numbers right-aligned with `tabular-nums`  | Centred numbers                          |
+| "Scan acme/agent-rules" as the button name | Five buttons all named "Scan"            |
+| `<Table>`                                  | A raw `<table>` (ESLint fails, SPEC-121) |
+
+## 13. Related
+
+`Badge`, `Button` (`size="sm"`, `variant="outline"` per row), `Card`, the Filtered list
+pattern (stage 3).

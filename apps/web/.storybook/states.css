@@ -1,0 +1,31 @@
+/* Storybook only (SPEC-122 stage 2): the state matrices freeze hover, focus and pressed
+   previews with data-preview-state, so every state is visible at once. The app's own CSS
+   (app/globals.css alone) has no such selector. */
+@import '../app/globals.css';
+
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+  &[data-preview-state~='hover'] {
+    @slot;
+  }
+}
+@custom-variant focus-visible {
+  &:focus-visible {
+    @slot;
+  }
+  &[data-preview-state~='focus'] {
+    @slot;
+  }
+}
+@custom-variant active {
+  &:active {
+    @slot;
+  }
+  &[data-preview-state~='pressed'] {
+    @slot;
+  }
+}
