@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect } from 'storybook/test';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { PageHeader } from './common';
+import { MockBadge, NotSandboxedBadge, PageHeader } from './common';
 
 const meta = {
   title: 'Product/App shell/PageHeader',
@@ -57,7 +57,22 @@ export const LongTextNarrowScreen: Story = {
     title: 'validate-external-input-and-reject-unknown-fields',
     description:
       'Skill from acme-engineering/agent-rules-and-skills-for-every-team, version 3, primary file SKILL.md',
-    actions: <Button>Run benchmark</Button>,
+    actions: (
+      <>
+        <Badge variant="outline">v3</Badge>
+        <MockBadge />
+        <NotSandboxedBadge />
+        <Button>Run benchmark</Button>
+      </>
+    ),
+  },
+  // The actions wrap, so badges and buttons stay inside 320px (SPEC-122 P14).
+  play: async ({ canvasElement }) => {
+    const frame = canvasElement.querySelector<HTMLElement>('.max-w-80')!;
+    const right = frame.getBoundingClientRect().right;
+    for (const item of frame.querySelectorAll<HTMLElement>('[data-slot]')) {
+      await expect(item.getBoundingClientRect().right).toBeLessThanOrEqual(right + 0.5);
+    }
   },
   decorators: [
     (Story) => (

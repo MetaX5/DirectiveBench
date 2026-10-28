@@ -303,7 +303,7 @@ P11 and P12 are documentation rules):
   container `tabIndex={0}` with `role="region"` and the table's name. Until then two stories
   carry a documented exception (`stories/blocks/a11y.ts`).
 
-Proposal from stage 5, waiting for the maintainer (not implemented):
+Proposal from stage 5, accepted by the maintainer on 2026-10-28 and implemented:
 
 - P14: `PageHeader` actions use `flex` without `flex-wrap` (`components/common.tsx`), so three
   badges in the actions overflow at 320 px, as on a mock benchmark's page. Add `flex-wrap`.
@@ -377,8 +377,9 @@ Proposal from stage 5, waiting for the maintainer (not implemented):
   - a11y: no violations and no exceptions in 107 stories in both themes.
   - Browser pass over all 147 entries at 320, 768 and 1440 px in both themes: no page errors;
     keyboard focus visible on all 354 elements reached by Tab; no horizontal page scroll
-    except the RED/GREEN result stories at 320 px (PageHeader actions do not wrap, proposal
-    P14) and one docs page (NotSandboxedBadge, 33 px from a code block).
+    except one docs page (NotSandboxedBadge, 33 px from a code block). The RED/GREEN result
+    stories overflowed at 320 px until P14 made the PageHeader actions wrap; a play function
+    in the PageHeader narrow-screen story guards it (shown red first).
   - The AGENTS.md change (design-system rule, `pnpm test:storybook` in the gate and the
     commands) was applied after the maintainer accepted it.
 - **Not verified:** AC-2 is met for 18 of the 19 components in §11 (ContentTab is on "What is

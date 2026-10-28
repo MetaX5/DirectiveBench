@@ -3,7 +3,7 @@ title: Design-system documentation in Storybook (SPEC-122, #134)
 date: 2026-10-28
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request ("zaczynaj 134"), issue #134, prompt .ai/specs/briefs/2026-10-27-design-system-storybook.md
-status: in-progress
+status: complete
 branch: feat/design-system-storybook
 specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 ---
@@ -19,10 +19,10 @@ specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 - **Approved in stage 1 review:** P6 to P10 (2026-10-28).
 - **Approved in stage 2 review:** P11 to P13 (2026-10-28).
 - **Approved in stage 4 review:** the AGENTS.md diff (applied in stage 5).
-- **Open questions:** proposal P14 (PageHeader actions wrap).
-- **Next step:** wait for "dalej", then push the branch and open the PR. After merge: the
-  maintainer makes the "Storybook (browser, both themes)" check required (Q5) and runs the
-  agent test below.
+- **Approved in stage 5 review:** P14 (implemented), push and PR; the maintainer asked me to
+  make the "Storybook (browser, both themes)" check required (Q5).
+- **Open questions:** none.
+- **Next step:** the maintainer reviews the PR and runs the agent test below.
 
 ## Objective
 
@@ -195,9 +195,11 @@ Stage 5:
   canvas (now `w-full max-w-80`), and MDX tables, inline code and code blocks widened the docs
   pages at 320 px (now scroll or wrap through `.storybook/preview.css`, limited to
   documentation, never stories).
-- Remaining: RED/GREEN result stories at 320 px overflow because PageHeader actions do not
-  wrap (P14, also true in the app); the NotSandboxedBadge docs page is 33 px wider than 320 px
-  because of its code block, cause not found.
+- P14 (accepted): PageHeader actions now wrap (`components/common.tsx`), which also fixes the
+  overflow on real pages with several badges in the header. The PageHeader narrow-screen story
+  asserts it and failed before the change. The RED/GREEN stories now fit 320 px.
+- Remaining: the NotSandboxedBadge docs page is 33 px wider than 320 px because of its code
+  block; cause not found.
 - Token report. The guard (hex, palette classes, `text-xs`/`text-sm`, radius, status text,
   arbitrary values) finds nothing outside its six documented allowlist entries:
   `native-select.tsx` (Canvas colours), `card.tsx` (card-spacing token, header grid tracks),
