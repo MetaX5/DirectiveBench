@@ -10,7 +10,7 @@ specs: [SPEC-121, SPEC-120]
 
 # Run: design-token migration and design-system guard in CI
 
-Source doc: .ai/specs/2026-10-28-design-token-migration-and-guard.md
+Source doc: .ai/specs/implemented/2026-10-28-design-token-migration-and-guard.md
 
 ## Objective
 

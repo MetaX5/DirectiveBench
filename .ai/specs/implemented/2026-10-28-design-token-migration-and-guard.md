@@ -1,7 +1,7 @@
 ---
 id: SPEC-121
 title: Design-token migration and design-system guard in CI
-status: draft
+status: implemented
 created: 2026-10-28
 updated: 2026-10-28
 category: feature
@@ -13,7 +13,7 @@ related: [SPEC-120, SPEC-119, SPEC-014]
 ## 📝 TLDR
 
 Contributors building web screens see two ways to set the same size: the type and spacing
-tokens of [SPEC-120](implemented/2026-10-27-design-tokens.md) and the raw Tailwind utilities
+tokens of [SPEC-120](2026-10-27-design-tokens.md) and the raw Tailwind utilities
 they stand for. Most app code still uses the raw utilities. This spec proposes to move app
 code onto the tokens without any visual change. It also proposes CI checks that fail when
 code drifts back: raw form and table elements outside `components/ui`, arbitrary Tailwind
@@ -26,7 +26,7 @@ This is SPEC-120 §19 and issue [#132](https://github.com/MetaX5/DirectiveBench/
 | # | Question | Default applied | Rationale |
 |---|---|---|---|
 | Q1 | Split the migration and the CI guard into two specs? | No. One spec in two phases: guard first, then migration. | The maintainer added the guard to #132 on 2026-10-27. The `text-xs` rule only goes green once the migration lands, and #134 needs both in place. |
-| Q2 | Migrate the generated `components/ui` files too? | Yes, for `text-xs`/`text-sm` and for spacing that matches a token's purpose. Recorded as a new `tokeny.md` decision. | PR #130 already moved control heights in those files to tokens. #134 documents these files and needs them migrated. The guard catches regressions from a re-run of the shadcn generator, so the [generator lesson](../lessons/2026-10-23-shadcn-generators-need-a-compatibility-review.md) review stays mechanical. |
+| Q2 | Migrate the generated `components/ui` files too? | Yes, for `text-xs`/`text-sm` and for spacing that matches a token's purpose. Recorded as a new `tokeny.md` decision. | PR #130 already moved control heights in those files to tokens. #134 documents these files and needs them migrated. The guard catches regressions from a re-run of the shadcn generator, so the [generator lesson](../../lessons/2026-10-23-shadcn-generators-need-a-compatibility-review.md) review stays mechanical. |
 | Q3 | Markdown renderer `<table>`: use `Table` or allow an exception? | A commented ESLint exception on that one line. | `Table` adds a wrapper and styles. That would change how imported Markdown renders, while "Done when" asks for pixel-identical screens. Moving it onto `Table` is a separate, visible change. |
 | Q4 | Existing arbitrary values: new tokens or exceptions? | Documented exceptions, as an allowlist with reasons in the test. | #132 excludes new token values. The current uses are system colours (`bg-[Canvas]`, `text-[CanvasText]`, decision 12), grid track templates, two scroll-height limits and the inline `card-spacing` component token. None of these is a reusable token today. |
 | Q5 | How do the ESLint rule and the test share their file scope (the #134 request)? | One JSON file, `apps/web/design-system-scope.json`, read by both `eslint.config.mjs` and `design-tokens.test.ts`. | JSON loads in both places without a TypeScript loader. It holds data rather than logic, so the coverage gate has nothing to measure. |
@@ -257,7 +257,7 @@ None blocking. The defaults are listed under Resolved assumptions.
 ## 20. Implementation status
 
 - **Implemented (verified 2026-10-28, Linux, Node 22, Chromium; run log
-  [`2026-10-28-design-token-migration-and-guard`](../runs/2026-10-28-design-token-migration-and-guard.md)):**
+  [`2026-10-28-design-token-migration-and-guard`](../../runs/2026-10-28-design-token-migration-and-guard.md)):**
   every acceptance criterion. Guards: `apps/web/test/design-tokens.test.ts` (type utilities,
   arbitrary values with allowlist, `tokeny.md` sync) and the `designSystemComponents` block in
   `eslint.config.mjs`, both reading `apps/web/design-system-scope.json`; each shown red first.
@@ -265,4 +265,4 @@ None blocking. The defaults are listed under Resolved assumptions.
   (10 demo pages, 1440 and 390 px, both themes) byte-identical. Full gate and 52 E2E tests pass.
 - **Not verified visually:** states the demo data does not reach (repository registration
   confirmation, scan status). Their changed utilities have values equal to the tokens.
-- The spec stays in `.ai/specs/` until the maintainer approves the move to `implemented/`.
+- Merged in #137; the maintainer approved the move to `implemented/` on 2026-10-28.
