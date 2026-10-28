@@ -122,12 +122,12 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
             <CardTitle>Latest RED/GREEN comparison</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-body">
+          <CardContent className="space-y-stack text-body">
             {latestEval ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
@@ -315,7 +315,7 @@ function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
 
 function GroupTable({ group, several }: { group: ComparabilityGroup; several: boolean }) {
   return (
-    <div className="space-y-2" data-testid="comparability-group" data-key={group.key ?? ''}>
+    <div className="space-y-stack" data-testid="comparability-group" data-key={group.key ?? ''}>
       <p className="text-ui font-medium">
         <span className="font-mono">{groupLabel(group.key)}</span>
         {several ? (
@@ -442,7 +442,7 @@ function ResultsByVersionTab({
           </p>
         ))}
         {!tested ? (
-          <div className="space-y-2 text-body" data-testid="no-runs">
+          <div className="space-y-stack text-body" data-testid="no-runs">
             <p className="text-muted-foreground">
               No benchmark runs yet. Create a suite with{' '}
               <code className="select-all rounded-surface bg-muted px-1 font-mono">

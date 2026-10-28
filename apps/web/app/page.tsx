@@ -89,7 +89,7 @@ export default async function DashboardPage() {
         <Stat label="Regressions or errors" value={failed} />
       </div>
 
-      <Card className="mt-6">
+      <Card className="mt-section">
         <CardHeader>
           <CardTitle>Recent benchmark runs</CardTitle>
           <CardDescription>
@@ -165,7 +165,7 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <Card className="mt-6">
+      <Card className="mt-section">
         <CardHeader>
           <CardTitle>Recent regressions</CardTitle>
         </CardHeader>

@@ -39,7 +39,7 @@ function FileTree({
       {nodes.map((node) =>
         node.children ? (
           <li key={`d:${node.path}`}>
-            <span className="flex items-center gap-1 text-muted-foreground">
+            <span className="flex items-center gap-inline-tight text-muted-foreground">
               <Folder className="size-3" aria-hidden />
               {node.name}/
             </span>
@@ -56,7 +56,7 @@ function FileTree({
               href={artifactHref(artifactId, { tab: 'content', version, file: node.path })}
               aria-current={node.path === selected ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-1 rounded-surface px-1 hover:bg-accent',
+                'flex items-center gap-inline-tight rounded-surface px-1 hover:bg-accent',
                 node.path === selected && 'bg-accent font-medium',
               )}
             >
@@ -89,8 +89,8 @@ export function ContentTab({
   const crNotice = rawViewNotice(file.content);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      <div className="flex flex-col gap-4">
+    <div className="grid gap-grid lg:grid-cols-4">
+      <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
             <CardTitle>Version</CardTitle>
@@ -136,7 +136,7 @@ export function ContentTab({
         </Card>
       </div>
 
-      <div className="flex flex-col gap-4 lg:col-span-3">
+      <div className="flex flex-col gap-grid lg:col-span-3">
         <Card>
           <CardHeader>
             <CardTitle className="font-mono" data-testid="content-path">

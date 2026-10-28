@@ -127,7 +127,7 @@ export default async function BenchmarkPage({
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-grid">
           {cliOnly ? (
             <Card data-testid="run-from-cli">
               <CardHeader>
@@ -192,7 +192,7 @@ export default async function BenchmarkPage({
                   <form
                     key={artifact.id}
                     action={enqueueBenchmarkRunAction}
-                    className="flex items-center justify-between gap-2"
+                    className="flex items-center justify-between gap-inline"
                   >
                     <input type="hidden" name="suiteVersionId" value={version.id} />
                     <input type="hidden" name="artifactId" value={artifact.id} />

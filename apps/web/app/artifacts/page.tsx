@@ -72,7 +72,7 @@ export default async function ArtifactsPage({
       />
       <Card>
         <CardContent>
-          <form className="mb-4 flex flex-wrap items-end gap-2" role="search">
+          <form className="mb-4 flex flex-wrap items-end gap-inline" role="search">
             <label className="flex flex-col gap-1 text-ui text-muted-foreground">
               Search
               <Input

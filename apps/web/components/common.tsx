@@ -21,7 +21,9 @@ export function PageHeader({
         <h1 className="text-page-title tracking-tight">{title}</h1>
         {description ? <p className="mt-1 text-body text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? <div className="flex min-w-0 max-w-full items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex min-w-0 max-w-full items-center gap-inline">{actions}</div>
+      ) : null}
     </div>
   );
 }
@@ -130,7 +132,7 @@ export function PlannedSection({
       <Card>
         <CardContent className="flex items-start gap-3 py-6">
           <Construction className="mt-0.5 size-5 text-muted-foreground" aria-hidden />
-          <div className="space-y-2 text-body">
+          <div className="space-y-stack text-body">
             <p>
               <Badge variant="muted">Planned — not implemented</Badge>
             </p>

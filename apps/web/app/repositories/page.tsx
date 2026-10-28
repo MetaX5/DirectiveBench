@@ -113,8 +113,8 @@ export default async function RepositoriesPage({
               contains any is rejected — with the repository&apos;s default branch.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
-            <form action={registerRepositoryAction} className="flex flex-wrap items-end gap-2">
+          <CardContent className="space-y-stack">
+            <form action={registerRepositoryAction} className="flex flex-wrap items-end gap-inline">
               <label className="flex min-w-64 flex-1 flex-col gap-1 text-ui text-muted-foreground">
                 Path or GitHub URL
                 <Input
@@ -146,7 +146,7 @@ export default async function RepositoriesPage({
               <div
                 role="alert"
                 data-testid="registration-confirmation"
-                className="space-y-2 rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
+                className="space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
               >
                 <p className="font-medium">{confirmation.message}</p>
                 <ul className="list-disc space-y-1 pl-4">
@@ -154,7 +154,7 @@ export default async function RepositoriesPage({
                     <li key={reason}>{reason}</li>
                   ))}
                 </ul>
-                <form action={registerRepositoryAction} className="flex items-center gap-2">
+                <form action={registerRepositoryAction} className="flex items-center gap-inline">
                   <input type="hidden" name="path" value={confirmation.path} />
                   <input type="hidden" name="confirmedLocation" value={confirmation.location} />
                   <Button type="submit" size="sm" variant="destructive">
@@ -191,8 +191,8 @@ export default async function RepositoriesPage({
 
         {scanNotice ? (
           <Card>
-            <CardContent className="space-y-2 pt-4">
-              <div className="flex flex-wrap items-center gap-2">
+            <CardContent className="space-y-stack pt-4">
+              <div className="flex flex-wrap items-center gap-inline">
                 <p
                   role="status"
                   data-testid="scan-status"

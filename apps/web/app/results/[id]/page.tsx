@@ -90,7 +90,7 @@ function VariantCard({
         <CardTitle data-testid={`${testId}-label`}>{label}</CardTitle>
         <CardDescription>{subtitle}</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-stack">
         <p className="text-metric tabular-nums" data-testid={testId}>
           {formatScore(data?.meanScore)}
         </p>
@@ -244,7 +244,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       ) : null}
 
       {summary ? (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-grid md:grid-cols-3">
           <VariantCard
             label={baselineName}
             subtitle={
@@ -269,7 +269,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <CardHeader>
               <CardTitle>Comparison</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2 text-body">
+            <CardContent className="space-y-stack text-body">
               <p className="text-metric tabular-nums" data-testid="score-delta">
                 {formatDelta(summary.delta)}
               </p>
