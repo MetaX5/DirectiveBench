@@ -103,7 +103,8 @@ Stories pass data through props. They never import `lib/db.ts` or runtime code f
 | `build-storybook` | `storybook build -o storybook-static` |
 | `test-storybook` | `vitest run --config vitest.storybook.config.ts`, with two projects, light and dark |
 
-The root gets a `test:storybook` script. CI gets a new job, "Storybook (browser, both themes)",
+`apps/web/tsconfig.json` includes `.storybook/*.ts(x)`, which the `**/*` globs skip, so the
+configuration is typechecked. The root gets a `test:storybook` script. CI gets a new job, "Storybook (browser, both themes)",
 which installs Chromium, runs `pnpm test:storybook` and runs `build-storybook`.
 
 New devDependencies, all in `apps/web`, pinned to releases at least two weeks old where
@@ -200,7 +201,10 @@ its reason in the story's parameters.
 
 ## 14. Edge cases
 
-- `Nav` and `AutoRefresh` need App Router mocks (`parameters.nextjs.appDirectory`).
+- `Nav` and `AutoRefresh` need App Router mocks. Set globally, `parameters.nextjs.appDirectory`
+  breaks every story on Next 16.4 (stage 1,
+  [lesson](../lessons/2026-10-28-storybook-nextjs-vite-app-directory-breaks-on-next-16-4.md)),
+  so stage 3 sets it per story or mocks `next/navigation`.
 - `ThemeToggle` needs `ThemeProvider` with `forcedTheme`, so it does not fight the decorator.
 - `components/ui/table.tsx` carries `'use client'` without a reason (proposal P2).
 - `tsconfig` includes `**/*.tsx`, so a broken story fails `pnpm typecheck` and `next build`.
@@ -266,6 +270,23 @@ Accepted proposals:
   blocks go in `apps/web/stories/`.
 - P5: use our own theme decorator instead of `@storybook/addon-themes`.
 
+Proposals from stage 1, waiting for the maintainer (none is implemented):
+
+- P6: every page jumps from the `PageHeader` h1 to the `CardTitle` h3, which axe reports as
+  `heading-order` (WCAG 1.3.1). Render `CardTitle` as an h2 in `components/ui/card.tsx`, or
+  give it a level prop. Until then, stories that compose a page carry a documented exception
+  (`stories/blocks/a11y.ts`).
+- P7: running text is at most about 65 characters per line (`max-w-prose`). The materials set
+  no line length.
+- P8: overlays that are not built yet (Dialog, menus, Toast) separate with `border` and the
+  `popover` fill, without a shadow. The materials do not decide overlay elevation.
+- P9: Button and Badge use `transition-all`, and Button moves 1px while pressed, also under
+  `prefers-reduced-motion`, against Q2. Add `motion-reduce:transition-none` to both and
+  `motion-reduce:active:translate-y-0` to Button.
+- P10: rules that come only from the maintainer's prompt (no emoji as icons, no sparkles as
+  the AI symbol) cite the prompt file as their source; confirm that counts as a source under
+  prompt rule 3.
+
 ## 19. Future extensions
 
 - Extracting presentational components from pages, which needs a separate spec.
@@ -275,13 +296,28 @@ Accepted proposals:
 
 ## 20. Implementation status
 
-- **Implemented:** none.
-- **Not implemented:** all. Stage 0 (inventory and plan) is complete and its questions are
-  resolved (§18).
+- **Implemented and verified (stage 1, 2026-10-28):**
+  - Storybook 10.6.2 in `apps/web` with docs (GFM tables), a11y as errors, Vitest story tests
+    in the `storybook-light` and `storybook-dark` projects, the scripts of §10 and the CI job
+    (FR-122-1, FR-122-2). Verified by `pnpm test:storybook` (22 tests) and
+    `build-storybook`, and by checking tables and list markers in the built pages.
+  - The theme switcher sets `.dark` on `<html>`, for stories and for MDX pages without stories
+    (FR-122-2). Verified in the built Storybook in both themes.
+  - Only the name DirectiveBench in the UI and tab title; telemetry, what's-new notices and
+    onboarding checklists off (FR-122-6). Verified in the built Storybook.
+  - The seven Foundations pages. Colour measures every `tokeny.md` pair on the stored values in
+    both themes: all pass, and no value differs from `tokeny.md` by more than 0.25.
+  - The SPEC-121 guards cover `stories/`, `.storybook/` and MDX pages; a dash check covers the
+    Storybook files (FR-122-4, FR-122-7). Verified red first.
+  - Storybook stays out of the tarball and the unit-coverage scope (FR-122-5). Verified by
+    `pnpm verify:pack` and `pnpm test`.
+  - The mock and planned labels no longer contain an em dash (Q4). Verified by `pnpm test:e2e`.
+- **Not implemented:** stages 2 to 5 (primitives, product components, patterns, teaching
+  pages, `design-system.md`). The CI job runs only once the PR is open.
 
 ## 📋 Implementation Plan
 
-### Stage 1: foundations
+### Stage 1: foundations (done 2026-10-28)
 
 1. Install and configure Storybook (FR-122-1, FR-122-2, FR-122-6) with the scripts and the CI
    job. Check `package.json` for dependencies outside the plan.
