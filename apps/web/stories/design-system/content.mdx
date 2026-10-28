@@ -1,0 +1,60 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Design system/Content" />
+
+# Content
+
+## Tone
+
+Plain and factual, no exclamation marks. Say what is true and what to do; do not cheer, apologise
+or joke. Source: SPEC-122 §18 Q1.
+
+| Write                                                                                 | Not                                    |
+| ------------------------------------------------------------------------------------- | -------------------------------------- |
+| "Registered acme/agent-rules. The first scan has started."                            | "Success! Your repository is ready 🎉" |
+| "The filesystem root cannot be registered. Choose the folder that holds your skills." | "Oops, something went wrong."          |
+
+## Buttons
+
+A verb plus an object: "Register repository", "Run benchmark", "Cancel job". One word is enough
+when the form names the object ("Register", "Filter"). Sentence case, no full stop. A per-row
+button names its row for assistive technology ("Scan acme/agent-rules"). Source: SPEC-122 Q1,
+Button page.
+
+## Errors
+
+What happened, then what to do, in one or two sentences. Name the thing ("benchmark.yaml is
+invalid: cases[0].prompt is required"). Never only "Error" or a code. Source: SPEC-122 Q1.
+
+## Empty states
+
+Why it is empty and the next step, with a link. "Nothing here yet" and "no results for these
+filters" are different messages. Source: EmptyState page, `app/artifacts/page.tsx`.
+
+## Labels and headings
+
+Nouns, sentence case ("Recent runs", "Path or GitHub URL"). Navigation keeps its current title
+case ("Agent Connections"). Machine values keep their own form (`running`, `skill`, `v3`).
+
+## Numbers, scores and durations
+
+Use the formatters in `lib/utils.ts`, never your own:
+
+| Value                                   | Formatter                                                           | Example                  |
+| --------------------------------------- | ------------------------------------------------------------------- | ------------------------ |
+| A score (0 to 1 stored)                 | `formatScore`                                                       | "83.3%"                  |
+| A change between baseline and candidate | `formatDelta`, signed, in points                                    | "+50 pts", "-16 pts"     |
+| A duration                              | `formatDuration`, ms below a second, seconds with one decimal above | "412 ms", "3.2 s"        |
+| A size                                  | `formatBytes` (`lib/artifacts.ts`)                                  | "4.2 kB"                 |
+| A date                                  | `formatDate`                                                        | "28 Oct 2026, 12:00 UTC" |
+
+- Use `tabular-nums` in columns and stat tiles.
+- Counts are numbers with their noun ("12 artifacts", "3 repetitions"); "x of y" while
+  filtered.
+- A missing value is said in words ("Not tested yet"). The formatters still return an em dash
+  for a missing value; changing that is issue 123.
+
+## Punctuation
+
+No en or em dash (U+2013, U+2014) in app-authored text: use a colon, parentheses, a separate
+sentence or a hyphen. Imported content keeps its own. Source: AGENTS.md §7.

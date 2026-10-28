@@ -22,7 +22,7 @@ export const Default: Story = {
 export const NextToAResult: Story = {
   render: () => (
     <div className="flex flex-wrap items-center gap-inline">
-      <span className="tabular-nums">0.50 → 1.00</span>
+      <span className="tabular-nums">50% → 100%</span>
       <StatusBadge status="passed" />
       <MockBadge />
     </div>

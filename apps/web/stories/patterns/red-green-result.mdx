@@ -23,7 +23,8 @@ verdict card with the change and the confidence.
    WCAG 1.4.1.
 3. Unstable and not-comparable results say why and what to do. Source: SPEC-111, SPEC-122 §18
    Q1.
-4. Scores use `text-metric tabular-nums` and two decimals.
+4. Scores use `formatScore` ("83.3%") in `text-metric tabular-nums`; the change uses
+   `formatDelta` ("-16 pts"). Source: `lib/utils.ts`, `app/results/[id]/page.tsx`.
 5. ScoreBar, VariantCard and AssertionDetails are locked in `app/results/[id]/page.tsx`; this
    pattern uses `Card` until they are extracted (on "What is missing").
 

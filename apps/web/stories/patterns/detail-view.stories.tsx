@@ -27,7 +27,7 @@ const skill: Detail = {
   repository: 'acme/agent-rules',
   path: '.claude/skills/validate-external-input/SKILL.md',
   description: 'Validate every external input at the boundary and reject unknown fields.',
-  latest: { status: 'passed', score: '0.50 → 1.00', mock: true },
+  latest: { status: 'passed', score: '50% → 100%', mock: true },
 };
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {

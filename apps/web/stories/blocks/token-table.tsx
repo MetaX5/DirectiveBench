@@ -51,7 +51,7 @@ function Preview({ group, property }: { group: TokenGroup; property: string }): 
   if (group === 'type') {
     return (
       <span data-preview={property} className={typeClasses[property]}>
-        {property === 'text-metric' ? '0.83' : 'Benchmark run passed'}
+        {property === 'text-metric' ? '83.3%' : 'Benchmark run passed'}
       </span>
     );
   }

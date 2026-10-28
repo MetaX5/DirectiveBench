@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import { MockBadge, NotSandboxedBadge, PageHeader, StatusBadge } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { formatDelta, formatScore } from '@/lib/utils';
 
 // Pattern: a RED/GREEN result (SPEC-112, SPEC-118), modelled on /results/[id]. The same suite
 // runs without the artifact (baseline, RED) and with it (candidate, GREEN); the verdict compares
@@ -55,8 +56,10 @@ function RedGreenResult({ result }: { result: Result }) {
                 <CardDescription>{description}</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-metric tabular-nums">{score.toFixed(2)}</p>
-                <p className="text-caption text-muted-foreground">Mean score, 0 to 1</p>
+                <p className="text-metric tabular-nums">{formatScore(score)}</p>
+                <p className="text-caption text-muted-foreground">
+                  Mean score over the repetitions
+                </p>
               </CardContent>
             </Card>
           ))}
@@ -67,12 +70,8 @@ function RedGreenResult({ result }: { result: Result }) {
           </CardHeader>
           <CardContent className="space-y-stack">
             <p>
-              Change:{' '}
-              <span className="tabular-nums">
-                {delta >= 0 ? '+' : ''}
-                {delta.toFixed(2)}
-              </span>
-              . Confidence: {result.confidence}.
+              Change: <span className="tabular-nums">{formatDelta(delta)}</span>. Confidence:{' '}
+              {result.confidence}.
             </p>
             {result.note ? <p className="text-muted-foreground">{result.note}</p> : null}
           </CardContent>
@@ -123,7 +122,7 @@ export const Regression: Story = {
   },
   play: async ({ canvas }) => {
     await expect(canvas.queryByText('Mock agent: not an AI evaluation')).toBeNull();
-    await expect(canvas.getByText('-0.16')).toBeVisible();
+    await expect(canvas.getByText('-16 pts')).toBeVisible();
   },
 };
 

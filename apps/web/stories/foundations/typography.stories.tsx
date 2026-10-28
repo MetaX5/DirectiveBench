@@ -31,7 +31,7 @@ export const Roles: Story = {
             <CardDescription>Skill from acme/agent-rules, version v3</CardDescription>
           </CardHeader>
           <CardContent className="space-y-stack">
-            <p className="text-metric tabular-nums">0.83</p>
+            <p className="text-metric tabular-nums">83.3%</p>
             <p className="text-caption text-muted-foreground">Mean score over 3 repetitions</p>
             <Badge variant="success">Passed</Badge>
           </CardContent>

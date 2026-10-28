@@ -15,9 +15,9 @@ import {
 } from './table';
 
 const runs = [
-  ['validate-external-input', 'v3', 'mock', 'Passed', '0.50 → 1.00'],
-  ['commit-message-style', 'v1', 'claude-code', 'Unstable', '0.62 → 0.71'],
-  ['no-secrets-in-logs', 'v2', 'mock', 'Regression', '1.00 → 0.75'],
+  ['validate-external-input', 'v3', 'mock', 'Passed', '50% → 100%'],
+  ['commit-message-style', 'v1', 'claude-code', 'Unstable', '62.5% → 70.8%'],
+  ['no-secrets-in-logs', 'v2', 'mock', 'Regression', '100% → 75%'],
 ] as const;
 
 const statusVariant = {

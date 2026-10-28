@@ -1,0 +1,12 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from './components.stories';
+
+<Meta of={Stories} />
+
+# Components
+
+Every documented component, with a small live preview, its group and a link to its page.
+Primitives come from the shadcn preset (`components/ui`); product components are
+DirectiveBench's own (`components/`). What is not built is on "What is missing".
+
+<Canvas of={Stories.Catalogue_} sourceState="none" />
