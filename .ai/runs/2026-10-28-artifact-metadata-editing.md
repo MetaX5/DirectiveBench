@@ -134,6 +134,25 @@ browser with an agent.
   `pnpm test:storybook` (224 tests), `pnpm build && pnpm verify:pack`, `pnpm test:e2e`
   (59 passed).
 
+## Maintainer follow-up (2026-10-28)
+
+The maintainer asked to fix the focus ring, the three small findings, and to run
+`om-auto-review-pr`.
+
+- **Focus ring:** `Button` now draws a solid 2px `outline-ring` 2px outside the button
+  (`components/ui/button.tsx`) instead of `border-ring` plus `ring-1` on the fill. tokeny.md
+  D4 and the note on the primary button, Colour, Button, Usage and `design-system.md` describe
+  it; `e2e/ui-contrast.spec.ts` measures the button outline against the page (passes in both
+  themes). Screenshots of a focused "Add tag" in both themes show a clear outline with a gap.
+  No token value changed.
+- **Placeholder:** "e.g. needs-review", so it no longer reads as an entered tag.
+- **Silent truncation:** a visible hint under the Tag field ("One tag at a time, up to 64
+  characters, no commas.") linked with `aria-describedby`; `maxLength` stays.
+- **Order:** tags are listed alphabetically; the focus fallback at the limit finds the new
+  tag by its value, not its position.
+- Gate: prettier, lint, typecheck, `pnpm test` (100%), `pnpm test:storybook` (224),
+  `pnpm build && pnpm verify:pack`, `pnpm test:e2e` (59) all pass.
+
 ## Problems and deviations
 
 - `pkill -f "port 4411"` also ended the shell running it (lesson of 2026-10-14 already says

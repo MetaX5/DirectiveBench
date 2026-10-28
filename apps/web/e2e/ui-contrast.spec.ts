@@ -12,7 +12,7 @@ type Measured = { name: string; ratio: number };
 // ancestor background (or against the background of `against`, when given).
 async function contrast(
   element: Locator,
-  colours: 'border' | 'ring' | 'background',
+  colours: 'border' | 'ring' | 'outline' | 'background',
   against?: Locator,
 ): Promise<number[]> {
   const backdrop = await (against ?? element).evaluate((el, own) => {
@@ -35,6 +35,8 @@ async function contrast(
       let found: string[];
       if (colours === 'border') found = [style.borderTopColor];
       else if (colours === 'background') found = [style.backgroundColor];
+      else if (colours === 'outline')
+        found = style.outlineStyle === 'none' ? [] : [style.outlineColor];
       else {
         // Ring layers are box-shadows with a non-zero spread; skip the empty Tailwind layers.
         found = style.boxShadow
@@ -97,7 +99,8 @@ for (const theme of ['light', 'dark'] as const) {
     await record(results, 'input focus ring', contrast(input, 'ring'));
     const register = page.getByRole('button', { name: 'Register', exact: true });
     await keyboardFocus(page, register);
-    await record(results, 'primary button focus ring', contrast(register, 'ring'));
+    // Buttons draw their focus outline 2px outside the fill, on the page (tokeny.md D4).
+    await record(results, 'primary button focus outline', contrast(register, 'outline'));
 
     // The home directory needs a confirmation (D05), whose submit is the destructive button;
     // it is cancelled below, so nothing is registered.
@@ -108,8 +111,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(registerAnyway).toBeVisible({ timeout: 30_000 });
     await page.addStyleTag({ content: '* { transition: none !important; }' });
     await keyboardFocus(page, registerAnyway);
-    await record(results, 'destructive button focus border', contrast(registerAnyway, 'border'));
-    await record(results, 'destructive button focus ring', contrast(registerAnyway, 'ring'));
+    await record(results, 'destructive button focus outline', contrast(registerAnyway, 'outline'));
     await confirmation.getByRole('link', { name: 'Cancel' }).click();
     await expect(confirmation).toHaveCount(0);
 

@@ -123,7 +123,17 @@ export function TagsCard({
   maxTags: number;
   maxTagLength: number;
 }) {
-  const [state, dispatch, pending] = useActionState(addOrRemoveTag, idle);
+  const added = useRef('');
+  const [state, dispatch, pending] = useActionState(
+    (previous: MetadataFormState, formData: FormData) => {
+      // The tag as the server stores it, to find its row when the field is disabled.
+      added.current = String(formData.get('tag') ?? '')
+        .trim()
+        .toLowerCase();
+      return addOrRemoveTag(previous, formData);
+    },
+    idle,
+  );
   const card = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -137,7 +147,9 @@ export function TagsCard({
   useEffect(() => {
     if (state.kind === 'idle') return;
     focusField(card.current, field.current, () =>
-      list.current?.querySelector<HTMLElement>('li:last-child button'),
+      [...(list.current?.querySelectorAll<HTMLElement>('li[data-tag]') ?? [])]
+        .find((item) => item.dataset.tag === added.current)
+        ?.querySelector('button'),
     );
   }, [state]);
 
@@ -149,27 +161,33 @@ export function TagsCard({
     >
       {tags.length ? (
         <ul ref={list} aria-label="Tags" className="flex flex-wrap gap-inline">
-          {tags.map((tag) => (
-            <li key={tag} className="flex max-w-full min-w-0 items-center gap-inline-tight">
-              <Badge variant="secondary" className="min-w-0 shrink break-all">
-                {tag}
-              </Badge>
-              <form action={dispatch}>
-                <input type="hidden" name="intent" value="remove" />
-                <input type="hidden" name="artifactId" value={artifactId} />
-                <input type="hidden" name="tag" value={tag} />
-                <Button
-                  type="submit"
-                  variant="outline"
-                  size="sm"
-                  disabled={pending}
-                  aria-label={`Remove tag ${tag}`}
-                >
-                  Remove
-                </Button>
-              </form>
-            </li>
-          ))}
+          {[...tags]
+            .sort((a, b) => a.localeCompare(b))
+            .map((tag) => (
+              <li
+                key={tag}
+                data-tag={tag}
+                className="flex max-w-full min-w-0 items-center gap-inline-tight"
+              >
+                <Badge variant="secondary" className="min-w-0 shrink break-all">
+                  {tag}
+                </Badge>
+                <form action={dispatch}>
+                  <input type="hidden" name="intent" value="remove" />
+                  <input type="hidden" name="artifactId" value={artifactId} />
+                  <input type="hidden" name="tag" value={tag} />
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    aria-label={`Remove tag ${tag}`}
+                  >
+                    Remove
+                  </Button>
+                </form>
+              </li>
+            ))}
         </ul>
       ) : (
         <p className="text-ui text-muted-foreground">No tags yet.</p>
@@ -183,11 +201,13 @@ export function TagsCard({
             ref={field}
             name="tag"
             maxLength={maxTagLength}
-            placeholder="security"
+            placeholder="e.g. needs-review"
             defaultValue={state.kind === 'fieldError' ? state.value : ''}
             disabled={pending || full}
             aria-invalid={fieldError ? true : undefined}
-            aria-describedby={fieldError ? 'tag-error' : full ? 'tag-limit' : undefined}
+            aria-describedby={
+              fieldError ? 'tag-error tag-hint' : full ? 'tag-limit tag-hint' : 'tag-hint'
+            }
           />
         </label>
         <Button
@@ -198,6 +218,9 @@ export function TagsCard({
           Add tag
         </Button>
       </form>
+      <p id="tag-hint" className="text-ui text-muted-foreground">
+        One tag at a time, up to {maxTagLength} characters, no commas.
+      </p>
       {full ? (
         <p id="tag-limit" className="text-ui text-muted-foreground">
           This artifact has {maxTags} tags, the most it can have. Remove one to add another.

@@ -37,6 +37,12 @@ test('tags are added and removed on the artifact Overview', async ({ page }) => 
   await field.fill('review');
   await tags.getByRole('button', { name: 'Add tag' }).click();
   await expect(tags.getByRole('status')).toHaveText('Added tag review.');
+  // Tags are listed alphabetically; the field states its limits next to it.
+  await expect(tags.getByRole('list', { name: 'Tags' }).getByRole('listitem')).toHaveText([
+    /review/,
+    /security/,
+  ]);
+  await expect(field).toHaveAccessibleDescription(/up to 64 characters, no commas/);
 
   // An invalid tag stays in the field, which is marked, described and focused.
   await field.fill('a, b');
