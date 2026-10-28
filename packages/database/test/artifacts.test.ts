@@ -5,7 +5,13 @@ import {
   acquireNextJob,
   applyRepositoryScan,
   ArtifactStoreError,
+  addArtifactTag,
+  assignArtifactSuite,
   assignBenchmarkSuite,
+  MAX_ARTIFACT_TAGS,
+  removeArtifactTag,
+  setArtifactNotes,
+  unassignArtifactSuite,
   enqueueRepositoryScanJob,
   JobNoLongerRunningError,
   markRepositoryScanFailed,
@@ -19,6 +25,7 @@ import {
   getArtifactDetail,
   getLatestArtifactVersionId,
   importArtifactVersion,
+  importSuiteVersion,
   hasArtifacts,
   listArtifacts,
   schema,
@@ -26,7 +33,7 @@ import {
   upsertRepository,
   withTransaction,
 } from '../src/index';
-import { artifactInput, registerLocal, seedRun, seedTargets } from './support/fixtures';
+import { artifactInput, registerLocal, seedRun, seedTargets, suiteInput } from './support/fixtures';
 import { useTestDatabase } from './support/test-database';
 
 const getHandle = useTestDatabase();
@@ -337,6 +344,114 @@ describe('assignBenchmarkSuite', () => {
     expect((await listArtifacts(handle.db))[0]?.benchmarkCount).toBe(1);
     const detail = await getArtifactDetail(handle.db, targets.artifactId);
     expect(detail?.suites).toEqual([{ id: targets.suiteId, slug: 'suite', name: 'Suite' }]);
+  });
+});
+
+describe('user metadata editing (issue #64)', () => {
+  it('adds a tag once, keeps the order and stops at the limit', async () => {
+    const handle = getHandle();
+    const { artifactId } = await importArtifactVersion(handle, artifactInput('v1'));
+    expect(await addArtifactTag(handle, artifactId, 'security')).toBe('added');
+    expect(await addArtifactTag(handle, artifactId, 'review')).toBe('added');
+    expect(await addArtifactTag(handle, artifactId, 'security')).toBe('exists');
+    expect((await getArtifactDetail(handle.db, artifactId))?.artifact.tags).toEqual([
+      'security',
+      'review',
+    ]);
+    for (let i = 2; i < MAX_ARTIFACT_TAGS; i++) {
+      expect(await addArtifactTag(handle, artifactId, `tag-${i}`)).toBe('added');
+    }
+    expect(await addArtifactTag(handle, artifactId, 'one-too-many')).toBe('limit');
+    // An existing tag is still reported as present at the limit.
+    expect(await addArtifactTag(handle, artifactId, 'review')).toBe('exists');
+    expect((await getArtifactDetail(handle.db, artifactId))?.artifact.tags).toHaveLength(
+      MAX_ARTIFACT_TAGS,
+    );
+  });
+
+  it('keeps both tags of two concurrent adds', async () => {
+    const handle = getHandle();
+    const { artifactId } = await importArtifactVersion(handle, artifactInput('v1'));
+    await Promise.all([
+      addArtifactTag(handle, artifactId, 'a'),
+      addArtifactTag(handle, artifactId, 'b'),
+    ]);
+    const tags = (await getArtifactDetail(handle.db, artifactId))?.artifact.tags;
+    expect([...(tags ?? [])].sort()).toEqual(['a', 'b']);
+  });
+
+  it('removes a tag and reports a tag that was not there', async () => {
+    const handle = getHandle();
+    const { artifactId } = await importArtifactVersion(handle, artifactInput('v1'));
+    await addArtifactTag(handle, artifactId, 'security');
+    await addArtifactTag(handle, artifactId, 'review');
+    expect(await removeArtifactTag(handle, artifactId, 'security')).toBe(true);
+    expect(await removeArtifactTag(handle, artifactId, 'security')).toBe(false);
+    expect((await getArtifactDetail(handle.db, artifactId))?.artifact.tags).toEqual(['review']);
+  });
+
+  it('refuses tags and notes of an unknown artifact', async () => {
+    const handle = getHandle();
+    await expect(addArtifactTag(handle, 'art_missing', 'x')).rejects.toBeInstanceOf(NotFoundError);
+    await expect(removeArtifactTag(handle, 'art_missing', 'x')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+    await expect(setArtifactNotes(handle.db, 'art_missing', 'x')).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
+  it('sets and clears the notes', async () => {
+    const handle = getHandle();
+    const { artifactId } = await importArtifactVersion(handle, artifactInput('v1'));
+    await setArtifactNotes(handle.db, artifactId, 'line one\nline two');
+    expect((await getArtifactDetail(handle.db, artifactId))?.artifact.notes).toBe(
+      'line one\nline two',
+    );
+    await setArtifactNotes(handle.db, artifactId, null);
+    expect((await getArtifactDetail(handle.db, artifactId))?.artifact.notes).toBeNull();
+  });
+
+  it('assigns and unassigns a suite and names a missing artifact or suite', async () => {
+    const handle = getHandle();
+    const { artifactId, suiteId } = await seedTargets(handle);
+    expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'assigned',
+      suiteName: 'Suite',
+    });
+    expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'already-assigned',
+      suiteName: 'Suite',
+    });
+    expect(await assignArtifactSuite(handle, 'art_missing', suiteId)).toEqual({
+      status: 'missing-artifact',
+    });
+    expect(await assignArtifactSuite(handle, artifactId, 'suite_missing')).toEqual({
+      status: 'missing-suite',
+    });
+    expect((await getArtifactDetail(handle.db, artifactId))?.suites).toHaveLength(1);
+
+    expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'unassigned',
+      suiteName: 'Suite',
+    });
+    expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'not-assigned',
+      suiteName: 'Suite',
+    });
+    expect(await unassignArtifactSuite(handle, artifactId, 'suite_missing')).toEqual({
+      status: 'missing-suite',
+    });
+    expect((await getArtifactDetail(handle.db, artifactId))?.suites).toEqual([]);
+  });
+
+  it('keeps the runs of an unassigned suite', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    await assignArtifactSuite(handle, targets.artifactId, targets.suiteId);
+    await seedRun(handle, targets);
+    await unassignArtifactSuite(handle, targets.artifactId, targets.suiteId);
+    expect(await handle.db.$count(schema.benchmarkRuns)).toBe(1);
   });
 });
 
@@ -722,6 +837,37 @@ describe('applyRepositoryScan', () => {
       .from(schema.artifactVersions);
     expect(versions.map((v) => v.version).sort()).toEqual([1, 2]);
     expect(await handle.db.$count(schema.artifacts)).toBe(1);
+  });
+
+  it('keeps tags, notes and suite assignments edited in the UI across a rescan (issue #64)', async () => {
+    const handle = getHandle();
+    const first = await runningScan(handle, '/srv/skills');
+    const apply = (content: string) =>
+      applyRepositoryScan(handle, {
+        commitSha: null,
+        repositoryId: first.repository.id,
+        jobId: first.jobId,
+        signal,
+        artifacts: [scanned('AGENTS.md', content)],
+      });
+    await apply('v1');
+    const [artifact] = await handle.db.select().from(schema.artifacts);
+    const artifactId = artifact?.id ?? '';
+    const { suiteId } = await importSuiteVersion(handle, suiteInput('h'));
+    await addArtifactTag(handle, artifactId, 'security');
+    await setArtifactNotes(handle.db, artifactId, 'Compare with v1.\nKeep it short.');
+    await assignArtifactSuite(handle, artifactId, suiteId);
+
+    await apply('v1');
+    expect(await apply('v2')).toEqual({ createdArtifacts: 0, createdVersions: 1 });
+
+    const detail = await getArtifactDetail(handle.db, artifactId);
+    expect(detail?.artifact).toMatchObject({
+      tags: ['security'],
+      notes: 'Compare with v1.\nKeep it short.',
+    });
+    expect(detail?.suites.map((s) => s.id)).toEqual([suiteId]);
+    expect(detail?.versions.map((v) => v.version)).toEqual([2, 1]);
   });
 
   it('leaves an occurrence the scan did not deliver exactly as it was (a discovery error)', async () => {
