@@ -28,7 +28,8 @@ from `tokeny.md` and previewed with the stored CSS values, so they cannot drift 
    Source: tokeny.md D5.
 3. Form controls draw their border with `border-control`. `input` is a fill, never a border.
    Source: tokeny.md D3, WCAG 1.4.11.
-4. Focus is `border-ring` plus a solid `ring-1 ring-ring`, never a translucent ring.
+4. Focus is `border-ring` plus a solid `ring-1 ring-ring`, never a translucent ring. Buttons
+   use a solid 2px `outline-ring` offset 2px, so the indicator never sits on their fill.
    Source: tokeny.md D4.
 5. Links and link buttons use `primary-text`. `primary` is a fill: as text it reaches only
    1.54:1 on white. Source: tokeny.md, `primary` and `primary-text` rows.

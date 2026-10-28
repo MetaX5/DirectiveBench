@@ -79,7 +79,8 @@ SPEC-119 FR-6, "Parameters in force".
 
 - Keyboard: Tab reaches it; Enter and Space activate it (native `<button>`). The Playground
   story tests both. Source: WCAG 2.1.1.
-- Focus: visible solid ring (tokeny.md D4); the order follows the DOM.
+- Focus: a solid 2px outline in `ring`, 2px outside the button, so it is clear on every fill
+  (tokeny.md D4); the order follows the DOM.
 - ARIA: the label is the accessible name. An icon-only button needs `aria-label` (Icons page).
   A screen reader announces "Run benchmark, button"; when disabled, "dimmed" or
   "unavailable", followed by the description.

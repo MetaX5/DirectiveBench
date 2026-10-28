@@ -10,6 +10,8 @@ import {
   repositoryPathInputSchema,
 } from '@directivebench/core';
 import {
+  addArtifactTag,
+  assignArtifactSuite,
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
@@ -17,11 +19,28 @@ import {
   UnsupportedRepositoryError,
   getLatestArtifactVersionId,
   getSuiteVersion,
+  removeArtifactTag,
   requestJobCancellation,
+  setArtifactNotes,
+  unassignArtifactSuite,
+  type ArtifactSuiteOutcome,
 } from '@directivebench/database';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import {
+  addTagSchema,
+  ARTIFACT_GONE_MESSAGE,
+  fieldText,
+  INCOMPLETE_FORM_MESSAGE,
+  metadataLimits,
+  notesSchema,
+  refused,
+  removeTagSchema,
+  SUITE_GONE_MESSAGE,
+  suiteAssignmentSchema,
+  type MetadataFormState,
+} from './artifact-metadata';
 import { requireDatabase } from './db';
 import { webRunBlockers } from './run-guard';
 import {
@@ -165,4 +184,146 @@ export async function scanRepositoryAction(formData: FormData): Promise<void> {
   if ('error' in outcome) redirect(`/repositories?scanError=${outcome.error}`);
   revalidatePath('/repositories');
   redirect(`/repositories?scan=${encodeURIComponent(outcome.jobId)}`);
+}
+
+/** Re-renders the artifact page so the server components show what was saved. */
+function refreshArtifact(artifactId: string): void {
+  revalidatePath(`/artifacts/${artifactId}`);
+}
+
+/** Runs a write whose only expected failure is a deleted artifact (`NotFoundError`). */
+async function onArtifact(write: () => Promise<MetadataFormState>): Promise<MetadataFormState> {
+  try {
+    return await write();
+  } catch (error) {
+    if (error instanceof NotFoundError) return { kind: 'error', message: ARTIFACT_GONE_MESSAGE };
+    throw error;
+  }
+}
+
+/**
+ * Adds one tag to an artifact (SPEC-101 FR-101-07, issue #64). The tag is trimmed and
+ * lower-cased; a tag the artifact already has is reported, not added twice.
+ */
+export async function addArtifactTagAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  const value = fieldText(formData.get('tag'));
+  const input = addTagSchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    tag: formData.get('tag'),
+  });
+  if (!input.success) return refused(input.error, 'tag', value);
+  const { artifactId, tag } = input.data;
+  return onArtifact(async () => {
+    const outcome = await addArtifactTag(requireDatabase(), artifactId, tag);
+    if (outcome === 'limit') {
+      return {
+        kind: 'fieldError',
+        message: `An artifact can have at most ${metadataLimits.tags} tags. Remove one first.`,
+        value,
+      };
+    }
+    refreshArtifact(artifactId);
+    return outcome === 'added'
+      ? { kind: 'success', message: `Added tag ${tag}.` }
+      : { kind: 'success', message: `${tag} is already a tag.` };
+  });
+}
+
+/** Removes one tag from an artifact (issue #64). */
+export async function removeArtifactTagAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  const input = removeTagSchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    tag: formData.get('tag'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const { artifactId, tag } = input.data;
+  return onArtifact(async () => {
+    const removed = await removeArtifactTag(requireDatabase(), artifactId, tag);
+    refreshArtifact(artifactId);
+    return {
+      kind: 'success',
+      message: removed ? `Removed tag ${tag}.` : `${tag} was already removed.`,
+    };
+  });
+}
+
+/** Saves an artifact's notes; empty notes clear them (issue #64). */
+export async function saveArtifactNotesAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  const value = fieldText(formData.get('notes'));
+  const input = notesSchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    notes: formData.get('notes'),
+  });
+  if (!input.success) return refused(input.error, 'notes', value);
+  const { artifactId, notes } = input.data;
+  return onArtifact(async () => {
+    await setArtifactNotes(requireDatabase().db, artifactId, notes);
+    refreshArtifact(artifactId);
+    return { kind: 'success', message: notes === null ? 'Cleared the notes.' : 'Saved the notes.' };
+  });
+}
+
+/** The message for a suite assignment outcome (issue #64). */
+function suiteMessage(outcome: ArtifactSuiteOutcome): MetadataFormState {
+  switch (outcome.status) {
+    case 'missing-artifact':
+      return { kind: 'error', message: ARTIFACT_GONE_MESSAGE };
+    case 'missing-suite':
+      return { kind: 'error', message: SUITE_GONE_MESSAGE };
+    case 'assigned':
+      return {
+        kind: 'success',
+        message: `Assigned ${outcome.suiteName}. Run it from its suite page.`,
+      };
+    case 'already-assigned':
+      return { kind: 'success', message: `${outcome.suiteName} is already assigned.` };
+    case 'unassigned':
+      return {
+        kind: 'success',
+        message: `Unassigned ${outcome.suiteName}. Its results stay in Results by version.`,
+      };
+    case 'not-assigned':
+      return { kind: 'success', message: `${outcome.suiteName} was already unassigned.` };
+  }
+}
+
+/** Assigns one benchmark suite to an artifact (SPEC-101 FR-101-16, issue #64). */
+export async function assignArtifactSuiteAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  const input = suiteAssignmentSchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    suiteId: formData.get('suiteId'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const { artifactId, suiteId } = input.data;
+  const outcome = await assignArtifactSuite(requireDatabase(), artifactId, suiteId);
+  refreshArtifact(artifactId);
+  return suiteMessage(outcome);
+}
+
+/** Unassigns one benchmark suite; its runs and results stay (issue #64). */
+export async function unassignArtifactSuiteAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  const input = suiteAssignmentSchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    suiteId: formData.get('suiteId'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const { artifactId, suiteId } = input.data;
+  const outcome = await unassignArtifactSuite(requireDatabase(), artifactId, suiteId);
+  refreshArtifact(artifactId);
+  return suiteMessage(outcome);
 }

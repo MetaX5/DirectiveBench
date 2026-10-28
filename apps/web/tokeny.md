@@ -155,8 +155,8 @@ decreased. Accepted exceptions:
   apply. Optional fix: outline the track with `border-control` (at least 3.79:1).
 - **U12**: decorative; the outline button is identified by its label (15.33:1). No change.
 - **U13**: the button is identified by its label (9.07:1). No change.
-- Focus on the primary button: `border-ring` against the dark-theme button fill is 1.33:1; the
-  outer `ring-1` against the page is 6.91:1, so the indicator stays visible.
+- Focus on the primary button: since 2026-10-28 a 2px `outline-ring` offset 2px from the
+  button, measured against the page (6.91:1 dark, 10.39:1 light); nothing is drawn on the fill.
 
 ## Decisions that are not tokens
 
@@ -167,7 +167,10 @@ decreased. Accepted exceptions:
    use no raw Tailwind colours (e.g. `zinc-500`), `#hex` values or arbitrary `text-[Npx]`.
 3. **D3**: form controls use `border-control` for their border; `input` is a fill only.
 4. **D4**: the focus indicator is `border-ring` plus a solid `ring-1`, without `/50`. Badge
-   moves from `ring-[3px]` to 1px.
+   moves from `ring-[3px]` to 1px. Buttons (changed 2026-10-28, issue #64, maintainer
+   request) draw a solid 2px `outline-ring` 2px outside the button instead: on a filled
+   button (`default`, `destructive`) a ring on the fill was a faint 1px line, while the offset
+   outline always sits on the page surface.
 5. **D5**: status colours (`success`, `warning`, `info`, `destructive`) are used only as fills
    (/10 to /30), borders (/30 to /40) and ScoreBar bars. Text and icons always use
    `*-foreground`.

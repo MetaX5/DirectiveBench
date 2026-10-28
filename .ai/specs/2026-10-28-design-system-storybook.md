@@ -182,7 +182,8 @@ On "What is missing", with reasons:
 - **Primitives that planned screens need:**
   - Dialog and AlertDialog: categories (#22), Builder (SPEC-109), UI approval (SPEC-118 §19).
   - Checkbox: bulk assign (#22), approval.
-  - Textarea and Combobox: categories (#22), Builder (SPEC-109).
+  - Textarea (added for issue #64 on 2026-10-28, with the maintainer's approval) and
+    Combobox: categories (#22), Builder (SPEC-109).
   - Toast: categories (#22), settings (SPEC-115).
   - Pagination and diff view: SPEC-113.
   - Command palette: SPEC-116.

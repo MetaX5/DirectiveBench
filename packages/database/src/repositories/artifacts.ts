@@ -522,6 +522,146 @@ export async function assignBenchmarkSuite(
     .onConflictDoNothing();
 }
 
+/** At most 32 tags per artifact, each at most 64 characters (SPEC-101 FR-101-07). */
+export const MAX_ARTIFACT_TAGS = 32;
+export const MAX_ARTIFACT_TAG_LENGTH = 64;
+/** User notes are at most 10 000 characters (SPEC-101 §11, issue #64). */
+export const MAX_ARTIFACT_NOTES_LENGTH = 10_000;
+
+export type AddArtifactTagOutcome = 'added' | 'exists' | 'limit';
+
+/**
+ * Adds one already normalised tag. Reading the tags and writing them back is one transaction,
+ * so two concurrent adds cannot lose a tag or pass the limit. Throws `NotFoundError` for an
+ * unknown artifact.
+ */
+export async function addArtifactTag(
+  handle: DatabaseHandle,
+  artifactId: string,
+  tag: string,
+): Promise<AddArtifactTagOutcome> {
+  return withTransaction(handle, async (db) => {
+    const tags = await artifactTags(db, artifactId);
+    if (tags.includes(tag)) return 'exists';
+    if (tags.length >= MAX_ARTIFACT_TAGS) return 'limit';
+    await db
+      .update(artifacts)
+      .set({ tags: [...tags, tag], updatedAt: nowIso() })
+      .where(eq(artifacts.id, artifactId));
+    return 'added';
+  });
+}
+
+/** Removes one tag; `false` when the artifact did not have it. Throws `NotFoundError`. */
+export async function removeArtifactTag(
+  handle: DatabaseHandle,
+  artifactId: string,
+  tag: string,
+): Promise<boolean> {
+  return withTransaction(handle, async (db) => {
+    const tags = await artifactTags(db, artifactId);
+    if (!tags.includes(tag)) return false;
+    await db
+      .update(artifacts)
+      .set({ tags: tags.filter((t) => t !== tag), updatedAt: nowIso() })
+      .where(eq(artifacts.id, artifactId));
+    return true;
+  });
+}
+
+async function artifactTags(db: Database, artifactId: string): Promise<string[]> {
+  const row = await db
+    .select({ tags: artifacts.tags })
+    .from(artifacts)
+    .where(eq(artifacts.id, artifactId))
+    .get();
+  if (!row) throw new NotFoundError(`Artifact ${artifactId} not found`);
+  return row.tags;
+}
+
+/** Replaces the notes; `null` clears them. Throws `NotFoundError` for an unknown artifact. */
+export async function setArtifactNotes(
+  db: Database,
+  artifactId: string,
+  notes: string | null,
+): Promise<void> {
+  const updated = await db
+    .update(artifacts)
+    .set({ notes, updatedAt: nowIso() })
+    .where(eq(artifacts.id, artifactId))
+    .returning({ id: artifacts.id });
+  if (updated.length === 0) throw new NotFoundError(`Artifact ${artifactId} not found`);
+}
+
+export type ArtifactSuiteOutcome =
+  | { status: 'assigned' | 'already-assigned' | 'unassigned' | 'not-assigned'; suiteName: string }
+  | { status: 'missing-artifact' | 'missing-suite' };
+
+/**
+ * Assigns a suite from the UI. Unlike `assignBenchmarkSuite`, a deleted artifact or suite is an
+ * outcome, not a foreign-key error, and the suite's name comes back for the message. The checks
+ * and the insert are one transaction.
+ */
+export async function assignArtifactSuite(
+  handle: DatabaseHandle,
+  artifactId: string,
+  suiteId: string,
+): Promise<ArtifactSuiteOutcome> {
+  return withTransaction(handle, async (db) => {
+    const artifact = await db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(eq(artifacts.id, artifactId))
+      .get();
+    if (!artifact) return { status: 'missing-artifact' };
+    const suite = await suiteName(db, suiteId);
+    if (suite === null) return { status: 'missing-suite' };
+    const inserted = await db
+      .insert(artifactBenchmarkAssignments)
+      .values({ artifactId, suiteId, createdAt: nowIso() })
+      .onConflictDoNothing()
+      .returning({ suiteId: artifactBenchmarkAssignments.suiteId });
+    return { status: inserted.length ? 'assigned' : 'already-assigned', suiteName: suite };
+  });
+}
+
+/** Removes an assignment made in the UI or by a CLI run. Runs and results are kept. */
+export async function unassignArtifactSuite(
+  handle: DatabaseHandle,
+  artifactId: string,
+  suiteId: string,
+): Promise<ArtifactSuiteOutcome> {
+  return withTransaction(handle, async (db) => {
+    const artifact = await db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(eq(artifacts.id, artifactId))
+      .get();
+    if (!artifact) return { status: 'missing-artifact' };
+    const suite = await suiteName(db, suiteId);
+    if (suite === null) return { status: 'missing-suite' };
+    const deleted = await db
+      .delete(artifactBenchmarkAssignments)
+      .where(
+        and(
+          eq(artifactBenchmarkAssignments.artifactId, artifactId),
+          eq(artifactBenchmarkAssignments.suiteId, suiteId),
+        ),
+      )
+      .returning({ suiteId: artifactBenchmarkAssignments.suiteId });
+    return { status: deleted.length ? 'unassigned' : 'not-assigned', suiteName: suite };
+  });
+}
+
+async function suiteName(db: Database, suiteId: string): Promise<string | null> {
+  const suite = await db
+    .select({ name: benchmarkSuites.name })
+    .from(benchmarkSuites)
+    .where(eq(benchmarkSuites.id, suiteId))
+    .get();
+  return suite?.name ?? null;
+}
+
 export interface LatestEvaluation {
   runId: string;
   verdict: string | null;

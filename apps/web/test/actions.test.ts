@@ -15,11 +15,23 @@ import {
   type DatabaseHandle,
 } from '@directivebench/database';
 import {
+  addArtifactTagAction,
+  assignArtifactSuiteAction,
   cancelJobAction,
   enqueueBenchmarkRunAction,
   registerRepositoryAction,
+  removeArtifactTagAction,
+  saveArtifactNotesAction,
   scanRepositoryAction,
+  unassignArtifactSuiteAction,
 } from '../lib/actions';
+import {
+  ARTIFACT_GONE_MESSAGE,
+  INCOMPLETE_FORM_MESSAGE,
+  SUITE_GONE_MESSAGE,
+  metadataLimits,
+  type MetadataFormState,
+} from '../lib/artifact-metadata';
 import { DatabaseNotInitializedError, requireDatabase } from '../lib/db';
 import { createTempDataDir, initialiseDatabase, resetCachedDatabase } from './support/data-dir';
 
@@ -531,5 +543,188 @@ describe('scanRepositoryAction', () => {
     );
     await expect(scanRepositoryAction(form({ repositoryId }))).rejects.toThrow();
     expect(next.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('artifact metadata actions (issue #64)', () => {
+  const idle: MetadataFormState = { kind: 'idle' };
+
+  async function storedArtifact(artifactId: string) {
+    return handle.sqlite
+      .prepare('select tags, notes from artifacts where id = ?')
+      .get(artifactId) as { tags: string; notes: string | null };
+  }
+
+  function failArtifactUpdates(): void {
+    handle.sqlite.exec(
+      "CREATE TRIGGER fail_artifacts BEFORE UPDATE ON artifacts BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+  }
+
+  it('adds a trimmed, lower-cased tag once and refreshes the page', async () => {
+    const { artifactId } = await importArtifact();
+    expect(await addArtifactTagAction(idle, form({ artifactId, tag: '  Security ' }))).toEqual({
+      kind: 'success',
+      message: 'Added tag security.',
+    });
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/artifacts/${artifactId}`);
+    expect(await addArtifactTagAction(idle, form({ artifactId, tag: 'SECURITY' }))).toEqual({
+      kind: 'success',
+      message: 'security is already a tag.',
+    });
+    expect(JSON.parse((await storedArtifact(artifactId)).tags)).toEqual(['security']);
+  });
+
+  it('keeps an invalid tag in the field with a message', async () => {
+    const { artifactId } = await importArtifact();
+    const long = 'x'.repeat(metadataLimits.tagLength + 1);
+    const cases: Array<[string, string]> = [
+      ['   ', 'Enter a tag.'],
+      [long, 'A tag can be at most 64 characters. Shorten it.'],
+      ['a, b', 'A tag cannot contain a comma. Add each tag on its own.'],
+      ['a\tb', 'A tag cannot contain line breaks or other control characters.'],
+    ];
+    for (const [tag, message] of cases) {
+      expect(await addArtifactTagAction(idle, form({ artifactId, tag }))).toEqual({
+        kind: 'fieldError',
+        message,
+        value: tag,
+      });
+    }
+    const upload = form({ artifactId });
+    upload.set('tag', new File(['x'], 'tag.txt'));
+    expect(await addArtifactTagAction(idle, upload)).toEqual({
+      kind: 'fieldError',
+      message: 'Enter a tag.',
+      value: '',
+    });
+    expect(JSON.parse((await storedArtifact(artifactId)).tags)).toEqual([]);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('refuses a tag over the limit and names how to continue', async () => {
+    const { artifactId } = await importArtifact();
+    for (let i = 0; i < metadataLimits.tags; i++) {
+      await addArtifactTagAction(idle, form({ artifactId, tag: `tag-${i}` }));
+    }
+    expect(await addArtifactTagAction(idle, form({ artifactId, tag: 'more' }))).toEqual({
+      kind: 'fieldError',
+      message: 'An artifact can have at most 32 tags. Remove one first.',
+      value: 'more',
+    });
+  });
+
+  it('removes a tag and reports one that was already removed', async () => {
+    const { artifactId } = await importArtifact();
+    await addArtifactTagAction(idle, form({ artifactId, tag: 'security' }));
+    expect(await removeArtifactTagAction(idle, form({ artifactId, tag: 'security' }))).toEqual({
+      kind: 'success',
+      message: 'Removed tag security.',
+    });
+    expect(await removeArtifactTagAction(idle, form({ artifactId, tag: 'security' }))).toEqual({
+      kind: 'success',
+      message: 'security was already removed.',
+    });
+    expect(JSON.parse((await storedArtifact(artifactId)).tags)).toEqual([]);
+  });
+
+  it('saves notes with LF line breaks and clears empty notes', async () => {
+    const { artifactId } = await importArtifact();
+    expect(
+      await saveArtifactNotesAction(idle, form({ artifactId, notes: 'one\r\ntwo\rthree ' })),
+    ).toEqual({ kind: 'success', message: 'Saved the notes.' });
+    expect((await storedArtifact(artifactId)).notes).toBe('one\ntwo\nthree ');
+    expect(await saveArtifactNotesAction(idle, form({ artifactId, notes: ' \r\n ' }))).toEqual({
+      kind: 'success',
+      message: 'Cleared the notes.',
+    });
+    expect((await storedArtifact(artifactId)).notes).toBeNull();
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/artifacts/${artifactId}`);
+  });
+
+  it('keeps notes over the limit in the field', async () => {
+    const { artifactId } = await importArtifact();
+    // CR LF counts as one character, as the browser counts it for maxLength.
+    const notes = `${'x'.repeat(metadataLimits.notesLength - 1)}\r\n`;
+    expect(await saveArtifactNotesAction(idle, form({ artifactId, notes }))).toEqual({
+      kind: 'success',
+      message: 'Saved the notes.',
+    });
+    const tooLong = 'x'.repeat(metadataLimits.notesLength + 1);
+    expect(await saveArtifactNotesAction(idle, form({ artifactId, notes: tooLong }))).toEqual({
+      kind: 'fieldError',
+      message: 'Notes can be at most 10,000 characters. Shorten them.',
+      value: tooLong,
+    });
+    const upload = form({ artifactId });
+    upload.set('notes', new File(['x'], 'notes.txt'));
+    expect(await saveArtifactNotesAction(idle, upload)).toEqual({
+      kind: 'fieldError',
+      message: 'Enter the notes as text.',
+      value: '',
+    });
+  });
+
+  it('answers a missing or altered hidden field with a general error', async () => {
+    const { artifactId, suiteId } = {
+      ...(await importArtifact()),
+      ...(await importSuite({}, null)),
+    };
+    const incomplete = { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+    expect(await addArtifactTagAction(idle, form({ tag: 'x' }))).toEqual(incomplete);
+    expect(await addArtifactTagAction(idle, form({ artifactId: '', tag: '' }))).toEqual(incomplete);
+    expect(await removeArtifactTagAction(idle, form({ artifactId }))).toEqual(incomplete);
+    expect(await saveArtifactNotesAction(idle, form({ notes: 'x' }))).toEqual(incomplete);
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId }))).toEqual(incomplete);
+    expect(await unassignArtifactSuiteAction(idle, form({ suiteId }))).toEqual(incomplete);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('says when the artifact no longer exists', async () => {
+    const gone = { kind: 'error', message: ARTIFACT_GONE_MESSAGE };
+    const { suiteId } = await importSuite({}, null);
+    const artifactId = 'art_missing';
+    expect(await addArtifactTagAction(idle, form({ artifactId, tag: 'x' }))).toEqual(gone);
+    expect(await removeArtifactTagAction(idle, form({ artifactId, tag: 'x' }))).toEqual(gone);
+    expect(await saveArtifactNotesAction(idle, form({ artifactId, notes: 'x' }))).toEqual(gone);
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
+  });
+
+  it('still fails loudly on an unexpected database error', async () => {
+    const { artifactId } = await importArtifact();
+    failArtifactUpdates();
+    await expect(addArtifactTagAction(idle, form({ artifactId, tag: 'x' }))).rejects.toThrow();
+    await expect(saveArtifactNotesAction(idle, form({ artifactId, notes: 'x' }))).rejects.toThrow();
+  });
+
+  it('assigns and unassigns a suite by name and keeps its results', async () => {
+    const { artifactId } = await importArtifact();
+    const { suiteId } = await importSuite({}, null);
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: 'Assigned Input validation. Run it from its suite page.',
+    });
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: 'Input validation is already assigned.',
+    });
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: 'Unassigned Input validation. Its results stay in Results by version.',
+    });
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: 'Input validation was already unassigned.',
+    });
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/artifacts/${artifactId}`);
+  });
+
+  it('says when the suite no longer exists', async () => {
+    const { artifactId } = await importArtifact();
+    const gone = { kind: 'error', message: SUITE_GONE_MESSAGE };
+    const suiteId = 'suite_missing';
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
   });
 });

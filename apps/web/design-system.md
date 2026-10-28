@@ -20,6 +20,7 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | Badge | `@/components/ui/badge` | A status or property in one to three words | Anything clickable or a sentence |
 | Card | `@/components/ui/card` | One page section; `CardTitle` is the h2 | Inside another card |
 | Input | `@/components/ui/input` | Single-line text, inside a visible `<label>` | Choosing from a list |
+| Textarea | `@/components/ui/textarea` | Text over several lines, inside a visible `<label>` | A single-line value |
 | NativeSelect | `@/components/ui/native-select` | One value from a short list, "All" first in filters | Search in many options |
 | Table | `@/components/ui/table` | Rows with the same columns; give it an `aria-label` | Facts of one item (`dl`) |
 | Pre | `@/components/ui/primitives` | JSON, code, raw output | A path in a sentence (`font-mono`) |
@@ -34,7 +35,7 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | Markdown | `@/components/artifacts/markdown` | Rendering artifact Markdown safely | App-authored text |
 
 Raw `<button>`, `<input>` (except hidden), `<select>`, `<textarea>` and `<table>` in `app/`
-or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Textarea, Combobox, Toast,
+or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Combobox, Toast,
 Tabs, Pagination, Tooltip, DescriptionList) are listed in Storybook under "What is missing":
 do not improvise one; ask.
 
@@ -46,7 +47,7 @@ do not improvise one; ask.
 - Fills: `bg-background`, `bg-card`, `bg-muted`, `bg-primary` (main action), status fills
   `bg-success/10`, `bg-warning/10`, `bg-info/10`, `bg-destructive/10`.
 - Borders: `border` (separators), `border-control` (fields), focus `border-ring` with
-  `ring-1 ring-ring`.
+  `ring-1 ring-ring`; buttons a 2px `outline-ring` offset 2px.
 - Type: `text-page-title`, `text-metric` (with `tabular-nums`), `text-body`, `text-ui`,
   `text-caption` (minimum 11px). Never `text-xs` or `text-sm`.
 - Spacing by relation: `gap-inline` (controls in a row), `gap-inline-tight` (icon and label,
@@ -65,6 +66,8 @@ do not improvise one; ask.
 | A run outcome | `StatusBadge`, plus `MockBadge` for mock runs |
 | Progress or a result message | A `role="status"` line in words; no spinner, no toast |
 | A field error | Under the field: `aria-invalid`, `aria-describedby`, `role="alert"` |
+| A list the user edits (tags, assigned suites) | Item + `outline` `sm` "Remove" named for it, add field under the list, one status line, focus back to the field (Form, "Lists edited in place") |
+| A reversible removal that keeps history | No confirmation; say what was kept |
 | Loading | Disable the control and say what is happening |
 | Numbers | `formatScore` ("83.3%"), `formatDelta` ("+50 pts"), `formatDuration`, `formatDate` from `lib/utils.ts` |
 

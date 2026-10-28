@@ -1,0 +1,98 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as TextareaStories from '../../components/ui/textarea.stories';
+
+<Meta of={TextareaStories} />
+
+# Textarea
+
+`import { Textarea } from '@/components/ui/textarea'`
+
+## 1. Purpose
+
+A multi-line text field.
+
+## 2. When to use
+
+- Free text that can span lines: Notes on an artifact's Overview (`/artifacts/[id]`).
+
+## 3. When not to use
+
+| Situation                          | Use instead                         |
+| ---------------------------------- | ----------------------------------- |
+| A single-line value (path, tag)    | `Input`                             |
+| Choosing from a known list         | `NativeSelect`                      |
+| Showing text that cannot change    | Text, or `Pre` for code             |
+| Code or a prompt that needs a diff | A code editor, not built (SPEC-109) |
+
+## 4. Anatomy
+
+A native `<textarea>` (`data-slot="textarea"`), always inside a visible `<label>` that names
+it, wrapped like `Input` (`flex flex-col gap-1 text-ui text-muted-foreground`).
+
+## 5. Variants
+
+One look, from the shadcn preset `b3Rq8QfWi`, migrated to the same tokens as `Input`
+(`border-control`, `text-ui`, a solid focus ring). The field is at least 64px high and grows
+with its content (`field-sizing-content`); the user can still resize it.
+
+## 6. States
+
+<Canvas of={TextareaStories.States} sourceState="none" />
+
+- **Hover:** no change. **Focus:** solid ring (tokeny.md D4).
+- **Disabled:** while the app saves the submitted value, with a `role="status"` message
+  saying so (SPEC-122 §18 P11).
+- **Invalid:** `aria-invalid` plus the message under the field, linked with
+  `aria-describedby` and announced with `role="alert"`. The value is kept.
+
+<Canvas of={TextareaStories.WithError} />
+
+## 7. Accessibility
+
+- Name: the visible label. A placeholder is never the name. Source: WCAG 1.3.1, 3.3.2.
+- Keyboard: Tab reaches it; Enter adds a line, so it never submits the form. Submit with the
+  form's button. Source: HTML.
+- Errors: `aria-invalid` and `aria-describedby` point at the message (WCAG 3.3.1).
+- The border reaches 3:1 (`border-control`, tokeny.md U01, U02).
+
+## 8. Content
+
+- Label: a noun, sentence case ("Notes").
+- Placeholder: what belongs there, in `muted-foreground`.
+- Set `maxLength` when the server limits the value; the error still names the limit.
+
+## 9. Responsiveness
+
+The field takes its container's width (`w-full min-w-0`); long lines wrap inside it, so the
+page never scrolls sideways at 320px.
+
+<Canvas of={TextareaStories.LongTextNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={TextareaStories} />
+
+All props of `<textarea>`.
+
+## 11. Code
+
+<Canvas of={TextareaStories.Playground} />
+
+```tsx
+<label className="flex flex-col gap-1 text-ui text-muted-foreground">
+  Notes
+  <Textarea name="notes" maxLength={10000} defaultValue={notes} />
+</label>
+```
+
+## 12. Do and don't
+
+| Do                               | Don't                                       |
+| -------------------------------- | ------------------------------------------- |
+| A visible label around the field | A placeholder as the only label             |
+| An explicit Save button          | Saving on every key press without a status  |
+| `<Textarea>`                     | A raw `<textarea>` (ESLint fails, SPEC-121) |
+
+## 13. Related
+
+`Input`, `Button`, the Form pattern.

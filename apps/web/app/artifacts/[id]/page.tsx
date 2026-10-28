@@ -2,6 +2,7 @@ import {
   countArtifactRuns,
   getArtifactDetail,
   listArtifactRuns,
+  listSuiteNames,
   listVersionComparisonRuns,
   type ArtifactDetail,
   type Database,
@@ -10,6 +11,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ContentTab } from '@/components/artifacts/content-tab';
+import { NotesCard, SuitesCard, TagsCard } from './metadata-forms';
 import {
   MockBadge,
   NotInitialized,
@@ -51,12 +53,15 @@ import {
   type ArtifactTab,
   type SearchParams,
 } from '@/lib/artifacts';
+import { metadataLimits } from '@/lib/artifact-metadata';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { providerLabel } from '@/lib/repositories';
 import { cn, formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifact' };
+
+type SuiteOption = Awaited<ReturnType<typeof listSuiteNames>>[number];
 
 function Tabs({ artifactId, current }: { artifactId: string; current: ArtifactTab }) {
   return (
@@ -160,29 +165,37 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
           <CardHeader>
             <CardTitle>Metadata</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-ui">
+          <CardContent className="space-y-stack text-ui">
             <div>
               <p className="text-muted-foreground">Categories</p>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {categories.length
-                  ? categories.map((c) => <Badge key={c.slug}>{c.name}</Badge>)
-                  : '—'}
-              </div>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Tags</p>
-              <p>{artifact.tags.length ? artifact.tags.join(', ') : '—'}</p>
+              {categories.length ? (
+                <div className="flex flex-wrap gap-inline-tight">
+                  {categories.map((c) => (
+                    <Badge key={c.slug}>{c.name}</Badge>
+                  ))}
+                </div>
+              ) : (
+                <p>No categories</p>
+              )}
             </div>
             <div>
               <p className="text-muted-foreground">Compatibility</p>
               <p title="Agent compatibility validation is planned">Not validated</p>
             </div>
-            <div>
-              <p className="text-muted-foreground">Notes</p>
-              <p className="whitespace-pre-line">{artifact.notes ?? '—'}</p>
-            </div>
           </CardContent>
         </Card>
+        <TagsCard
+          artifactId={artifact.id}
+          // Sorted on the server only, so the browser renders the same order (no hydration drift).
+          tags={[...artifact.tags].sort()}
+          maxTags={metadataLimits.tags}
+          maxTagLength={metadataLimits.tagLength}
+        />
+        <NotesCard
+          artifactId={artifact.id}
+          notes={artifact.notes}
+          maxLength={metadataLimits.notesLength}
+        />
       </div>
     </div>
   );
@@ -254,29 +267,14 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
   );
 }
 
-function BenchmarksTab({ detail }: { detail: ArtifactDetail }) {
+function BenchmarksTab({ detail, suites }: { detail: ArtifactDetail; suites: SuiteOption[] }) {
+  const assigned = new Set(detail.suites.map((s) => s.id));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Assigned benchmarks</CardTitle>
-        <CardDescription>Run a benchmark from its suite page.</CardDescription>
-      </CardHeader>
-      <CardContent className="text-body">
-        {detail.suites.length ? (
-          <ul className="space-y-1">
-            {detail.suites.map((s) => (
-              <li key={s.id}>
-                <Link href={`/benchmarks/${s.id}`} className="underline">
-                  {s.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground">No benchmark suite is assigned.</p>
-        )}
-      </CardContent>
-    </Card>
+    <SuitesCard
+      artifactId={detail.artifact.id}
+      assigned={detail.suites.map((s) => ({ id: s.id, name: s.name }))}
+      available={suites.filter((s) => !assigned.has(s.id))}
+    />
   );
 }
 
@@ -562,7 +560,9 @@ export default async function ArtifactPage({
       ) : null}
       {query.tab === 'metadata' ? <MetadataTab detail={detail} /> : null}
       {query.tab === 'versions' ? <VersionsTab detail={detail} /> : null}
-      {query.tab === 'benchmarks' ? <BenchmarksTab detail={detail} /> : null}
+      {query.tab === 'benchmarks' ? (
+        <BenchmarksTab detail={detail} suites={await listSuiteNames(handle.db)} />
+      ) : null}
       {query.tab === 'evaluations' ? (
         <ResultsByVersionTab
           slug={artifact.slug}
