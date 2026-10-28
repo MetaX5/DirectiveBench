@@ -186,7 +186,8 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
         </Card>
         <TagsCard
           artifactId={artifact.id}
-          tags={artifact.tags}
+          // Sorted on the server only, so the browser renders the same order (no hydration drift).
+          tags={[...artifact.tags].sort()}
           maxTags={metadataLimits.tags}
           maxTagLength={metadataLimits.tagLength}
         />

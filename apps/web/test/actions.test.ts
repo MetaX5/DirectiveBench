@@ -688,6 +688,7 @@ describe('artifact metadata actions (issue #64)', () => {
     expect(await removeArtifactTagAction(idle, form({ artifactId, tag: 'x' }))).toEqual(gone);
     expect(await saveArtifactNotesAction(idle, form({ artifactId, notes: 'x' }))).toEqual(gone);
     expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
   });
 
   it('still fails loudly on an unexpected database error', async () => {

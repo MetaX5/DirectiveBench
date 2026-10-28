@@ -632,6 +632,12 @@ export async function unassignArtifactSuite(
   suiteId: string,
 ): Promise<ArtifactSuiteOutcome> {
   return withTransaction(handle, async (db) => {
+    const artifact = await db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .where(eq(artifacts.id, artifactId))
+      .get();
+    if (!artifact) return { status: 'missing-artifact' };
     const suite = await suiteName(db, suiteId);
     if (suite === null) return { status: 'missing-suite' };
     const deleted = await db

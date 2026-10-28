@@ -442,6 +442,9 @@ describe('user metadata editing (issue #64)', () => {
     expect(await unassignArtifactSuite(handle, artifactId, 'suite_missing')).toEqual({
       status: 'missing-suite',
     });
+    expect(await unassignArtifactSuite(handle, 'art_missing', suiteId)).toEqual({
+      status: 'missing-artifact',
+    });
     expect((await getArtifactDetail(handle.db, artifactId))?.suites).toEqual([]);
   });
 

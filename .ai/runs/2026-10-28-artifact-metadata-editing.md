@@ -153,6 +153,21 @@ The maintainer asked to fix the focus ring, the three small findings, and to run
 - Gate: prettier, lint, typecheck, `pnpm test` (100%), `pnpm test:storybook` (224),
   `pnpm build && pnpm verify:pack`, `pnpm test:e2e` (59) all pass.
 
+## om-auto-review-pr (2026-10-28)
+
+Verdict APPROVED (posted as a comment, the author cannot approve their own PR); labels
+`merge-queue`, `priority-medium`, `risk-medium`. Its three optional findings were fixed:
+
+- tags were sorted with `localeCompare()` in a client component, which can order non-ASCII
+  tags differently on the server and in the browser (hydration drift): now sorted once on the
+  server in code-point order;
+- `unassignArtifactSuite` reported a deleted artifact as "already unassigned": it now returns
+  `missing-artifact` like `assignArtifactSuite` (repository and action tests added);
+- SPEC-101 §11 now states the focus fallbacks and the tag order.
+
+Gate after the fixes: all commands pass (`pnpm test:e2e` 59, `pnpm test:storybook` 224,
+100% coverage).
+
 ## Problems and deviations
 
 - `pkill -f "port 4411"` also ended the shell running it (lesson of 2026-10-14 already says

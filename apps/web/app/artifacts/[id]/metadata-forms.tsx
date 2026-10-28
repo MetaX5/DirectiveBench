@@ -161,33 +161,31 @@ export function TagsCard({
     >
       {tags.length ? (
         <ul ref={list} aria-label="Tags" className="flex flex-wrap gap-inline">
-          {[...tags]
-            .sort((a, b) => a.localeCompare(b))
-            .map((tag) => (
-              <li
-                key={tag}
-                data-tag={tag}
-                className="flex max-w-full min-w-0 items-center gap-inline-tight"
-              >
-                <Badge variant="secondary" className="min-w-0 shrink break-all">
-                  {tag}
-                </Badge>
-                <form action={dispatch}>
-                  <input type="hidden" name="intent" value="remove" />
-                  <input type="hidden" name="artifactId" value={artifactId} />
-                  <input type="hidden" name="tag" value={tag} />
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    disabled={pending}
-                    aria-label={`Remove tag ${tag}`}
-                  >
-                    Remove
-                  </Button>
-                </form>
-              </li>
-            ))}
+          {tags.map((tag) => (
+            <li
+              key={tag}
+              data-tag={tag}
+              className="flex max-w-full min-w-0 items-center gap-inline-tight"
+            >
+              <Badge variant="secondary" className="min-w-0 shrink break-all">
+                {tag}
+              </Badge>
+              <form action={dispatch}>
+                <input type="hidden" name="intent" value="remove" />
+                <input type="hidden" name="artifactId" value={artifactId} />
+                <input type="hidden" name="tag" value={tag} />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  disabled={pending}
+                  aria-label={`Remove tag ${tag}`}
+                >
+                  Remove
+                </Button>
+              </form>
+            </li>
+          ))}
         </ul>
       ) : (
         <p className="text-ui text-muted-foreground">No tags yet.</p>
