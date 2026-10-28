@@ -93,6 +93,11 @@ These rules are not optional. A task is not done until the applicable steps are 
     (run the CLI, open the page, run `directivebench demo`) and review your own diff as a
     sceptical reviewer would; do not open a PR until it passes that review. If a fix works but is
     a hack, redo it cleanly now that you understand the problem.
+    For a UI change in `apps/web`, also run an exploratory browser QA agent (Claude in Chrome
+    or agent-browser) on the built app after `directivebench demo` (flows, invalid input,
+    keyboard only, both themes, 320px, console) and the Codex adversarial review until it
+    approves; each confirmed finding gets a regression test
+    ([lesson](.ai/lessons/2026-10-28-ui-changes-get-a-browser-qa-agent.md)).
 15. Update the spec's **Implementation status** only for behaviour you verified. Move a spec to
     `.ai/specs/implemented/` (status `implemented`) only when *all* acceptance criteria are
     verified; move deprecated specs to `.ai/specs/archive/`. Never mark interfaces, stubs or
