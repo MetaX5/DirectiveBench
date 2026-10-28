@@ -12,13 +12,14 @@ specs: [SPEC-122, SPEC-119, SPEC-120, SPEC-121]
 
 ## State
 
-- **Completed stages:** 0 (inventory and plan), 1 (foundations).
+- **Completed stages:** 0 (inventory and plan), 1 (foundations), 2 (primitives).
 - **Approved by the maintainer:** the stage 0 plan, Q1–Q5 and P1–P5 (2026-10-28; Q4: fix the
   two em dashes here; Q5: the Storybook CI job becomes required). #132 was merged first, as
   the prompt requires.
-- **Open questions:** proposals P6 to P10 from stage 1 (SPEC-122 §18).
-- **Next step:** wait for "dalej" and the answers to P6 to P10, then start stage 2
-  (primitives, first batch).
+- **Approved in stage 1 review:** P6 to P10 (2026-10-28).
+- **Open questions:** proposals P11 to P13 from stage 2 (SPEC-122 §18).
+- **Next step:** wait for "dalej" and the answers to P11 to P13, then start stage 3 (product
+  components and patterns).
 
 ## Objective
 
@@ -73,6 +74,18 @@ Stage 1:
   "Planned: not implemented"; the E2E constants follow. Specs still quote the old wording,
   which is documentation and stays with #123, as does the CLI demo line.
 
+Stage 2:
+- Implemented the accepted P2, P6 and P9 (plus the Q2 rule for every colour transition) in
+  `components/ui/*`, `components/nav.tsx` and `components/artifacts/content-tab.tsx`, with two
+  guard tests. Removed the stage 1 `heading-order` exception.
+- `.storybook/states.css` re-declares the `hover`, `focus-visible` and `active` variants so
+  `data-preview-state` freezes a state; it imports `globals.css`, so the app CSS is unchanged.
+- `stories/blocks/state-matrix.tsx`; colocated stories for the seven primitives
+  (`components/ui/*.stories.tsx`, 37 stories); "Parameters in force" and seven 13-section
+  MDX pages in `stories/primitives/`.
+- axe found `scrollable-region-focusable` on a long `Pre` and on a table at 320px: documented
+  exception and proposal P13.
+
 ## Verification
 
 Stage 0 produced documents only. Stage 1, all on 2026-10-28:
@@ -95,6 +108,12 @@ Stage 0 produced documents only. Stage 1, all on 2026-10-28:
   story failed ESLint. The same run caught a variable named `rounded` in my own story.
 - In the built Storybook: brand and tab title show DirectiveBench; MDX tables render; list
   markers render after the `preview.css` fix; the theme switch applies to MDX-only pages.
+
+Stage 2, full gate on 2026-10-28: format, lint, typecheck, `pnpm test` (100% coverage),
+`pnpm test:storybook` (24 files, 96 tests), `pnpm build`, `pnpm verify:pack`, `pnpm test:e2e`
+(52 passed): all pass. Red first: with the component changes stashed, the motion test listed
+the six files; the CardTitle test fails on an h3. Checked in the built Storybook: the seven
+pages render, ArgTypes tables included, and the frozen states show in both themes.
 
 Not verified: the CI job itself (it runs once the PR exists); the pages at 320 and 768px
 (stage 5); keyboard use of the Storybook UI.

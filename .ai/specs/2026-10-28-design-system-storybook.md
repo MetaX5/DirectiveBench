@@ -270,7 +270,8 @@ Accepted proposals:
   blocks go in `apps/web/stories/`.
 - P5: use our own theme decorator instead of `@storybook/addon-themes`.
 
-Proposals from stage 1, waiting for the maintainer (none is implemented):
+Proposals from stage 1, accepted by the maintainer on 2026-10-28 (P2, P6 and P9 implemented in
+stage 2; P7, P8 and P10 are documentation rules):
 
 - P6: every page jumps from the `PageHeader` h1 to the `CardTitle` h3, which axe reports as
   `heading-order` (WCAG 1.3.1). Render `CardTitle` as an h2 in `components/ui/card.tsx`, or
@@ -286,6 +287,16 @@ Proposals from stage 1, waiting for the maintainer (none is implemented):
 - P10: rules that come only from the maintainer's prompt (no emoji as icons, no sparkles as
   the AI symbol) cite the prompt file as their source; confirm that counts as a source under
   prompt rule 3.
+
+Proposals from stage 2, waiting for the maintainer (none is implemented):
+
+- P11: loading state. No component has one. Disable the control and say what is happening in
+  a `role="status"` message, as `/repositories` does while it checks a path; no spinner.
+- P12: at most one `default` button per form or section, as on every current page.
+- P13: `Pre` and the `Table` scroll container scroll when content is long or wide, but are not
+  tab stops (axe `scrollable-region-focusable`). Give `Pre` `tabIndex={0}`, and give the table
+  container `tabIndex={0}` with `role="region"` and the table's name. Until then two stories
+  carry a documented exception (`stories/blocks/a11y.ts`).
 
 ## 19. Future extensions
 
@@ -312,8 +323,19 @@ Proposals from stage 1, waiting for the maintainer (none is implemented):
   - Storybook stays out of the tarball and the unit-coverage scope (FR-122-5). Verified by
     `pnpm verify:pack` and `pnpm test`.
   - The mock and planned labels no longer contain an em dash (Q4). Verified by `pnpm test:e2e`.
-- **Not implemented:** stages 2 to 5 (primitives, product components, patterns, teaching
-  pages, `design-system.md`). The CI job runs only once the PR is open.
+- **Implemented and verified (stage 2, 2026-10-28):**
+  - "Parameters in force" and 13-section pages for Button, Badge, Card, Input, NativeSelect,
+    Table and Pre, each with a Playground, variants, a state matrix (hover, focus and pressed
+    frozen through `data-preview-state`, read only by `.storybook/states.css`), long content
+    at 320px and play functions (AC-2 for the primitives). Verified by `pnpm test:storybook`
+    (48 stories in both themes, 96 tests) and in the built Storybook.
+  - P6: `CardTitle` is an h2 and the artifact content heading an h3; the page compositions
+    pass axe `heading-order` without an exception. P9 and Q2: every transition has
+    `motion-reduce:transition-none` and the button press shift is `motion-safe:`. P2: `table.tsx`
+    has no `'use client'`. Guard tests cover the heading level and the motion pairing, both
+    shown red first. Verified by `pnpm test:e2e` (52 passed).
+- **Not implemented:** stages 3 to 5 (product components, patterns, teaching pages,
+  `design-system.md`). The CI job runs only once the PR is open.
 
 ## 📋 Implementation Plan
 
@@ -327,7 +349,7 @@ Proposals from stage 1, waiting for the maintainer (none is implemented):
 4. Extend `design-system-scope.json` and the guards to the Storybook files.
 5. Replace the em dashes in `MockBadge` and `PlannedSection` copy and the E2E constant (Q4).
 
-### Stage 2: primitives, in batches of about six
+### Stage 2: primitives, in batches of about six (done 2026-10-28, one batch of seven)
 
 5. Write down the shape, density and state parameters in force, with their sources.
 6. Button, Badge, Card, Input, NativeSelect, Table, Pre: 13-section pages, state matrices and
