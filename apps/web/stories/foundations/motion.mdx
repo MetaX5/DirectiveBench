@@ -1,0 +1,33 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Foundations/Motion" />
+
+# Motion
+
+DirectiveBench barely moves. Motion only confirms that a control responded.
+
+## The rule
+
+Transitions change colour and opacity only, last at most 150ms, and stop under
+`prefers-reduced-motion`. No decorative animation. Source: maintainer decision of 2026-10-28,
+SPEC-122 §18 Q2.
+
+## What moves today
+
+| Where                                         | What                                                       | Duration                    | Source                                               |
+| --------------------------------------------- | ---------------------------------------------------------- | --------------------------- | ---------------------------------------------------- |
+| Navigation links, fields, selects, table rows | Colour on hover and focus (`transition-colors`)            | 150ms, the Tailwind default | `components/nav.tsx`, `components/ui/*`              |
+| Button, Badge                                 | Every animatable property (`transition-all`)               | 150ms                       | Lyra preset, `components/ui/button.tsx`, `badge.tsx` |
+| Button, while pressed                         | Moves down 1px (`active:translate-y-px`)                   | instant                     | Lyra preset, `components/ui/button.tsx`              |
+| Theme switch                                  | Nothing: transitions are suspended while the theme changes | none                        | `components/theme.tsx` (`disableTransitionOnChange`) |
+
+`tw-animate-css` is imported in `globals.css` for the shadcn generator; no component uses its
+animations.
+
+## Gap against the rule
+
+`transition-all` on Button and Badge, and the 1px press shift on Button, keep running under
+`prefers-reduced-motion`. **Proposal (not yet approved):** add `motion-reduce:transition-none`
+to `components/ui/button.tsx` and `badge.tsx`, and `motion-reduce:active:translate-y-0` to
+Button. It is
+listed on "What is missing" until the maintainer decides; this stage changes no component.

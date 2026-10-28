@@ -1,0 +1,32 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Foundations/Themes" />
+
+# Themes
+
+DirectiveBench has a light and a dark theme. Both are complete: every semantic token has a
+value for each (see Colour).
+
+## How the theme is applied
+
+1. `next-themes` sets the `.dark` class on `<html>`. The default follows the operating system
+   and the toggle stores the choice. Source: SPEC-119 FR-5, tokeny.md decision 15.
+2. `globals.css` defines the light values on `:root` and the dark values on `.dark`. The
+   `dark:` variant matches anything inside `.dark`. Source: `app/globals.css`.
+3. In Storybook, the Theme switch in the toolbar sets the same class on `<html>`, so overlays
+   rendered outside the story, such as menus and dialogs, get the theme too. Source: SPEC-122
+   FR-122-2.
+4. The story tests render every story once in each theme, as the `storybook-light` and
+   `storybook-dark` projects of `vitest.storybook.config.ts`, with axe and the play functions.
+   Source: SPEC-122 FR-122-2.
+
+## Rules
+
+1. Write a colour once, as a semantic token. Do not pair a light colour with a `dark:`
+   override in app code; if the two themes need different values, the token holds both.
+   Source: tokeny.md D1, D2. The generated `components/ui` files use `dark:` for the shadcn
+   control fills, which is their only use.
+2. Check contrast in both themes on the real surface, including muted text, navigation,
+   badges, errors and placeholders. Source: AGENTS.md §7.
+3. `ThemeToggle` shows the Sun in the dark theme and the Moon in the light theme: the icon
+   names the theme it switches to. Source: `components/theme.tsx`.

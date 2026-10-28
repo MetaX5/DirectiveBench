@@ -1,0 +1,44 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as TypographyStories from './typography.stories';
+
+<Meta of={TypographyStories} />
+
+# Typography
+
+One typeface, Figtree, bundled with the app through `@fontsource-variable/figtree`, so no page
+makes a remote font request (SPEC-119 §7, ADR-0001). Monospace text uses the system
+`ui-monospace` stack. Sizes come from five tokens; the minimum is 11px (tokeny.md D8, D10).
+
+## Roles
+
+| Role                                                  | Token and classes                             | Component                                   | Source                          |
+| ----------------------------------------------------- | --------------------------------------------- | ------------------------------------------- | ------------------------------- |
+| Page title                                            | `text-page-title` (20px, weight 600)          | `PageHeader` (h1)                           | tokeny.md D8                    |
+| Section or card title                                 | `text-body font-medium`                       | `CardTitle` (h3)                            | shadcn generator, tokeny.md D11 |
+| Body: descriptions, navigation, messages              | `text-body` (14px)                            | `PageHeader` description, notices           | tokeny.md D8                    |
+| Controls, tables, badges, card text                   | `text-ui` (12px)                              | `Button`, `Input`, `Table`, `Badge`, `Card` | SPEC-119 FR-6, Lyra density     |
+| Caption: nav section labels, hints, the "planned" tag | `text-caption` (11px)                         | `Nav` section labels                        | tokeny.md D8, D10               |
+| Metric                                                | `text-metric tabular-nums` (24px, weight 600) | Stat tiles on the dashboard                 | tokeny.md D8                    |
+| Code, paths, identifiers                              | `font-mono text-ui`                           | `Pre`, table cells with paths               | tokeny.md `font-mono`           |
+
+<Canvas of={TypographyStories.Roles} />
+
+## Rules
+
+1. Use only the five size tokens. `text-xs`, `text-sm` and arbitrary sizes such as
+   `text-[13px]` fail `test/design-tokens.test.ts`. Source: SPEC-121 FR-121-1, tokeny.md D2.
+2. Nothing is smaller than 11px (`text-caption`). Errors and main content never use the
+   caption size. Source: tokeny.md D10.
+3. Numbers that are compared in columns or tiles use `tabular-nums`. Source: tokeny.md
+   `text-metric` row.
+4. Do not add a second typeface. `font-heading` is the same family as `font-sans`. Source:
+   tokeny.md `font-heading` row.
+5. **Proposal (not yet approved):** running text is at most about 65 characters per line
+   (`max-w-prose`). The materials do not set a line length; the prompt asks for one.
+6. **Finding:** every page jumps from the `PageHeader` h1 to the `CardTitle` h3 with no h2,
+   which axe reports as `heading-order`. Stories that compose a page carry a documented
+   exception until the maintainer decides proposal P6 in SPEC-122 §18.
+
+## Size and font tokens
+
+<Canvas of={TypographyStories.TypeTokens} sourceState="none" />

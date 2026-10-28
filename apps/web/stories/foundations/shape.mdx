@@ -1,0 +1,33 @@
+import { Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as ShapeStories from './shape.stories';
+
+<Meta of={ShapeStories} />
+
+# Shape and depth
+
+DirectiveBench is flat and square, as the Lyra preset is (SPEC-119 AC-1).
+
+## Rules
+
+1. Corners are square on every surface and control. App code uses `rounded-surface` (0);
+   the generated `components/ui` files keep their equivalent `rounded-none`. Any other radius
+   class fails `test/design-tokens.test.ts`. Source: tokeny.md D7.
+2. The shadcn radius scale (`--radius`, `--radius-sm` to `--radius-4xl`) stays in
+   `globals.css` for the generator and is not used by components. Source: tokeny.md
+   `scale-radius` row.
+3. Surfaces separate by a one-pixel line and by surface colour, not by elevation:
+   - cards draw a 1px ring in `foreground` at 10% (generated `Card`);
+   - separators, table rows and outline buttons use `border`;
+   - fields and selects use `border-control`, which reaches 3:1 (tokeny.md D3);
+   - a card sits on `background` with the `card` fill, a code block on `muted` at 40%.
+4. No surface uses a drop shadow today. The story test checks that no element in the
+   composition below has a blurred or offset shadow. Source: inventory of 2026-10-28.
+5. **Proposal (not yet approved):** overlays that are not built yet (Dialog, menus, Toast,
+   see "What is missing") separate with a `border` and the `popover` fill, without a shadow,
+   to stay flat. The materials do not decide overlay elevation.
+
+<Canvas of={ShapeStories.Surfaces} />
+
+## Radius token
+
+<Canvas of={ShapeStories.ShapeTokens} sourceState="none" />
