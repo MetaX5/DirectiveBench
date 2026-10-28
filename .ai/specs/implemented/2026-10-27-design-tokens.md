@@ -132,7 +132,7 @@ None.
 
 Migrate existing `text-xs`/`text-sm` and `gap-*`/`space-y-*` utilities to `text-ui`/`text-body`
 and the `space-*` tokens ([#132](https://github.com/MetaX5/DirectiveBench/issues/132), specified in
-[SPEC-121](../2026-10-28-design-token-migration-and-guard.md)); add a token export for design
+[SPEC-121](2026-10-28-design-token-migration-and-guard.md)); add a token export for design
 tools if needed.
 
 ## 20. Implementation status
