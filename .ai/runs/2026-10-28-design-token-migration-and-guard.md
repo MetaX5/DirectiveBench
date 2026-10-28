@@ -46,10 +46,10 @@ The maintainer accepted all six autonomous defaults of SPEC-121 (Q1–Q6) on 202
 
 ### Phase 1: guards (red first)
 
-- [ ] 1.1 Shared scope file read by the token test
-- [ ] 1.2 tokeny.md CSS property column and sync test
-- [ ] 1.3 Arbitrary-value rule with allowlist
-- [ ] 1.4 ESLint raw-element rule with the markdown table exception
+- [x] 1.1 Shared scope file read by the token test — 646f083
+- [x] 1.2 tokeny.md CSS property column and sync test — b4571e2
+- [x] 1.3 Arbitrary-value rule with allowlist — 6a30444
+- [x] 1.4 ESLint raw-element rule with the markdown table exception — 972fe15
 
 ### Phase 2: migration
 
