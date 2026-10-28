@@ -136,9 +136,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
       case 'table':
         return (
           <div key={index} className="overflow-x-auto">
-            {/* Imported Markdown keeps its own compact table; the Table component would restyle
-                it (SPEC-121 Q3). */}
-            {/* eslint-disable-next-line no-restricted-syntax */}
+            {/* eslint-disable-next-line no-restricted-syntax -- imported Markdown keeps its own compact table; Table would restyle it (SPEC-121 Q3) */}
             <table className="text-ui">
               <thead>
                 <tr className="border-b">
