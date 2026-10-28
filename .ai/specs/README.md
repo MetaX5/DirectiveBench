@@ -90,7 +90,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 ## Index
 
 Specifications are drafts except SPEC-119 and SPEC-120, implemented and verified on 2026-10-23 and 2026-10-27. They were created on 2026-10-14 during the bootstrap, except
-SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23) and SPEC-120 (2026-10-27).
+SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23), SPEC-120 (2026-10-27) and SPEC-121 (2026-10-28).
 `implemented/` contains verified specifications; `archive/` is currently empty.
 
 ### Foundation
@@ -136,6 +136,7 @@ SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23)
 | SPEC-118 | [Benchmark own skills with Claude Code against registry artifacts (S1)](2026-10-22-benchmark-own-skills-s1.md) | draft |
 | SPEC-119 | [Shadcn preset design system](implemented/2026-10-23-shadcn-design-system.md) | implemented |
 | SPEC-120 | [Three-layer design tokens](implemented/2026-10-27-design-tokens.md) | implemented |
+| SPEC-121 | [Design-token migration and design-system guard in CI](2026-10-28-design-token-migration-and-guard.md) | draft |
 
 ### Integrations
 
