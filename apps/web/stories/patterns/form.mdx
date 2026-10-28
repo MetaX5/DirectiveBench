@@ -29,6 +29,29 @@ the status message.
    Source: SPEC-122 §18 Q1.
 7. Success is a `role="status"` line that names the result and the next step; no toast.
 8. One `default` button per form. Source: SPEC-122 §18 P12.
+9. A card holds one form with a `default` button. Two independent forms (tags and notes) are
+   two cards, not one card with two main actions. Source: SPEC-122 §18 P12, Card page.
+
+## Lists edited in place
+
+Modelled on Tags and Assigned benchmarks on `/artifacts/[id]` (issue 64).
+
+1. Each item shows its value (a `secondary` Badge for a user label, a link for an item with a
+   page) and its own small form with an `outline` `sm` button: "Remove", "Unassign". The
+   button's accessible name names the item ("Remove tag security"). The Badge itself is never
+   the button. Source: Badge page, Content page.
+2. The field and `default` button that add an item sit under the list, in the same card.
+3. The item forms and the add form share one result line and one pending state: one
+   `useActionState` per card, so a remove and an add never show two messages at once.
+4. Removing or unassigning a reversible item needs no confirmation, when its history stays
+   (runs, results). Say so in the result line ("Its results stay in Results by version.").
+   Source: Risky-action page.
+5. After a remove, focus moves to the add field (Usage rule 5).
+6. An item that is already there, or already gone, is a status, not an error ("security is
+   already a tag.").
+7. At the list's limit the add field and button are disabled and a sentence next to them says
+   why and what to do, linked with `aria-describedby`.
+8. An empty list is a sentence in the card ("No tags yet."), not an `EmptyState`.
 
 ## States
 
@@ -38,3 +61,4 @@ the status message.
 <Canvas of={Stories.GeneralError} />
 <Canvas of={Stories.Success} />
 <Canvas of={Stories.BlocksDoubleSubmit} />
+<Canvas of={Stories.EditableList} />

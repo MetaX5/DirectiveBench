@@ -15,14 +15,20 @@ The rules every screen follows, each with its source.
 3. Focus order follows reading order; no positive `tabIndex`. Scrolling blocks (`Pre`, wide
    tables) are tab stops. Source: WCAG 2.4.3, SPEC-122 P13.
 4. After a submit with errors, focus moves to the first invalid field. Source: Form pattern.
-   The app does not do this yet (What is missing).
+   The artifact editing forms do this; `/repositories` does not yet (What is missing).
+5. When the focused control disappears (its item was removed or unassigned), focus moves to
+   the field that adds items to that list, never to the page body. After an item is added,
+   focus stays in that field, ready for the next one. Source: WCAG 2.4.3, issue 64
+   (`app/artifacts/[id]/metadata-forms.tsx`).
 
 ## Forms and messages
 
 5. Every field has a visible label; the placeholder is an example. Source: WCAG 3.3.2.
 6. Field errors sit under the field with `aria-invalid`, `aria-describedby` and
    `role="alert"`; general errors go above the form. Source: WCAG 3.3.1, Form pattern.
-7. Status and progress use `role="status"`; they never take focus. Source: WCAG 4.1.3.
+7. Status and progress use `role="status"`; they never take focus. Keep the `role="status"`
+   element rendered and change its text: a live region inserted together with its message is
+   often not announced. Source: WCAG 4.1.3, WAI-ARIA live regions.
 8. Loading: disable the control and say what is happening; no spinner. Source: SPEC-122 P11.
 9. A disabled control says why next to it, linked with `aria-describedby`. Source: WCAG 3.3.2,
    Button page.

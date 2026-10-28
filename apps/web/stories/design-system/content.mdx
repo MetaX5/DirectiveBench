@@ -31,6 +31,15 @@ invalid: cases[0].prompt is required"). Never only "Error" or a code. Source: SP
 Why it is empty and the next step, with a link. "Nothing here yet" and "no results for these
 filters" are different messages. Source: EmptyState page, `app/artifacts/page.tsx`.
 
+An empty list inside a card is one sentence ("No tags yet.", "No benchmark suite is
+assigned."); `EmptyState` is for a whole page section.
+
+## Result messages
+
+After a save, name what changed with its value: "Added tag security.", "Saved the notes.",
+"Assigned Input validation. Run it from its suite page." Name a tab or page by its visible
+label. Source: issue 64.
+
 ## Labels and headings
 
 Nouns, sentence case ("Recent runs", "Path or GitHub URL"). Navigation keeps its current title

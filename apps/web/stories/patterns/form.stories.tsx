@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { expect, fn, userEvent, waitFor } from 'storybook/test';
 import { PageHeader } from '@/components/common';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -192,5 +193,87 @@ export const BlocksDoubleSubmit: Story = {
     await userEvent.click(button, { pointerEventsCheck: 0 });
     await expect(args.onSubmit).toHaveBeenCalledTimes(1);
     await expect(args.onSubmit).toHaveBeenCalledWith('~/code/agent-rules');
+  },
+};
+
+/** A list edited in place: per-item Remove, one add field, one result line, focus kept. */
+function TagList({ initial }: { initial: string[] }) {
+  const [tags, setTags] = useState(initial);
+  const [message, setMessage] = useState('');
+  const field = useRef<HTMLInputElement>(null);
+
+  const add = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const tag = String(new FormData(form).get('tag')).trim().toLowerCase();
+    if (!tag) return;
+    if (tags.includes(tag)) setMessage(`${tag} is already a tag.`);
+    else {
+      setTags([...tags, tag]);
+      setMessage(`Added tag ${tag}.`);
+    }
+    form.reset();
+    field.current?.focus();
+  };
+
+  const remove = (tag: string) => {
+    setTags(tags.filter((t) => t !== tag));
+    setMessage(`Removed tag ${tag}.`);
+    field.current?.focus();
+  };
+
+  return (
+    <Card className="max-w-md">
+      <CardHeader>
+        <CardTitle>Tags</CardTitle>
+        <CardDescription>Your own labels for this artifact. A rescan keeps them.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-stack">
+        {tags.length ? (
+          <ul aria-label="Tags" className="flex flex-wrap gap-inline">
+            {tags.map((tag) => (
+              <li key={tag} className="flex items-center gap-inline-tight">
+                <Badge variant="secondary">{tag}</Badge>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Remove tag ${tag}`}
+                  onClick={() => remove(tag)}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-ui text-muted-foreground">No tags yet.</p>
+        )}
+        <form onSubmit={add} className="flex flex-wrap items-end gap-inline" noValidate>
+          <label className="flex min-w-48 flex-1 flex-col gap-1 text-ui text-muted-foreground">
+            Tag
+            <Input ref={field} name="tag" maxLength={64} placeholder="security" />
+          </label>
+          <Button type="submit">Add tag</Button>
+        </form>
+        <p role="status" className="text-ui text-muted-foreground">
+          {message}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+export const EditableList: Story = {
+  render: () => <TagList initial={['security', 'review']} />,
+  play: async ({ canvas }) => {
+    const field = canvas.getByRole('textbox', { name: 'Tag' });
+    await userEvent.type(field, '  Testing {Enter}');
+    await expect(canvas.getByRole('status')).toHaveTextContent('Added tag testing.');
+    await expect(field).toHaveValue('');
+    await expect(field).toHaveFocus();
+    await userEvent.click(canvas.getByRole('button', { name: 'Remove tag security' }));
+    await expect(canvas.getByRole('status')).toHaveTextContent('Removed tag security.');
+    await expect(field).toHaveFocus();
   },
 };

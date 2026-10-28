@@ -55,6 +55,10 @@ Hover changes the fill in the dark theme only. Focus, disabled and invalid work 
 ## 8. Content
 
 - The first option is the neutral value, "All", when the select filters.
+- Outside a filter there is no placeholder option ("Choose a suite…"): the first real value is
+  selected, and the visible label says what is chosen. A select whose list is empty is not
+  rendered; a sentence says why ("Every benchmark suite is assigned."). Source: issue 64,
+  Do and don't below.
 - Option text is the value's own name (`skill`, `rule`), not a sentence.
 
 ## 9. Responsiveness

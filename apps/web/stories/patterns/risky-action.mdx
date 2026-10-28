@@ -24,6 +24,12 @@ naming the object, the reasons as a list, then the destructive action and Cancel
 5. The panel is inline, not a modal. A Dialog primitive is on "What is missing" for actions
    that need one.
 
+## When not to use
+
+An action that is easy to undo and keeps the item's history needs no confirmation: removing a
+tag, unassigning a suite (its runs and results stay). Say what was kept in the result line.
+See "Lists edited in place" in the Form pattern.
+
 ## States
 
 <Canvas of={Stories.OneReason} />

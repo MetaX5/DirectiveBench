@@ -66,6 +66,8 @@ do not improvise one; ask.
 | A run outcome | `StatusBadge`, plus `MockBadge` for mock runs |
 | Progress or a result message | A `role="status"` line in words; no spinner, no toast |
 | A field error | Under the field: `aria-invalid`, `aria-describedby`, `role="alert"` |
+| A list the user edits (tags, assigned suites) | Item + `outline` `sm` "Remove" named for it, add field under the list, one status line, focus back to the field (Form, "Lists edited in place") |
+| A reversible removal that keeps history | No confirmation; say what was kept |
 | Loading | Disable the control and say what is happening |
 | Numbers | `formatScore` ("83.3%"), `formatDelta` ("+50 pts"), `formatDuration`, `formatDate` from `lib/utils.ts` |
 
