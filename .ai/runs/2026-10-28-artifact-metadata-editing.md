@@ -96,6 +96,44 @@ Not verified:
   field and button with their written reason were not exercised in a browser.
 - A screen reader was not used.
 
+## Review rounds (2026-10-28, after the first PR push)
+
+The maintainer asked to fill the documentation gaps, run the Codex review and test in a
+browser with an agent.
+
+- **Documentation:** Form pattern "Lists edited in place" (with an `EditableList` story),
+  Usage rules on focus after removal and on live regions, NativeSelect placeholder rule,
+  Risky-action and EmptyState "when not to use", Content "Result messages", agent summary.
+- **Codex adversarial review, round 1 (needs-attention, 2 medium, both confirmed):**
+  - the suite picker called `listSuites`, which loads every suite's versions, assignments and
+    runs: fixed with `listSuiteNames` (ids and names only);
+  - assigning the last free suite removed the select and dropped focus: fixed with a focus
+    fallback to that suite's Unassign button. The new e2e assertion failed on the old build
+    (red) and passes now.
+- **Browser QA agent (Claude in Chrome, built app after `demo`):** all happy paths worked, no
+  console errors. Findings and what was done:
+  - a 64-character tag without spaces pushed its Remove button out of the card and the page
+    wider than the screen: fixed (`min-w-0 shrink break-all` on the Badge, `wrap-anywhere` on
+    messages);
+  - focus dropped to the body after Save notes and after the 32nd tag: fixed (focus returns to
+    the Notes field; at the limit it moves to the newest tag's Remove);
+  - a field error stayed after the value changed, against the Input page ("kept until the
+    value changes"): fixed;
+  - "No benchmark suite is assigned." used `text-body` next to `text-ui`: now `text-ui`;
+  - "removing a tag wipes the draft": not reproduced; an e2e assertion now guards it;
+  - not changed: the placeholder "security" (Input page: the placeholder is an example),
+    silent truncation at `maxLength` (native), status lines staying per card, insertion order
+    of tags, and the 1px focus ring on the lime `default` button (a `components/ui` and token
+    question for the maintainer; `e2e/ui-contrast.spec.ts` passes it).
+- **Codex adversarial review, round 2 (needs-attention, 1 medium, confirmed):** after a slow
+  save the card focused its field even when the user had moved to another editor, so typing
+  went to the wrong field. Fixed: focus is restored only when it is inside the card or on the
+  body. The new e2e test (delayed save, typing in Notes) failed on the old build and passes.
+- **Codex adversarial review, round 3: approve**, no material findings.
+- Gate after the fixes: prettier, lint, typecheck, `pnpm test` (100% in every package),
+  `pnpm test:storybook` (224 tests), `pnpm build && pnpm verify:pack`, `pnpm test:e2e`
+  (59 passed).
+
 ## Problems and deviations
 
 - `pkill -f "port 4411"` also ended the shell running it (lesson of 2026-10-14 already says
@@ -103,6 +141,7 @@ Not verified:
 
 ## Lessons recorded
 
+- [`break-words` does not stop a long word widening a grid card](../lessons/2026-10-28-long-words-widen-grid-cards.md)
 - [A React action form resets to the new render's `defaultValue`](../lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)
 
 ## Follow-ups

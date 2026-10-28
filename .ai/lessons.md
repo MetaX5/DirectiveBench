@@ -18,6 +18,7 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-28] **`break-words` does not stop a long word widening a grid card** — min-content ignores it; use `wrap-anywhere` or `break-all`, and `min-w-0 shrink` on a `Badge` beside a button. → [lessons/2026-10-28-long-words-widen-grid-cards.md](lessons/2026-10-28-long-words-widen-grid-cards.md)
 - [2026-10-28] **A React action form resets to the new render's `defaultValue`** — return the entered text in the error state and derive `defaultValue` from it to keep input after an error; normalise a textarea's CR LF to LF before length limits. → [lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md](lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)
 - [2026-10-28] **Name an attached MDX page after its story file** — `<Meta of>` gives the id `…--docs` only when the MDX and CSF file names match; otherwise the file name becomes the id and links break. → [lessons/2026-10-28-storybook-mdx-file-name-sets-the-docs-id.md](lessons/2026-10-28-storybook-mdx-file-name-sets-the-docs-id.md)
 - [2026-10-28] **Do not set Storybook's `nextjs.appDirectory` on Next 16.4** — with `@storybook/nextjs-vite` 10.6.2 every story fails in `RedirectBoundary` ("reading 'data'"); stub `usePathname` from `@storybook/nextjs-vite/navigation.mock` in the story's `beforeEach` instead. → [lessons/2026-10-28-storybook-nextjs-vite-app-directory-breaks-on-next-16-4.md](lessons/2026-10-28-storybook-nextjs-vite-app-directory-breaks-on-next-16-4.md)
