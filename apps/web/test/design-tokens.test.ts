@@ -21,6 +21,17 @@ function sources(dir: string): string[] {
 
 const files = scope.roots.flatMap(sources);
 
+// MDX documentation pages (SPEC-122 FR-122-4) are checked on the classes they render: the
+// values of their className attributes. Their prose and code examples name forbidden classes
+// on purpose. Returns [line, text] pairs; other files are checked line by line.
+function checkedText(file: string, source: string): Array<[line: number, text: string]> {
+  if (!file.endsWith('.mdx')) return source.split('\n').map((text, index) => [index + 1, text]);
+  return [...source.matchAll(/className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/g)].map((match) => [
+    source.slice(0, match.index).split('\n').length,
+    match[1] ?? match[2] ?? match[3]!,
+  ]);
+}
+
 const forbidden: Array<[rule: string, pattern: RegExp]> = [
   ['raw palette token outside globals.css (D2)', /palette-/],
   ['arbitrary font size; use a text-* token (D2, D8)', /\btext-\[\d/],
@@ -48,11 +59,9 @@ describe('design token usage in app and components', () => {
   for (const [rule, pattern] of forbidden) {
     it(rule, () => {
       const hits = files.flatMap((file) =>
-        readFileSync(file, 'utf8')
-          .split('\n')
-          .flatMap((line, index) =>
-            pattern.test(line) ? [`${relative(root, file)}:${index + 1}`] : [],
-          ),
+        checkedText(file, readFileSync(file, 'utf8')).flatMap(([line, text]) =>
+          pattern.test(text) ? [`${relative(root, file)}:${line}`] : [],
+        ),
       );
       expect(hits).toEqual([]);
     });
@@ -125,6 +134,49 @@ const arbitraryAllowlist: Array<[file: string, pattern: RegExp, reason: string]>
   ],
 ];
 
+describe('MDX pages', () => {
+  it('are checked on their className values only', () => {
+    const page = [
+      'Never use `text-sm` or a `rounded` corner.',
+      '<div className="flex gap-inline">',
+      "  <p className='text-sm'>x</p>",
+      '  <p className={`p-[13px]`}>y</p>',
+    ].join('\n');
+    expect(checkedText('page.mdx', page)).toEqual([
+      [2, 'flex gap-inline'],
+      [3, 'text-sm'],
+      [4, 'p-[13px]'],
+    ]);
+  });
+
+  it('keep every line of other files', () => {
+    expect(checkedText('page.tsx', 'a\nb')).toEqual([
+      [1, 'a'],
+      [2, 'b'],
+    ]);
+  });
+});
+
+// Documentation text follows the UI copy rule: no en or em dash (SPEC-122 FR-122-7, AGENTS.md
+// §7). Storybook files are the stories/ and .storybook/ roots and colocated *.stories.tsx files.
+describe('Storybook documentation copy', () => {
+  it('contains no en or em dash', () => {
+    const storybook = files.filter((file) => {
+      const path = relative(root, file);
+      return /^(?:stories|\.storybook)\//.test(path) || /\.stories\.tsx?$/.test(path);
+    });
+    expect(storybook.length).toBeGreaterThan(0);
+    const hits = storybook.flatMap((file) =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .flatMap((line, index) =>
+          /[\u2013\u2014]/.test(line) ? [`${relative(root, file)}:${index + 1}`] : [],
+        ),
+    );
+    expect(hits).toEqual([]);
+  });
+});
+
 describe('arbitrary Tailwind values', () => {
   it.each([
     ['className="p-[13px]"', ['p-[13px]']],
@@ -161,7 +213,13 @@ describe('arbitrary Tailwind values', () => {
   it('appear only as documented exceptions (FR-121-5)', () => {
     const hits = files.flatMap((file) => {
       const path = relative(root, file);
-      return arbitraryValues(readFileSync(file, 'utf8'), file)
+      const source = readFileSync(file, 'utf8');
+      const words = file.endsWith('.mdx')
+        ? checkedText(file, source).flatMap(([line, text]) =>
+            arbitraryValues(JSON.stringify(text)).map(([, word]): [number, string] => [line, word]),
+          )
+        : arbitraryValues(source, file);
+      return words
         .filter(
           ([, word]) =>
             !arbitraryAllowlist.some(
