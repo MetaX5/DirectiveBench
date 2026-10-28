@@ -5,6 +5,7 @@ import {
   getSuiteVersion,
   importArtifactVersion,
   importSuiteVersion,
+  listSuiteNames,
   listSuites,
   recordFixtureVersion,
   schema,
@@ -72,6 +73,19 @@ describe('importSuiteVersion', () => {
 describe('getSuiteVersion', () => {
   it('returns null for an unknown version', async () => {
     expect(await getSuiteVersion(getHandle().db, 'suitev_missing')).toBeNull();
+  });
+});
+
+describe('listSuiteNames', () => {
+  it('lists ids and names by name', async () => {
+    const handle = getHandle();
+    expect(await listSuiteNames(handle.db)).toEqual([]);
+    const b = await importSuiteVersion(handle, suiteInput('b', { slug: 'b', name: 'Beta' }));
+    const a = await importSuiteVersion(handle, suiteInput('a', { slug: 'a', name: 'Alpha' }));
+    expect(await listSuiteNames(handle.db)).toEqual([
+      { id: a.suiteId, name: 'Alpha' },
+      { id: b.suiteId, name: 'Beta' },
+    ]);
   });
 });
 

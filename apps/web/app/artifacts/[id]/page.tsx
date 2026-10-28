@@ -2,7 +2,7 @@ import {
   countArtifactRuns,
   getArtifactDetail,
   listArtifactRuns,
-  listSuites,
+  listSuiteNames,
   listVersionComparisonRuns,
   type ArtifactDetail,
   type Database,
@@ -61,14 +61,7 @@ import { cn, formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifact' };
 
-interface SuiteOption {
-  id: string;
-  name: string;
-}
-
-async function listSuiteOptions(db: Database): Promise<SuiteOption[]> {
-  return (await listSuites(db)).map(({ suite }) => ({ id: suite.id, name: suite.name }));
-}
+type SuiteOption = Awaited<ReturnType<typeof listSuiteNames>>[number];
 
 function Tabs({ artifactId, current }: { artifactId: string; current: ArtifactTab }) {
   return (
@@ -567,7 +560,7 @@ export default async function ArtifactPage({
       {query.tab === 'metadata' ? <MetadataTab detail={detail} /> : null}
       {query.tab === 'versions' ? <VersionsTab detail={detail} /> : null}
       {query.tab === 'benchmarks' ? (
-        <BenchmarksTab detail={detail} suites={await listSuiteOptions(handle.db)} />
+        <BenchmarksTab detail={detail} suites={await listSuiteNames(handle.db)} />
       ) : null}
       {query.tab === 'evaluations' ? (
         <ResultsByVersionTab

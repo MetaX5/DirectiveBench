@@ -104,7 +104,10 @@ test('a benchmark suite is unassigned and assigned again on the Benchmarks tab',
   await expect(select).toBeFocused();
   await expect(select).toHaveValue(/.+/);
 
-  await suites.getByRole('button', { name: 'Assign' }).click();
+  // Assigning the last free suite removes the field: the focus moves to its Unassign button.
+  await select.press('Tab');
+  await expect(suites.getByRole('button', { name: 'Assign' })).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(suites.getByRole('status')).toHaveText(
     `Assigned ${DEMO_SUITE}. Run it from its suite page.`,
   );
@@ -112,6 +115,37 @@ test('a benchmark suite is unassigned and assigned again on the Benchmarks tab',
     'href',
     /^\/benchmarks\//,
   );
+  await expect(suites.getByRole('button', { name: `Unassign suite ${DEMO_SUITE}` })).toBeFocused();
+});
+
+test('at the tag limit the field is disabled with its reason and focus stays on the list', async ({
+  page,
+}) => {
+  const artifactId = await demoArtifactId();
+  const tags = Array.from({ length: 31 }, (_, i) => `limit-${String(i).padStart(2, '0')}`);
+  await withDatabase((db) =>
+    db.prepare('update artifacts set tags = ? where id = ?').run(JSON.stringify(tags), artifactId),
+  );
+  try {
+    await page.goto(`/artifacts/${artifactId}`);
+    const card_ = card(page, 'Tags');
+    const field = card_.getByRole('textbox', { name: 'Tag' });
+    await field.fill('last');
+    await field.press('Enter');
+    await expect(card_.getByRole('status')).toHaveText('Added tag last.');
+    await expect(field).toBeDisabled();
+    await expect(field).toHaveAccessibleDescription(/has 32 tags, the most it can have/);
+    await expect(card_.getByRole('button', { name: 'Add tag' })).toBeDisabled();
+    await expect(card_.getByRole('button', { name: 'Remove tag last' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(card_.getByRole('status')).toHaveText('Removed tag last.');
+    await expect(field).toBeEnabled();
+    await expect(field).toBeFocused();
+  } finally {
+    await withDatabase((db) =>
+      db.prepare("update artifacts set tags = '[]' where id = ?").run(artifactId),
+    );
+  }
 });
 
 test('the editing cards fit a 320px screen', async ({ page }) => {
@@ -122,4 +156,55 @@ test('the editing cards fit a 320px screen', async ({ page }) => {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBe(0);
+});
+
+test('browser QA findings: long tags wrap, drafts and focus survive, errors clear on edit', async ({
+  page,
+}) => {
+  const artifactId = await demoArtifactId();
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(`/artifacts/${artifactId}`);
+  const tags = card(page, 'Tags');
+  const field = tags.getByRole('textbox', { name: 'Tag' });
+  try {
+    // A 64-character tag without spaces wraps inside the card; nothing scrolls sideways.
+    const long = 'k'.repeat(64);
+    await field.fill(long);
+    await field.press('Enter');
+    await expect(tags.getByRole('status')).toHaveText(`Added tag ${long}.`);
+    const remove = await tags.getByRole('button', { name: `Remove tag ${long}` }).boundingBox();
+    const box = await tags.boundingBox();
+    expect((remove?.x ?? Infinity) + (remove?.width ?? 0)).toBeLessThanOrEqual(
+      (box?.x ?? 0) + (box?.width ?? 0),
+    );
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBe(0);
+
+    // A field error disappears as soon as the value changes.
+    await field.fill('a, b');
+    await field.press('Enter');
+    await expect(tags.getByRole('alert')).toBeVisible();
+    await field.press('Backspace');
+    await expect(tags.getByRole('alert')).toHaveCount(0);
+    await expect(field).not.toHaveAttribute('aria-invalid', 'true');
+
+    // Removing another tag keeps the draft in the Tag field.
+    await field.fill('draft');
+    await tags.getByRole('button', { name: `Remove tag ${long}` }).click();
+    await expect(tags.getByRole('status')).toHaveText(`Removed tag ${long}.`);
+    await expect(field).toHaveValue('draft');
+
+    // Save notes disables itself while saving; the focus returns to the Notes field.
+    const notes = card(page, 'Notes');
+    await notes.getByRole('textbox', { name: 'Notes' }).fill('x');
+    await notes.getByRole('button', { name: 'Save notes' }).press('Enter');
+    await expect(notes.getByRole('status')).toHaveText('Saved the notes.');
+    await expect(notes.getByRole('textbox', { name: 'Notes' })).toBeFocused();
+  } finally {
+    await withDatabase((db) =>
+      db.prepare("update artifacts set tags = '[]', notes = null where id = ?").run(artifactId),
+    );
+  }
 });

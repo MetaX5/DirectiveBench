@@ -18,7 +18,9 @@ The rules every screen follows, each with its source.
    The artifact editing forms do this; `/repositories` does not yet (What is missing).
 5. When the focused control disappears (its item was removed or unassigned), focus moves to
    the field that adds items to that list, never to the page body. After an item is added,
-   focus stays in that field, ready for the next one. Source: WCAG 2.4.3, issue 64
+   focus stays in that field, ready for the next one. When that field is gone or disabled
+   (the last free suite was assigned, the list is full), focus moves to the item just added.
+   A button disabled while it saves loses focus: return it to the form's field. Source: WCAG 2.4.3, issue 64
    (`app/artifacts/[id]/metadata-forms.tsx`).
 
 ## Forms and messages

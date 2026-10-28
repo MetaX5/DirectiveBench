@@ -137,6 +137,14 @@ export async function getSuiteVersion(db: Database, versionId: string) {
 
 export type SuiteVersionRecord = NonNullable<Awaited<ReturnType<typeof getSuiteVersion>>>;
 
+/** Suite ids and names only, by name: for choosing a suite without loading its history. */
+export async function listSuiteNames(db: Database): Promise<Array<{ id: string; name: string }>> {
+  return db
+    .select({ id: benchmarkSuites.id, name: benchmarkSuites.name })
+    .from(benchmarkSuites)
+    .orderBy(benchmarkSuites.name);
+}
+
 export async function listSuites(db: Database) {
   const suites = await db.select().from(benchmarkSuites).orderBy(benchmarkSuites.name);
   const ids = suites.map((s) => s.id);

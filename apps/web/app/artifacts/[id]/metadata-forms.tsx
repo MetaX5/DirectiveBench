@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect, useRef, type ReactNode } from 'react';
+import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Badge,
   Button,
@@ -41,22 +41,36 @@ function byIntent(
 const addOrRemoveTag = byIntent(addArtifactTagAction, removeArtifactTagAction);
 const assignOrUnassignSuite = byIntent(assignArtifactSuiteAction, unassignArtifactSuiteAction);
 
+/**
+ * Focuses the card's field, or `fallback()` when the field is gone or disabled (the last suite
+ * was assigned, the last free tag slot was taken), so focus never drops to the page body.
+ */
+function focusField(
+  field: HTMLInputElement | HTMLSelectElement | null,
+  fallback: () => HTMLElement | null | undefined,
+): void {
+  if (field && !field.disabled) field.focus();
+  else fallback()?.focus();
+}
+
 /** The general error, the field error and the status line under a form. */
 function Messages({
   state,
   pending,
   pendingText,
   errorId,
+  fieldError,
 }: {
   state: MetadataFormState;
   pending: boolean;
   pendingText: string;
   errorId: string;
+  fieldError: boolean;
 }) {
   return (
     <>
-      {state.kind === 'fieldError' && !pending ? (
-        <p id={errorId} role="alert" className="text-ui text-destructive-foreground">
+      {state.kind === 'fieldError' && fieldError ? (
+        <p id={errorId} role="alert" className="text-ui wrap-anywhere text-destructive-foreground">
           {state.message}
         </p>
       ) : null}
@@ -65,7 +79,7 @@ function Messages({
           {state.message}
         </p>
       ) : null}
-      <p role="status" className="text-ui text-muted-foreground empty:hidden">
+      <p role="status" className="text-ui wrap-anywhere text-muted-foreground empty:hidden">
         {pending ? pendingText : state.kind === 'success' ? state.message : ''}
       </p>
     </>
@@ -105,21 +119,30 @@ export function TagsCard({
 }) {
   const [state, dispatch, pending] = useActionState(addOrRemoveTag, idle);
   const field = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLUListElement>(null);
   const full = tags.length >= maxTags;
-  const fieldError = state.kind === 'fieldError' && !pending;
+  // The error stays until the value changes (Input page, Do and don't).
+  const [editedAfter, setEditedAfter] = useState<MetadataFormState | null>(null);
+  const fieldError = state.kind === 'fieldError' && !pending && editedAfter !== state;
 
-  // After an add, a remove or an error the focus is in the field, ready for the next tag.
+  // After an add, a remove or an error the focus is in the field, ready for the next tag. At
+  // the limit the field is disabled: the focus goes to the Remove button of the newest tag.
   useEffect(() => {
-    if (state.kind !== 'idle') field.current?.focus();
+    if (state.kind === 'idle') return;
+    focusField(field.current, () =>
+      list.current?.querySelector<HTMLElement>('li:last-child button'),
+    );
   }, [state]);
 
   return (
     <Section title="Tags" description="Your own labels for this artifact. A rescan keeps them.">
       {tags.length ? (
-        <ul aria-label="Tags" className="flex flex-wrap gap-inline">
+        <ul ref={list} aria-label="Tags" className="flex flex-wrap gap-inline">
           {tags.map((tag) => (
-            <li key={tag} className="flex items-center gap-inline-tight">
-              <Badge variant="secondary">{tag}</Badge>
+            <li key={tag} className="flex max-w-full min-w-0 items-center gap-inline-tight">
+              <Badge variant="secondary" className="min-w-0 shrink break-all">
+                {tag}
+              </Badge>
               <form action={dispatch}>
                 <input type="hidden" name="intent" value="remove" />
                 <input type="hidden" name="artifactId" value={artifactId} />
@@ -145,6 +168,7 @@ export function TagsCard({
         <label className="flex min-w-48 flex-1 flex-col gap-1 text-ui text-muted-foreground">
           Tag
           <Input
+            onChange={() => setEditedAfter(state)}
             ref={field}
             name="tag"
             maxLength={maxTagLength}
@@ -173,6 +197,7 @@ export function TagsCard({
         pending={pending}
         pendingText="Saving the tags."
         errorId="tag-error"
+        fieldError={fieldError}
       />
     </Section>
   );
@@ -189,10 +214,13 @@ export function NotesCard({
 }) {
   const [state, dispatch, pending] = useActionState(saveArtifactNotesAction, idle);
   const field = useRef<HTMLTextAreaElement>(null);
-  const fieldError = state.kind === 'fieldError' && !pending;
+  // The error stays until the value changes (Input page, Do and don't).
+  const [editedAfter, setEditedAfter] = useState<MetadataFormState | null>(null);
+  const fieldError = state.kind === 'fieldError' && !pending && editedAfter !== state;
 
   useEffect(() => {
-    if (state.kind === 'fieldError') field.current?.focus();
+    // The Save button is disabled while saving, which drops its focus: return it to the field.
+    if (state.kind !== 'idle') field.current?.focus();
   }, [state]);
 
   return (
@@ -205,6 +233,7 @@ export function NotesCard({
         <label className="flex flex-col gap-1 text-ui text-muted-foreground">
           Notes
           <Textarea
+            onChange={() => setEditedAfter(state)}
             ref={field}
             name="notes"
             maxLength={maxLength}
@@ -224,6 +253,7 @@ export function NotesCard({
         pending={pending}
         pendingText="Saving the notes."
         errorId="notes-error"
+        fieldError={fieldError}
       />
     </Section>
   );
@@ -238,12 +268,26 @@ export function SuitesCard({
   assigned: Array<{ id: string; name: string }>;
   available: Array<{ id: string; name: string }>;
 }) {
-  const [state, dispatch, pending] = useActionState(assignOrUnassignSuite, idle);
+  const submitted = useRef<FormDataEntryValue | null>(null);
+  const [state, dispatch, pending] = useActionState(
+    (previous: MetadataFormState, formData: FormData) => {
+      submitted.current = formData.get('suiteId');
+      return assignOrUnassignSuite(previous, formData);
+    },
+    idle,
+  );
   const field = useRef<HTMLSelectElement>(null);
+  const list = useRef<HTMLUListElement>(null);
 
-  // After an unassign the clicked button is gone: the focus moves to the suite field.
+  // After an unassign the clicked button is gone: the focus moves to the suite field. After the
+  // last free suite is assigned the field is gone: the focus moves to that suite's Unassign.
   useEffect(() => {
-    if (state.kind !== 'idle') field.current?.focus();
+    if (state.kind === 'idle') return;
+    focusField(field.current, () =>
+      [...(list.current?.querySelectorAll<HTMLElement>('li[data-suite-id]') ?? [])]
+        .find((item) => item.dataset.suiteId === submitted.current)
+        ?.querySelector('button'),
+    );
   }, [state]);
 
   return (
@@ -252,9 +296,13 @@ export function SuitesCard({
       description="Suites this artifact is benchmarked with. Run a benchmark from its suite page."
     >
       {assigned.length ? (
-        <ul aria-label="Assigned suites" className="space-y-stack text-body">
+        <ul ref={list} aria-label="Assigned suites" className="space-y-stack text-body">
           {assigned.map((suite) => (
-            <li key={suite.id} className="flex flex-wrap items-center gap-inline">
+            <li
+              key={suite.id}
+              data-suite-id={suite.id}
+              className="flex flex-wrap items-center gap-inline"
+            >
               <Link href={`/benchmarks/${suite.id}`} className="underline">
                 {suite.name}
               </Link>
@@ -276,7 +324,7 @@ export function SuitesCard({
           ))}
         </ul>
       ) : (
-        <p className="text-body text-muted-foreground">No benchmark suite is assigned.</p>
+        <p className="text-ui text-muted-foreground">No benchmark suite is assigned.</p>
       )}
       {available.length ? (
         <form action={dispatch} className="flex flex-wrap items-end gap-inline">
@@ -311,6 +359,7 @@ export function SuitesCard({
         pending={pending}
         pendingText="Saving the assignment."
         errorId="suite-error"
+        fieldError={false}
       />
     </Section>
   );

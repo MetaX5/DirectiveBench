@@ -46,12 +46,15 @@ Modelled on Tags and Assigned benchmarks on `/artifacts/[id]` (issue 64).
 4. Removing or unassigning a reversible item needs no confirmation, when its history stays
    (runs, results). Say so in the result line ("Its results stay in Results by version.").
    Source: Risky-action page.
-5. After a remove, focus moves to the add field (Usage rule 5).
+5. After a remove, focus moves to the add field; when that field is gone or disabled, to the
+   item just added (Usage rule 5).
 6. An item that is already there, or already gone, is a status, not an error ("security is
    already a tag.").
 7. At the list's limit the add field and button are disabled and a sentence next to them says
    why and what to do, linked with `aria-describedby`.
 8. An empty list is a sentence in the card ("No tags yet."), not an `EmptyState`.
+9. Long values without spaces wrap inside the card (`break-all` on the Badge, `wrap-anywhere`
+   on messages that repeat them); the Remove button never leaves the card.
 
 ## States
 
