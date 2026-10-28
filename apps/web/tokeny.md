@@ -191,3 +191,8 @@ decreased. Accepted exceptions:
     dashes (A§7).
 17. Reserved tokens (`popover`, `sidebar-primary`, `chart-*`) stay for the shadcn generator and
     are not used without a separate decision.
+18. **D11**: the generated `components/ui` files use the type and spacing tokens too
+    (`text-ui`, `text-body`, `gap-inline-tight`, …). Output of a shadcn generator re-run is
+    migrated before merge; `test/design-tokens.test.ts` fails on `text-xs`/`text-sm`, and the
+    design-system rules (SPEC-121) read their file scope from `design-system-scope.json`.
+    D7 still applies: generated files keep `rounded-none`.
