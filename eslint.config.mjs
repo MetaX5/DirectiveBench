@@ -95,9 +95,12 @@ const designSystemScope = JSON.parse(
 );
 const designSystemMessage =
   'Use the design-system component from components/ui (Button, NativeSelect, Input, Table) or add one there (SPEC-121).';
+// ESLint parses TypeScript only; design-tokens.test.ts checks the MDX pages in the scope.
 const designSystemComponents = {
   files: designSystemScope.roots.flatMap((root) =>
-    designSystemScope.extensions.map((extension) => `apps/web/${root}/**/*${extension}`),
+    designSystemScope.extensions
+      .filter((extension) => extension !== '.mdx')
+      .map((extension) => `apps/web/${root}/**/*${extension}`),
   ),
   ignores: [`apps/web/${designSystemScope.componentLibrary}/**`],
   rules: {
@@ -131,6 +134,7 @@ export default tseslint.config(
       'examples/benchmarks/*/verification/**',
       '**/test-results/**',
       '**/playwright-report/**',
+      '**/storybook-static/**',
     ],
   },
   js.configs.recommended,

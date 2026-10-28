@@ -74,3 +74,17 @@ jobs:
           name: playwright-report
           path: apps/web/test-results
           retention-days: 7
+
+  storybook:
+    name: Storybook (browser, both themes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+      - name: Install Playwright Chromium
+        run: pnpm --filter @directivebench/web exec playwright install --with-deps chromium
+      - name: Story tests (render, play functions, axe) in the light and dark themes
+        run: pnpm test:storybook
+      - name: Build the static Storybook
+        run: pnpm --filter @directivebench/web build-storybook
