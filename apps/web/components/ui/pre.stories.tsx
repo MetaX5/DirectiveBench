@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect } from 'storybook/test';
-import { scrollableRegionException } from '../../stories/blocks/a11y';
 import { Pre } from './primitives';
 
 const definition = {
@@ -28,7 +27,6 @@ export const Playground: Story = {
 
 /** Long output scrolls inside the block after 28rem; the page does not grow without limit. */
 export const LongOutput: Story = {
-  parameters: scrollableRegionException,
   args: {
     children: Array.from(
       { length: 60 },
@@ -38,6 +36,8 @@ export const LongOutput: Story = {
   play: async ({ canvasElement }) => {
     const pre = canvasElement.querySelector('pre')!;
     await expect(pre.scrollHeight).toBeGreaterThan(pre.clientHeight);
+    // A tab stop, so the keyboard can scroll it (SPEC-122 P13).
+    await expect(pre.tabIndex).toBe(0);
   },
 };
 

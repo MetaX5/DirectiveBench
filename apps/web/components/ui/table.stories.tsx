@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect } from 'storybook/test';
-import { scrollableRegionException } from '../../stories/blocks/a11y';
 import { StateMatrix, stateProps } from '../../stories/blocks/state-matrix';
 import { Badge } from './badge';
 import { Button } from './button';
@@ -160,7 +159,6 @@ export const Empty: Story = {
 
 /** At 320px the table scrolls sideways inside its container; the page does not. */
 export const NarrowScreen: Story = {
-  parameters: scrollableRegionException,
   render: () => (
     <div className="w-80 border border-dashed">
       <RecentRuns />
@@ -170,5 +168,8 @@ export const NarrowScreen: Story = {
     const container = canvasElement.querySelector<HTMLElement>('[data-slot="table-container"]')!;
     await expect(container.scrollWidth).toBeGreaterThan(container.clientWidth);
     await expect(getComputedStyle(container).overflowX).toBe('auto');
+    // A named region and a tab stop, so the keyboard can scroll it (SPEC-122 P13).
+    await expect(container).toHaveAttribute('tabindex', '0');
+    await expect(container).toHaveAccessibleName('Recent runs');
   },
 };

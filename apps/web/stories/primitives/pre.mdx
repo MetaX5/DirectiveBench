@@ -45,8 +45,8 @@ None interactive. Long content scrolls inside the block.
 ## 7. Accessibility
 
 - Text contrast on `muted` at 40% is 19.12:1 (light) and 16.13:1 (dark), tokeny.md T29.
-- **Finding:** a block taller than 28rem scrolls but is not a tab stop (axe
-  `scrollable-region-focusable`). Documented exception; proposal P13.
+- The block is a tab stop (`tabIndex={0}`) with the focus ring, so a keyboard user can
+  scroll a block taller than 28rem. Source: axe `scrollable-region-focusable`, SPEC-122 P13.
 - Raw output is shown verbatim, never rewritten: imported and agent text keep their own
   punctuation (AGENTS.md §7).
 

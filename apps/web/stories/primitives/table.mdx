@@ -54,8 +54,9 @@ paths in `font-mono`.
 - A table has a name: `aria-label`, or the card title it sits under.
 - Header cells are `<th>`. A per-row action names its row ("Scan acme/agent-rules"), because
   "Scan" repeated is ambiguous out of context. Source: WCAG 2.4.6, `app/repositories/page.tsx`.
-- **Finding:** a table wider than the screen scrolls inside its container, which is not a tab
-  stop (axe `scrollable-region-focusable`). Documented exception; proposal P13.
+- The scroll container is a tab stop with the focus ring, so a keyboard user can scroll a
+  table wider than the screen. When the table has an `aria-label`, the container is a region
+  with the same name. Source: axe `scrollable-region-focusable`, SPEC-122 P13.
 
 <Canvas of={TableStories.RowAction} />
 

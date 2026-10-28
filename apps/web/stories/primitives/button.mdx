@@ -49,8 +49,7 @@ label and, optionally, one icon before it (`data-icon="inline-start"`) or after 
 | `destructive` | An action that cannot be undone or overrides a warning                  | Register anyway                   |
 | `link`        | An action that reads as text inside a sentence                          | available, unused                 |
 
-**Proposal P12 (not yet approved):** at most one `default` button per form or section, as on
-every current page.
+At most one `default` button per form or section. Source: SPEC-122 §18 P12.
 
 <Canvas of={ButtonStories.Variants} />
 
@@ -69,7 +68,8 @@ SPEC-119 FR-6, "Parameters in force".
   `aria-describedby`, as the story below does, so a screen reader hears it on the button; the
   app does not do that yet (on "What is missing"). A disabled button without a reason is on
   "What to avoid". Source: WCAG 3.3.2, `app/benchmarks/[id]/page.tsx`.
-- **Loading:** none built in; see proposal P11 on "Parameters in force".
+- **Loading:** disabled, with a `role="status"` message that says what is happening; no
+  spinner. Source: SPEC-122 §18 P11.
 - **Invalid:** `aria-invalid` exists in the preset; buttons in the app never use it.
 - **Selected:** `aria-expanded` when the button opens something; no button does so today.
 
