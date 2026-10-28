@@ -8,7 +8,7 @@ import { parseMarkdown, type Block, type Inline } from '@/lib/markdown';
  */
 export function Markdown({ source }: { source: string }) {
   return (
-    <div className="space-y-3 text-sm leading-relaxed">{renderBlocks(parseMarkdown(source))}</div>
+    <div className="space-y-3 text-body leading-relaxed">{renderBlocks(parseMarkdown(source))}</div>
   );
 }
 
@@ -23,7 +23,7 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
         );
       case 'code':
         return (
-          <code key={index} className="rounded-surface bg-muted px-1 py-0.5 font-mono text-xs">
+          <code key={index} className="rounded-surface bg-muted px-1 py-0.5 font-mono text-ui">
             {node.text}
           </code>
         );
@@ -58,7 +58,7 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
             key={index}
             data-inert-image=""
             title={`Image not loaded: ${node.destination}`}
-            className="rounded-surface border px-1 text-xs text-muted-foreground"
+            className="rounded-surface border px-1 text-ui text-muted-foreground"
           >
             [image: {node.alt || node.destination}]
           </span>
@@ -70,10 +70,10 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
 const headingClasses = {
   1: 'text-lg font-semibold',
   2: 'text-base font-semibold',
-  3: 'text-sm font-semibold',
-  4: 'text-sm font-medium',
-  5: 'text-sm font-medium',
-  6: 'text-sm font-medium text-muted-foreground',
+  3: 'text-body font-semibold',
+  4: 'text-body font-medium',
+  5: 'text-body font-medium',
+  6: 'text-body font-medium text-muted-foreground',
 } as const;
 
 function renderBlocks(blocks: Block[]): ReactNode[] {
@@ -84,7 +84,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
           <pre
             key={index}
             data-frontmatter=""
-            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap"
+            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-ui whitespace-pre-wrap"
           >
             {block.text}
           </pre>
@@ -104,7 +104,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
           <pre
             key={index}
             data-language={block.language ?? undefined}
-            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-xs whitespace-pre"
+            className="overflow-auto rounded-surface border bg-muted/40 p-2 font-mono text-ui whitespace-pre"
           >
             <code>{block.text}</code>
           </pre>
@@ -136,7 +136,8 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
       case 'table':
         return (
           <div key={index} className="overflow-x-auto">
-            <table className="text-xs">
+            {/* eslint-disable-next-line no-restricted-syntax -- imported Markdown keeps its own compact table; Table would restyle it (SPEC-121 Q3) */}
+            <table className="text-ui">
               <thead>
                 <tr className="border-b">
                   {block.header.map((cell, cellIndex) => (

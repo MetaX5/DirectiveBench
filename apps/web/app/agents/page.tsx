@@ -26,7 +26,7 @@ function AuthCell({ detection }: { detection: AgentDetection }) {
   if (!detection.readiness) {
     return (
       <TD
-        className="text-xs text-muted-foreground"
+        className="text-ui text-muted-foreground"
         title="Login status checks are specified but not implemented"
       >
         unknown
@@ -34,7 +34,7 @@ function AuthCell({ detection }: { detection: AgentDetection }) {
     );
   }
   return (
-    <TD className="text-xs">
+    <TD className="text-ui">
       {detection.auth === 'ready' ? (
         <Badge variant="success">ready</Badge>
       ) : (
@@ -83,18 +83,18 @@ export default async function AgentsPage() {
                 <TD>
                   <Badge variant="success">built-in</Badge>
                 </TD>
-                <TD className="font-mono text-xs">{mock.version}</TD>
-                <TD className="text-xs">not required</TD>
+                <TD className="font-mono text-ui">{mock.version}</TD>
+                <TD className="text-ui">not required</TD>
                 <TD>
                   <Badge variant="success">supported</Badge>
                 </TD>
-                <TD className="text-xs text-muted-foreground">—</TD>
+                <TD className="text-ui text-muted-foreground">—</TD>
               </TR>
               {detections.map(({ descriptor, detection }) => (
                 <TR key={descriptor.id} data-agent={descriptor.id}>
                   <TD className="font-medium">
                     {descriptor.displayName}{' '}
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className="font-mono text-ui text-muted-foreground">
                       {descriptor.executable}
                     </span>
                   </TD>
@@ -105,17 +105,17 @@ export default async function AgentsPage() {
                       <Badge variant="muted">not found</Badge>
                     )}
                   </TD>
-                  <TD className="font-mono text-xs">{detection.version ?? '—'}</TD>
+                  <TD className="font-mono text-ui">{detection.version ?? '—'}</TD>
                   <AuthCell detection={detection} />
                   <TD>
                     <Badge variant="muted">not implemented</Badge>
                   </TD>
-                  <TD className="font-mono text-xs text-muted-foreground">{descriptor.specPath}</TD>
+                  <TD className="font-mono text-ui text-muted-foreground">{descriptor.specPath}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
-          <p className="mt-4 text-xs text-muted-foreground">
+          <p className="mt-4 text-ui text-muted-foreground">
             Claude Code runs benchmarks from the CLI (<code>directivebench benchmark run</code>) in
             Local Subscription Mode or API Key Mode; running from the web UI and Codex and Cursor
             execution are planned. DirectiveBench uses only officially supported CLI mechanisms and

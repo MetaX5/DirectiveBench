@@ -18,7 +18,7 @@ export function Pre({ className, ...props }: ComponentProps<'pre'>) {
   return (
     <pre
       className={cn(
-        'max-h-[28rem] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words',
+        'max-h-[28rem] overflow-auto rounded-none border bg-muted/40 p-3 font-mono text-ui leading-relaxed whitespace-pre-wrap break-words',
         className,
       )}
       {...props}

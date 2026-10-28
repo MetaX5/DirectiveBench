@@ -62,18 +62,18 @@ export default async function ExecutionsPage() {
               <TBody>
                 {jobs.map(({ job, suiteName, artifactName, benchmarkRunId }) => (
                   <TR key={job.id} data-job-status={job.status}>
-                    <TD className="font-mono text-xs">{job.id}</TD>
+                    <TD className="font-mono text-ui">{job.id}</TD>
                     <TD>{suiteName ?? '—'}</TD>
                     <TD>{artifactName ?? '—'}</TD>
                     <TD>
                       <JobStatusBadge status={job.status} />
                       {job.cancelRequestedAt && job.status === 'running' ? (
-                        <span className="ml-1 text-xs text-muted-foreground">cancelling…</span>
+                        <span className="ml-1 text-ui text-muted-foreground">cancelling…</span>
                       ) : null}
                     </TD>
-                    <TD className="text-xs text-muted-foreground">{formatDate(job.createdAt)}</TD>
-                    <TD className="text-xs text-muted-foreground">{formatDate(job.finishedAt)}</TD>
-                    <TD className="max-w-xs text-xs">
+                    <TD className="text-ui text-muted-foreground">{formatDate(job.createdAt)}</TD>
+                    <TD className="text-ui text-muted-foreground">{formatDate(job.finishedAt)}</TD>
+                    <TD className="max-w-xs text-ui">
                       {benchmarkRunId ? (
                         <Link className="underline" href={`/results/${benchmarkRunId}`}>
                           View run

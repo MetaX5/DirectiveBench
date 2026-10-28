@@ -72,8 +72,8 @@ export default async function ArtifactsPage({
       />
       <Card>
         <CardContent>
-          <form className="mb-4 flex flex-wrap items-end gap-2" role="search">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          <form className="mb-4 flex flex-wrap items-end gap-inline" role="search">
+            <label className="flex flex-col gap-1 text-ui text-muted-foreground">
               Search
               <Input
                 name="q"
@@ -83,7 +83,7 @@ export default async function ArtifactsPage({
                 className="w-56"
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1 text-ui text-muted-foreground">
               Repository
               <NativeSelect name="repository" defaultValue={filter.repository ?? ''}>
                 <NativeSelectOption value="">All</NativeSelectOption>
@@ -94,7 +94,7 @@ export default async function ArtifactsPage({
                 ))}
               </NativeSelect>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1 text-ui text-muted-foreground">
               Type
               <NativeSelect name="type" defaultValue={filter.type ?? ''}>
                 <NativeSelectOption value="">All</NativeSelectOption>
@@ -105,7 +105,7 @@ export default async function ArtifactsPage({
                 ))}
               </NativeSelect>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1 text-ui text-muted-foreground">
               Category
               <NativeSelect name="category" defaultValue={filter.category ?? ''}>
                 <NativeSelectOption value="">All</NativeSelectOption>
@@ -120,7 +120,7 @@ export default async function ArtifactsPage({
               Filter
             </Button>
             {filtered || invalid.length ? (
-              <Link href="/artifacts" className="h-8 px-2 text-sm leading-8 underline">
+              <Link href="/artifacts" className="h-8 px-2 text-body leading-8 underline">
                 Clear filters
               </Link>
             ) : null}
@@ -129,7 +129,7 @@ export default async function ArtifactsPage({
             <p
               role="status"
               data-testid="filter-notice"
-              className="mb-4 text-sm text-muted-foreground"
+              className="mb-4 text-body text-muted-foreground"
             >
               {notice}
             </p>
@@ -176,7 +176,7 @@ export default async function ArtifactsPage({
                         <Link href={`/artifacts/${a.id}`} className="hover:underline">
                           {a.name}
                         </Link>
-                        <span className="ml-1 text-xs text-muted-foreground">
+                        <span className="ml-1 text-ui text-muted-foreground">
                           v{a.latestVersion}
                         </span>
                       </TD>
@@ -199,14 +199,14 @@ export default async function ArtifactsPage({
                         </div>
                       </TD>
                       <TD
-                        className="text-xs text-muted-foreground"
+                        className="text-ui text-muted-foreground"
                         title={a.repositories.map((r) => r.name).join(', ')}
                       >
                         {repositoriesLabel(a.repositories)}
                       </TD>
                       <TD className="text-right tabular-nums">{a.occurrenceCount}</TD>
                       <TD
-                        className="text-xs text-muted-foreground"
+                        className="text-ui text-muted-foreground"
                         title="Agent compatibility validation is planned"
                       >
                         Not validated
@@ -218,7 +218,7 @@ export default async function ArtifactsPage({
                         </div>
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(e?.delta)}</TD>
-                      <TD className="text-xs text-muted-foreground">
+                      <TD className="text-ui text-muted-foreground">
                         {e ? formatDate(e.finishedAt ?? e.startedAt) : '—'}
                       </TD>
                       <TD>

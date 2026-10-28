@@ -19,9 +19,11 @@ export function PageHeader({
     <div className="mb-section flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
         <h1 className="text-page-title tracking-tight">{title}</h1>
-        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+        {description ? <p className="mt-1 text-body text-muted-foreground">{description}</p> : null}
       </div>
-      {actions ? <div className="flex min-w-0 max-w-full items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex min-w-0 max-w-full items-center gap-inline">{actions}</div>
+      ) : null}
     </div>
   );
 }
@@ -88,8 +90,8 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   return (
     <Card className="border-dashed">
       <CardContent className="py-10 text-center">
-        <p className="text-sm font-medium">{title}</p>
-        {children ? <div className="mt-2 text-sm text-muted-foreground">{children}</div> : null}
+        <p className="text-body font-medium">{title}</p>
+        {children ? <div className="mt-2 text-body text-muted-foreground">{children}</div> : null}
       </CardContent>
     </Card>
   );
@@ -100,7 +102,7 @@ export function NotInitialized() {
     <Card>
       <CardContent className="flex items-start gap-3 py-6">
         <DatabaseZap className="mt-0.5 size-5 text-warning-foreground" aria-hidden />
-        <div className="text-sm">
+        <div className="text-body">
           <p className="font-medium">The local database has not been initialised.</p>
           <p className="mt-1 text-muted-foreground">
             Start the app through the CLI (<code className="font-mono">npx directivebench</code>) or
@@ -130,7 +132,7 @@ export function PlannedSection({
       <Card>
         <CardContent className="flex items-start gap-3 py-6">
           <Construction className="mt-0.5 size-5 text-muted-foreground" aria-hidden />
-          <div className="space-y-2 text-sm">
+          <div className="space-y-stack text-body">
             <p>
               <Badge variant="muted">Planned — not implemented</Badge>
             </p>
@@ -138,7 +140,7 @@ export function PlannedSection({
             <p className="text-muted-foreground">
               Scheduled for {milestone}. Specifications in the repository:
             </p>
-            <ul className="list-inside list-disc font-mono text-xs text-muted-foreground">
+            <ul className="list-inside list-disc font-mono text-ui text-muted-foreground">
               {specs.map((spec) => (
                 <li key={spec}>{spec}</li>
               ))}

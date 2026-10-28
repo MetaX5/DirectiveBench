@@ -8,7 +8,7 @@ export default function NotFound() {
         title="Not found"
         description="The requested record does not exist in the local database."
       />
-      <Link href="/" className="text-sm underline">
+      <Link href="/" className="text-body underline">
         Back to the dashboard
       </Link>
     </>

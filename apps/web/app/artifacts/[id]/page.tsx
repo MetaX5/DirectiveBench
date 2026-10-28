@@ -67,7 +67,7 @@ function Tabs({ artifactId, current }: { artifactId: string; current: ArtifactTa
           href={artifactHref(artifactId, { tab: tab.id })}
           aria-current={tab.id === current ? 'page' : undefined}
           className={cn(
-            '-mb-px border-b-2 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground',
+            '-mb-px border-b-2 px-3 py-1.5 text-body text-muted-foreground hover:text-foreground',
             tab.id === current
               ? 'border-foreground font-medium text-foreground'
               : 'border-transparent',
@@ -105,14 +105,14 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
               {occurrences.map(({ occurrence, repository }) => (
                 <TR key={occurrence.id}>
                   <TD title={repository.location}>{repository.name}</TD>
-                  <TD className="text-xs">{providerLabel(repository.provider)}</TD>
-                  <TD className="font-mono text-xs">{occurrence.path}</TD>
+                  <TD className="text-ui">{providerLabel(repository.provider)}</TD>
+                  <TD className="font-mono text-ui">{occurrence.path}</TD>
                   <TD>
                     <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
                       {occurrence.status}
                     </Badge>
                   </TD>
-                  <TD className="text-xs text-muted-foreground">
+                  <TD className="text-ui text-muted-foreground">
                     {formatDate(occurrence.lastSeenAt)}
                   </TD>
                 </TR>
@@ -122,12 +122,12 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
             <CardTitle>Latest RED/GREEN comparison</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <CardContent className="space-y-stack text-body">
             {latestEval ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
@@ -139,7 +139,7 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
                   />
                   {isMockAgent(latestEval.agentAdapterId) ? <MockBadge /> : null}
                 </div>
-                <dl className="grid grid-cols-2 gap-1 text-xs">
+                <dl className="grid grid-cols-2 gap-1 text-ui">
                   <dt className="text-muted-foreground">Baseline (RED)</dt>
                   <dd className="tabular-nums">{formatScore(latestEval.baselineScore)}</dd>
                   <dt className="text-muted-foreground">Candidate (GREEN)</dt>
@@ -147,7 +147,7 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
                   <dt className="text-muted-foreground">Delta</dt>
                   <dd className="tabular-nums">{formatDelta(latestEval.delta)}</dd>
                 </dl>
-                <Link className="text-xs underline" href={`/results/${latestEval.runId}`}>
+                <Link className="text-ui underline" href={`/results/${latestEval.runId}`}>
                   Open run details and traces
                 </Link>
               </>
@@ -160,7 +160,7 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
           <CardHeader>
             <CardTitle>Metadata</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-xs">
+          <CardContent className="space-y-3 text-ui">
             <div>
               <p className="text-muted-foreground">Categories</p>
               <div className="mt-1 flex flex-wrap gap-1">
@@ -237,14 +237,14 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
                   </Link>
                 </TD>
                 <TD
-                  className="font-mono text-xs"
+                  className="font-mono text-ui"
                   title={`${v.contentHash} — SHA-256 over the sorted file manifest`}
                 >
                   {v.contentHash.slice(0, 16)}…
                 </TD>
                 <TD>{v.files.length}</TD>
-                <TD className="font-mono text-xs">{v.sourcePath ?? '—'}</TD>
-                <TD className="text-xs text-muted-foreground">{formatDate(v.createdAt)}</TD>
+                <TD className="font-mono text-ui">{v.sourcePath ?? '—'}</TD>
+                <TD className="text-ui text-muted-foreground">{formatDate(v.createdAt)}</TD>
               </TR>
             ))}
           </TBody>
@@ -261,7 +261,7 @@ function BenchmarksTab({ detail }: { detail: ArtifactDetail }) {
         <CardTitle>Assigned benchmarks</CardTitle>
         <CardDescription>Run a benchmark from its suite page.</CardDescription>
       </CardHeader>
-      <CardContent className="text-sm">
+      <CardContent className="text-body">
         {detail.suites.length ? (
           <ul className="space-y-1">
             {detail.suites.map((s) => (
@@ -288,7 +288,7 @@ function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
           Version regression vs v{comparison.previousVersion}
           {comparison.versionDelta === null ? '' : ` (${formatDelta(comparison.versionDelta)})`}
         </Badge>
-        <span className="text-xs text-muted-foreground" data-testid="comparison-reason">
+        <span className="text-ui text-muted-foreground" data-testid="comparison-reason">
           {comparison.reasons.join('; ')}
         </span>
       </span>
@@ -300,7 +300,7 @@ function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
         <Badge variant="warning" data-testid="version-comparison">
           Inconclusive vs v{comparison.previousVersion}
         </Badge>
-        <span className="text-xs text-muted-foreground" data-testid="comparison-reason">
+        <span className="text-ui text-muted-foreground" data-testid="comparison-reason">
           {comparison.reason}
         </span>
       </span>
@@ -315,8 +315,8 @@ function ComparisonBadge({ comparison }: { comparison: VersionComparison }) {
 
 function GroupTable({ group, several }: { group: ComparabilityGroup; several: boolean }) {
   return (
-    <div className="space-y-2" data-testid="comparability-group" data-key={group.key ?? ''}>
-      <p className="text-xs font-medium">
+    <div className="space-y-stack" data-testid="comparability-group" data-key={group.key ?? ''}>
+      <p className="text-ui font-medium">
         <span className="font-mono">{groupLabel(group.key)}</span>
         {several ? (
           <span className="text-muted-foreground"> · not comparable with other groups</span>
@@ -345,20 +345,20 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
               className={row.comparison?.kind === 'regression' ? 'bg-destructive/10' : undefined}
             >
               <TD>
-                <Link className="font-mono text-xs underline" href={`/results/${row.runId}`}>
+                <Link className="font-mono text-ui underline" href={`/results/${row.runId}`}>
                   {row.runId}
                 </Link>
               </TD>
-              <TD className="text-xs">
+              <TD className="text-ui">
                 <Link className="underline" href={`/benchmarks/${row.suite.id}`}>
                   {row.suite.name}
                 </Link>{' '}
                 v{row.suite.version}
               </TD>
-              <TD className="text-xs" data-testid="run-baseline">
+              <TD className="text-ui" data-testid="run-baseline">
                 {row.baseline}
               </TD>
-              <TD className="text-xs">
+              <TD className="text-ui">
                 {row.mock ? (
                   <MockBadge />
                 ) : (
@@ -378,7 +378,7 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
                   </Badge>
                 ) : null}
               </TD>
-              <TD className="max-w-48 break-words font-mono text-xs">{row.model}</TD>
+              <TD className="max-w-48 break-words font-mono text-ui">{row.model}</TD>
               <TD>
                 <div className="flex flex-wrap items-center gap-1">
                   <StatusBadge status={row.displayStatus} />
@@ -386,8 +386,8 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
                 </div>
               </TD>
               <TD className="text-right tabular-nums">{formatDelta(row.delta)}</TD>
-              <TD className="text-xs">{row.confidence ?? '—'}</TD>
-              <TD className="whitespace-nowrap text-xs text-muted-foreground">
+              <TD className="text-ui">{row.confidence ?? '—'}</TD>
+              <TD className="whitespace-nowrap text-ui text-muted-foreground">
                 {formatDate(row.startedAt)}
               </TD>
             </TR>
@@ -437,12 +437,12 @@ function ResultsByVersionTab({
       </CardHeader>
       <CardContent className="space-y-6">
         {notices.map((notice) => (
-          <p key={notice} role="note" className="text-sm" data-testid="history-notice">
+          <p key={notice} role="note" className="text-body" data-testid="history-notice">
             {notice}
           </p>
         ))}
         {!tested ? (
-          <div className="space-y-2 text-sm" data-testid="no-runs">
+          <div className="space-y-stack text-body" data-testid="no-runs">
             <p className="text-muted-foreground">
               No benchmark runs yet. Create a suite with{' '}
               <code className="select-all rounded-surface bg-muted px-1 font-mono">
@@ -452,7 +452,7 @@ function ResultsByVersionTab({
           </div>
         ) : null}
         {tested && groups > 1 ? (
-          <p role="note" className="text-sm" data-testid="not-comparable-notice">
+          <p role="note" className="text-body" data-testid="not-comparable-notice">
             These runs fall into {groups} comparability groups that are{' '}
             <strong>not comparable with each other</strong>: no number is compared across groups.
           </p>
@@ -466,7 +466,7 @@ function ResultsByVersionTab({
                 data-version={block.version}
                 className="space-y-3"
               >
-                <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                <h3 className="flex flex-wrap items-center gap-2 text-body font-semibold">
                   v{block.version}
                   {block.regressed ? (
                     <Badge variant="destructive">
@@ -477,7 +477,7 @@ function ResultsByVersionTab({
                   ) : null}
                 </h3>
                 {block.groups.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-ui text-muted-foreground">
                     No completed runs for this version.
                   </p>
                 ) : (
@@ -490,7 +490,7 @@ function ResultsByVersionTab({
                   ))
                 )}
                 {block.otherRuns.length > 0 ? (
-                  <p className="text-xs text-muted-foreground" data-testid="other-runs">
+                  <p className="text-ui text-muted-foreground" data-testid="other-runs">
                     Not completed:{' '}
                     {block.otherRuns.map((run, index) => (
                       <span key={run.runId}>
@@ -549,7 +549,7 @@ export default async function ArtifactPage({
         <div
           role="status"
           data-testid="artifact-notice"
-          className="mb-4 text-sm text-muted-foreground"
+          className="mb-4 text-body text-muted-foreground"
         >
           {notices.map((notice) => (
             <p key={notice}>{notice}</p>

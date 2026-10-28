@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import js from '@eslint/js';
 import nextPlugin from '@next/eslint-plugin-next';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -87,6 +88,34 @@ const noConsoleOutsideCli = {
   rules: { 'no-console': 'error' },
 };
 
+// Pages and product components use the design-system components instead of raw form and table
+// elements (SPEC-121 FR-121-4). The scope file is shared with apps/web/test/design-tokens.test.ts.
+const designSystemScope = JSON.parse(
+  readFileSync(new URL('apps/web/design-system-scope.json', import.meta.url), 'utf8'),
+);
+const designSystemMessage =
+  'Use the design-system component from components/ui (Button, NativeSelect, Input, Table) or add one there (SPEC-121).';
+const designSystemComponents = {
+  files: designSystemScope.roots.flatMap((root) =>
+    designSystemScope.extensions.map((extension) => `apps/web/${root}/**/*${extension}`),
+  ),
+  ignores: [`apps/web/${designSystemScope.componentLibrary}/**`],
+  rules: {
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: 'JSXOpeningElement[name.name=/^(button|select|textarea|table)$/]',
+        message: designSystemMessage,
+      },
+      {
+        selector:
+          "JSXOpeningElement[name.name='input']:not(:has(JSXAttribute[name.name='type'][value.value='hidden']))",
+        message: designSystemMessage,
+      },
+    ],
+  },
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -134,4 +163,5 @@ export default tseslint.config(
   ...packageBoundaries,
   webBoundary,
   noConsoleOutsideCli,
+  designSystemComponents,
 );

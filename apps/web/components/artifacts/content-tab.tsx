@@ -39,7 +39,7 @@ function FileTree({
       {nodes.map((node) =>
         node.children ? (
           <li key={`d:${node.path}`}>
-            <span className="flex items-center gap-1 text-muted-foreground">
+            <span className="flex items-center gap-inline-tight text-muted-foreground">
               <Folder className="size-3" aria-hidden />
               {node.name}/
             </span>
@@ -56,7 +56,7 @@ function FileTree({
               href={artifactHref(artifactId, { tab: 'content', version, file: node.path })}
               aria-current={node.path === selected ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-1 rounded-surface px-1 hover:bg-accent',
+                'flex items-center gap-inline-tight rounded-surface px-1 hover:bg-accent',
                 node.path === selected && 'bg-accent font-medium',
               )}
             >
@@ -82,21 +82,21 @@ export function ContentTab({
 }) {
   const { version, file } = selection;
   if (!version || !file) {
-    return <p className="text-sm text-muted-foreground">This artifact has no stored content.</p>;
+    return <p className="text-body text-muted-foreground">This artifact has no stored content.</p>;
   }
   const markdown = isMarkdownPath(file.path);
   const tooLarge = file.content.length > MAX_RENDERED_MARKDOWN_CHARS;
   const crNotice = rawViewNotice(file.content);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      <div className="flex flex-col gap-4">
+    <div className="grid gap-grid lg:grid-cols-4">
+      <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
             <CardTitle>Version</CardTitle>
           </CardHeader>
           <CardContent>
-            <nav aria-label="Versions" className="flex flex-wrap gap-1 text-xs">
+            <nav aria-label="Versions" className="flex flex-wrap gap-1 text-ui">
               {versions.map((v) => (
                 <Link
                   key={v.id}
@@ -125,7 +125,7 @@ export function ContentTab({
               {version.files.length} file(s) in version {version.version}
             </CardDescription>
           </CardHeader>
-          <CardContent className="font-mono text-xs" data-testid="file-tree">
+          <CardContent className="font-mono text-ui" data-testid="file-tree">
             <FileTree
               nodes={buildFileTree(version.files.map((f) => f.path))}
               artifactId={artifactId}
@@ -136,7 +136,7 @@ export function ContentTab({
         </Card>
       </div>
 
-      <div className="flex flex-col gap-4 lg:col-span-3">
+      <div className="flex flex-col gap-grid lg:col-span-3">
         <Card>
           <CardHeader>
             <CardTitle className="font-mono" data-testid="content-path">
@@ -149,15 +149,15 @@ export function ContentTab({
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <h4 className="mb-2 text-xs font-medium text-muted-foreground">Rendered</h4>
+            <h4 className="mb-2 text-ui font-medium text-muted-foreground">Rendered</h4>
             <div data-testid="artifact-rendered">
               {!markdown ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   Only Markdown is rendered. This file is shown as text only, in the raw view below;
                   DirectiveBench never runs or loads supporting files.
                 </p>
               ) : tooLarge ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   This file is too large to render ({formatBytes(file.size)}); the raw view below
                   shows all of it.
                 </p>
@@ -177,7 +177,7 @@ export function ContentTab({
           </CardHeader>
           <CardContent>
             {crNotice ? (
-              <p className="mb-2 text-xs text-muted-foreground" data-testid="raw-notice">
+              <p className="mb-2 text-ui text-muted-foreground" data-testid="raw-notice">
                 {crNotice}
               </p>
             ) : null}

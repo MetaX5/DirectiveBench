@@ -1,0 +1,5 @@
+{
+  "roots": ["app", "components"],
+  "extensions": [".ts", ".tsx"],
+  "componentLibrary": "components/ui"
+}
