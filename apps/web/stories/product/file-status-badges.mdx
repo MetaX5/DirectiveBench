@@ -1,0 +1,98 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/output-files/file-status-badges.stories';
+
+<Meta of={Stories} />
+
+# FileStatusBadges
+
+`import { FileStatusBadges } from '@/components/output-files/file-status-badges'`
+
+**Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** A mapping onto
+the existing `Badge`; it adds no Badge variant.
+
+## 1. Purpose
+
+Says in one to three words per badge what happened to an output file: how the agent changed it,
+whether it was kept whole, and whether secrets were redacted. Source: SPEC-123 FR-123-21, §11.
+
+## 2. When to use
+
+- The changed-files list of an agent run.
+- The path list of the compare page, with `onlyIn` for a path one side lacks.
+
+## 3. When not to use
+
+| Situation                         | Use instead                                 |
+| --------------------------------- | ------------------------------------------- |
+| A run's outcome                   | `StatusBadge`                               |
+| The full reason a file is missing | The notices of `FileView` (sentences)       |
+| A path in a blind review list     | `onlyIn="A"` or `"B"`, never a variant name |
+
+## 4. Anatomy
+
+A wrapping `inline-flex` group of `Badge`s, in this order: "Only &lt;side&gt;" (compare only),
+the change, the kept state when the file is not whole, the redaction count.
+
+## 5. Variants
+
+The mapping lives in `fileBadges` (`lib/output-files.ts`); pages never pick variants.
+
+| Data                          | Badge             | Variant   |
+| ----------------------------- | ----------------- | --------- |
+| `change: added`               | Added             | `outline` |
+| `change: modified`            | Modified          | `outline` |
+| `change: deleted`             | Deleted           | `outline` |
+| `kept: truncated`             | Truncated         | `warning` |
+| `kept: none`, `binary`        | Binary, not kept  | `muted`   |
+| `kept: none`, `artifact-path` | Artifact file     | `muted`   |
+| `kept: none`, `run-limit`     | Not kept          | `muted`   |
+| `redactions > 0`              | N redacted        | `info`    |
+| path on one side only         | Only left, Only A | `outline` |
+
+The change is a property of the file, so it is `outline` (How to choose: "A property or a
+type"). Only incomplete evidence gets a colour: `warning` when part is missing, `muted` when
+nothing is shown. "Added" is not `success`: that colour means a passed run in this app.
+
+<Canvas of={Stories.AllStatuses} sourceState="none" />
+
+## 6. States
+
+Static (badges). The data combinations above are its states.
+
+## 7. Accessibility
+
+Each badge is a word; colour only repeats it (WCAG 1.4.1). Text contrast on each fill passes in
+both themes (Colour page, the same pairs as `StatusBadge`).
+
+## 8. Content
+
+Sentence case, one to three words. A deleted file gets no second badge: "Deleted" already says
+why nothing is shown.
+
+## 9. Responsiveness
+
+The group wraps; next to a long path the badges go under it.
+
+<Canvas of={Stories.LongPathNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+## 11. Code
+
+```tsx
+<FileStatusBadges file={file} />
+<FileStatusBadges file={file} onlyIn="right" />
+```
+
+## 12. Do and don't
+
+| Do                                      | Don't                                    |
+| --------------------------------------- | ---------------------------------------- |
+| `FileStatusBadges` from the file's data | Mapping file states to colours in a page |
+| `onlyIn="A"` in a blind review          | `onlyIn="candidate"` before the reveal   |
+
+## 13. Related
+
+`FileView`, `SideBySideDiff`, `Badge`, `StatusBadge`.

@@ -33,6 +33,9 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | MockBadge | `@/components/common` | Every mock-agent result, always | Real agents |
 | NotSandboxedBadge | `@/components/common` | A `local-process` suite | Sandboxed runs |
 | Markdown | `@/components/artifacts/markdown` | Rendering artifact Markdown safely | App-authored text |
+| FileView (proposed) | `@/components/output-files/file-view` | One file an agent run wrote, line-numbered | JSON or command output (`Pre`) |
+| SideBySideDiff (proposed) | `@/components/output-files/side-by-side-diff` | One path of two agent runs; `variant="neutral"` in blind review | One file (`FileView`) |
+| FileStatusBadges (proposed) | `@/components/output-files/file-status-badges` | An output file's change and kept state | A run's outcome (`StatusBadge`) |
 
 Raw `<button>`, `<input>` (except hidden), `<select>`, `<textarea>` and `<table>` in `app/`
 or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Combobox, Toast,

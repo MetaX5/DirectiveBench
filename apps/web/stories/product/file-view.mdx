@@ -1,0 +1,114 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/output-files/file-view.stories';
+
+<Meta of={Stories} />
+
+# FileView
+
+`import { FileView } from '@/components/output-files/file-view'`
+
+**Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** No page uses it
+yet; the agent-run files page (SPEC-123 Phase 3) is planned.
+
+## 1. Purpose
+
+Shows one file an agent run wrote, read-only: its path, its size, why it is cut or not shown,
+and the kept text with line numbers. Source: SPEC-123 FR-123-21, §11.
+
+## 2. When to use
+
+The selected file on the agent-run files page (`/results/[id]/agent-runs/[agentRunId]`).
+
+## 3. When not to use
+
+| Situation                          | Use instead                                   |
+| ---------------------------------- | --------------------------------------------- |
+| The same path in two agent runs    | `SideBySideDiff`                              |
+| JSON, a trace or command output    | `Pre`                                         |
+| An artifact file from the registry | ContentTab (`Markdown` or the raw `Pre` view) |
+| A list of files with their state   | `Table` with `FileStatusBadges` in a cell     |
+
+## 4. Anatomy
+
+1. Header: the path as an `h3` in `font-mono` (wraps anywhere) and the size in
+   `text-muted-foreground` ("2.1 KB").
+2. Notices: one `role="status"` block of sentences from `fileNotices` (`lib/output-files.ts`).
+3. Content: a named scroll region (`role="region"`, "Content of &lt;path&gt;", a tab stop)
+   holding a `pre`. Each line has a sticky, right-aligned number in a `bg-muted` gutter, hidden
+   from assistive technology and from selection.
+
+## 5. Variants
+
+None. The states below come from the file's data.
+
+<Canvas of={Stories.Playground} />
+
+## 6. States
+
+| State                  | What the view shows                                                         |
+| ---------------------- | --------------------------------------------------------------------------- |
+| Kept in full           | Lines only, no notice                                                       |
+| Empty file             | "The file is empty.", no block                                              |
+| Truncated (file limit) | "Truncated at 1 MB: the file has N bytes." and the kept start               |
+| Truncated (run limit)  | "Truncated: the 10 MB limit for this agent run was reached."                |
+| Binary                 | "Binary file, not kept.", no block                                          |
+| Deleted                | "Deleted by the agent.", no block                                           |
+| Artifact file          | "Artifact file, not kept.", no block                                        |
+| Not kept (run limit)   | "Not kept: the 10 MB limit for this agent run was reached."                 |
+| Redacted               | "N secrets redacted." and the redaction marker in the text                  |
+| Carriage returns       | "Shown with LF line endings." (the DOM cannot show a CR, lesson 2026-10-20) |
+
+<Canvas of={Stories.TruncatedAtFileLimit} />
+<Canvas of={Stories.NotKept} />
+<Canvas of={Stories.Redacted} />
+
+The only interactive state is keyboard focus of the scroll region: a solid ring (tokeny.md D4),
+shown by the Keyboard story's play function.
+
+## 7. Accessibility
+
+- The content is one tab stop with a name, so keyboard users can scroll long lines with the
+  arrow keys (SPEC-122 P13, axe `scrollable-region-focusable`).
+- Line numbers are `aria-hidden` and `select-none`: a screen reader reads the text, and a copy
+  takes the text without numbers.
+- Notices are words in a `role="status"` block, never a colour alone.
+- Content is untrusted agent output: React text only, never HTML (SPEC-123 §12).
+
+<Canvas of={Stories.UntrustedContent} />
+
+## 8. Content
+
+- Notices are full sentences with a full stop and say the limit in words ("1 MB", "10 MB").
+- The file's own text is shown verbatim, en and em dashes included (AGENTS.md §7).
+
+## 9. Responsiveness
+
+Lines never wrap: a long line scrolls inside the block, so line numbers stay true to the file
+(SPEC-123 §14). The path wraps anywhere; at 320px nothing scrolls the page sideways.
+
+<Canvas of={Stories.LongPathNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+`file: OutputFile` from `lib/output-files.ts`: `path`, `change`, `sizeBytes`, `kept`, `reason`,
+`content`, `redactions` (the proposed `agent_run_files` columns, SPEC-123 §8.1).
+
+## 11. Code
+
+```tsx
+<FileView file={await getAgentRunFile(db, { benchmarkRunId, agentRunId, path })} />
+```
+
+## 12. Do and don't
+
+| Do                                     | Don't                                            |
+| -------------------------------------- | ------------------------------------------------ |
+| Show why a file is cut or missing      | Show a truncated file as if it were whole        |
+| Render content as text                 | Render agent output as Markdown or HTML          |
+| Let long lines scroll inside the block | Wrap lines (numbers would no longer match lines) |
+
+## 13. Related
+
+`SideBySideDiff`, `FileStatusBadges`, `Pre`, `MockBadge` (mock-agent runs keep it).

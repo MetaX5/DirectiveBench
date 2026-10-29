@@ -16,7 +16,7 @@ export const Catalogue_: Story = {
   name: 'Catalogue',
   play: async ({ canvas }) => {
     const links = canvas.getAllByRole('link');
-    await expect(links).toHaveLength(19);
+    await expect(links).toHaveLength(22);
     for (const link of links) {
       await expect(link.getAttribute('href')).toMatch(/^\.\/\?path=\/docs\/[a-z-]+--docs$/);
     }

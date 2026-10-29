@@ -30,6 +30,7 @@ built; see "What is missing" before you improvise one.
 | That a result comes from the mock agent | `MockBadge`, always                                               | Mock agent: not an AI evaluation |
 | That commands run without isolation     | `NotSandboxedBadge`                                               | Not sandboxed                    |
 | A property or a type                    | `Badge` `outline`                                                 | `skill`, `v3`                    |
+| An output file's change and kept state  | `FileStatusBadges` (proposed, SPEC-123)                           | Modified, Truncated              |
 | A user label (category)                 | `Badge` `secondary`                                               | security                         |
 | Something planned in a working page     | `Badge` `muted` "Planned: not implemented: …"                     | /repositories                    |
 | A message that needs reading            | Text with `role="status"` or `role="alert"`; Alert is **missing** | The path check                   |
@@ -55,6 +56,8 @@ built; see "What is missing" before you improvise one.
 | Rows to compare            | `Table`                                            | Artifacts               |
 | Facts about one item       | `dl` by hand today; DescriptionList is **missing** | Overview of an artifact |
 | Raw data                   | `Pre`                                              | Run trace               |
+| A file an agent run wrote  | `FileView` (proposed, SPEC-123)                    | `src/render.php`        |
+| One file in two agent runs | `SideBySideDiff`; `variant="neutral"` when blind   | Baseline and candidate  |
 | Rendered artifact Markdown | `Markdown`                                         | SKILL.md                |
 | Nothing to show            | `EmptyState`                                       | No runs yet             |
 | A page that is not built   | `PlannedSection`                                   | Benchmark Builder       |
