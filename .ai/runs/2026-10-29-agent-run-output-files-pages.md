@@ -42,9 +42,11 @@ merged with #155).
 
 ## Decisions
 
-### Open UI decisions for the maintainer (D21 to D34), not settled by SPEC-123, D1 to D20 or the design system
+### UI decisions D21 to D34 (approved by the maintainer on 2026-10-29)
 
-The run stopped here before any page code, as asked. Each item has a proposed default.
+These were not settled by SPEC-123, D1 to D20 or the design system. The run stopped before any
+page code and returned them; the maintainer approved every proposed default as written (not the
+alternatives) on 2026-10-29, relayed by the coordinator. The text below is the approved text.
 
 - **D21 Card placement.** §11 says "below the existing comparison", but the page has, in order:
   the three score cards, Agent profile, Warnings, Agent runs, Environment. Proposed: directly
@@ -115,21 +117,66 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
 ## Work performed
 
 1. Worktree from `origin/main` (f439c6b), branch `feat/agent-run-output-files-pages`.
-2. `countAgentRunFiles` in `packages/database/src/repositories/runs.ts` with a unit test.
+2. `countAgentRunFiles` in `packages/database/src/repositories/runs.ts` with a unit test
+   (7841cf3). Stopped and returned D21 to D34; approved on 2026-10-29.
+3. `apps/web/lib/agent-run-files.ts` (status badge mapping shared with the "Agent runs" section,
+   labels, row cells, notices, `?path=` parsing, file selection, URLs) with
+   `apps/web/test/agent-run-files.test.ts` at 100%; the "Output files" card on `/results/[id]`;
+   the page `/results/[id]/agent-runs/[agentRunId]`; `e2e/agent-run-files.spec.ts` with the seed
+   `e2e/output-files-seed.ts`; the text-contrast scanner moved unchanged to `e2e/contrast.ts` so
+   both specs use it; `e2e/ui-contrast.spec.ts` measures the selected-file border and the link
+   focus outlines (854c1ce).
+4. Browser QA finding 1 fixed with a regression test (52703b0), see below.
+5. SPEC-123 §20, this run log and a lesson.
 
 ## Verification
 
-- `pnpm --filter @directivebench/database exec vitest run test/runs.test.ts --coverage.enabled=false`:
-  19 passed. The full gate has not run yet (the run is stopped for D21 to D34).
+- Red first: with the two pages removed and the app rebuilt, `playwright test agent-run-files`
+  failed 7 of 9 (the two contrast tests passed on the 404 page, so they now assert the page is
+  not the 404 page first). The QA regression test failed on the previous build
+  (`toBeInViewport`) and passes after the fix.
+- Full gate after the last code change: `pnpm lint` 0, `pnpm format:check` 0, `pnpm typecheck`
+  0, `pnpm test` 0 (web 407, database 164, engine 516, core 286, adapters 362 + 2 skipped,
+  runner 234, cli 132; 100% coverage everywhere), `pnpm build` 0, `pnpm verify:pack` 0
+  ("Packaging verification passed"), `pnpm test:e2e` 72 passed, `pnpm test:storybook` 298
+  passed. The first storybook run of the session had 5 timeouts in untouched stories
+  (theme toggle, status badge, typography, nav, colour; cold cache); the rerun and the final
+  gate passed all 298.
+- Real app: `directivebench demo` in a fresh data directory, the built CLI served on port 4411.
+  The run page card and a files page were checked in light and dark, at 1280px and 320px (no
+  horizontal page scroll), with no console error; seeded states checked the same way.
+- Browser QA agent (Playwright, `agent-browser` not installed) on the built app: one confirmed
+  defect (medium): at 320px, choosing a file reloaded the page at the top while the file is
+  stacked below the list, so nothing seemed to change. Fixed: file links carry `#file` and the
+  file card has `id="file"` (`scroll-mt-4`); regression test at 320x640. Its low-severity
+  suggestions: size placement uneven (fixed: the size now has its own line); seeded
+  `changed_files` did not match the seeded files (fixed in the seed); a repeated `?path=` shows
+  the first file (D33 as approved, unchanged); the file `h3` sits after the list card's `h2` (the
+  `FileView` heading is D3, unchanged); the case table's scroll container and table carry the
+  same `aria-label` (the existing `Table` primitive, unchanged); the 404 keeps the route's title
+  (as on other routes). Everything else passed: flows, 40+ invalid ids and paths, keyboard
+  order and focus, both themes and the toggle, 320px, contrast (lowest 5.51:1 light, 5.19:1
+  dark), no console errors, no en or em dash in the new copy.
+- Not verified: a fake-`claude` run in the browser; a planted secret through a real capture and
+  an `assertion-error` run shown end to end (AC-3, AC-11 stay partial); screen readers other
+  than the accessibility tree that Playwright reads.
 
 ## Problems and deviations
 
-None yet.
+- `demoRunId` returns the oldest run, and the first seed used a fixed date earlier than the demo
+  run, so "the demo run" resolved to the seed. Seeds now use the current time (lesson below).
+- Browser QA fix beyond D30/D31: choosing a file also scrolls the file card to the top of the
+  viewport on wide screens (the `#file` fragment), which hides the page header until the user
+  scrolls up. The size of a file in the list is on its own line under the badges.
+- The "Agent runs" section's status badge now uses the same helper as the card (same mapping,
+  no visible change).
 
 ## Lessons recorded
 
-None yet.
+- [Seeded e2e runs must be newer than the demo run; stacked details need a fragment](../lessons/2026-10-29-e2e-seeds-must-not-become-the-demo-run.md)
 
 ## Follow-ups
 
-- Resume after the maintainer's answers to D21 to D34: steps 2 to 6 of the plan.
+- Phase 3a: highlight the files page (`highlightLines` in this Server Component).
+- Phase 4 (compare) and Phase 5 (blind review, which must close this card and page while a review
+  is unrevealed, FR-123-52a).
