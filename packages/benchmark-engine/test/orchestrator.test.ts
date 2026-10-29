@@ -21,17 +21,19 @@ import type {
   InstalledArtifact,
   WorkspacePin,
 } from '@directivebench/agent-adapters';
-import type { ArtifactBundle } from '@directivebench/core';
+import { findSecretRanges, type ArtifactBundle } from '@directivebench/core';
 import type { BenchmarkDefinitionInput } from '../src/definition';
 import { prepareSuiteImport } from '../src/import';
 import {
   BenchmarkCancelledError,
   BenchmarkConfigurationError,
   comparabilityKey,
+  OUTPUT_NOT_CAPTURED_REASON,
   runBenchmark,
   type AgentRunRecord,
   type RunBenchmarkInput,
 } from '../src/orchestrator';
+import { NOT_CAPTURED, type OutputFilesCapture } from '../src/output-files';
 import { BenchmarkStoppedError } from '../src/agent-conditions';
 import { collectGarbage, nodeScript, useTempDirs } from './helpers';
 
@@ -114,6 +116,10 @@ class FakeAdapter implements AgentAdapter {
   installArtifact(workspace: WorkspacePin): Promise<InstalledArtifact> {
     return this.install(workspace.path);
   }
+
+  /** The core rules only, unless a test replaces it. */
+  findOutputSecrets: AgentAdapter['findOutputSecrets'] = (text, options) =>
+    findSecretRanges(text, [], options);
 
   run(request: AgentRunRequest): Promise<AgentRunResult> {
     this.requests.push(request);
@@ -976,5 +982,409 @@ describe('assertions that cannot finish (SPEC-118 FR-118-46)', () => {
     ]);
     // The worker stopped with the cancellation, well before the 2 s pattern deadline.
     expect(performance.now() - agentFinished).toBeLessThan(1800);
+  }, 20_000);
+});
+
+describe('output files (SPEC-123 Phase 1)', () => {
+  type Delivered = { record: AgentRunRecord; capture: OutputFilesCapture | null };
+  const collect =
+    (delivered: Delivered[]) =>
+    async (record: AgentRunRecord, capture: OutputFilesCapture | null) => {
+      delivered.push({ record, capture });
+    };
+  const notKept = (reason: string) => ({
+    status: 'not-kept',
+    reason,
+    files: 0,
+    truncated: 0,
+    notKept: 0,
+    storedBytes: 0,
+  });
+
+  it('captures before the overlay and delivers the content beside a metadata-only record (FR-123-01/10)', async () => {
+    const input = await suite();
+    const delivered: Delivered[] = [];
+    const outcome = await runBenchmark({
+      ...input,
+      adapter: new FakeAdapter(),
+      signal: signal(),
+      onAgentRun: collect(delivered),
+    });
+    expect(delivered.map((d) => d.capture)).toEqual([
+      {
+        files: [
+          {
+            path: 'out.txt',
+            change: 'added',
+            sizeBytes: 8,
+            sha256: expect.any(String),
+            kept: 'full',
+            reason: null,
+            content: 'baseline',
+            storedBytes: 8,
+            redactions: 0,
+          },
+        ],
+      },
+      { files: [expect.objectContaining({ path: 'out.txt', content: 'candidate' })] },
+    ]);
+    // The overlay (hidden.txt) and the installed artifact are not output of the agent.
+    for (const record of outcome.agentRuns) {
+      expect(record.outputFiles).toEqual({
+        status: 'kept',
+        reason: null,
+        files: 1,
+        truncated: 0,
+        notKept: 0,
+        storedBytes: record.variant === 'baseline' ? 8 : 9,
+      });
+      // Records hold metadata only (AC-10).
+      expect(JSON.stringify(record)).not.toMatch(/"content"/);
+    }
+    expect(delivered.map((d) => d.record)).toEqual(outcome.agentRuns);
+  });
+
+  it('captures nothing without onAgentRun, and scores identically either way (AC-9)', async () => {
+    const input = await suite();
+    const without = await runBenchmark({ ...input, adapter: new FakeAdapter(), signal: signal() });
+    const withCapture = await runBenchmark({
+      ...input,
+      workRoot: join(tmp('work'), 'run'),
+      adapter: new FakeAdapter(),
+      signal: signal(),
+      onAgentRun: async () => {},
+    });
+    expect(without.agentRuns.map((r) => r.outputFiles)).toEqual([NOT_CAPTURED, NOT_CAPTURED]);
+    // Durations are the only values that may differ between two runs.
+    const withoutDurations = (value: unknown): unknown =>
+      JSON.parse(
+        JSON.stringify(value, (key, item: unknown) => (/DurationMs$/.test(key) ? 0 : item)),
+      );
+    const measured = (o: typeof without) => ({
+      summary: withoutDurations(o.summary),
+      warnings: o.warnings,
+      runs: o.agentRuns.map((r) => [
+        r.executionStatus,
+        r.score,
+        r.passed,
+        r.changedFiles,
+        r.assertions.map((a) => [a.assertionId, a.passed, a.score]),
+      ]),
+    });
+    expect(measured(withCapture)).toEqual(measured(without));
+  });
+
+  it('keeps the files of agent-error and timeout runs and stores their change list (FR-123-02/03)', async () => {
+    const input = await suite();
+    const adapter = new FakeAdapter(async (request, variant) => {
+      writeFileSync(join(request.workspace.path, 'partial.txt'), `${variant} partial`);
+      return variant === 'baseline'
+        ? completed({ status: 'agent-error', error: 'crashed' })
+        : completed({ status: 'timeout', error: 'exceeded' });
+    });
+    const delivered: Delivered[] = [];
+    const outcome = await runBenchmark({
+      ...input,
+      adapter,
+      signal: signal(),
+      onAgentRun: collect(delivered),
+    });
+    expect(outcome.agentRuns.map((r) => [r.executionStatus, r.score, r.changedFiles])).toEqual([
+      ['agent-error', null, [{ path: 'partial.txt', change: 'added' }]],
+      ['timeout', null, [{ path: 'partial.txt', change: 'added' }]],
+    ]);
+    expect(delivered.map((d) => d.capture?.files.map((f) => f.content))).toEqual([
+      ['baseline partial'],
+      ['candidate partial'],
+    ]);
+    // Without a consumer nothing is captured and the change list stays empty, as before.
+    const plain = await runBenchmark({
+      ...input,
+      workRoot: join(tmp('work'), 'run'),
+      adapter,
+      signal: signal(),
+    });
+    expect(plain.agentRuns.map((r) => r.changedFiles)).toEqual([[], []]);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps an agent-error run unchanged when its own manifest fails (FR-123-09)',
+    async () => {
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        symlinkSync('/etc', join(request.workspace.path, 'link'));
+        return completed({ status: 'agent-error', error: 'crashed' });
+      });
+      const delivered: Delivered[] = [];
+      await runBenchmark({ ...input, adapter, signal: signal(), onAgentRun: collect(delivered) });
+      expect(delivered[0]?.record).toMatchObject({
+        executionStatus: 'agent-error',
+        error: 'crashed',
+        changedFiles: [],
+        outputFiles: notKept('Symbolic links are not allowed: link'),
+      });
+      expect(delivered[0]?.capture).toBeNull();
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps no files when the agent of a completed run left a link: the run is an infrastructure error (FR-123-02)',
+    async () => {
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        symlinkSync('/etc', join(request.workspace.path, 'link'));
+        return completed();
+      });
+      const delivered: Delivered[] = [];
+      await runBenchmark({ ...input, adapter, signal: signal(), onAgentRun: collect(delivered) });
+      expect(delivered[0]?.record).toMatchObject({
+        executionStatus: 'infrastructure-error',
+        outputFiles: notKept(OUTPUT_NOT_CAPTURED_REASON),
+      });
+      expect(delivered[0]?.capture).toBeNull();
+    },
+  );
+
+  it('records a capture failure without changing the measurement (FR-123-09)', async () => {
+    const input = await suite();
+    const adapter = new FakeAdapter();
+    adapter.findOutputSecrets = () => [{ start: 0, end: 10_000 }];
+    const delivered: Delivered[] = [];
+    const outcome = await runBenchmark({
+      ...input,
+      adapter,
+      signal: signal(),
+      onAgentRun: collect(delivered),
+    });
+    expect(outcome.agentRuns.map((r) => [r.executionStatus, r.score, r.changedFiles])).toEqual([
+      ['completed', 2 / 3, [{ path: 'out.txt', change: 'added' }]],
+      ['completed', 1, [{ path: 'out.txt', change: 'added' }]],
+    ]);
+    // The reason cannot be redacted by this adapter either, so it is generic.
+    expect(outcome.agentRuns[0]?.outputFiles).toEqual(
+      notKept('the output files could not be captured'),
+    );
+    expect(delivered.map((d) => d.capture)).toEqual([null, null]);
+  });
+
+  it.each([
+    ['cancelled', undefined],
+    ['infrastructure-error', undefined],
+    ['agent-error', 'auth-expired'],
+  ] as const)('captures nothing for an adapter result %s (code %s)', async (status, errorCode) => {
+    const input = await suite();
+    const adapter = new FakeAdapter(async (request, variant) => {
+      await writeVariant(request, variant);
+      return completed({ status, error: 'failed', ...(errorCode ? { errorCode } : {}) });
+    });
+    const delivered: Delivered[] = [];
+    await runBenchmark({
+      ...input,
+      adapter,
+      signal: signal(),
+      onAgentRun: collect(delivered),
+    }).catch(() => undefined);
+    expect(delivered[0]?.record.outputFiles).toEqual(notKept(OUTPUT_NOT_CAPTURED_REASON));
+    expect(delivered[0]?.record.changedFiles).toEqual([]);
+    expect(delivered[0]?.capture).toBeNull();
+  });
+
+  it('captures nothing when the run was cancelled while the agent worked', async () => {
+    const input = await suite();
+    const controller = new AbortController();
+    const adapter = new FakeAdapter(async (request, variant) => {
+      controller.abort();
+      return writeVariant(request, variant);
+    });
+    const delivered: Delivered[] = [];
+    await runBenchmark({
+      ...input,
+      adapter,
+      signal: controller.signal,
+      onAgentRun: collect(delivered),
+    }).catch(() => undefined);
+    expect(delivered[0]?.record.outputFiles).toEqual(notKept(OUTPUT_NOT_CAPTURED_REASON));
+    expect(delivered[0]?.capture).toBeNull();
+  });
+
+  it('captures nothing from an agent that did not stop after its timeout', async () => {
+    const input = await suite({
+      execution: { agent: 'fake', timeoutSeconds: 0.05, repetitions: 1 },
+    });
+    const adapter = new FakeAdapter((request, variant) =>
+      variant === 'baseline'
+        ? new Promise<AgentRunResult>(() => {})
+        : writeVariant(request, variant),
+    );
+    const delivered: Delivered[] = [];
+    await runBenchmark({ ...input, adapter, signal: signal(), onAgentRun: collect(delivered) });
+    expect(delivered[0]?.record.outputFiles).toEqual(
+      notKept('the agent did not stop after its timeout'),
+    );
+    expect(delivered[0]?.capture).toBeNull();
+    expect(delivered[1]?.record.outputFiles.status).toBe('kept');
+  }, 20_000);
+
+  it.skipIf(process.platform === 'win32')(
+    'captures nothing from a workspace the agent replaced',
+    async () => {
+      const victim = tmp('victim');
+      writeFileSync(join(victim, 'host.txt'), 'host file');
+      const input = await suite();
+      const adapter = new FakeAdapter(async (request) => {
+        renameSync(request.workspace.path, `${request.workspace.path}.saved`);
+        symlinkSync(victim, request.workspace.path);
+        return completed();
+      });
+      const delivered: Delivered[] = [];
+      await runBenchmark({
+        ...input,
+        adapter,
+        signal: signal(),
+        onAgentRun: collect(delivered),
+      }).catch(() => undefined);
+      expect(delivered[0]?.record.outputFiles).toEqual(
+        notKept('the workspace was replaced during the agent run'),
+      );
+      expect(delivered[0]?.capture).toBeNull();
+    },
+  );
+
+  it('keeps the files of an assertion-error run (A6, AC-11)', async () => {
+    const input = await suite({
+      cases: [
+        testCase({
+          verification: undefined,
+          assertions: [
+            { id: 'pattern', type: 'file-contains', path: 'out.txt', pattern: '(a+)+$' },
+          ],
+        }),
+      ],
+    });
+    const adapter = new FakeAdapter(async (request) => {
+      writeFileSync(join(request.workspace.path, 'out.txt'), `${'a'.repeat(32)}!`);
+      return completed();
+    });
+    const delivered: Delivered[] = [];
+    await runBenchmark({ ...input, adapter, signal: signal(), onAgentRun: collect(delivered) });
+    expect(delivered[0]?.record).toMatchObject({
+      executionStatus: 'infrastructure-error',
+      errorCode: 'assertion-error',
+      outputFiles: { status: 'kept', files: 1 },
+    });
+    expect(delivered[0]?.capture?.files[0]?.content).toBe(`${'a'.repeat(32)}!`);
+  }, 20_000);
+
+  it('keeps the files when an assertion command leaves processes or replaces the workspace (A6)', async () => {
+    const strayInput = await suite({
+      cases: [
+        testCase({
+          assertions: [{ id: 'leaves', type: 'command', command: nodeScript('process.exit(0)') }],
+        }),
+      ],
+    });
+    const delivered: Delivered[] = [];
+    strayGroup.survives = true;
+    try {
+      await runBenchmark({
+        ...strayInput,
+        adapter: new FakeAdapter(),
+        signal: signal(),
+        onAgentRun: collect(delivered),
+      }).catch(() => undefined);
+    } finally {
+      strayGroup.survives = false;
+    }
+    expect(delivered[0]?.record).toMatchObject({
+      errorCode: 'stray-processes',
+      outputFiles: { status: 'kept', files: 1 },
+    });
+    expect(delivered[0]?.capture?.files[0]?.content).toBe('baseline');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps the files when an assertion command replaced the workspace (A6)',
+    async () => {
+      const victim = tmp('victim');
+      const input = await suite({
+        cases: [
+          testCase({
+            assertions: [
+              {
+                id: 'replaces',
+                type: 'command',
+                command: [
+                  'sh',
+                  '-c',
+                  `mv "$PWD" "$PWD.saved" && ln -s ${JSON.stringify(victim)} "$PWD"`,
+                ],
+              },
+            ],
+          }),
+        ],
+      });
+      const delivered: Delivered[] = [];
+      await runBenchmark({
+        ...input,
+        adapter: new FakeAdapter(),
+        signal: signal(),
+        onAgentRun: collect(delivered),
+      }).catch(() => undefined);
+      expect(delivered[0]?.record).toMatchObject({
+        errorCode: 'workspace-replaced',
+        outputFiles: { status: 'kept', files: 1 },
+      });
+      expect(delivered[0]?.capture?.files[0]?.content).toBe('baseline');
+    },
+  );
+
+  it('keeps the files when the run is cancelled during assertions (A6)', async () => {
+    const input = await suite({
+      cases: [
+        testCase({
+          verification: undefined,
+          assertions: [
+            { id: 'slow', type: 'command', command: nodeScript('setTimeout(() => {}, 30000)') },
+          ],
+        }),
+      ],
+    });
+    const controller = new AbortController();
+    const adapter = new FakeAdapter(async (request, variant) => {
+      setTimeout(() => controller.abort(), 300);
+      return writeVariant(request, variant);
+    });
+    const delivered: Delivered[] = [];
+    await runBenchmark({
+      ...input,
+      adapter,
+      signal: controller.signal,
+      onAgentRun: collect(delivered),
+    }).catch(() => undefined);
+    expect(delivered[0]?.record).toMatchObject({
+      executionStatus: 'cancelled',
+      outputFiles: { status: 'kept', files: 1 },
+    });
+    expect(delivered[0]?.capture?.files[0]?.content).toBe('baseline');
+  }, 20_000);
+
+  it('releases each capture once its callback resolved while the run goes on (FR-123-10, AC-10)', async () => {
+    const input = await suite({
+      execution: { agent: 'fake', timeoutSeconds: 30, repetitions: 3 },
+    });
+    const refs: WeakRef<OutputFilesCapture>[] = [];
+    const alive: number[] = [];
+    await runBenchmark({
+      ...input,
+      adapter: new FakeAdapter(),
+      signal: signal(),
+      onAgentRun: async (_record, capture) => {
+        // Every earlier capture must be collectable by now.
+        await collectGarbage();
+        alive.push(refs.filter((ref) => ref.deref() !== undefined).length);
+        refs.push(new WeakRef(capture as OutputFilesCapture));
+      },
+    });
+    expect(alive).toEqual([0, 0, 0, 0, 0, 0]);
   }, 20_000);
 });

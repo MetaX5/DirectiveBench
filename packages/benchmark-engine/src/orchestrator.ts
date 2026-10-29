@@ -40,6 +40,14 @@ import {
 import { buildManifest, copyTree, diffManifests, type FileChange } from './files';
 import type { CaseFixtures } from './import';
 import {
+  captureOutputFiles,
+  NOT_CAPTURED,
+  notKeptOutput,
+  summarizeCapture,
+  type OutputFilesCapture,
+  type OutputFilesSummary,
+} from './output-files';
+import {
   scoreRun,
   summarize,
   type ExecutionStatus,
@@ -80,6 +88,11 @@ export interface AgentRunRecord extends RunOutcome {
   /** Skills other than the tested one the agent used (FR-118-08); real-agent adapters only. */
   otherSkillsInvoked?: string[];
   assertions: AssertionResult[];
+  /**
+   * Metadata of the captured output files (SPEC-123 FR-123-10). The content never lives here: it
+   * is passed once to `onAgentRun` as an {@link OutputFilesCapture}.
+   */
+  outputFiles: OutputFilesSummary;
 }
 
 /** Engine-level trace events (FR-110-15); adapter events are interleaved in order. */
@@ -155,8 +168,13 @@ export interface RunBenchmarkInput {
   /** Whether the suite version is approved to execute commands. */
   executionApproved: boolean;
   signal: AbortSignal;
-  /** Called after each agent run so callers can persist results incrementally. */
-  onAgentRun?: (record: AgentRunRecord) => Promise<void>;
+  /**
+   * Called after each agent run so callers can persist results incrementally. `capture` holds the
+   * content of the files the agent run wrote (null when none were kept, the reason is then in
+   * `record.outputFiles`); the engine drops it once the callback has resolved (SPEC-123
+   * FR-123-10). Without this callback the engine captures no output files.
+   */
+  onAgentRun?: (record: AgentRunRecord, capture: OutputFilesCapture | null) => Promise<void>;
 }
 
 export interface BenchmarkOutcome {
@@ -284,13 +302,35 @@ function agentAbortSignal(
   };
 }
 
+/** Reason stored for an agent run that ended before its output files were captured. */
+export const OUTPUT_NOT_CAPTURED_REASON =
+  'the agent run ended before its output files were captured';
+
+/**
+ * Runs one agent run. Its output files, once captured, stay with it on every later return path
+ * (SPEC-123 A6): `output.capture` is set once and returned beside the record.
+ */
 async function executeAgentRun(
   input: RunBenchmarkInput,
   benchmarkCase: BenchmarkCase,
   variant: Variant,
   repetition: number,
+): Promise<{ record: AgentRunRecord; capture: OutputFilesCapture | null }> {
+  const output: { capture: OutputFilesCapture | null } = { capture: null };
+  const record = await runAgentStages(input, benchmarkCase, variant, repetition, output);
+  return { record, capture: output.capture };
+}
+
+async function runAgentStages(
+  input: RunBenchmarkInput,
+  benchmarkCase: BenchmarkCase,
+  variant: Variant,
+  repetition: number,
+  output: { capture: OutputFilesCapture | null },
 ): Promise<AgentRunRecord> {
   const { definition, adapter } = input;
+  // Nothing could keep the content without a consumer, so nothing is captured (FR-123-10).
+  const capturing = input.onAgentRun !== undefined;
   const caseFixtures = input.fixtures[benchmarkCase.id] as CaseFixtures;
   const started = performance.now();
   const runDir = join(input.workRoot, benchmarkCase.id, `${variant}-${repetition}`);
@@ -316,6 +356,7 @@ async function executeAgentRun(
     errorCode: null,
     warnings: [],
     assertions: [] as AssertionResult[],
+    outputFiles: capturing ? notKeptOutput(OUTPUT_NOT_CAPTURED_REASON) : NOT_CAPTURED,
   };
   const fail = (
     executionStatus: ExecutionStatus,
@@ -429,6 +470,8 @@ async function executeAgentRun(
     stage('agent');
     const agentAbort = agentAbortSignal(input.signal, timeoutMs);
     let agentResult: AgentRunResult;
+    // Set when the engine gave up waiting: the agent may still be writing (FR-123-01).
+    let agentStillRunning = false;
     try {
       agentResult = await withTimeout(
         adapter.run({
@@ -444,14 +487,17 @@ async function executeAgentRun(
           options: benchmarkCase.agentOptions[adapter.id],
         }),
         timeoutMs + AGENT_STOP_GRACE_MS,
-        () => ({
-          status: 'timeout',
-          durationMs: timeoutMs,
-          summary: 'Timed out',
-          trace: [],
-          usage: null,
-          error: 'Agent did not stop after timeout',
-        }),
+        () => {
+          agentStillRunning = true;
+          return {
+            status: 'timeout',
+            durationMs: timeoutMs,
+            summary: 'Timed out',
+            trace: [],
+            usage: null,
+            error: 'Agent did not stop after timeout',
+          };
+        },
       );
     } finally {
       agentAbort.dispose();
@@ -465,11 +511,49 @@ async function executeAgentRun(
     if (input.signal.aborted) return fail('cancelled', 'Cancelled');
     // Whatever the agent run's status: a failed or timed-out run that replaced the workspace must
     // still stop the benchmark run, and a code that already stops it keeps precedence.
-    if (agentResult.errorCode === undefined || !STOP_CODES.includes(agentResult.errorCode)) {
+    const stopped =
+      agentResult.errorCode !== undefined && STOP_CODES.includes(agentResult.errorCode);
+    if (!stopped) {
       const replacedByAgent = await replacedAfter('the agent run');
-      if (replacedByAgent) return replacedByAgent;
+      if (replacedByAgent) {
+        return capturing
+          ? {
+              ...replacedByAgent,
+              outputFiles: notKeptOutput('the workspace was replaced during the agent run'),
+            }
+          : replacedByAgent;
+      }
     }
+    // Output files of a run whose process tree has exited and whose workspace pin still holds,
+    // before the verification overlay (FR-123-01).
+    const capture = async (measured: Parameters<typeof captureOutputFiles>[0]['measured']) => {
+      const outcome = await captureOutputFiles({
+        workspace,
+        before,
+        measured,
+        installedPaths,
+        adapter,
+      });
+      if (!outcome.ok) {
+        base.outputFiles = notKeptOutput(outcome.reason);
+        return null;
+      }
+      output.capture = outcome.capture;
+      base.outputFiles = summarizeCapture(outcome.capture);
+      return outcome.changes;
+    };
     if (agentResult.status !== 'completed') {
+      if (agentStillRunning) {
+        if (capturing) base.outputFiles = notKeptOutput('the agent did not stop after its timeout');
+      } else if (
+        capturing &&
+        !stopped &&
+        (agentResult.status === 'agent-error' || agentResult.status === 'timeout')
+      ) {
+        // The capture's own manifest; a failure stays a capture failure (FR-123-02/03/09).
+        const changes = await capture(null);
+        if (changes) base.changedFiles = changes;
+      }
       return fail(
         agentResult.status,
         agentResult.error ?? agentResult.summary,
@@ -478,6 +562,7 @@ async function executeAgentRun(
     }
     const after = await buildManifest(workspaceDir);
     const changedFiles = diffManifests(before, after);
+    if (capturing) await capture({ after, changes: changedFiles });
 
     stage('verification');
     if (caseFixtures.overlay) {
@@ -599,6 +684,26 @@ export function equivalenceIssues(
 }
 
 /**
+ * Runs one agent run, records it and hands it to `onAgentRun` with its output files. The capture
+ * is referenced only in this function's frame, so it is collectable as soon as the callback has
+ * resolved, while the benchmark run goes on (SPEC-123 FR-123-10, NFR-123-06).
+ */
+async function runAndDeliver(
+  input: RunBenchmarkInput,
+  benchmarkCase: BenchmarkCase,
+  variant: Variant,
+  repetition: number,
+  agentRuns: AgentRunRecord[],
+): Promise<AgentRunRecord> {
+  const executed = await executeAgentRun(input, benchmarkCase, variant, repetition);
+  const record = applySkillActivationRules(executed.record, input.baselineArtifact !== undefined);
+  addAgentMetadataEvent(record);
+  agentRuns.push(record);
+  await input.onAgentRun?.(record, executed.capture);
+  return record;
+}
+
+/**
  * RED/GREEN evaluation. For each case and repetition the baseline (no artifact, or the exact
  * baseline version installed) and candidate (exact artifact version installed) run in fresh,
  * independent workspaces from the same fixture snapshot with identical prompt, adapter, model and
@@ -646,13 +751,7 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
           repetition % 2 === 1 ? ['baseline', 'candidate'] : ['candidate', 'baseline'];
         for (const variant of order) {
           if (input.signal.aborted) throw new BenchmarkCancelledError();
-          const record = applySkillActivationRules(
-            await executeAgentRun(input, benchmarkCase, variant, repetition),
-            abBaseline,
-          );
-          addAgentMetadataEvent(record);
-          agentRuns.push(record);
-          await input.onAgentRun?.(record);
+          const record = await runAndDeliver(input, benchmarkCase, variant, repetition, agentRuns);
           if (record.executionStatus === 'cancelled') throw new BenchmarkCancelledError();
           // A systematic failure (workspace refused, login, quota, skill not loaded, …) ends the
           // run: no further setup, installation or adapter call (FR-118-15).
