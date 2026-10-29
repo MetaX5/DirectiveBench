@@ -60,7 +60,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(3);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(4);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -501,7 +501,7 @@ describe('additive migrations', () => {
       `);
 
       // Up: the existing run survives with a null baseline, i.e. baseline kind `none`.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 3))).applied).toBe(1);
       expect(runColumns(handle)).toEqual([...runColumns(before), 'baseline_artifact_version_id']);
       expect(
         handle.sqlite
@@ -525,8 +525,84 @@ describe('additive migrations', () => {
         'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
       );
       expect(runColumns(handle)).toEqual(runColumns(before));
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 3))).applied).toBe(1);
       expect(runColumns(handle)).toContain('baseline_artifact_version_id');
+    } finally {
+      before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds agent_runs.output_files_kept/reason and agent_run_files: existing agent runs read as not kept (SPEC-123 §8.1)', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const agentRunColumns = (h: DatabaseHandle) => columns(h, 'agent_runs');
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 3));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 3));
+      handle.sqlite.exec(`
+        insert into artifacts (id, slug, name, type, created_at, updated_at)
+          values ('art_1', 'a', 'A', 'skill', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+          values ('artv_1', 'art_1', 1, 'h', 'skill-md', 'SKILL.md', '[]', '{}', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suites (id, slug, name, created_at, updated_at)
+          values ('suite_1', 's', 'S', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suite_versions (id, suite_id, version, schema_version, definition, fixtures, content_hash, created_at)
+          values ('suitev_1', 'suite_1', 1, 1, '{}', '{}', 'h', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_runs (id, suite_version_id, artifact_version_id, agent_adapter_id, environment, status, started_at)
+          values ('run_old', 'suitev_1', 'artv_1', 'mock', '{}', 'completed', '2026-01-01T00:00:00.000Z');
+        insert into agent_runs (id, benchmark_run_id, case_id, variant, repetition, fixture_version_id, execution_status, duration_ms, changed_files, trace, created_at)
+          values ('arun_old', 'run_old', 'c', 'baseline', 1, 'f', 'completed', 1, '[]', '[]', '2026-01-01T00:00:00.000Z');
+      `);
+
+      // Up: the existing agent run survives and reads as "not kept" with no reason.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(agentRunColumns(handle)).toEqual([
+        ...agentRunColumns(before),
+        'output_files_kept',
+        'output_files_reason',
+      ]);
+      expect(
+        handle.sqlite
+          .prepare(
+            "select output_files_kept, output_files_reason from agent_runs where id = 'arun_old'",
+          )
+          .get(),
+      ).toEqual({ output_files_kept: 0, output_files_reason: null });
+      handle.sqlite.exec(`
+        insert into agent_run_files (id, agent_run_id, path, change, kept)
+          values ('afile_1', 'arun_old', 'a.txt', 'deleted', 'none');
+      `);
+      expect(
+        handle.sqlite
+          .prepare(
+            "select stored_bytes, redactions, content from agent_run_files where id = 'afile_1'",
+          )
+          .get(),
+      ).toEqual({ stored_bytes: 0, redactions: 0, content: null });
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into agent_run_files (id, agent_run_id, path, change, kept) values ('afile_2', 'arun_missing', 'b', 'added', 'none')",
+        ),
+      ).toThrow(/FOREIGN KEY/);
+
+      // Down (the rollback plan in the PR): drop the new table and columns and forget the
+      // migration; agent_runs returns to the 0002 shape with its data and the migration re-applies.
+      handle.sqlite.exec('drop table agent_run_files');
+      handle.sqlite.exec('alter table agent_runs drop column output_files_reason');
+      handle.sqlite.exec('alter table agent_runs drop column output_files_kept');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(agentRunColumns(handle)).toEqual(agentRunColumns(before));
+      expect(tableNames(handle)).not.toContain('agent_run_files');
+      expect(
+        handle.sqlite.prepare("select case_id from agent_runs where id = 'arun_old'").get(),
+      ).toEqual({ case_id: 'c' });
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(tableNames(handle)).toContain('agent_run_files');
     } finally {
       before.close();
       handle.close();
