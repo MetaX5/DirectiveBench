@@ -21,7 +21,7 @@ const twMerge = extendTailwindMerge({
         'sidebar',
       ],
       radius: ['surface'],
-      container: ['content'],
+      container: ['content', 'wide'],
     },
   },
 });

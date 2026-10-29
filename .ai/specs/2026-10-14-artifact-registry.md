@@ -3,7 +3,7 @@ id: SPEC-101
 title: Artifact Registry
 status: draft
 created: 2026-10-14
-updated: 2026-10-20
+updated: 2026-10-29
 category: feature
 related: [SPEC-005, SPEC-006, SPEC-102, SPEC-103, SPEC-104, SPEC-105, SPEC-106, SPEC-111, SPEC-112, SPEC-113, SPEC-116]
 ---
@@ -205,6 +205,7 @@ Function names are indicative; the authoritative names are those exported by `@d
 ## 11. UI/UX considerations
 
 - **List** (`/artifacts`): table with the FR-101-10 columns; type shown as an icon + label; evaluation status as a badge with text; delta shown with sign and colour plus arrow (not colour only); "Mock agent" pill where applicable; empty state explains how artifacts arrive (register and scan a repository, or run `directivebench demo`).
+- **List width (issue #122):** at a 1920x1080 viewport, 100% zoom, with the desktop sidebar visible, every FR-101-10 column (Status included) is visible without horizontal scrolling of the document or the table, with no hidden column and no smaller text. The list page opts into the wide layout (`data-layout="wide"`, `main` up to `max-w-wide`, 96rem, instead of `max-w-content`, 72rem); every other page keeps 72rem. The description stays one truncated line of at most 15rem; its full text stays in the cell for screen readers and is shown in the detail view. The "Mock agent: not an AI evaluation" label stays on one line with its icon at full size. Names and repository names may be paths (`dir/AGENTS.md`) or one long word, so the name and repository cells wrap anywhere within a minimum width (10rem and 8rem) instead of widening the table; category badges break only between words. On a narrower viewport, when the columns no longer fit, the table scrolls inside its own focusable container.
 - **List filters (issue #17):** a GET form whose fields are the URL parameters `q`, `repository` (a repository id; artifacts with an active occurrence there), `type` and `category` (a category slug; the options are all non-archived categories). Each value is Zod-validated at the page boundary; an invalid or repeated value is ignored and named in a visible notice ("Ignored invalid value in the URL: type."), never a page error. Repository options show the name, plus the location when two repositories share a name. "Clear filters" returns to `/artifacts`.
 - **Filters** in a left panel or toolbar; active filters as removable chips; URL-synchronised.
 - **Detail** (`/artifacts/[id]`): header with name, type, format, status, compatibility badges; tabs per FR-101-15. Version selector in the Content tab. Multi-file skills show a file tree; binary files show size and hash only.
@@ -259,6 +260,7 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - [ ] Results from the mock agent carry the "Mock agent — not an AI evaluation" label in list and detail.
 - [ ] No score is averaged across different suites in the list view.
 - [x] Markdown containing `<script>` is displayed inertly (issue #17, `apps/web/e2e/registry.spec.ts`).
+- [x] At 1920x1080 with the sidebar, the list shows every column without horizontal scrolling, in both themes, with a nested-path name, a long description, four categories, two repositories with one-word names and a mock evaluation (issue #122, `apps/web/e2e/artifacts-full-hd.spec.ts`).
 
 ## 17. Dependencies
 

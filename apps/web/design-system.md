@@ -56,7 +56,8 @@ do not improvise one; ask.
 - Spacing by relation: `gap-inline` (controls in a row), `gap-inline-tight` (icon and label,
   badges), `space-y-stack` (inside a panel), `gap-grid` (between panels), `space-y-section`
   and `mb-section` (between sections), `px-page-inline py-page-block` (page).
-- Sizes: `h-control` (32px), `h-control-sm`, `h-control-xs`, `max-w-content`, `w-sidebar`.
+- Sizes: `h-control` (32px), `h-control-sm`, `h-control-xs`, `max-w-content`, `max-w-wide` (only through `data-layout="wide"` on a
+  wide table page; `main` switches itself), `w-sidebar`.
 - Shape: square; `rounded-surface` only. No shadows.
 - Syntax colours (D20): `text-syntax-foreground` and `text-syntax-token-*`, only inside
   `FileView` and `SideBySideDiff`, from tokens computed on the server by

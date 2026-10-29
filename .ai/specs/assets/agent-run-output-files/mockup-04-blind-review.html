@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mockup: blind review</title><style>
+*{box-sizing:border-box}body{margin:0;font:12px/1.5 Figtree,system-ui,sans-serif;color:#0a0a0a;background:#fff}
+.side{position:fixed;top:0;left:0;bottom:0;width:180px;border-right:1px solid #e5e5e5;padding:16px;background:#fafafa}
+.side b{display:block;margin-bottom:12px}.side a{display:block;color:#525252;padding:4px 0;text-decoration:none}.side a.on{color:#0a0a0a;font-weight:600}
+main{margin-left:180px;padding:20px 24px;max-width:1180px}h1{font-size:20px;margin:0 0 4px}.sub{color:#5c5c5c;margin:0 0 16px}
+.card{border:1px solid #e5e5e5;padding:12px;margin-bottom:16px;background:#fff}.card h2{font-size:14px;margin:0 0 8px}
+.badge{display:inline-block;border:1px solid #d4d4d4;padding:0 6px;margin-right:4px;font-size:11px}
+.b-add{background:#ecfccb;border-color:#a3e635}.b-mod{background:#f5f5f5}.b-warn{background:#fef9c3;border-color:#eab308}.b-mock{background:#e0f2fe;border-color:#38bdf8}
+.grid{display:grid;grid-template-columns:260px 1fr;gap:16px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+ul.files{list-style:none;margin:0;padding:0}ul.files li{padding:6px 8px;border-bottom:1px solid #f0f0f0;font-family:ui-monospace,monospace;font-size:11px}ul.files li.on{background:#f5f5f5;border-left:3px solid #a3e635}
+pre{margin:0;background:#f5f5f5;border:1px solid #e5e5e5;padding:8px;font:11px/1.6 ui-monospace,monospace;overflow:auto;white-space:pre}
+.ln{color:#737373;display:inline-block;width:28px;text-align:right;margin-right:8px}.add{background:#ecfccb;display:block}.del{background:#fee2e2;display:block}
+.status{padding:6px 8px;margin-bottom:8px;border:1px solid #eab308;background:#fefce8}
+.btn{display:inline-block;height:32px;line-height:30px;padding:0 12px;border:1px solid #737373;background:#fff;margin-right:6px;font:inherit}
+.btn.p{background:#a3e635;border-color:#a3e635;font-weight:600}.btn.d{border-color:#dc2626;color:#991b1b}
+select,textarea{font:inherit;border:1px solid #737373;height:32px;padding:0 6px}textarea{height:56px;width:100%;padding:6px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee}th{color:#5c5c5c;font-weight:600}
+.note{color:#5c5c5c;font-size:11px;margin-top:6px}label{display:block;margin:8px 0 4px;font-weight:600}
+</style></head><body><nav class="side"><b>DirectiveBench</b><a>Dashboard</a><a>Artifacts</a><a>Benchmarks</a><a class="on">Results</a><a>Settings</a></nav><main>
+<h1>Blind review</h1><p class="sub">Run run_5vR9G7vc. Pair 3 of 6. Pairs decided: 2 of 6. Illustrative mockup.</p>
+<div class="card"><h2>Task</h2><p style="margin:0">Make the existing notice block dismissible and bring it up to current standards. It is used on about 400 published pages.</p>
+<p class="note">Variants, scores and statuses are hidden until you reveal them. Content written by the agent may still hint at the variant.</p></div>
+<div class="grid"><div class="card"><h2>Paths (8)</h2><ul class="files"><li class="on">render.php</li><li>block.json</li><li>src/deprecated.js <span class="badge">Only B</span></li></ul></div>
+<div class="card"><div class="two"><div><b>A</b><pre><span class="ln">1</span>&lt;?php
+<span class="del"><span class="ln">2</span>- $wrapper = get_block_wrapper_attributes();</span><span class="ln">3</span>?&gt;</pre></div>
+<div><b>B</b><pre><span class="ln">1</span>&lt;?php
+<span class="add"><span class="ln">2</span>+ $wrapper = get_block_wrapper_attributes( array( 'class' =&gt; 'is-dismissible' ) );</span><span class="ln">3</span>?&gt;</pre></div></div></div></div>
+<div class="card"><h2>Your verdict for pair 3</h2><span class="btn">A is better</span><span class="btn">B is better</span><span class="btn">About the same</span>
+<label for="n">Note (optional)</label><textarea id="n">B keeps the saved markup valid and adds a deprecation.</textarea>
+<p class="note">A verdict cannot be changed after you record it. <a href="#">Previous pair</a> . <a href="#">Next pair</a></p></div>
+<div class="card"><h2>Reveal</h2><p style="margin:0 0 8px">Revealing ends the blind review. Pairs without a verdict stay without one.</p><span class="btn d">Reveal variants</span></div>
+</main></body></html>
