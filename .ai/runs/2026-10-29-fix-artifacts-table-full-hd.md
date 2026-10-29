@@ -3,7 +3,7 @@ title: Fit the Artifacts table in a Full HD viewport (issue 122)
 date: 2026-10-29
 agent: Claude Code / claude-opus-5-5
 trigger: user request ("#122 rób"), via om-auto-fix-issue 122
-status: in-progress
+status: completed
 branch: fix/issue-122-artifacts-table-full-hd
 specs: [SPEC-101, SPEC-116, SPEC-122]
 ---
@@ -67,13 +67,15 @@ accessible overflow. Playwright covers the geometry.
 | --- | --- |
 | Red first: new e2e against the base build | 3 failed (container 1196 > 1056; main 1152 instead of 1440) |
 | Red first: `design-tokens.test.ts` after adding the token only | 2 failed (token undocumented, `max-w-wide` not merged), then pass |
-| `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test` | pass (100% coverage) |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test` | pass (100% coverage); `pnpm test` again after the QA fix: pass |
 | `pnpm build`, `pnpm verify:pack` | pass |
-| `pnpm test:e2e` | 62 passed |
+| `pnpm test:e2e` | 62 passed (again after the QA fix: 62 passed) |
 | `pnpm test:storybook` | 224 passed |
 | Built CLI + demo, widths 320 to 2560 on `/artifacts`, `/`, `/repositories`, `/results` | no document overflow at any width; `/artifacts` main 1440 from 1664px, others 1152; the table scrolls in its container below ~1500px with the demo row |
 
-Not verified: other browsers than Chromium; zoom levels other than 100%.
+| Codex adversarial review (`codex exec -s read-only`, after the QA fix) | approve, no material findings |
+
+Not verified: other browsers than Chromium; zoom levels other than 100%; a real screen reader. `pnpm test:storybook` and `verify:pack` ran before the QA fix (it changed only classes on three cells of the page, which has no story).
 
 ## Problems and deviations
 
@@ -101,4 +103,4 @@ Not verified: other browsers than Chromium; zoom levels other than 100%.
 
 ## Follow-ups
 
-- None yet.
+- Give the Artifacts `Table` an `aria-label` so its focusable scroll container is a named region (SPEC-122 P13); it was unnamed before this change.
