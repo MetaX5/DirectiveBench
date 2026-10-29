@@ -110,7 +110,9 @@ export default async function AgentRunFilesPage({
                     return (
                       <li key={file.id}>
                         <Link
-                          href={agentRunFilesHref(detail.run.id, agentRun.id, file.path)}
+                          // The fragment brings the file into view where it is stacked under the list
+                          // (320 px, browser QA finding 1).
+                          href={`${agentRunFilesHref(detail.run.id, agentRun.id, file.path)}#file`}
                           aria-current={current ? 'page' : undefined}
                           className={cn(
                             'block border-l-2 py-1 pr-1 pl-2 text-body hover:bg-muted',
@@ -118,14 +120,14 @@ export default async function AgentRunFilesPage({
                           )}
                         >
                           <span className="block font-mono wrap-anywhere">{file.path}</span>
-                          <span className="mt-1 flex flex-wrap items-center gap-inline-tight">
+                          <span className="mt-1 block">
                             <FileStatusBadges file={file} />
-                            {file.sizeBytes === null ? null : (
-                              <span className="text-ui text-muted-foreground">
-                                {formatSize(file.sizeBytes)}
-                              </span>
-                            )}
                           </span>
+                          {file.sizeBytes === null ? null : (
+                            <span className="block text-ui text-muted-foreground">
+                              {formatSize(file.sizeBytes)}
+                            </span>
+                          )}
                         </Link>
                       </li>
                     );
@@ -134,7 +136,7 @@ export default async function AgentRunFilesPage({
               </nav>
             </CardContent>
           </Card>
-          <Card className="min-w-0 lg:flex-1">
+          <Card id="file" className="min-w-0 scroll-mt-4 lg:flex-1">
             <CardContent>{selected ? <FileView file={selected} /> : null}</CardContent>
           </Card>
         </div>

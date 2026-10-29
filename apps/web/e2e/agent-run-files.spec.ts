@@ -136,7 +136,7 @@ test('the files page lists every file state and shows its notices (FR-123-21)', 
   ];
   for (const [path, notice] of notices) {
     await list.getByRole('link', { name: new RegExp(escapeRegExp(path)) }).click();
-    await expect(page).toHaveURL(new RegExp(`path=${encodeURIComponent(path)}$`));
+    await expect(page).toHaveURL(new RegExp(`path=${encodeURIComponent(path)}#file$`));
     await expect(list.getByRole('link', { name: new RegExp(escapeRegExp(path)) })).toHaveAttribute(
       'aria-current',
       'page',
@@ -214,7 +214,7 @@ test('the files page works with the keyboard only', async ({ page }) => {
   }
   expect(steps).toBeLessThan(60);
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/path=big\.log$/);
+  await expect(page).toHaveURL(/path=big\.log#file$/);
   // The file's scroll region is one tab stop after the list (D8, D17).
   const region = page.getByRole('region', { name: 'Content of big.log' });
   steps = 0;
@@ -223,6 +223,18 @@ test('the files page works with the keyboard only', async ({ page }) => {
     steps += 1;
   }
   expect(steps).toBeLessThan(20);
+});
+
+test('at 320px choosing a file brings it into view (browser QA finding 1)', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich));
+  const last = page
+    .getByRole('navigation', { name: 'Changed files' })
+    .getByRole('link', { name: /zz-not-kept\.txt/ });
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(page.getByRole('heading', { level: 3, name: 'zz-not-kept.txt' })).toBeInViewport();
+  await expect(page).toHaveURL(/path=zz-not-kept\.txt#file$/);
 });
 
 for (const theme of ['light', 'dark'] as const) {

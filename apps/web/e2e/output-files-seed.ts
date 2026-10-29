@@ -153,7 +153,7 @@ function seed(db: DatabaseSync): void {
     'completed',
     0,
     0,
-    changed(FILES.length),
+    JSON.stringify(FILES.map((f) => ({ path: f.path, change: f.change }))),
     now,
     1,
     null,
