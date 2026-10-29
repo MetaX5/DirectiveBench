@@ -94,7 +94,13 @@ async function onlyFile(text: string | Buffer, adapter: Finder = mock): Promise<
 
 describe('captureOutputFiles: what is kept (SPEC-123 FR-123-04/05/08)', () => {
   it('keeps changed text files in full and lists deleted, binary and artifact files without content', async () => {
-    const ws = await workspace({ 'keep.txt': 'old', 'gone.txt': 'x', '.agent/skill.md': 's0' });
+    const ws = await workspace({
+      'keep.txt': 'old',
+      'gone.txt': 'x',
+      '.agent/skill.md': 's0',
+      '.agent/removed.md': 'r',
+    });
+    rmSync(join(ws.pin.path, '.agent/removed.md'));
     ws.write('keep.txt', 'new text');
     rmSync(join(ws.pin.path, 'gone.txt'));
     ws.write('bin.dat', Buffer.from([0x61, 0x00, 0x62]));
@@ -112,6 +118,17 @@ describe('captureOutputFiles: what is kept (SPEC-123 FR-123-04/05/08)', () => {
       sha256: sha(content),
     });
     expect(outcome.capture.files).toEqual([
+      {
+        path: '.agent/removed.md',
+        change: 'deleted',
+        sizeBytes: null,
+        sha256: null,
+        kept: 'none',
+        reason: 'artifact-path',
+        content: null,
+        storedBytes: 0,
+        redactions: 0,
+      },
       {
         path: '.agent/skill.md',
         change: 'modified',
@@ -202,9 +219,9 @@ describe('captureOutputFiles: what is kept (SPEC-123 FR-123-04/05/08)', () => {
     expect(summarizeCapture(outcome.capture)).toEqual({
       status: 'kept',
       reason: null,
-      files: 8,
+      files: 9,
       truncated: 0,
-      notKept: 5,
+      notKept: 6,
       storedBytes: 12,
     });
   });

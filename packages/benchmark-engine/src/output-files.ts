@@ -139,13 +139,13 @@ export async function captureOutputFiles(input: CaptureInput): Promise<CaptureOu
     const files: CapturedFile[] = [];
     const reading: { change: FileChange; entry: ManifestFile }[] = [];
     for (const change of changes) {
-      if (change.change === 'deleted') {
-        files.push(metadataOnly(change, null, 'deleted'));
-        continue;
-      }
-      const entry = entries.get(change.path) as ManifestFile;
+      // A deleted file has no entry after the run.
+      const entry = entries.get(change.path) ?? null;
+      // Any path of the installed artifact, deleted ones included, is listed as such (A7).
       if (isArtifactPath(change.path, input.installedPaths)) {
         files.push(metadataOnly(change, entry, 'artifact-path'));
+      } else if (entry === null) {
+        files.push(metadataOnly(change, null, 'deleted'));
       } else {
         reading.push({ change, entry });
       }
