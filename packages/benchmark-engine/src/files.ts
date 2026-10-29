@@ -19,9 +19,20 @@ export interface ManifestFile extends ManifestEntry {
   size: number;
 }
 
-async function sha256File(path: string): Promise<string> {
+/**
+ * sha256 of the first `size` bytes of a file, the size `lstat` reported. At most one byte more is
+ * read: a file that grew meanwhile is refused, so a writer cannot make the walk read without bound
+ * past the manifest's byte limit (SPEC-123 Codex review round 2).
+ */
+async function sha256File(path: string, size: number, relPath: string): Promise<string> {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  let read = 0;
+  // `end` is inclusive: bytes 0..size, i.e. the file plus a one-byte growth probe.
+  for await (const chunk of createReadStream(path, { start: 0, end: size })) {
+    read += (chunk as Buffer).length;
+    if (read > size) throw new UnsafeFileError(`File changed while it was read: ${relPath}`);
+    hash.update(chunk as Buffer);
+  }
   return hash.digest('hex');
 }
 
@@ -57,7 +68,7 @@ export async function buildManifest(
         if (totalBytes > limits.maxTotalBytes) {
           throw new UnsafeFileError(`More than ${limits.maxTotalBytes} bytes in ${root}`);
         }
-        files.push({ path: rel, sha256: await sha256File(abs), size: info.size });
+        files.push({ path: rel, sha256: await sha256File(abs, info.size, rel), size: info.size });
       } else {
         throw new UnsafeFileError(`Unsupported file type: ${rel}`);
       }

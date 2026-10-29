@@ -18,6 +18,8 @@ import { useTempDirs } from './helpers';
 const hooks = vi.hoisted(() => ({
   wrapHandle: null as ((handle: FileHandle) => void) | null,
   lstatIno: null as bigint | null,
+  /** Size every `lstat` of a file named `a.txt` reports (a file that grows after the walk). */
+  lstatSize: null as number | null,
   realpathCall: null as ((call: number, real: string) => string) | null,
   realpathCalls: 0,
   missingFlags: false,
@@ -35,6 +37,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     lstat: async (...args: Parameters<typeof actual.lstat>) => {
       const stats = await actual.lstat(...args);
       if (hooks.lstatIno !== null) Object.defineProperty(stats, 'ino', { value: hooks.lstatIno });
+      if (hooks.lstatSize !== null && String(args[0]).endsWith('a.txt')) {
+        Object.defineProperty(stats, 'size', { value: hooks.lstatSize });
+      }
       return stats;
     },
     realpath: async (path: string) => {
@@ -63,6 +68,7 @@ const tmp = useTempDirs();
 afterEach(() => {
   hooks.wrapHandle = null;
   hooks.lstatIno = null;
+  hooks.lstatSize = null;
   hooks.realpathCall = null;
   hooks.realpathCalls = 0;
   hooks.missingFlags = false;
@@ -185,6 +191,25 @@ describe('captureOutputFiles on simulated file systems (FR-123-04)', () => {
       ok: false,
       reason: 'a.txt changed after the agent stopped',
     });
+  });
+
+  it('bounds the own manifest of an agent-error or timeout run on a growing file (Codex round 2)', async () => {
+    const dir = join(tmp('ws'), 'workspace');
+    mkdirSync(dir);
+    const workspace = await pinWorkspace(dir);
+    const before = await buildManifest(dir);
+    writeFileSync(join(dir, 'a.txt'), 'x'.repeat(100_000));
+    // The walk's lstat saw 1 byte; the file holds more by the time it is hashed.
+    hooks.lstatSize = 1;
+    expect(
+      await captureOutputFiles({
+        workspace,
+        before,
+        measured: null,
+        installedPaths: [],
+        adapter: new MockAgentAdapter(),
+      }),
+    ).toEqual({ ok: false, reason: 'File changed while it was read: a.txt' });
   });
 
   it('fails when the file ends before its read window is full', async () => {
