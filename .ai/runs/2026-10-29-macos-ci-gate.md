@@ -34,6 +34,11 @@ record the gates in SPEC-012.
   fell to 61-99%: days of work, and best effort under NFR-118-04. #48 is closed as replaced by #160.
 - **`--continue` on the macOS job**, so every package reports its failures; the first probe
   stopped at the first failing package.
+- **macOS is not a required check for now** (maintainer decision): the job runs on every PR,
+  but branch protection does not require it yet.
+- **`--concurrency=2` on macOS**: with seven suites in parallel on the 3-core runner, three
+  timing and SQLite-lock tests failed on the merge commit (run 40959332904); the earlier green
+  run was a lucky machine.
 - **Perl for `setsid`** rather than Node: the command assertions run with an environment
   allowlist, and Perl is on the Linux and macOS runners and on developer machines.
 
@@ -53,6 +58,10 @@ record the gates in SPEC-012.
    - `runner` "rejects a file name that is not valid UTF-8": APFS rejects the name (`EILSEQ`).
      The name is now committed through the git index (`FixtureRemote.commitRawPath`), and the
      test runs on every platform.
+   - `runner` coverage 99.88% on macOS (`git-process.ts:107`, a second stop request while git
+     is stopping): only a second stdout chunk racing the kill covered it, on Linux but not on
+     macOS. A new test makes it deterministic (the watch stops git, which ignores SIGTERM, then
+     the job is cancelled during the grace); it alone covers both branches.
    - `web` "groups many distinct keys in linear time": a hand-made wall-clock ratio measured
      48 > 40. Moved to the shared `expectLinearTime` helper.
 3. Windows job removed; issue #160 filed with the inventory by package and by error.
@@ -93,5 +102,5 @@ Not verified: a real Mac outside CI; Windows (issue #160).
 ## Follow-ups
 
 - Issue #160: Windows unit gate.
-- Make `Unit tests (100% coverage, macOS)` a required check in the `main` branch protection (a
-  repository setting; needs the maintainer's go-ahead).
+- Make `Unit tests (100% coverage, macOS)` a required check once it has proven stable (deferred by
+  the maintainer on 2026-10-29).
