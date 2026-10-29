@@ -492,6 +492,35 @@ describe('captureOutputFiles: failures never throw (FR-123-09)', () => {
     ).toEqual({ ok: false, reason: 'dir/a.txt is not the file the manifest listed' });
   });
 
+  it('fails when the workspace path holds another directory than the pinned one (Codex round 1)', async () => {
+    const ws = await workspace();
+    ws.write('a.txt', 'one');
+    const after = await buildManifest(ws.pin.path);
+    const outcome = await captureOutputFiles({
+      workspace: { ...ws.pin, ino: ws.pin.ino + 1 },
+      before: ws.before,
+      measured: { after, changes: diffManifests(ws.before, after) },
+      installedPaths: [],
+      adapter: mock,
+    });
+    expect(outcome).toEqual({ ok: false, reason: 'a.txt is not the file the manifest listed' });
+  });
+
+  it('fails when a directory component was replaced by a link to a directory inside the workspace', async () => {
+    const ws = await workspace();
+    ws.write('real/a.txt', 'one');
+    ws.write('dir/a.txt', 'one');
+    const after = await buildManifest(ws.pin.path);
+    rmSync(join(ws.pin.path, 'dir'), { recursive: true });
+    // The link resolves inside the workspace, but not to the directory the manifest walked.
+    symlinkSync(join(ws.pin.path, 'real'), join(ws.pin.path, 'dir'));
+    const changes = diffManifests(ws.before, after).filter((c) => c.path === 'dir/a.txt');
+    expect(await capture(ws, { measured: { after, changes } })).toEqual({
+      ok: false,
+      reason: 'dir/a.txt is not the file the manifest listed',
+    });
+  });
+
   it('fails with the manifest error of an agent-error or timeout run (own manifest)', async () => {
     const ws = await workspace();
     symlinkSync('/etc', join(ws.pin.path, 'link'));

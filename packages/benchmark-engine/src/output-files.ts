@@ -239,17 +239,36 @@ function isSameRegularFile(opened: BigIntStats, path: BigIntStats): boolean {
 }
 
 /**
+ * Checks that `path`'s directory still lies inside the pinned workspace: the workspace path is
+ * the pinned directory (same device and inode, not a link), every directory component below it
+ * is a real directory (`lstat`, so a link in any component is refused) and the directory resolves
+ * to its place below the pinned canonical path.
+ */
+async function assertDirectoryInsidePin(workspace: WorkspacePin, path: string): Promise<boolean> {
+  const root = await lstat(workspace.path);
+  if (!root.isDirectory() || root.dev !== workspace.dev || root.ino !== workspace.ino) return false;
+  let dir = workspace.path;
+  for (const segment of dirname(path).split('/')) {
+    if (segment === '.') continue;
+    dir = join(dir, segment);
+    if (!(await lstat(dir)).isDirectory()) return false;
+  }
+  return (await realpath(dir)) === join(workspace.canonical, dirname(path));
+}
+
+/**
  * Opens a changed file through the pinned workspace without following a link (FR-123-04): its
- * directory must resolve to its place inside the pinned workspace before and after the open, the
- * open refuses a link in the last component where the platform can (`O_NOFOLLOW`), and the handle
- * and the path must be the same regular file with a usable identity (lesson 2026-10-19). Whatever
- * a swap still slipped past is caught by the sha256 comparison with the manifest.
+ * directory must lie inside the pinned workspace ({@link assertDirectoryInsidePin}) before and
+ * after the open, the open refuses a link in the last component where the platform can
+ * (`O_NOFOLLOW`), and the handle and the path must be the same regular file with a usable identity
+ * (lesson 2026-10-19). The agent's process tree has exited, so nothing should change the workspace
+ * now; a swap that still slipped between these checks is caught by the size and sha256 comparison
+ * with the manifest.
  */
 async function openChangedFile(workspace: WorkspacePin, path: string): Promise<FileHandle> {
   const abs = join(workspace.path, path);
-  const expectedParent = join(workspace.canonical, dirname(path));
   const unsafe = () => new OutputCaptureError(`${path} is not the file the manifest listed`);
-  if ((await realpath(dirname(abs))) !== expectedParent) throw unsafe();
+  if (!(await assertDirectoryInsidePin(workspace, path))) throw unsafe();
   const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const handle = await open(abs, flags);
   try {
@@ -257,7 +276,7 @@ async function openChangedFile(workspace: WorkspacePin, path: string): Promise<F
     if (
       UNKNOWN_FILE_IDS.includes(opened.ino) ||
       !isSameRegularFile(opened, await lstat(abs, { bigint: true })) ||
-      (await realpath(dirname(abs))) !== expectedParent
+      !(await assertDirectoryInsidePin(workspace, path))
     ) {
       throw unsafe();
     }
@@ -332,17 +351,21 @@ async function readWindow(
     const scan = new KeyMarkerScan(bytes.length);
     hash.update(window);
     scan.push(window);
+    // Only the manifested bytes are read; a file that grew since is refused after a one-byte
+    // probe, so a writer cannot make the capture read without bound (Codex review round 1).
     const chunk = Buffer.alloc(READ_CHUNK_BYTES);
-    for (;;) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
-      if (bytesRead === 0) break;
+    while (total < entry.size) {
+      const want = Math.min(chunk.length, entry.size - total);
+      const { bytesRead } = await handle.read(chunk, 0, want, total);
+      if (bytesRead === 0) throw changed();
       const part = chunk.subarray(0, bytesRead);
       hash.update(part);
       scan.push(part);
       total += bytesRead;
     }
+    if ((await handle.read(chunk, 0, 1, total)).bytesRead !== 0) throw changed();
     const keyFragments = scan.end();
-    if (total !== entry.size || hash.digest('hex') !== entry.sha256) throw changed();
+    if (hash.digest('hex') !== entry.sha256) throw changed();
     return { bytes, wholeFile, keyFragments };
   } finally {
     await handle.close();

@@ -152,6 +152,41 @@ describe('captureOutputFiles on simulated file systems (FR-123-04)', () => {
     expect(await ws.capture()).toEqual({ ok: false, reason: 'a.txt could not be read (EIO)' });
   });
 
+  it('stops reading a file that grows after the manifest, one byte past its size (Codex round 1)', async () => {
+    const ws = await written('x');
+    let reads = 0;
+    hooks.wrapHandle = (handle) => {
+      // An endless file: every read fills the buffer.
+      handle.read = ((buffer: Buffer, offset: number, length: number) => {
+        reads += 1;
+        buffer.fill(0x78, offset, offset + length);
+        return Promise.resolve({ bytesRead: length, buffer });
+      }) as unknown as FileHandle['read'];
+    };
+    expect(await ws.capture()).toEqual({
+      ok: false,
+      reason: 'a.txt changed after the agent stopped',
+    });
+    // The window (the whole manifested byte) and the one-byte probe.
+    expect(reads).toBe(2);
+  });
+
+  it('fails when a file shrinks after its read window', async () => {
+    const ws = await written('a'.repeat(1_200_000));
+    let reads = 0;
+    hooks.wrapHandle = (handle) => {
+      const read = handle.read.bind(handle) as (...args: unknown[]) => Promise<unknown>;
+      handle.read = ((...args: unknown[]) => {
+        reads += 1;
+        return reads > 1 ? Promise.resolve({ bytesRead: 0 }) : read(...args);
+      }) as FileHandle['read'];
+    };
+    expect(await ws.capture()).toEqual({
+      ok: false,
+      reason: 'a.txt changed after the agent stopped',
+    });
+  });
+
   it('fails when the file ends before its read window is full', async () => {
     const ws = await written();
     hooks.wrapHandle = (handle) => {
