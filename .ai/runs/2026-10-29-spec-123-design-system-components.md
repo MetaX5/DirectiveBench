@@ -5,7 +5,7 @@ agent: Claude Code / claude-opus-5-5
 trigger: user request (approval vehicle for SPEC-123 assumption A14, issue #152)
 status: completed
 branch: feat/spec-123-design-system-components
-specs: [SPEC-123, SPEC-122]
+specs: [SPEC-123, SPEC-122, ADR-0014]
 ---
 
 # Run: Storybook pages for the SPEC-123 design-system components
@@ -104,6 +104,52 @@ None of these is approved. Each is what the stories show today; each can change 
   `design-system.md` list the three as "proposed (SPEC-123)"; "diff view" leaves the
   missing-primitives table. If a decision is rejected, these entries change with it.
 
+## D20 Syntax highlighting (approved by the maintainer on 2026-10-29)
+
+D1 to D19 were approved on PR #155. D20 adds server-side syntax highlighting, specified in
+SPEC-123 §6.7 (FR-123-70 to 77), NFR-123-07, AC-12 to AC-15 and ADR-0014 on
+`origin/spec/agent-run-output-files`. Implemented here as the component and library half of
+Phase 3a; no page renders highlighted files yet.
+
+- `apps/web/lib/syntax-highlight.ts` (`server-only`): the constants, `SYNTAX_LANGUAGE_BY_EXTENSION`,
+  `languageForPath`, `highlightLines` and the `HighlightResult`, `HighlightedLine` and
+  `SyntaxTokenKind` types with the spec's names. Shiki's `createHighlighterCore` with the 13
+  grammars (their embedded grammars load as dependencies), the JavaScript regex engine and
+  `createCssVariablesTheme({ variablePrefix: '--syntax-' })`; a memoised promise that is
+  forgotten when creation fails; `codeToTokens` on the whole text split like `displayLines`;
+  neighbouring tokens of one kind merged; colours other than `var(--syntax-token-*)` become
+  `null`. Errors log the language and error name only.
+- Tokens: `--syntax-foreground` and nine `--syntax-token-*` in `:root` and `.dark`, on six new
+  palette entries (violet, teal and orange at 48/47 and 75) and existing ones; Tailwind colours
+  `text-syntax-*`; `tokeny.md` rows and contrast pairs S01 to S10 (each on the code surface and
+  the D11 and D12 tints), measured by the Foundations/Colour story in both themes.
+- Rendering: `CodeLine.tokens`; `LineText` renders one `span` per token, React text only.
+  `FileView` takes `highlight?`; each `SideBySideDiff` side takes `highlight?`, attached to rows
+  by line number after the plain-line diff. Notes from `syntaxHighlightNotice`
+  (`lib/output-files.ts`) join the side's `role="status"` notices.
+- Stories: precomputed tokens in `components/output-files/highlight-fixtures.json`, kept equal
+  to the highlighter output by `test/highlight-fixtures.test.ts`
+  (`UPDATE_HIGHLIGHT_FIXTURES=1` rewrites it).
+
+Contrast of the syntax colours (WCAG 2.x, `card` + `muted` 40% = code surface, then the
+`destructive`, `success` or `info` 10% row tint; computed from the OKLCH values, matched by the
+Chromium measurement within 0.25):
+
+| Token | Light: code / removed / added / neutral | Dark: code / removed / added / neutral |
+|---|---|---|
+| syntax-foreground | 19.13 / 16.04 / 16.83 / 16.88 | 16.15 / 14.13 / 13.69 / 13.72 |
+| comment | 5.81 / 4.87 / 5.11 / 5.12 | 6.52 / 5.71 / 5.53 / 5.54 |
+| keyword | 6.89 / 5.78 / 6.06 / 6.08 | 7.26 / 6.35 / 6.15 / 6.16 |
+| string | 6.24 / 5.23 / 5.49 / 5.50 | 7.89 / 6.90 / 6.69 / 6.70 |
+| string-expression | 6.78 / 5.69 / 5.97 / 5.98 | 7.20 / 6.30 / 6.10 / 6.11 |
+| constant | 7.22 / 6.06 / 6.35 / 6.37 | 6.86 / 6.00 / 5.82 / 5.83 |
+| function | 6.70 / 5.62 / 5.90 / 5.91 | 7.27 / 6.36 / 6.16 / 6.18 |
+| parameter | 7.38 / 6.18 / 6.49 / 6.51 | 8.83 / 7.73 / 7.48 / 7.50 |
+| punctuation | 10.02 / 8.40 / 8.82 / 8.84 | 13.38 / 11.71 / 11.34 / 11.37 |
+| link | 8.47 / 7.10 / 7.45 / 7.47 | 10.99 / 9.62 / 9.31 / 9.34 |
+
+Lowest: comment on a removed row in light, 4.87:1.
+
 ## Work performed
 
 1. `apps/web/lib/line-diff.ts` and `test/line-diff.test.ts`: Myers after prefix and suffix
@@ -119,6 +165,12 @@ None of these is approved. Each is what the stories show today; each can change 
    `file-status-badges.mdx` (13 sections each, marked as proposed); catalogue rows (the catalogue
    story now expects 22 links); Start here, How to choose, What is missing, `design-system.md`.
 5. Lesson on container queries (below).
+6. D20 (see above): `lib/syntax-highlight.ts`, `test/syntax-highlight.test.ts`,
+   `test/syntax-highlight-failure.test.ts`, `test/highlight-fixtures.test.ts`,
+   `syntaxHighlightNotice`, the tokens, the component props, 11 new stories (FileView 8,
+   SideBySideDiff 3) and the FileView, SideBySideDiff and Colour docs pages and
+   `design-system.md`. Dependencies `@shikijs/core`, `@shikijs/engine-javascript` and
+   `@shikijs/langs` 4.5.0 in `apps/web` only.
 
 ## Verification
 
@@ -132,6 +184,21 @@ None of these is approved. Each is what the stories show today; each can change 
 | `storybook build` | pass (the three MDX pages compile) |
 | Screenshots | SideBySideDiff Playground light and dark at 1280px, BlindReview light, NarrowScreen at 360px, FileView Playground dark, NotKept, FileStatusBadges AllStatuses: reviewed by eye |
 
+D20 gate (after the D20 commit):
+
+| Command / check | Result |
+|---|---|
+| `pnpm lint` | pass |
+| `pnpm format:check` | pass |
+| `pnpm typecheck` | pass |
+| `pnpm test` | pass; web 18 files, 391 tests, 100% coverage (`lib/syntax-highlight.ts` 100% lines, branches, functions, statements) |
+| `pnpm test:storybook` | pass; 68 files, 298 tests. A first run inside the full gate timed out two stories at 15 s (one unrelated, Foundations/Icons) under load; the rerun passed |
+| `pnpm build` | pass (from a clean `apps/web/.next` and `apps/cli/dist`) |
+| `pnpm verify:pack` | pass; runtime dependencies stay `next`, `react`, `react-dom` |
+| 256 KiB TypeScript timing (NFR-123-07) | 357 ms (target under 1 s) |
+| Packaging proof with a temporary page (not committed) | a throwaway Server Component page highlighting a PHP file, built and packed: Shiki code in `.next/server` chunks only, no `@shikijs` require left external, nothing in `.next/static`; the installed tarball (no `@shikijs` in its `node_modules`) served the page with `text-syntax-token-*` spans and `&lt;script&gt;` as text |
+| Screenshots | FileView HighlightedTsx light, SideBySideDiff Highlighted dark: reviewed by eye |
+
 Red first: the NarrowScreen story failed with the first `md:grid-cols-2` layout (columns did not
 stack) and passes with the container query.
 
@@ -144,6 +211,11 @@ Not verified:
 - Rendering cost of a 30,000-line file in a page (D7).
 - No screen-reader check of the `sr-only` markers.
 - The docs pages were checked to compile, not read through in the Storybook UI.
+- D20: no page renders highlighted files, so `verify:pack` cannot check a highlighted file
+  (FR-123-77's smoke test) and `e2e/ui-contrast.spec.ts` does not measure the syntax colours on
+  a page (AC-14); both are Phase 3a's page work. The packaging was proved once by hand with a
+  temporary page (above). The diff row attachment is checked by Storybook play functions, not
+  by a unit test (components are outside unit coverage).
 
 ## Problems and deviations
 
@@ -153,9 +225,31 @@ Not verified:
 - The worktree sandbox refused some compound shell commands (downloads, `git show` piped into
   files); the mockups were read with plain `git show` into the scratchpad.
 
+- D20 deviations, for the maintainer:
+  - The dependency is `@shikijs/core`, `@shikijs/engine-javascript` and `@shikijs/langs`
+    (4.5.0, exact like `remark-gfm`), not `shiki`: with pnpm only direct dependencies can be
+    imported, and FR-123-77 asks for the `@shikijs/*` entry points. ADR-0014 says
+    "`apps/web/package.json` gains `shiki`".
+  - `highlightLines(text, language)` takes `SyntaxLanguage | null`, so the `no-language`
+    result exists for callers that pass `languageForPath(path)` straight through.
+  - The server log of FR-123-74 is a `console.error` with an ESLint `no-console` exception
+    (the web app has no logger; SPEC-014 §6 keeps console output to the CLI). It logs the
+    language and the error name, never the message or content.
+  - `tokenizeMaxLineLength` is passed as `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS + 1`: Shiki leaves a
+    line of exactly the limit plain, and FR-123-75 says lines *longer than* 10,000 stay plain.
+  - Shiki's CSS-variables theme uses `string-expression` for quoted strings, tags and JSON
+    keys' values, and `string` only for inline code and a few others; the palette gives
+    `string-expression` the green and `string` the teal.
+- D20 finding (needs a decision): `tokenizeTimeLimit` does not interrupt one slow regex
+  match. A TypeScript or JavaScript line of one 9,000-character identifier takes about 1.6 s
+  (three lines 4.8 s), so a 256 KiB file of such lines could take tens of seconds, beyond the
+  intent of NFR-123-07 and FR-123-74. Options: a total time budget per file (line-by-line with
+  `grammarState`), or a lower line limit. Not changed here, because both alter SPEC-123.
+
 ## Lessons recorded
 
 - [A component that must stack in a narrow column needs a container query](../lessons/2026-10-29-narrow-story-wrappers-need-container-queries.md)
+- [Shiki's per-line time limit does not bound one slow regex match, and its line-length limit is exclusive](../lessons/2026-10-29-shiki-time-limit-does-not-bound-one-regex-match.md)
 
 ## Follow-ups
 
@@ -165,3 +259,8 @@ Not verified:
   constants (D18).
 - Phases 3 to 5: Playwright tests, `ui-contrast` coverage of the row tints, browser QA agent and
   Codex review on the real pages.
+- D20, Phase 3a page: call `highlightLines` in the Server Components, extend `verify:pack` to
+  render a highlighted file from the tarball, measure the `--syntax-*` colours in
+  `e2e/ui-contrast.spec.ts`, and check that the browser loads no Shiki chunk.
+- D20: decide how to bound the slow-regex case (finding above) before a page highlights
+  untrusted files.
