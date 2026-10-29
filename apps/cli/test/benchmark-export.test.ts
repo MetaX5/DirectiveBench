@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -574,6 +575,68 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
       expect(readdirSync(out)).toEqual([]);
     });
   });
+
+  // Another user who can change a directory of the chain could win a race no path check can
+  // close (Codex review round 2), so such a chain is refused before anything is written.
+  describe.skipIf(process.platform === 'win32')(
+    'directories other users can change (exit 2)',
+    () => {
+      function shared(mode: number): string {
+        const dir = join(newScratch(), 'shared');
+        mkdirSync(dir);
+        chmodSync(dir, mode);
+        return dir;
+      }
+
+      it('refuses a parent writable by others, or by a foreign group, or owned by someone else', async () => {
+        const open = shared(0o777);
+        const error = await exportError(demoRunId, join(open, 'export'));
+        expect(error.exitCode).toBe(ExitCode.Usage);
+        expect(error.message).toBe(
+          `${open} can be changed by another user, who could redirect the export; choose a directory that only you can change. Nothing was written.`,
+        );
+        expect(readdirSync(open)).toEqual([]);
+
+        const group = shared(0o775);
+        fsHooks.afterLstat = (path, stats) => {
+          if (path === group) Object.assign(stats, { gid: stats.gid + 1 });
+        };
+        expect((await exportError(demoRunId, join(group, 'export'))).message).toContain(
+          `${group} can be changed by another user`,
+        );
+
+        const owned = shared(0o755);
+        fsHooks.afterLstat = (path, stats) => {
+          if (path === owned) Object.assign(stats, { uid: stats.uid + 1 });
+        };
+        expect((await exportError(demoRunId, join(owned, 'export'))).message).toContain(
+          `${owned} can be changed by another user`,
+        );
+      });
+
+      it('refuses an existing empty target writable by others', async () => {
+        const target = shared(0o777);
+        expect((await exportError(demoRunId, target)).message).toContain(
+          `${target} can be changed by another user`,
+        );
+        expect(readdirSync(target)).toEqual([]);
+      });
+
+      it('skips the owner and mode checks where the platform has no POSIX ids (Windows)', async () => {
+        // Windows has no `process.getuid`; its ACLs are a documented residual (FR-123-42).
+        vi.spyOn(process, 'getuid').mockReturnValue(undefined as never);
+        const open = shared(0o777);
+        expect((await exportRun(demoRunId, join(open, 'export'))).code).toBe(ExitCode.Ok);
+      });
+
+      it("accepts a sticky shared parent and one writable only by the user's own group", async () => {
+        const sticky = shared(0o1777);
+        expect((await exportRun(demoRunId, join(sticky, 'export'))).code).toBe(ExitCode.Ok);
+        const ownGroup = shared(0o775);
+        expect((await exportRun(demoRunId, join(ownGroup, 'export'))).code).toBe(ExitCode.Ok);
+      });
+    },
+  );
 
   // Exclusive create protects only the last name of a path: another process that swaps a
   // directory of the chain, or the file itself, must never receive the content (Codex review

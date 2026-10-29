@@ -131,9 +131,11 @@ class ExportChangedError extends Error {
  * The export directory and every directory created below it, with the identity each had when it
  * was checked or created. Node has no directory-relative (`openat`) file API, so every write goes
  * through a path; before content is written, the path's whole chain is checked again, and the
- * opened file must be the entry the path names. A directory or file swapped for another one, or
- * for a symbolic link, by another process is detected before any content reaches it, so no
- * content is written outside the export directory (SPEC-123 FR-123-42).
+ * opened file must be the entry the path names, so a directory or file that was swapped for
+ * another one, or for a symbolic link, stops the export before content reaches it (SPEC-123
+ * FR-123-42). Path-based checks cannot close a race against a process that swaps and restores
+ * between them; `assertOnlyUserCanChange` keeps other users out of the chain, so only the user
+ * (or root) could run such a process.
  */
 class ExportTree {
   private readonly dirs = new Map<string, Identity>();
@@ -177,6 +179,52 @@ class ExportTree {
     const opened = await handle.stat();
     const named = await lstat(path);
     if (named.dev !== opened.dev || named.ino !== opened.ino) throw new ExportChangedError(path);
+  }
+}
+
+/** Exported files and directories are private to the user, like the data directory. */
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+/** POSIX permission bits: written by the group, written by others, and the sticky bit. */
+const GROUP_WRITE = 0o020;
+const OTHER_WRITE = 0o002;
+const STICKY = 0o1000;
+
+/**
+ * Whether a user other than the current one (or root) can rename or replace entries in this
+ * directory: it belongs to someone else, or it is writable by others, or by a group that is not
+ * the user's own, without the sticky bit (which limits renames to each entry's owner, as in
+ * `/tmp`).
+ */
+function anotherUserCanChange(stats: Stats, uid: number, gid: number): boolean {
+  if (stats.uid !== 0 && stats.uid !== uid) return true;
+  if ((stats.mode & STICKY) !== 0) return false;
+  return (
+    (stats.mode & OTHER_WRITE) !== 0 || ((stats.mode & GROUP_WRITE) !== 0 && stats.gid !== gid)
+  );
+}
+
+/**
+ * Refuses (exit 2) an export whose directory, or any directory above it, another user could
+ * change: such a user could swap a directory for a symbolic link between a check and a write, a
+ * race that path-based checks cannot close because Node has no directory-relative `openat`
+ * (Codex review round 2). Within that chain only the current user and root can change anything,
+ * and they already hold every permission the export has. Windows has no POSIX owner or mode bits;
+ * its ACLs are not checked (residual, SPEC-123 FR-123-42).
+ */
+async function assertOnlyUserCanChange(start: string): Promise<void> {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid !== undefined && gid !== undefined) {
+    for (let current = start; ; current = dirname(current)) {
+      if (anotherUserCanChange(await lstat(current), uid, gid)) {
+        throw new CliError(
+          `${current} can be changed by another user, who could redirect the export; choose a directory that only you can change. Nothing was written.`,
+          ExitCode.Usage,
+        );
+      }
+      if (dirname(current) === current) return;
+    }
   }
 }
 
@@ -239,6 +287,7 @@ async function prepareTarget(dir: string): Promise<ExportTree> {
       ExitCode.Usage,
     );
   }
+  await assertOnlyUserCanChange(dir);
   return new ExportTree(dir, stats);
 }
 
@@ -276,10 +325,6 @@ async function claimOutputs(tree: ExportTree): Promise<FileHandle> {
     throw error;
   }
 }
-
-/** Exported files and directories are private to the user, like the data directory. */
-const PRIVATE_DIR_MODE = 0o700;
-const PRIVATE_FILE_MODE = 0o600;
 
 /**
  * Writes kept files below the claimed `files/` directory. Every directory is created one segment
@@ -384,6 +429,7 @@ export async function benchmarkExportCommand(flags: BenchmarkExportFlags): Promi
     const detail = await getBenchmarkRunDetail(handle.db, flags.runId);
     if (!detail) throw new CliError(`No benchmark run ${flags.runId}`, ExitCode.Usage);
     const dir = await targetPath(flags.out);
+    await assertOnlyUserCanChange(dirname(dir));
     const tree = await prepareTarget(dir);
     const manifestHandle = await claimOutputs(tree);
     const writer = new FileWriter(tree);
