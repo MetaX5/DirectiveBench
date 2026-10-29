@@ -64,6 +64,8 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
       `env > ${q('env')}`,
       `for arg in "$@"; do printf '%s\\n' "$arg"; done > ${q('argv')}`,
       'cat > /dev/null',
+      // An agent that writes its credential into its output (SPEC-123 AC-3): kept only redacted.
+      `if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'key=%s\\n' "$ANTHROPIC_API_KEY" > key.txt; fi`,
       ...body[mode],
       'exit 0',
       '',

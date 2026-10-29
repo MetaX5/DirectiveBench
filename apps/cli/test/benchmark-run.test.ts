@@ -25,6 +25,7 @@ import {
   type ImportArtifactInput,
 } from '@directivebench/database';
 import { LocalRunner } from '@directivebench/runner';
+import { eq } from 'drizzle-orm';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { benchmarkRunCommand, type RunTerminal } from '../src/benchmark-run';
 import { CliError, ExitCode, resolveAssets } from '../src/runtime';
@@ -221,6 +222,23 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     );
     expect(code).toBe(ExitCode.Ok);
     expect(s.fake.starts()).toBe(2);
+    // The candidate's output.md is kept with its agent run (SPEC-123 AC-1, fake claude).
+    const stored = openDatabase(join(s.dataDir, 'directivebench.db'), { readOnly: true });
+    try {
+      const files = await stored.db
+        .select({ variant: schema.agentRuns.variant, file: schema.agentRunFiles })
+        .from(schema.agentRunFiles)
+        .innerJoin(schema.agentRuns, eq(schema.agentRunFiles.agentRunId, schema.agentRuns.id));
+      expect(files.map((f) => [f.variant, f.file.path, f.file.kept, f.file.content])).toEqual([
+        ['candidate', 'output.md', 'full', '# Report\n\n## Summary\n'],
+      ]);
+      const kept = await stored.db
+        .select({ kept: schema.agentRuns.outputFilesKept })
+        .from(schema.agentRuns);
+      expect(kept).toEqual([{ kept: true }, { kept: true }]);
+    } finally {
+      stored.close();
+    }
     const out = s.output();
     expect(out).toContain('Agent runs: 2 (1 case(s) × 1 repetition(s) × 2 variants)');
     expect(out).toContain('Baseline:   no artifact');
@@ -317,8 +335,18 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
         await db.db.select().from(schema.jobs),
         await db.db.select().from(schema.benchmarkRuns),
         await db.db.select().from(schema.agentRuns),
+        await db.db.select().from(schema.agentRunFiles),
       ]);
       expect(rows).not.toContain(PLANTED_KEY);
+      // The agent wrote the key into a file: kept, redacted (SPEC-123 AC-3).
+      const keyFiles = await db.db
+        .select()
+        .from(schema.agentRunFiles)
+        .where(eq(schema.agentRunFiles.path, 'key.txt'));
+      expect(keyFiles).toHaveLength(2);
+      for (const file of keyFiles) {
+        expect(file).toMatchObject({ kept: 'full', content: 'key=[REDACTED]\n', redactions: 1 });
+      }
     } finally {
       db.close();
     }
