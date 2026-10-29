@@ -6,6 +6,7 @@ import {
   getBenchmarkRunDetail,
   importSuiteVersion,
   insertAgentRun,
+  countAgentRunFiles,
   getAgentRunFile,
   listAgentRunFiles,
   ARTIFACT_RUNS_PAGE_LIMIT,
@@ -322,6 +323,44 @@ describe('agent run output files (SPEC-123 FR-123-11, §8.3)', () => {
     ).rejects.toThrow();
     expect(await handle.db.select().from(schema.agentRuns)).toEqual([]);
     expect(await handle.db.select().from(schema.agentRunFiles)).toEqual([]);
+  });
+
+  it('counts the files of each agent run of one benchmark run without loading content', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets);
+    const otherRun = await seedRun(handle, targets);
+    const withFiles = await insertAgentRun(
+      handle,
+      agentRunInput(runId, {
+        outputFilesKept: true,
+        outputFiles: [
+          outputFile('a.txt', { storedBytes: 5 }),
+          outputFile('big.txt', { kept: 'truncated', reason: 'file-limit', storedBytes: 7 }),
+          outputFile('img.png', { kept: 'none', reason: 'binary', content: null, storedBytes: 0 }),
+          outputFile('old.txt', {
+            change: 'deleted',
+            sizeBytes: null,
+            sha256: null,
+            kept: 'none',
+            reason: 'deleted',
+            content: null,
+            storedBytes: 0,
+          }),
+        ],
+      }),
+    );
+    // Kept, but the agent changed no file: no row, so the page reads it as zero files.
+    await insertAgentRun(handle, agentRunInput(runId, { caseId: 'case-b', outputFilesKept: true }));
+    await insertAgentRun(
+      handle,
+      agentRunInput(otherRun, { outputFilesKept: true, outputFiles: [outputFile('a.txt')] }),
+    );
+
+    expect(await countAgentRunFiles(handle.db, runId)).toEqual([
+      { agentRunId: withFiles, files: 4, truncated: 1, notKept: 2, storedBytes: 12 },
+    ]);
+    expect(await countAgentRunFiles(handle.db, 'brun_missing')).toEqual([]);
   });
 
   it('removes the files with their benchmark run (cascade, AC-8)', async () => {
