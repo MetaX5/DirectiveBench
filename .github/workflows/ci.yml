@@ -55,8 +55,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
       - name: Unit and package tests with the 100% coverage threshold
-        # --continue: every package reports its failures, not only the first one.
-        run: pnpm test --continue
+        # --continue: every package reports its failures, not only the first one. The macOS runner
+        # has 3 cores; seven parallel suites starved the timing and SQLite-lock tests there (run
+        # 40959332904), so at most two packages run at once.
+        run: pnpm test --continue --concurrency=2
 
   build:
     name: Build and package
