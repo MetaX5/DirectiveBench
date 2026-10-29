@@ -3,7 +3,7 @@ id: SPEC-118
 title: Benchmark own skills with Claude Code against registry artifacts (S1)
 status: draft
 created: 2026-10-22
-updated: 2026-10-26
+updated: 2026-10-29
 category: feature
 related: [SPEC-203, SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-009, SPEC-013, SPEC-103, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0013]
 ---
@@ -1183,11 +1183,12 @@ changed before merge.
   benchmark run `not-comparable` (`other-skill-invoked`) when any run used one (FR-118-08); a
   `/<name>` prompt for a loaded skill listed in `slash_commands` counts as an invocation with
   `skillActivation.slashInvocation: 'inferred'` (FR-118-09).
-  - Not verified: API Key Mode (deferred by maintainer decision; AC-22 stays open), macOS and
+  - Not verified: API Key Mode (deferred by maintainer decision; AC-22 stays open and is
+    tracked outside E06 by E07, issue #147, since 2026-10-29), macOS and
     Windows, and whether the remaining listed skills (`design`, `doctor`, `plugin-authoring`) can
     be disabled.
-- **Not implemented:** the API Key Mode half of the live check (AC-22) and every other
-  requirement of §6 not listed above.
+- **Not implemented:** the API Key Mode half of the live check (AC-22, issue #103 under E07
+  #147) and every other requirement of §6 not listed above.
 
 ## 21. Phasing and implementation plan
 

@@ -35,7 +35,7 @@ Last filed: 2026-10-23
 ## .ai/specs/2026-10-22-benchmark-own-skills-s1.md
 
 Backlog source: .ai/specs/2026-10-22-benchmark-own-skills-s1.md
-Last filed: 2026-10-22
+Last filed: 2026-10-29
 
 | Id | Issue | Title | Parent | Depends on | Adopted |
 |---|---|---|---|---|---|
@@ -49,8 +49,12 @@ Last filed: 2026-10-22
 | E06-S03-T04 | [#102](https://github.com/MetaX5/DirectiveBench/issues/102) | Readiness: auth status, API key presence and detection ready/missing | #96 | — | no |
 | E06-S03-T05 | [#117](https://github.com/MetaX5/DirectiveBench/issues/117) | Compose ClaudeCodeAdapter from the S03 pieces and prove #96 end to end with the fake claude | #96 | E06-S03-T01 (#99), E06-S03-T02 (#100), E06-S03-T03 (#101), E06-S03-T04 (#102) | no |
 | E06-S04 | [#97](https://github.com/MetaX5/DirectiveBench/issues/97) | A skill author scaffolds a suite and runs it against a skill version from the CLI, with or without an A/B baseline, and gets a verdict and exit code | #93 | E06-S01 (#94), E06-S02 (#95), E06-S03 (#96) | no |
-| E06-S04-T01 | [#103](https://github.com/MetaX5/DirectiveBench/issues/103) | Opt-in live check in both auth modes; record results in SPEC-203 before S04 ships | #97 | E06-S03 (#96) | no |
 | E06-S05 | [#98](https://github.com/MetaX5/DirectiveBench/issues/98) | A skill author sees runs per skill version, the baseline, comparability and regressions on the artifact page | #93 | E06-S02 (#95) | no |
+| E07 | [#147](https://github.com/MetaX5/DirectiveBench/issues/147) | Verify Claude Code benchmarks in API Key Mode | — | — | no |
+| E07-T01 | [#103](https://github.com/MetaX5/DirectiveBench/issues/103) | Opt-in live check in API Key Mode; record results in SPEC-203 | #147 | E06-S03 (#96) | no |
+
+E07-T01 was E06-S04-T01. Local Subscription Mode was verified in #126; on 2026-10-29 the
+maintainer moved the API Key Mode half of AC-22 into E07, because no API key is available yet.
 
 ## Maintainer UI follow-ups (2026-10-23)
 
