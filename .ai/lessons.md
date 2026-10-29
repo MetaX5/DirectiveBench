@@ -18,6 +18,7 @@ Do not record secrets, personal data or information that is already obvious from
 
 ## Index
 
+- [2026-10-29] **Prove a memory-release test fails on a real leak** — a `WeakRef` + `gc()` test only counts once a deliberately injected leak made it fail. → [lessons/2026-10-29-prove-a-memory-release-test-fails-on-a-leak.md](lessons/2026-10-29-prove-a-memory-release-test-fails-on-a-leak.md)
 - [2026-10-29] **A deterministic assertion must check the outcome, not one way of reaching it** — in the first real D03 check, a "must add `deprecated`" check failed 6/12 runs; those inspected had validly kept the saved markup identical instead. → [lessons/2026-10-29-assert-outcomes-not-one-solution.md](lessons/2026-10-29-assert-outcomes-not-one-solution.md)
 - [2026-10-29] **Tests never snapshot shared global state such as `os.tmpdir()`** — a before/after listing of the shared tmpdir raced with parallel Vitest workers and turned the required unit-test check red; stub `TMPDIR` to a private directory and assert on it. → [lessons/2026-10-29-tests-never-snapshot-shared-tmpdir.md](lessons/2026-10-29-tests-never-snapshot-shared-tmpdir.md)
 - [2026-10-28] **A UI change gets a browser QA agent and a Codex review before it is called done** — maintainer correction on PR #141: the agent found an overflow and three focus losses, Codex an unbounded query and two focus bugs, after the gate passed. → [lessons/2026-10-28-ui-changes-get-a-browser-qa-agent.md](lessons/2026-10-28-ui-changes-get-a-browser-qa-agent.md)

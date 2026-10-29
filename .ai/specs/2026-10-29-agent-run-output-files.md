@@ -676,11 +676,27 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
 
 ## 20. Implementation status
 
-- **Implemented:** none.
-- **Partially implemented:** none.
-- **Not implemented:** everything in this spec. Today `changedFiles` (paths only) is stored and
-  workspaces are removed after each agent run. Syntax highlighting (Phase 3a) is not
-  implemented either.
+- **Implemented (Phase 1, capture and storage; issue #152, run log
+  [2026-10-29-agent-run-output-files-capture](../runs/2026-10-29-agent-run-output-files-capture.md),
+  verified on 2026-10-29 by `packages/benchmark-engine/test/{output-files,output-files-simulated-fs,orchestrator}.test.ts`,
+  `packages/core/test/secret-ranges.test.ts`, `packages/agent-adapters/test/output-secrets.test.ts`,
+  `packages/database/test/{client,runs}.test.ts`, `packages/runner/test/runner.test.ts`,
+  `apps/cli/test/benchmark-run.test.ts` (fake `claude`) and a `directivebench demo` run of the
+  built CLI whose six agent runs each stored `src/parse-age.js` in `agent_run_files` with
+  unchanged scores):**
+  FR-123-01 to FR-123-11 and FR-123-60; migration `0003` (§8.1, without the Phase 5 tables);
+  §8.2 contracts (`AgentRunRecord.outputFiles`, `OutputFilesCapture`,
+  `onAgentRun(record, capture)`, `AgentAdapter.findOutputSecrets`, core `findSecretRanges` and
+  `TextRange`, the named constants of `benchmark-engine`); §8.3 `insertAgentRun`,
+  `listAgentRunFiles`, `getAgentRunFile`; the engine, database and adapter side of AC-2, AC-3
+  (including the private-key regressions of Codex rounds 1 to 3 with the mock, Claude Code and
+  no-range adapters), AC-4, AC-8 (agent-run files), AC-9, AC-10 and AC-11.
+- **Partially implemented:** AC-1 to AC-4 and AC-11: files are stored and readable through the
+  repository functions, but nothing shows them yet (Phase 3). NFR-123-01 (capture time) is a
+  target without a timing test.
+- **Not implemented:** Phases 2 (CLI export), 3 (run page and files page), 3a (syntax
+  highlighting), 4 (compare) and 5 (blind review, migration `0004`): FR-123-20 to FR-123-55,
+  FR-123-70 to FR-123-77, AC-5 to AC-7 and AC-12 to AC-15.
 
 ## 21. Phasing and implementation plan
 
