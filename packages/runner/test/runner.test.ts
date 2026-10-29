@@ -7,7 +7,9 @@ import { MockAgentAdapter, createExecutableAdapters } from '@directivebench/agen
 import {
   enqueueBenchmarkJob,
   getBenchmarkRunDetail,
+  getAgentRunFile,
   getJob,
+  listAgentRunFiles,
   listArtifacts,
   migrateDatabase,
   openDatabase,
@@ -69,6 +71,23 @@ describe('vertical slice: import → enqueue → run → persist', () => {
     expect(detail?.run.summary).toMatchObject({ delta: 0.5, displayStatus: 'passed' });
     expect(detail?.agentRuns).toHaveLength(6);
     expect(detail?.agentRuns.flatMap((r) => r.assertions)).toHaveLength(24);
+
+    // Every agent run kept the files it wrote, in the same transaction (SPEC-123 FR-123-11).
+    for (const agentRun of detail?.agentRuns ?? []) {
+      expect(agentRun).toMatchObject({ outputFilesKept: true, outputFilesReason: null });
+      const files = await listAgentRunFiles(handle.db, agentRun.id);
+      expect(files.map((f) => f.path)).toEqual(agentRun.changedFiles.map((c) => c.path));
+      expect(files.length).toBeGreaterThan(0);
+      for (const file of files) {
+        const stored = await getAgentRunFile(handle.db, {
+          benchmarkRunId: runId,
+          agentRunId: agentRun.id,
+          path: file.path,
+        });
+        expect(stored).toMatchObject({ kept: 'full', reason: null, redactions: 0 });
+        expect(Buffer.byteLength(stored?.content ?? '')).toBe(stored?.sizeBytes);
+      }
+    }
 
     const listed = await listArtifacts(handle.db);
     expect(listed[0]?.latestEvaluation).toMatchObject({
