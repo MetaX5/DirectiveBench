@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { FileStatusBadges } from '@/components/output-files/file-status-badges';
 
 // The component catalogue of the "Components" page (SPEC-122 stage 4): a small live preview of
 // the real component, its group, one sentence and a link to its page.
@@ -193,6 +194,31 @@ const entries: Entry[] = [
     docs: 'product-registry-markdown--docs',
     description: 'Renders untrusted Markdown from artifacts safely.',
     preview: <span className="text-body font-semibold">Validate external input</span>,
+  },
+  {
+    name: 'FileView',
+    group: 'Product',
+    docs: 'product-benchmarking-fileview--docs',
+    description: 'Shows one file an agent run wrote, with line numbers. Proposed (SPEC-123).',
+    preview: <span className="font-mono text-ui">src/render.php</span>,
+  },
+  {
+    name: 'SideBySideDiff',
+    group: 'Product',
+    docs: 'product-benchmarking-sidebysidediff--docs',
+    description: 'Compares one path of two agent runs, aligned by lines. Proposed (SPEC-123).',
+    preview: <span className="font-mono text-ui">Left | Right</span>,
+  },
+  {
+    name: 'FileStatusBadges',
+    group: 'Product',
+    docs: 'product-benchmarking-filestatusbadges--docs',
+    description: 'Says how an output file changed and whether it was kept. Proposed (SPEC-123).',
+    preview: (
+      <FileStatusBadges
+        file={{ change: 'modified', kept: 'truncated', reason: 'file-limit', redactions: 0 }}
+      />
+    ),
   },
 ];
 

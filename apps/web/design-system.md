@@ -33,6 +33,9 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | MockBadge | `@/components/common` | Every mock-agent result, always | Real agents |
 | NotSandboxedBadge | `@/components/common` | A `local-process` suite | Sandboxed runs |
 | Markdown | `@/components/artifacts/markdown` | Rendering artifact Markdown safely | App-authored text |
+| FileView (proposed) | `@/components/output-files/file-view` | One file an agent run wrote, line-numbered; optional `highlight` from the server | JSON or command output (`Pre`) |
+| SideBySideDiff (proposed) | `@/components/output-files/side-by-side-diff` | One path of two agent runs; `variant="neutral"` in blind review; optional `highlight` per side | One file (`FileView`) |
+| FileStatusBadges (proposed) | `@/components/output-files/file-status-badges` | An output file's change and kept state | A run's outcome (`StatusBadge`) |
 
 Raw `<button>`, `<input>` (except hidden), `<select>`, `<textarea>` and `<table>` in `app/`
 or `components/` fail ESLint. Missing primitives (Dialog, Checkbox, Combobox, Toast,
@@ -53,8 +56,13 @@ do not improvise one; ask.
 - Spacing by relation: `gap-inline` (controls in a row), `gap-inline-tight` (icon and label,
   badges), `space-y-stack` (inside a panel), `gap-grid` (between panels), `space-y-section`
   and `mb-section` (between sections), `px-page-inline py-page-block` (page).
-- Sizes: `h-control` (32px), `h-control-sm`, `h-control-xs`, `max-w-content`, `w-sidebar`.
+- Sizes: `h-control` (32px), `h-control-sm`, `h-control-xs`, `max-w-content`, `max-w-wide` (only through `data-layout="wide"` on a
+  wide table page; `main` switches itself), `w-sidebar`.
 - Shape: square; `rounded-surface` only. No shadows.
+- Syntax colours (D20): `text-syntax-foreground` and `text-syntax-token-*`, only inside
+  `FileView` and `SideBySideDiff`, from tokens computed on the server by
+  `lib/syntax-highlight.ts` (Shiki, `server-only`). Never highlight in the browser and never
+  render highlighter HTML.
 
 ## If… use…
 
@@ -70,6 +78,7 @@ do not improvise one; ask.
 | A reversible removal that keeps history | No confirmation; say what was kept |
 | Loading | Disable the control and say what is happening |
 | Numbers | `formatScore` ("83.3%"), `formatDelta` ("+50 pts"), `formatDuration`, `formatDate` from `lib/utils.ts` |
+| Code with syntax colours | `highlightLines(text, languageForPath(path))` in a Server Component, passed as `highlight` to `FileView` or a `SideBySideDiff` side |
 
 ## What to avoid
 

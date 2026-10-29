@@ -707,8 +707,12 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   repository functions, but nothing shows them yet (Phase 3). NFR-123-01 (capture time) is a
   target without a timing test.
 - **Not implemented:** Phases 2 (CLI export), 3 (run page and files page), 3a (syntax
-  highlighting), 4 (compare) and 5 (blind review, migration `0004`): FR-123-20 to FR-123-55,
-  FR-123-70 to FR-123-77, AC-5 to AC-7 and AC-12 to AC-15.
+  highlighting on pages), 4 (compare) and 5 (blind review, migration `0004`): FR-123-20 to
+  FR-123-55, FR-123-70 to FR-123-78, AC-5 to AC-7 and AC-12 to AC-15. The design-system
+  components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
+  `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
+  ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)),
+  not in this status: no page uses them yet.
 
 ## 21. Phasing and implementation plan
 

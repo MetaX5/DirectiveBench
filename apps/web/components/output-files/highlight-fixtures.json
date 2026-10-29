@@ -1,0 +1,1187 @@
+{
+  "candidateRender": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "$wrapper ",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "get_block_wrapper_attributes",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": "punctuation"
+        }
+      ],
+      [
+        {
+          "text": "  array( ",
+          "token": "function"
+        },
+        {
+          "text": "'class'",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": "function"
+        },
+        {
+          "text": "=>",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": "function"
+        },
+        {
+          "text": "'is-dismissible'",
+          "token": "string-expression"
+        },
+        {
+          "text": " )",
+          "token": "function"
+        }
+      ],
+      [
+        {
+          "text": ")",
+          "token": "punctuation"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "$label ",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "esc_attr__",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": "function"
+        },
+        {
+          "text": "'Close notice'",
+          "token": "string-expression"
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": "function"
+        },
+        {
+          "text": "'notice-block'",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": "function"
+        },
+        {
+          "text": ")",
+          "token": "punctuation"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "?>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "<",
+          "token": "keyword"
+        },
+        {
+          "text": "div ",
+          "token": null
+        },
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php ",
+          "token": null
+        },
+        {
+          "text": "echo",
+          "token": "function"
+        },
+        {
+          "text": " $wrapper; ",
+          "token": null
+        },
+        {
+          "text": "?>>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php ",
+          "token": null
+        },
+        {
+          "text": "echo",
+          "token": "function"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "wp_kses_post",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": "punctuation"
+        },
+        {
+          "text": " $content ",
+          "token": "function"
+        },
+        {
+          "text": ")",
+          "token": "punctuation"
+        },
+        {
+          "text": "; ",
+          "token": null
+        },
+        {
+          "text": "?>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "<",
+          "token": "keyword"
+        },
+        {
+          "text": "button type",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"button\"",
+          "token": "string-expression"
+        },
+        {
+          "text": " aria",
+          "token": null
+        },
+        {
+          "text": "-",
+          "token": "keyword"
+        },
+        {
+          "text": "label",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"<?php echo $label; ?>\"",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": "keyword"
+        },
+        {
+          "text": "x",
+          "token": null
+        },
+        {
+          "text": "</",
+          "token": "keyword"
+        },
+        {
+          "text": "button",
+          "token": null
+        },
+        {
+          "text": ">",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "</",
+          "token": "keyword"
+        },
+        {
+          "text": "div",
+          "token": null
+        },
+        {
+          "text": ">",
+          "token": "keyword"
+        }
+      ]
+    ]
+  },
+  "baselineRender": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "$wrapper ",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "get_block_wrapper_attributes",
+          "token": "function"
+        },
+        {
+          "text": "()",
+          "token": "punctuation"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "$label ",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "'Close'",
+          "token": "string-expression"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "?>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "<",
+          "token": "keyword"
+        },
+        {
+          "text": "div ",
+          "token": null
+        },
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php ",
+          "token": null
+        },
+        {
+          "text": "echo",
+          "token": "function"
+        },
+        {
+          "text": " $wrapper; ",
+          "token": null
+        },
+        {
+          "text": "?>>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "<?",
+          "token": "keyword"
+        },
+        {
+          "text": "php ",
+          "token": null
+        },
+        {
+          "text": "echo",
+          "token": "function"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "wp_kses_post",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": "punctuation"
+        },
+        {
+          "text": " $content ",
+          "token": "function"
+        },
+        {
+          "text": ")",
+          "token": "punctuation"
+        },
+        {
+          "text": "; ",
+          "token": null
+        },
+        {
+          "text": "?>",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "<",
+          "token": "keyword"
+        },
+        {
+          "text": "button type",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"button\"",
+          "token": "string-expression"
+        },
+        {
+          "text": "><?",
+          "token": "keyword"
+        },
+        {
+          "text": "php ",
+          "token": null
+        },
+        {
+          "text": "echo",
+          "token": "function"
+        },
+        {
+          "text": " $label; ",
+          "token": null
+        },
+        {
+          "text": "?></",
+          "token": "keyword"
+        },
+        {
+          "text": "button",
+          "token": null
+        },
+        {
+          "text": ">",
+          "token": "keyword"
+        }
+      ],
+      [
+        {
+          "text": "</",
+          "token": "keyword"
+        },
+        {
+          "text": "div",
+          "token": null
+        },
+        {
+          "text": ">",
+          "token": "keyword"
+        }
+      ]
+    ]
+  },
+  "editTsx": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "import",
+          "token": "keyword"
+        },
+        {
+          "text": " { useBlockProps } ",
+          "token": null
+        },
+        {
+          "text": "from",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "'@wordpress/block-editor'",
+          "token": "string-expression"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [],
+      [
+        {
+          "text": "/** Editor view of the notice block. */",
+          "token": "comment"
+        }
+      ],
+      [
+        {
+          "text": "export",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "default",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "function",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "Edit",
+          "token": "function"
+        },
+        {
+          "text": "({ attributes",
+          "token": null
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        },
+        {
+          "text": " setAttributes }",
+          "token": null
+        },
+        {
+          "text": ":",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "EditProps",
+          "token": "function"
+        },
+        {
+          "text": ") {",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "const",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "label",
+          "token": "constant"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "`Close ",
+          "token": "string-expression"
+        },
+        {
+          "text": "${",
+          "token": "keyword"
+        },
+        {
+          "text": "attributes",
+          "token": "constant"
+        },
+        {
+          "text": ".title ",
+          "token": null
+        },
+        {
+          "text": "??",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "'notice'",
+          "token": "string-expression"
+        },
+        {
+          "text": "}",
+          "token": "keyword"
+        },
+        {
+          "text": "`",
+          "token": "string-expression"
+        },
+        {
+          "text": ";",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "return",
+          "token": "keyword"
+        },
+        {
+          "text": " (",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "    <",
+          "token": null
+        },
+        {
+          "text": "div",
+          "token": "string-expression"
+        },
+        {
+          "text": " {",
+          "token": null
+        },
+        {
+          "text": "...",
+          "token": "keyword"
+        },
+        {
+          "text": "useBlockProps",
+          "token": "function"
+        },
+        {
+          "text": "({ className",
+          "token": null
+        },
+        {
+          "text": ":",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "'is-dismissible'",
+          "token": "string-expression"
+        },
+        {
+          "text": " })}>",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "      <",
+          "token": null
+        },
+        {
+          "text": "button",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "type",
+          "token": "function"
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"button\"",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "aria-label",
+          "token": "function"
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "{label} ",
+          "token": null
+        },
+        {
+          "text": "onClick",
+          "token": "function"
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "{() ",
+          "token": null
+        },
+        {
+          "text": "=>",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "setAttributes",
+          "token": "function"
+        },
+        {
+          "text": "({ open",
+          "token": null
+        },
+        {
+          "text": ":",
+          "token": "keyword"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "false",
+          "token": "constant"
+        },
+        {
+          "text": " })}>",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "        x",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "      </",
+          "token": null
+        },
+        {
+          "text": "button",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "    </",
+          "token": null
+        },
+        {
+          "text": "div",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "  );",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "}",
+          "token": null
+        }
+      ]
+    ]
+  },
+  "blockJson": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "{",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "\"$schema\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "\"https://schemas.wp.org/trunk/block.json\"",
+          "token": "string-expression"
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "\"apiVersion\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "3",
+          "token": "constant"
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "\"name\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "\"notice-block/notice\"",
+          "token": "string-expression"
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "\"supports\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " { ",
+          "token": null
+        },
+        {
+          "text": "\"html\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "false",
+          "token": "constant"
+        },
+        {
+          "text": " }",
+          "token": null
+        },
+        {
+          "text": ",",
+          "token": "punctuation"
+        }
+      ],
+      [
+        {
+          "text": "  ",
+          "token": null
+        },
+        {
+          "text": "\"render\"",
+          "token": "keyword"
+        },
+        {
+          "text": ":",
+          "token": "punctuation"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "\"file:./render.php\"",
+          "token": "string-expression"
+        }
+      ],
+      [
+        {
+          "text": "}",
+          "token": null
+        }
+      ]
+    ]
+  },
+  "readmeMarkdown": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "# Notice block",
+          "token": null
+        }
+      ],
+      [],
+      [
+        {
+          "text": "A dismissible notice. See ",
+          "token": null
+        },
+        {
+          "text": "[",
+          "token": "link"
+        },
+        {
+          "text": "the block API",
+          "token": "keyword"
+        },
+        {
+          "text": "](https://developer.wordpress.org/block-editor/)",
+          "token": "link"
+        },
+        {
+          "text": ".",
+          "token": null
+        }
+      ],
+      [],
+      [
+        {
+          "text": "```sh",
+          "token": "string"
+        }
+      ],
+      [
+        {
+          "text": "npm",
+          "token": "function"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "run",
+          "token": "string"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "build",
+          "token": "string"
+        }
+      ],
+      [
+        {
+          "text": "```",
+          "token": "string"
+        }
+      ]
+    ]
+  },
+  "hostileHtml": {
+    "kind": "highlighted",
+    "lines": [
+      [
+        {
+          "text": "<",
+          "token": null
+        },
+        {
+          "text": "script",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": null
+        },
+        {
+          "text": "alert",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": null
+        },
+        {
+          "text": "1",
+          "token": "constant"
+        },
+        {
+          "text": ")</",
+          "token": null
+        },
+        {
+          "text": "script",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": null
+        }
+      ],
+      [
+        {
+          "text": "<",
+          "token": null
+        },
+        {
+          "text": "img",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "src",
+          "token": "function"
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"x\"",
+          "token": "string-expression"
+        },
+        {
+          "text": " ",
+          "token": null
+        },
+        {
+          "text": "onerror",
+          "token": "function"
+        },
+        {
+          "text": "=",
+          "token": "keyword"
+        },
+        {
+          "text": "\"",
+          "token": "string-expression"
+        },
+        {
+          "text": "alert",
+          "token": "function"
+        },
+        {
+          "text": "(",
+          "token": "string-expression"
+        },
+        {
+          "text": "2",
+          "token": "constant"
+        },
+        {
+          "text": ")\"",
+          "token": "string-expression"
+        },
+        {
+          "text": ">",
+          "token": null
+        }
+      ]
+    ]
+  }
+}

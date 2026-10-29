@@ -15,6 +15,7 @@ How the tokens appear in code:
 | `space-page-inline`, `space-page-block`, `space-section`, `space-grid`, `space-stack`, `space-inline`, `space-inline-tight` | `--spacing-page-inline` (from `--page-inline`), `--spacing-page-block`, … | `px-page-inline`, `py-page-block`, `mb-section`, `gap-grid`, `space-y-stack`, `gap-inline`, `gap-inline-tight` |
 | `radius-surface` | `--radius-surface` | `rounded-surface` |
 | `size-content-max` | `--container-content` | `max-w-content` |
+| `size-content-wide` | `--container-wide` | `max-w-wide` |
 | `control-height`, `-sm`, `-xs` | `--spacing-control`, `-sm`, `-xs` | `h-control`, `size-control`, … |
 | `sidebar-width` | `--spacing-sidebar` | `w-sidebar` |
 | `button-secondary-hover` | `--button-secondary-hover` | `hover:bg-button-secondary-hover` |
@@ -50,6 +51,7 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 | `palette-green-{45,55,72}` | `--palette-green-{45,55,72}` | raw | (.45 .12 150) / (.55 .14 150) / (.72 .15 150) | FR-4, FR-8, D6 | `app/globals.css` | components and pages |
 | `palette-amber-{45,68,80}` | `--palette-amber-{45,68,80}` | raw | (.45 .10 70) / (.68 .15 70) / (.80 .14 75) | FR-4, FR-8 | `app/globals.css` | components and pages |
 | `palette-blue-{45,55,72}` | `--palette-blue-{45,55,72}` | raw | (.45 .12 250) / (.55 .13 250) / (.72 .12 250) | FR-4, FR-8 | `app/globals.css` | components and pages |
+| `palette-violet-{48,75}`, `palette-teal-{47,75}`, `palette-orange-{48,75}` | `--palette-violet-{48,75}`, `--palette-teal-{47,75}`, `--palette-orange-{48,75}` | raw | violet (.48 .18 300) / (.75 .13 300); teal (.47 .09 190) / (.75 .10 190); orange (.48 .14 40) / (.75 .12 40) | SPEC-123 D20 | `app/globals.css` (syntax tokens) | components and pages |
 | `scale-spacing` | none | raw | 0.25rem × n (Tailwind `--spacing`) | Tailwind 4 | source for `space-*` | new code where a `space-*` token fits |
 | `scale-radius` | `--radius`, `--radius-{sm,md,lg,xl,2xl,3xl,4xl}` | raw | `--radius` .625rem and its sm to 4xl steps | P1 | the shadcn generator only | components (see D7) |
 | `scale-text` | none | raw | .6875 / .75 / .875 / 1 / 1.125 / 1.25 / 1.5 rem | Tailwind, D8 | source for `text-*` | arbitrary `text-[Npx]` |
@@ -96,11 +98,14 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 | **`space-inline`**, **`space-inline-tight`** | `--spacing-inline`, `--spacing-inline-tight` | semantic | 0.5rem; 0.25rem | D9 | a row of controls; icon next to a label | page layout |
 | **`radius-surface`** | `--radius-surface` | semantic | 0 | P1 (Lyra), D7 | all surfaces and controls | |
 | **`size-content-max`** | `--container-content` | semantic | 72rem | `app/layout.tsx` | maximum width of `main` | |
+| **`size-content-wide`** | `--container-wide` | semantic | 96rem | issue 122 (`app/layout.tsx`) | maximum width of `main` on a page whose content has `data-layout="wide"`: wide tables such as the Artifacts list | text, forms and detail pages |
 | `card-spacing` | none (inline in `components/ui/card.tsx`) | component | 1rem, .75rem for size `sm` | P1 (already in `components/ui/card.tsx`) | Card | other components |
 | **`control-height`**, **`control-height-sm`**, **`control-height-xs`** | `--spacing-control`, `--spacing-control-sm`, `--spacing-control-xs` | component | 2rem / 1.75rem / 1.5rem | FR-6 (32px) | Button, Input, NativeSelect | |
 | **`button-secondary-hover`** | `--button-secondary-hover` | component | color-mix(in oklch, secondary, foreground 5%) | FR-6 (currently an inline class) | secondary button hover | |
 | **`sidebar-width`** | `--spacing-sidebar` | component | 14rem | `app/layout.tsx` | aside | |
 | **`scorebar-red-phase`**, **`scorebar-green-phase`**, **`scorebar-track`** | `--scorebar-red-phase`, `--scorebar-green-phase`, `--scorebar-track` | component | destructive 70%; success 80%; muted | RED/GREEN evaluation spec, D5 | ScoreBar on result pages | statuses outside ScoreBar |
+| **`syntax-foreground`** | `--syntax-foreground` | component | neutral-950 / neutral-50 | SPEC-123 D20 (FR-123-73) | text of highlighted code without a token colour | text outside FileView and SideBySideDiff |
+| **`syntax-token-*`** (code colours) | `--syntax-token-{comment,keyword,string,string-expression,constant,function,parameter,punctuation,link}` | component | comment neutral-550 / neutral-400; keyword violet-48 / violet-75; string teal-47 / teal-75; string-expression green-45 / green-72; constant blue-45 / blue-72; function orange-48 / orange-75; parameter amber-45 / amber-80; punctuation neutral-700 / neutral-200; link lime-900 / lime-400 | SPEC-123 D20 (FR-123-73), Shiki CSS-variables theme | syntax colours in FileView and SideBySideDiff (`text-syntax-token-*`), set by `lib/syntax-highlight.ts` | statuses, links and any meaning (colour adds none) |
 
 ## Colour pairs and contrast
 
@@ -147,6 +152,23 @@ pages.
 | U11 | muted / card | ScoreBar track | 1.09 ✗ | 1.19 ✗ |
 | U12 | border / background | separators, card outline, outline button | 1.26 ✗ | 1.25 ✗ |
 | U13 | primary / background | primary button fill | 1.54 ✗ | 10.12 |
+| S01 | syntax-foreground / code surface, removed, added, neutral row | highlighted code text | 19.13 / 16.04 / 16.83 / 16.88 | 16.15 / 14.13 / 13.69 / 13.72 |
+| S02 | syntax-token-comment / code surface, removed, added, neutral row | comments | 5.81 / 4.87 / 5.11 / 5.12 | 6.52 / 5.71 / 5.53 / 5.54 |
+| S03 | syntax-token-keyword / code surface, removed, added, neutral row | keywords, operators, JSON keys | 6.89 / 5.78 / 6.06 / 6.08 | 7.26 / 6.35 / 6.15 / 6.16 |
+| S04 | syntax-token-string / code surface, removed, added, neutral row | inline code, other strings | 6.24 / 5.23 / 5.49 / 5.50 | 7.89 / 6.90 / 6.69 / 6.70 |
+| S05 | syntax-token-string-expression / code surface, removed, added, neutral row | quoted and template strings, tags | 6.78 / 5.69 / 5.97 / 5.98 | 7.20 / 6.30 / 6.10 / 6.11 |
+| S06 | syntax-token-constant / code surface, removed, added, neutral row | numbers, constants, properties | 7.22 / 6.06 / 6.35 / 6.37 | 6.86 / 6.00 / 5.82 / 5.83 |
+| S07 | syntax-token-function / code surface, removed, added, neutral row | functions, types, attributes | 6.70 / 5.62 / 5.90 / 5.91 | 7.27 / 6.36 / 6.16 / 6.18 |
+| S08 | syntax-token-parameter / code surface, removed, added, neutral row | function parameters | 7.38 / 6.18 / 6.49 / 6.51 | 8.83 / 7.73 / 7.48 / 7.50 |
+| S09 | syntax-token-punctuation / code surface, removed, added, neutral row | separators, argument brackets | 10.02 / 8.40 / 8.82 / 8.84 | 13.38 / 11.71 / 11.34 / 11.37 |
+| S10 | syntax-token-link / code surface, removed, added, neutral row | Markdown links | 8.47 / 7.10 / 7.45 / 7.47 | 10.99 / 9.62 / 9.31 / 9.34 |
+
+S01 to S10 (SPEC-123 D20, FR-123-73) put each syntax colour on the four backgrounds a code line
+can have: the code surface of FileView (`muted` 40% over `card`), and that surface under the D11
+removed (`destructive` 10%) and added (`success` 10%) tints and the D12 neutral tint (`info`
+10%). `card` is the worst case: in dark it is lighter than `background`. The lowest is S02 on a
+removed row in light (4.87). The Foundations/Colour story measures all 40 values in Chromium in
+both themes.
 
 After the changes all 50 pairs were recomputed: none fell below its threshold and no ratio
 decreased. Accepted exceptions:

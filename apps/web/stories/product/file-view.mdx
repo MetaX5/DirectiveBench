@@ -1,0 +1,156 @@
+import { ArgTypes, Canvas, Meta } from '@storybook/addon-docs/blocks';
+import * as Stories from '../../components/output-files/file-view.stories';
+
+<Meta of={Stories} />
+
+# FileView
+
+`import { FileView } from '@/components/output-files/file-view'`
+
+**Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** No page uses it
+yet; the agent-run files page (SPEC-123 Phase 3) is planned.
+
+## 1. Purpose
+
+Shows one file an agent run wrote, read-only: its path, its size, why it is cut or not shown,
+and the kept text with line numbers, with syntax colours when the server could highlight it.
+Source: SPEC-123 FR-123-21, §11, §6.7 (decision D20, ADR-0014).
+
+## 2. When to use
+
+The selected file on the agent-run files page (`/results/[id]/agent-runs/[agentRunId]`).
+
+## 3. When not to use
+
+| Situation                          | Use instead                                   |
+| ---------------------------------- | --------------------------------------------- |
+| The same path in two agent runs    | `SideBySideDiff`                              |
+| JSON, a trace or command output    | `Pre`                                         |
+| An artifact file from the registry | ContentTab (`Markdown` or the raw `Pre` view) |
+| A list of files with their state   | `Table` with `FileStatusBadges` in a cell     |
+
+## 4. Anatomy
+
+1. Header: the path as an `h3` in `font-mono` (wraps anywhere) and the size in
+   `text-muted-foreground` ("2.1 KB").
+2. Notices: one `role="status"` block of sentences from `fileNotices` (`lib/output-files.ts`).
+3. Content: a named scroll region (`role="region"`, "Content of &lt;path&gt;", a tab stop)
+   holding a `pre`. Each line has a sticky, right-aligned number in a `bg-muted` gutter, hidden
+   from assistive technology and from selection.
+4. Syntax colours (optional, D20): with a `highlight` result of kind `highlighted`, each line's
+   text is a row of `span`s, one per token, coloured with `text-syntax-token-*`; text without a
+   token kind uses `text-syntax-foreground`. The gutter is never coloured.
+
+## 5. Variants
+
+None. The states below come from the file's data and its `highlight` result. Syntax colours
+depend on the extension (`.php`, `.tsx`, `.json`, `.md` and the rest of FR-123-71); the
+language is never guessed from content.
+
+<Canvas of={Stories.Playground} />
+<Canvas of={Stories.HighlightedPhp} />
+<Canvas of={Stories.HighlightedTsx} />
+<Canvas of={Stories.HighlightedJson} />
+<Canvas of={Stories.HighlightedMarkdown} />
+
+## 6. States
+
+| State                  | What the view shows                                                         |
+| ---------------------- | --------------------------------------------------------------------------- |
+| Kept in full           | Lines only, no notice                                                       |
+| Empty file             | "The file is empty.", no block                                              |
+| Truncated (file limit) | "Truncated at 1 MB: the file has N bytes." and the kept start               |
+| Truncated (run limit)  | "Truncated: the 10 MB limit for this agent run was reached."                |
+| Binary                 | "Binary file, not kept.", no block                                          |
+| Deleted                | "Deleted by the agent.", no block                                           |
+| Artifact file          | "Artifact file, not kept.", no block                                        |
+| Not kept (run limit)   | "Not kept: the 10 MB limit for this agent run was reached."                 |
+| Redacted               | "N secrets redacted." and the redaction marker in the text                  |
+| Carriage returns       | "Shown with LF line endings." (the DOM cannot show a CR, lesson 2026-10-20) |
+
+Syntax highlighting states (SPEC-123 FR-123-71, FR-123-74):
+
+| `highlight`                             | What the view shows                                                               |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| absent                                  | Plain text, no note (no page highlights yet)                                      |
+| `highlighted`                           | Syntax colours; lines over 10,000 characters stay plain inside the file           |
+| `plain`, `no-language` (unknown suffix) | Plain text, no note                                                               |
+| `plain`, `too-large` (over 256 KB)      | Plain text and "Syntax highlighting is off for files over 256 KB."                |
+| `plain`, `failed` (highlighter error)   | Plain text and "Syntax highlighting failed, so this file is shown as plain text." |
+
+<Canvas of={Stories.HighlightOffOverTheLimit} />
+<Canvas of={Stories.HighlightFailed} />
+<Canvas of={Stories.UnknownExtension} />
+<Canvas of={Stories.TruncatedAtFileLimit} />
+<Canvas of={Stories.NotKept} />
+<Canvas of={Stories.Redacted} />
+
+The only interactive state is keyboard focus of the scroll region: a solid ring (tokeny.md D4),
+shown by the Keyboard story's play function.
+
+## 7. Accessibility
+
+- The content is one tab stop with a name, so keyboard users can scroll long lines with the
+  arrow keys (SPEC-122 P13, axe `scrollable-region-focusable`).
+- Line numbers are `aria-hidden` and `select-none`: a screen reader reads the text, and a copy
+  takes the text without numbers.
+- Notices are words in a `role="status"` block, never a colour alone.
+- Content is untrusted agent output: React text only, never HTML (SPEC-123 §12). Syntax
+  tokens are React text in `span`s too; the highlighter's HTML output is never used.
+- Syntax colours add no meaning, so nothing is lost without them. Every `--syntax-*` colour
+  reaches 4.5:1 on the code surface and on the diff tints in both themes (tokeny.md S01 to S10,
+  measured on the Colour page).
+
+<Canvas of={Stories.UntrustedContent} />
+<Canvas of={Stories.HighlightedUntrustedContent} />
+
+## 8. Content
+
+- Notices are full sentences with a full stop and say the limit in words ("1 MB", "10 MB").
+- The file's own text is shown verbatim, en and em dashes included (AGENTS.md §7).
+- The highlighting notes say why colours are missing, in one sentence each, and sit with the
+  other notices in the `role="status"` block.
+
+## 9. Responsiveness
+
+Lines never wrap: a long line scrolls inside the block, so line numbers stay true to the file
+(SPEC-123 §14). The path wraps anywhere; at 320px nothing scrolls the page sideways.
+
+<Canvas of={Stories.LongPathNarrowScreen} />
+
+## 10. API
+
+<ArgTypes of={Stories} />
+
+`file: OutputFile` from `lib/output-files.ts`: `path`, `change`, `sizeBytes`, `kept`, `reason`,
+`content`, `redactions` (the proposed `agent_run_files` columns, SPEC-123 §8.1).
+
+`highlight?: HighlightResult` from `lib/syntax-highlight.ts`: computed on the server by
+`highlightLines(content, languageForPath(path))` (Shiki, server only, ADR-0014). The component
+only renders the tokens; it never loads the highlighter. Stories use precomputed tokens
+(`components/output-files/highlight-fixtures.json`, kept current by
+`test/highlight-fixtures.test.ts`).
+
+## 11. Code
+
+```tsx
+// A Server Component: highlighting runs on the server, the browser receives tokens only.
+const file = await getAgentRunFile(db, { benchmarkRunId, agentRunId, path });
+const highlight =
+  file.content === null ? undefined : await highlightLines(file.content, languageForPath(path));
+<FileView file={file} highlight={highlight} />;
+```
+
+## 12. Do and don't
+
+| Do                                       | Don't                                                  |
+| ---------------------------------------- | ------------------------------------------------------ |
+| Show why a file is cut or missing        | Show a truncated file as if it were whole              |
+| Render content as text                   | Render agent output as Markdown or HTML                |
+| Let long lines scroll inside the block   | Wrap lines (numbers would no longer match lines)       |
+| Pass `highlight` from a Server Component | Import `lib/syntax-highlight.ts` in a client component |
+| Let the extension choose the language    | Guess a language from content or a shebang             |
+
+## 13. Related
+
+`SideBySideDiff`, `FileStatusBadges`, `Pre`, `MockBadge` (mock-agent runs keep it).

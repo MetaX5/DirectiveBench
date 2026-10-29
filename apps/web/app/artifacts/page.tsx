@@ -64,8 +64,9 @@ export default async function ArtifactsPage({
   const categories = (await listCategories(handle.db)).filter((c) => c.archivedAt === null);
   const notice = invalidParamsNotice(invalid);
 
+  // The table has eleven columns; the wide layout fits them at 1920px with the sidebar (issue 122).
   return (
-    <>
+    <div data-layout="wide">
       <PageHeader
         title="Artifacts"
         description="Skills, instructions and rules from every registered repository."
@@ -172,7 +173,9 @@ export default async function ArtifactsPage({
                   const e = a.latestEvaluation;
                   return (
                     <TR key={a.id} data-artifact-id={a.id}>
-                      <TD className="font-medium">
+                      {/* Names can be paths (`dir/AGENTS.md`) or snake_case and repository names
+                          one long word: they wrap anywhere, within a minimum width. */}
+                      <TD className="min-w-40 font-medium wrap-anywhere">
                         <Link href={`/artifacts/${a.id}`} className="hover:underline">
                           {a.name}
                         </Link>
@@ -184,7 +187,7 @@ export default async function ArtifactsPage({
                         <Badge variant="outline">{a.type}</Badge>
                       </TD>
                       <TD
-                        className="max-w-xs truncate text-muted-foreground"
+                        className="max-w-60 truncate text-muted-foreground"
                         title={a.description ?? ''}
                       >
                         {a.description ?? '—'}
@@ -199,7 +202,7 @@ export default async function ArtifactsPage({
                         </div>
                       </TD>
                       <TD
-                        className="text-ui text-muted-foreground"
+                        className="min-w-32 text-ui text-muted-foreground wrap-anywhere"
                         title={a.repositories.map((r) => r.name).join(', ')}
                       >
                         {repositoriesLabel(a.repositories)}
@@ -212,7 +215,8 @@ export default async function ArtifactsPage({
                         Not validated
                       </TD>
                       <TD className="text-right tabular-nums" data-testid="latest-score">
-                        <div className="flex flex-col items-end gap-1">
+                        {/* min-w-max keeps the mock label on one line in the table. */}
+                        <div className="flex min-w-max flex-col items-end gap-1">
                           <span>{formatScore(e?.candidateScore)}</span>
                           {isMockAgent(e?.agentAdapterId) ? <MockBadge /> : null}
                         </div>
@@ -243,6 +247,6 @@ export default async function ArtifactsPage({
           )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }

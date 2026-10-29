@@ -94,6 +94,33 @@ const pairs: Record<string, Pair> = {
   U13: { ...ui('primary', ['background']), exception: 'the button is identified by its label' },
 };
 
+// S01 to S10: each syntax colour (SPEC-123 D20) on the code surface of FileView and under the
+// removed, added and neutral row tints of SideBySideDiff (components/output-files/code-lines.tsx).
+const codeSurface: Layer[] = ['card', ['muted', 0.4]];
+const syntaxSurfaces: Layer[][] = [
+  codeSurface,
+  [...codeSurface, ['destructive', 0.1]],
+  [...codeSurface, ['success', 0.1]],
+  [...codeSurface, ['info', 0.1]],
+];
+const syntaxColours = [
+  'syntax-foreground',
+  'syntax-token-comment',
+  'syntax-token-keyword',
+  'syntax-token-string',
+  'syntax-token-string-expression',
+  'syntax-token-constant',
+  'syntax-token-function',
+  'syntax-token-parameter',
+  'syntax-token-punctuation',
+  'syntax-token-link',
+];
+syntaxColours.forEach((colour, index) => {
+  syntaxSurfaces.forEach((surface, row) => {
+    pairs[`S${String(index + 1).padStart(2, '0')}.${row + 1}`] = text(colour, surface);
+  });
+});
+
 const css = (layer: Layer) =>
   typeof layer === 'string'
     ? `var(--${layer})`

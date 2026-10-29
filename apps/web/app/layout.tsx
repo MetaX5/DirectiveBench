@@ -47,7 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   <Nav />
                 </div>
               </details>
-              <main className="mx-auto w-full max-w-content flex-1 px-page-inline py-page-block">
+              <main className="mx-auto w-full max-w-content flex-1 px-page-inline py-page-block has-data-[layout=wide]:max-w-wide">
                 {children}
               </main>
             </div>
