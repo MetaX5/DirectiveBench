@@ -5,7 +5,13 @@ import {
   type DiffVariant,
   type LineDiff,
 } from '@/lib/line-diff';
-import { displayLines, fileNotices, type OutputFile } from '@/lib/output-files';
+import {
+  displayLines,
+  fileNotices,
+  syntaxHighlightNotice,
+  type OutputFile,
+} from '@/lib/output-files';
+import type { HighlightedLine, HighlightResult } from '@/lib/syntax-highlight';
 import { CodeLines, type CodeLine } from './code-lines';
 import { FileNotices } from './file-view';
 
@@ -16,25 +22,37 @@ export interface DiffSide {
   description?: string;
   /** The file on this side, or null when this agent run has no such path. */
   file: OutputFile | null;
+  /**
+   * Syntax tokens of this side's whole file, computed on the server with the language of the
+   * compared path (SPEC-123 FR-123-76); without it this side is plain.
+   */
+  highlight?: HighlightResult;
 }
 
 type Side = 'left' | 'right';
 
-function cellLine(cell: DiffCell | null, side: Side, variant: DiffVariant, name: string): CodeLine {
+function cellLine(
+  cell: DiffCell | null,
+  side: Side,
+  variant: DiffVariant,
+  name: string,
+  tokens: readonly HighlightedLine[] | null,
+): CodeLine {
   if (cell === null) return { number: null, text: '', tone: 'filler' };
-  if (cell.change === 'same') return { number: cell.line, text: cell.text };
+  // The diff is computed on plain lines; the tokens of the same line index are attached.
+  const line = { number: cell.line, text: cell.text, tokens: tokens?.[cell.line - 1] };
+  if (cell.change === 'same') return line;
   if (variant === 'neutral') {
     return {
-      number: cell.line,
-      text: cell.text,
+      ...line,
       tone: 'only',
       marker: side === 'left' ? '<' : '>',
       markerLabel: `Only in ${name}`,
     };
   }
   return side === 'left'
-    ? { number: cell.line, text: cell.text, tone: 'removed', marker: '-', markerLabel: 'Removed' }
-    : { number: cell.line, text: cell.text, tone: 'added', marker: '+', markerLabel: 'Added' };
+    ? { ...line, tone: 'removed', marker: '-', markerLabel: 'Removed' }
+    : { ...line, tone: 'added', marker: '+', markerLabel: 'Added' };
 }
 
 /**
@@ -59,11 +77,19 @@ export function SideBySideDiff({
   const diff: LineDiff | null = leftLines && rightLines ? diffLines(leftLines, rightLines) : null;
 
   const column = (side: Side, info: DiffSide, lines: string[] | null) => {
-    const notices = info.file ? fileNotices(info.file) : ['Not present in this agent run.'];
+    const highlightNote = info.file ? syntaxHighlightNotice(info.highlight) : null;
+    const notices = info.file
+      ? [...fileNotices(info.file), ...(highlightNote ? [highlightNote] : [])]
+      : ['Not present in this agent run.'];
+    const tokens = info.highlight?.kind === 'highlighted' ? info.highlight.lines : null;
     const code: CodeLine[] =
       diff?.kind === 'aligned'
-        ? diff.rows.map((row) => cellLine(row[side], side, variant, info.name))
-        : (lines ?? []).map((text, index) => ({ number: index + 1, text }));
+        ? diff.rows.map((row) => cellLine(row[side], side, variant, info.name, tokens))
+        : (lines ?? []).map((text, index) => ({
+            number: index + 1,
+            text,
+            tokens: tokens?.[index],
+          }));
     return (
       <div className="min-w-0 space-y-stack">
         <h4 className="text-body font-medium wrap-anywhere">

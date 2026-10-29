@@ -2,6 +2,8 @@
 // proposed `agent_run_files` columns (SPEC-123 §8.1); once Phase 1 adds the table, the
 // repository type replaces OutputFile. Pure functions, so the components stay presentational.
 
+import type { HighlightResult } from './syntax-highlight';
+
 export type FileChange = 'added' | 'modified' | 'deleted';
 export type FileKept = 'full' | 'truncated' | 'none';
 export type FileKeptReason = 'file-limit' | 'run-limit' | 'binary' | 'deleted' | 'artifact-path';
@@ -122,4 +124,18 @@ export function displayLines(text: string): string[] {
   const lines = text.replace(/\r\n?/g, '\n').split('\n');
   if (lines.at(-1) === '') lines.pop();
   return lines;
+}
+
+/**
+ * The note shown with a file that has no syntax colours for a reason the reader should know
+ * (SPEC-123 FR-123-74): over the size bound or a highlighter failure. An unknown language, a
+ * highlighted file and no highlight result at all need no note.
+ */
+export function syntaxHighlightNotice(highlight: HighlightResult | undefined): string | null {
+  if (highlight?.kind !== 'plain') return null;
+  if (highlight.reason === 'too-large') return 'Syntax highlighting is off for files over 256 KB.';
+  if (highlight.reason === 'failed') {
+    return 'Syntax highlighting failed, so this file is shown as plain text.';
+  }
+  return null;
 }

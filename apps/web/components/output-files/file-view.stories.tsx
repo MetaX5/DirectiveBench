@@ -1,7 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, userEvent } from 'storybook/test';
+import { displayLines } from '@/lib/output-files';
 import { file, longLine, longPath } from './fixtures';
 import { FileView } from './file-view';
+import {
+  highlightedLineTexts,
+  highlights,
+  highlightSamples,
+  sampleFile,
+  tokenColour,
+  type HighlightSample,
+} from './highlight-fixtures';
 
 const meta = {
   title: 'Product/Benchmarking/FileView',
@@ -208,6 +217,100 @@ export const UntrustedContent: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText('<script>alert(1)</script>')).toBeVisible();
+    await expect(canvasElement.querySelectorAll('pre script, pre img')).toHaveLength(0);
+  },
+};
+
+// Syntax highlighting (SPEC-123 §6.7, D20). Tokens come precomputed from the server-only
+// highlighter (highlight-fixtures.json); the component renders them as React text in spans.
+
+/** Each line shows its own tokens, and a token of `kind` has its design-token colour. */
+async function expectHighlighted(root: HTMLElement, sample: HighlightSample, kind: string) {
+  const lines = displayLines(highlightSamples[sample].text);
+  const shown = highlightedLineTexts(root);
+  await expect(shown).toEqual(lines.map((text, index) => [index + 1, text]));
+  const token = root.querySelector(`.text-syntax-token-${kind}`);
+  await expect(token).not.toBeNull();
+  await expect(getComputedStyle(token!).color).toBe(tokenColour(root, kind));
+}
+
+/** A PHP template with syntax colours: keywords, functions, strings and punctuation. */
+export const HighlightedPhp: Story = {
+  args: { file: file(sampleFile('candidateRender')), highlight: highlights.candidateRender },
+  play: async ({ canvas, canvasElement }) => {
+    await expectHighlighted(canvasElement, 'candidateRender', 'function');
+    await expect(canvas.queryByRole('status')).toBeNull();
+  },
+};
+
+/** TSX with a doc comment, a template string, JSX tags and attributes. */
+export const HighlightedTsx: Story = {
+  args: { file: file(sampleFile('editTsx')), highlight: highlights.editTsx },
+  play: async ({ canvasElement }) => {
+    await expectHighlighted(canvasElement, 'editTsx', 'comment');
+  },
+};
+
+/** JSON: keys, string values and constants. */
+export const HighlightedJson: Story = {
+  args: { file: file(sampleFile('blockJson')), highlight: highlights.blockJson },
+  play: async ({ canvasElement }) => {
+    await expectHighlighted(canvasElement, 'blockJson', 'constant');
+  },
+};
+
+/** Markdown: a heading, a link and a fenced block, coloured only as far as its grammar goes. */
+export const HighlightedMarkdown: Story = {
+  args: { file: file(sampleFile('readmeMarkdown')), highlight: highlights.readmeMarkdown },
+  play: async ({ canvasElement }) => {
+    await expectHighlighted(canvasElement, 'readmeMarkdown', 'link');
+  },
+};
+
+/** Over 256 KB of stored content: plain text and a note saying why (FR-123-74). */
+export const HighlightOffOverTheLimit: Story = {
+  args: {
+    file: file({ path: 'build/index.js', sizeBytes: 393_216 }),
+    highlight: { kind: 'plain', reason: 'too-large' },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('status')).toHaveTextContent(
+      'Syntax highlighting is off for files over 256 KB.',
+    );
+    await expect(canvasElement.querySelectorAll('[data-highlighted]')).toHaveLength(0);
+  },
+};
+
+/** The highlighter failed: plain text and a note; the file is still shown (FR-123-74). */
+export const HighlightFailed: Story = {
+  args: { highlight: { kind: 'plain', reason: 'failed' } },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('status')).toHaveTextContent(
+      'Syntax highlighting failed, so this file is shown as plain text.',
+    );
+    await expect(canvas.getByRole('region')).toHaveTextContent('esc_attr__');
+    await expect(canvasElement.querySelectorAll('[data-highlighted]')).toHaveLength(0);
+  },
+};
+
+/** An extension the highlighter does not know: plain text and no note (FR-123-71). */
+export const UnknownExtension: Story = {
+  args: {
+    file: file({ path: 'Makefile', content: 'build:\n\tnpm run build\n' }),
+    highlight: { kind: 'plain', reason: 'no-language' },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.queryByRole('status')).toBeNull();
+    await expect(canvasElement.querySelectorAll('[data-highlighted]')).toHaveLength(0);
+  },
+};
+
+/** Highlighted markup is still text: tags are coloured, never rendered (AC-15). */
+export const HighlightedUntrustedContent: Story = {
+  args: { file: file(sampleFile('hostileHtml')), highlight: highlights.hostileHtml },
+  play: async ({ canvas, canvasElement }) => {
+    await expectHighlighted(canvasElement, 'hostileHtml', 'function');
+    await expect(canvas.getByRole('region')).toHaveTextContent('<script>alert(1)</script>');
     await expect(canvasElement.querySelectorAll('pre script, pre img')).toHaveLength(0);
   },
 };

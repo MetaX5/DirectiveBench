@@ -1,6 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect } from 'storybook/test';
-import { baselineRender, file, longLine, longPath, numberedLines } from './fixtures';
+import {
+  baselineRender,
+  candidateRender,
+  file,
+  longLine,
+  longPath,
+  numberedLines,
+} from './fixtures';
+import { highlightedLineTexts, highlights, tokenColour } from './highlight-fixtures';
 import { SideBySideDiff } from './side-by-side-diff';
 
 const baseline = { name: 'Left', description: 'Baseline (v2), repetition 1' };
@@ -194,5 +202,84 @@ export const NarrowScreen: Story = {
     for (const region of canvas.getAllByRole('region')) {
       await expect(region.getBoundingClientRect().right).toBeLessThanOrEqual(box.right);
     }
+  },
+};
+
+// Syntax highlighting (SPEC-123 §6.7, FR-123-76): the diff is computed on plain lines; each side
+// gets its own precomputed tokens, attached by line number. Rows, markers and tints are unchanged.
+
+/** Each column shows, on every numbered row, the tokens of exactly that line of its file. */
+async function expectSideTokens(pre: Element, text: string) {
+  const lines = text.split('\n');
+  const shown = highlightedLineTexts(pre);
+  await expect(shown.length).toBeGreaterThan(0);
+  await expect(shown).toEqual(shown.map(([number]) => [number, lines[number - 1]]));
+  // Filler rows have no line, so no tokens.
+  await expect(pre.querySelectorAll('[data-tone="filler"] [data-highlighted]')).toHaveLength(0);
+}
+
+/** A highlighted diff: syntax colours on both sides, red and green rows and markers as before. */
+export const Highlighted: Story = {
+  args: {
+    left: {
+      ...baseline,
+      file: file({ content: baselineRender }),
+      highlight: highlights.baselineRender,
+    },
+    right: { ...candidate, file: file(), highlight: highlights.candidateRender },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('status')).toHaveTextContent('3 lines removed, 5 lines added.');
+    const [left, right] = [...canvasElement.querySelectorAll('pre')];
+    await expectSideTokens(left!, baselineRender);
+    await expectSideTokens(right!, candidateRender);
+    await expect(canvas.getAllByText('Removed:')).toHaveLength(3);
+    await expect(canvas.getAllByText('Added:')).toHaveLength(5);
+    const keyword = right!.querySelector('[data-tone="added"] .text-syntax-token-keyword');
+    await expect(getComputedStyle(keyword!).color).toBe(tokenColour(canvasElement, 'keyword'));
+  },
+};
+
+/** Blind review with highlighting: the same colours on A and B, neutral rows (FR-123-52). */
+export const HighlightedBlindReview: Story = {
+  args: {
+    variant: 'neutral',
+    left: {
+      name: 'A',
+      file: file({ content: baselineRender }),
+      highlight: highlights.baselineRender,
+    },
+    right: { name: 'B', file: file(), highlight: highlights.candidateRender },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const [left, right] = [...canvasElement.querySelectorAll('pre')];
+    await expectSideTokens(left!, baselineRender);
+    await expectSideTokens(right!, candidateRender);
+    await expect(canvas.getAllByText('Only in B:')).toHaveLength(5);
+    await expect(
+      canvasElement.querySelectorAll('[data-tone="removed"], [data-tone="added"]'),
+    ).toHaveLength(0);
+  },
+};
+
+/** Each side is checked on its own: one side over 256 KB is plain with its note (FR-123-76). */
+export const HighlightOneSideOverTheLimit: Story = {
+  args: {
+    left: {
+      ...baseline,
+      file: file({ content: baselineRender }),
+      highlight: highlights.baselineRender,
+    },
+    right: { ...candidate, file: file(), highlight: { kind: 'plain', reason: 'too-large' } },
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const [left, right] = [...canvasElement.querySelectorAll('pre')];
+    await expectSideTokens(left!, baselineRender);
+    await expect(right!.querySelectorAll('[data-highlighted]')).toHaveLength(0);
+    const statuses = canvas.getAllByRole('status').map((status) => status.textContent);
+    await expect(statuses).toEqual([
+      '3 lines removed, 5 lines added.',
+      'Syntax highlighting is off for files over 256 KB.',
+    ]);
   },
 };

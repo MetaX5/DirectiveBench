@@ -6,8 +6,10 @@ import {
   formatBytes,
   formatSize,
   onlyInBadge,
+  syntaxHighlightNotice,
   type OutputFile,
 } from '../lib/output-files';
+import type { HighlightResult } from '../lib/syntax-highlight';
 
 const file = (overrides: Partial<OutputFile> = {}): OutputFile => ({
   path: 'src/render.php',
@@ -138,5 +140,20 @@ describe('displayLines', () => {
 
   it('treats CR LF and lone CR as line breaks', () => {
     expect(displayLines('a\r\nb\rc\r\n')).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('syntaxHighlightNotice (SPEC-123 FR-123-74)', () => {
+  it.each<[HighlightResult | undefined, string | null]>([
+    [undefined, null],
+    [{ kind: 'highlighted', lines: [] }, null],
+    [{ kind: 'plain', reason: 'no-language' }, null],
+    [{ kind: 'plain', reason: 'too-large' }, 'Syntax highlighting is off for files over 256 KB.'],
+    [
+      { kind: 'plain', reason: 'failed' },
+      'Syntax highlighting failed, so this file is shown as plain text.',
+    ],
+  ])('%j gives %j', (highlight, notice) => {
+    expect(syntaxHighlightNotice(highlight)).toBe(notice);
   });
 });

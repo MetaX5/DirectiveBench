@@ -1,3 +1,4 @@
+import type { HighlightedLine, SyntaxTokenKind } from '@/lib/syntax-highlight';
 import { cn } from '@/lib/utils';
 
 // The line-numbered, horizontally scrolling text block shared by FileView and SideBySideDiff
@@ -13,6 +14,33 @@ export interface CodeLine {
   /** Visible one-character marker, read by assistive technology as `markerLabel`. */
   marker?: string;
   markerLabel?: string;
+  /** Syntax tokens of `text`, computed on the server (SPEC-123 §6.7); absent for plain text. */
+  tokens?: HighlightedLine;
+}
+
+// Each token kind has its own design token (FR-123-73); a null kind keeps the code text colour.
+const tokenClass: Record<SyntaxTokenKind, string> = {
+  comment: 'text-syntax-token-comment',
+  keyword: 'text-syntax-token-keyword',
+  string: 'text-syntax-token-string',
+  'string-expression': 'text-syntax-token-string-expression',
+  constant: 'text-syntax-token-constant',
+  function: 'text-syntax-token-function',
+  parameter: 'text-syntax-token-parameter',
+  punctuation: 'text-syntax-token-punctuation',
+  link: 'text-syntax-token-link',
+};
+
+/** The text of one line: React text nodes only, never HTML (FR-123-72, SPEC-123 §12). */
+function LineText({ line }: { line: CodeLine }) {
+  // A no-break space keeps an empty line one line high.
+  if (line.text === '') return '\u00a0';
+  if (!line.tokens) return line.text;
+  return line.tokens.map((token, index) => (
+    <span key={index} className={token.token ? tokenClass[token.token] : undefined}>
+      {token.text}
+    </span>
+  ));
 }
 
 const toneClass: Record<LineTone, string> = {
@@ -75,7 +103,12 @@ export function CodeLines({
               </span>
             ) : null}
             {line.markerLabel ? <span className="sr-only">{line.markerLabel}: </span> : null}
-            <span className="pr-3 pl-2 whitespace-pre">{line.text === '' ? ' ' : line.text}</span>
+            <span
+              data-highlighted={line.tokens ? '' : undefined}
+              className={cn('pr-3 pl-2 whitespace-pre', line.tokens && 'text-syntax-foreground')}
+            >
+              <LineText line={line} />
+            </span>
           </span>
         ))}
       </pre>
