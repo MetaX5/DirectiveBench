@@ -3,7 +3,7 @@ title: SPEC-123 Phase 2, CLI export of agent run output files
 date: 2026-10-29
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (issue #152, Phases 2 and 3 approved on 2026-10-29), om-auto-implement-spec
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-export
 specs: [SPEC-123, SPEC-014, SPEC-118]
 ---
@@ -115,7 +115,18 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
    group bits of a user-owned ancestor. Replaced the ancestor walk by working inside `<dir>` as
    the working directory (`chdir`, `lstat('.')` identity against the checked directory, relative
    paths only, cwd restored in `finally`); `<dir>` must be the user's and not group- or
-   other-writable (exit 2).
+   other-writable (exit 2): see the commit after a3f770a.
+8. Codex round 4: **approve** (no material finding within the threat model).
+
+## Review
+
+| Round | Reviewer | Verdict | Findings and outcome |
+| --- | --- | --- | --- |
+| self | `om-auto-review-pr` / `om-code-review` | changes (fixed) | Non-portable names (`:`, `<>"\|?*`, control characters, trailing dot or space, Windows devices) were accepted: fixed in 74f6b1c. |
+| 1 | Codex adversarial | needs-attention | (high) a replaced directory or symlink could redirect writes; (high) undoing a lost claim unlinked `manifest.json` by path: chain verification, `files/`-first claim with `rmdir`, 0700/0600 (37a1bc1). |
+| 2 | Codex adversarial | needs-attention | (high) swap-and-restore between two `lstat`s defeats path checks: ancestor permission walk (a3f770a). |
+| 3 | Codex adversarial | needs-attention | (high) POSIX ACLs bypass the ancestor walk: export works inside `<dir>` as its working directory, `<dir>` owned by the user and not group- or other-writable. |
+| 4 | Codex adversarial | approve | none |
 
 ## Verification
 
