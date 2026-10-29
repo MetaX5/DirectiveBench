@@ -40,7 +40,10 @@ which are most of what agents write. Constraints:
 4. One DirectiveBench theme built with Shiki's CSS-variables theme (`--syntax-*` variables),
    whose light and dark values are new design-system tokens.
 5. Bound the work: `SYNTAX_HIGHLIGHT_MAX_BYTES` (256 KiB), a maximum line length and a per-line
-   time limit; above them, or on any error, render plain text with a note.
+   time limit; above them, or on any error, render plain text with a note. The per-line limit is
+   cooperative only (Shiki's JavaScript scanner runs a synchronous `RegExp.exec`), so tokenizing
+   runs in a terminable `node:worker_threads` worker with an aggregate 2 s deadline per page
+   render (SPEC-123 FR-123-78), added after a Codex review.
 6. Bundle Shiki into the Next.js server build. Next.js 16.4 lists `shiki` in its default
    `serverExternalPackages`, so the implementation must make sure it is bundled (for example by
    importing the `@shikijs/*` entry points) and prove it with `pnpm verify:pack`; it is not added

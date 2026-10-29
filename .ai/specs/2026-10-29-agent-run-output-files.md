@@ -200,14 +200,15 @@ Rationale and rejected alternatives: [ADR-0014](../decisions/0014-server-side-sy
 
 | ID | Requirement |
 | --- | --- |
-| FR-123-70 | **Server only.** Highlighting SHALL run only on the server, in `apps/web/lib/syntax-highlight.ts` (which imports `server-only`), called by App Router Server Components. No highlighter code, grammar or theme SHALL ship to the browser; components receive tokens as plain data. The highlighter uses Shiki's fine-grained core (`createHighlighterCore`) with only the grammars of FR-123-71 and Shiki's JavaScript regular-expression engine, so no WebAssembly and no native code is loaded. It is created once per server process (a lazily created, memoised promise); a failed creation is not memoised, so a later request retries. It never starts a process or touches the file system beyond module loading (SPEC-014 §3.3). |
+| FR-123-70 | **Server only.** Highlighting SHALL run only on the server, in `apps/web/lib/syntax-highlight.ts` (which imports `server-only`), called by App Router Server Components. No highlighter code, grammar or theme SHALL ship to the browser; components receive tokens as plain data. The highlighter uses Shiki's fine-grained core (`createHighlighterCore`) with only the grammars of FR-123-71 and Shiki's JavaScript regular-expression engine, so no WebAssembly and no native code is loaded. It runs in the highlight worker of FR-123-78 (a `node:worker_threads` thread of the web server process, not a child process), created lazily once per server process; a failed creation is not memoised, so a later request retries. It never starts a process or touches the file system beyond module loading (SPEC-014 §3.3). |
 | FR-123-71 | **Language from the extension only.** The language SHALL be chosen from the last extension of the file's basename, compared case-insensitively, through the fixed map `SYNTAX_LANGUAGE_BY_EXTENSION`: `js`, `mjs`, `cjs` → `javascript`; `jsx` → `jsx`; `ts`, `mts`, `cts` → `typescript`; `tsx` → `tsx`; `json` → `json`; `css` → `css`; `scss` → `scss`; `html`, `htm` → `html`; `php` → `php`; `md`, `markdown` → `markdown`; `yaml`, `yml` → `yaml`; `sh`, `bash` → `shellscript`; `py` → `python`. Any other extension, a file without one (`Makefile`) or a dotfile with no further dot (`.env`) is plain text. There is no detection from content, shebang or Markdown fence info: a fenced block inside a Markdown file is coloured only as far as the bundled grammars cover it, never by loading another grammar. Grammars that a listed grammar embeds (for example HTML, CSS, JavaScript or SQL inside PHP) are loaded as its dependencies; they are not reachable by extension unless listed. `languageForPath(path)` returns the language or `null`. |
 | FR-123-72 | **Tokens, never HTML.** The highlighter SHALL produce tokens (`codeToTokens`), not an HTML string, and components SHALL render each token as a React text node inside a `span`. No `dangerouslySetInnerHTML`, `innerHTML` or HTML string from Shiki is used anywhere (the files are untrusted, §12). A token's colour SHALL be one of the fixed CSS variables of FR-123-73, mapped to a known class or style value; a token whose colour is anything else is rendered without colour. `highlightLines(text, language)` returns `HighlightedLine[]` (`HighlightedLine = readonly { text: string; token: SyntaxTokenKind \| null }[]`, one entry per line) and the concatenated token text of each line SHALL equal that line of the input exactly (a unit test asserts it for every listed language). |
 | FR-123-73 | **Colours from design-system tokens.** The theme SHALL be one DirectiveBench theme built with Shiki's CSS-variables theme (`createCssVariablesTheme`, `variablePrefix: '--syntax-'`), so each token's colour is a `var(--syntax-token-*)` reference and the light and dark values come from new design-system tokens in `apps/web/app/globals.css` (defined for `:root` and `.dark`, documented on the Storybook tokens page): `--syntax-foreground`, `--syntax-token-comment`, `--syntax-token-keyword`, `--syntax-token-string`, `--syntax-token-string-expression`, `--syntax-token-constant`, `--syntax-token-function`, `--syntax-token-parameter`, `--syntax-token-punctuation` and `--syntax-token-link`. Switching the theme needs no second highlighting pass. Each colour SHALL reach at least 4.5:1, in both themes, against every background it appears on: the code surface of `FileView` (plain lines), the D11 tints (`bg-destructive/10` for removed lines, `bg-success/10` for added lines) and the D12 neutral tint (`bg-info/10`) composited over that surface. The D5 line-number gutter is not highlighted and is unchanged. |
 | FR-123-74 | **Size bound and failure.** A file (or a side of a diff) SHALL be highlighted only when its kept content is at most `SYNTAX_HIGHLIGHT_MAX_BYTES` (262,144 UTF-8 bytes, 256 KiB, measured on the stored content, `stored_bytes`). Above it the text is shown plain with the visible note "Syntax highlighting is off for files over 256 KB." (`role="status"`, with the other notices of FR-123-21). Any highlighter error (creation, grammar, tokenizing) SHALL be caught in `apps/web/lib`: the text is shown plain with the note "Syntax highlighting failed, so this file is shown as plain text." and the error is logged on the server without file content. A highlighting failure SHALL never fail, blank or delay the page beyond the bound of NFR-123-07. Plain text because of an unknown extension shows no note. |
-| FR-123-75 | **Long lines.** Lines longer than `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` (10,000 UTF-16 code units) SHALL be shown as plain text in an otherwise highlighted file (Shiki's `tokenizeMaxLineLength`), and tokenizing one line SHALL stop after `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` (500 ms, Shiki's `tokenizeTimeLimit`), leaving the rest of that line plain. A minified one-line file under 256 KiB therefore shows as plain text, not as a slow page. |
+| FR-123-75 | **Long lines.** Lines longer than `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` (10,000 UTF-16 code units) SHALL be shown as plain text in an otherwise highlighted file (Shiki's `tokenizeMaxLineLength`), and Shiki's `tokenizeTimeLimit` is set to `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` (500 ms). That limit is **cooperative only**: Shiki's JavaScript scanner calls a synchronous `RegExp.exec`, which no deadline can interrupt, and the limit restarts on every line. The enforceable bound is the hard deadline of FR-123-78. A minified one-line file under 256 KiB therefore shows as plain text, not as a slow page. |
 | FR-123-76 | **Diff stays line-based.** The diff (FR-123-31, D9 whole-line) SHALL be computed on the plain lines exactly as without highlighting. Each side is tokenized as a whole text (so a block comment or string spanning lines is coloured correctly) and the resulting `HighlightedLine` of each line index is attached to that side's row; filler rows, markers (`-`, `+`, `<`, `>`), `sr-only` labels and row tints are unchanged. Each side is checked against FR-123-74 on its own, so one side can be highlighted and the other plain with its note. Both sides use the language of the compared path, so the colouring never differs by variant (no blind-review signal, FR-123-52). Line splitting is the same as `FileView`'s (CR and CRLF shown as LF, §11), so token lines and diff lines always correspond. |
 | FR-123-77 | **Packaging.** The published `directivebench` package's runtime `dependencies` SHALL stay `next`, `react` and `react-dom` (SPEC-004 §4.3): the highlighter is bundled into the web app's server build, not required from `node_modules` at run time. Next.js 16.4 lists `shiki` in its default `serverExternalPackages` (`next/dist/lib/server-external-packages.jsonc`), so importing `shiki` as is would be left external and fail in the installed tarball; the implementation SHALL make it bundled (for example by importing the fine-grained `@shikijs/*` entry points, which are not on that list, or another Next.js setting) and SHALL prove it with `pnpm build && pnpm verify:pack`, whose smoke test renders a highlighted file from the installed tarball (FR-123-72 tokens present in the HTML). |
+| FR-123-78 | **Hard deadline in a terminable worker (Codex review of D20).** Tokenizing SHALL run off the request thread, in one `node:worker_threads` worker per server process that owns the highlighter. Each page render sends its texts (at most two, the sides of a diff) as one job with an **aggregate deadline** `SYNTAX_HIGHLIGHT_DEADLINE_MS` (2,000 ms) that covers highlighter creation and both texts. Jobs run one at a time; at most `SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS` (8) wait, and a job that cannot be queued is not highlighted. When the deadline passes, the server SHALL call `worker.terminate()` (which stops a synchronous `RegExp.exec`), resolve every pending job of that worker as plain text, and create a new worker lazily on the next job. The texts of a job that timed out, or could not be queued, are shown plain with the note "Syntax highlighting took too long, so this file is shown as plain text." (`HighlightResult` reason `timeout`). The request thread never runs Shiki, so a pathological grammar and input pair cannot block the Next.js event loop. The worker entry is part of the server build and of the packed CLI (FR-123-77). |
 
 ## 7. Non-functional requirements
 
@@ -231,8 +232,10 @@ Rationale and rejected alternatives: [ADR-0014](../decisions/0014-server-side-sy
   and variants (FR-123-10). Without this, 50 repetitions x 10 cases x 2 variants at 10 MiB would
   retain about 10 GiB.
 - NFR-123-07 (Phase 3a): highlighting work per request is bounded by `SYNTAX_HIGHLIGHT_MAX_BYTES`
-  per shown text (at most two in a diff), `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` per line and
-  `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` per line; these bounds are tested exactly (256 KiB
+  per shown text (at most two in a diff), `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` per line and, as the
+  only hard bound on time, the aggregate `SYNTAX_HIGHLIGHT_DEADLINE_MS` per page render enforced
+  by terminating the worker (FR-123-78; the per-line `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` is
+  cooperative only); these bounds are tested exactly (256 KiB
   highlighted, 256 KiB plus one byte plain with the note). Target, not an acceptance criterion:
   highlighting a generated 256 KiB TypeScript file takes under 1 s after the highlighter exists,
   in a unit timing test with a generous bound (lesson 2026-10-21 on timing tests). The browser
@@ -324,13 +327,13 @@ flowchart LR
   `OUTPUT_REDACTION_MARGIN_BYTES` (4 KiB, asserted to be at least the longest minimum match
   length of the core patterns); in `apps/web/lib`: `FILE_DIFF_MAX_EDIT_LINES`,
   `BLIND_REVIEW_NOTE_MAX_CHARS` (2,000; shared Zod schema).
-- Phase 3a, in `apps/web/lib/syntax-highlight.ts` (FR-123-70 to FR-123-77):
+- Phase 3a, in `apps/web/lib/syntax-highlight.ts` (FR-123-70 to FR-123-78):
   `SYNTAX_HIGHLIGHT_MAX_BYTES = 262_144`, `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS = 10_000`,
   `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS = 500`, `SYNTAX_LANGUAGE_BY_EXTENSION` (the fixed map of
   FR-123-71), `languageForPath(path): SyntaxLanguage | null`,
   `highlightLines(text, language): Promise<HighlightResult>` with `HighlightResult =
   { kind: 'highlighted'; lines: HighlightedLine[] } | { kind: 'plain'; reason: 'no-language' |
-  'too-large' | 'failed' }`, and `SyntaxTokenKind` (the token names of FR-123-73: `comment`,
+  'too-large' | 'failed' | 'timeout' }`, and `SyntaxTokenKind` (the token names of FR-123-73: `comment`,
   `keyword`, `string`, `string-expression`, `constant`, `function`, `parameter`, `punctuation`,
   `link`). `FileView` and each `SideBySideDiff` side gain an optional prop with the
   `HighlightResult`; without it they render plain text as before.
@@ -581,6 +584,11 @@ design-system components):
     Diff integration: the rows of a highlighted diff carry the `HighlightedLine` of their line
     index on each side, filler rows none.
   - Timing (NFR-123-07): a generated 256 KiB TypeScript file, generous bound.
+  - Deadline (FR-123-78): a worker whose tokenizer stalls in a synchronous loop is terminated at
+    the deadline and the text is plain with the timeout note; many expensive lines that each stay
+    under the per-line limit still end at the aggregate deadline; the next job creates a new
+    worker and succeeds; a full queue gives plain text; while a worker is stalled the request
+    thread stays responsive (an event-loop delay probe stays under a small bound).
   - Storybook: `FileView` and `SideBySideDiff` stories for highlighted text (one per token kind
     present, in both variants `change` and `neutral`), the too-large note and the failed note, in
     both themes with axe (contrast checked by axe in stories only until a page exists).
@@ -632,6 +640,10 @@ design-system components):
   page (FR-123-73).
 - [ ] AC-15 (Phase 3a): A file containing HTML or script markup is shown as text, never
   interpreted (no `dangerouslySetInnerHTML`, §12).
+- [ ] AC-16 (Phase 3a): A tokenizer that stalls in a synchronous loop is stopped at the
+  aggregate deadline by terminating the worker; the page renders plain text with "Syntax
+  highlighting took too long, so this file is shown as plain text." and the server keeps answering
+  other requests meanwhile (FR-123-78).
 
 ## 17. Dependencies
 
