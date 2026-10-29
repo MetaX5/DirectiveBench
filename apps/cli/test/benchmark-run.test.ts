@@ -62,6 +62,7 @@ function tempDir(): string {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -388,9 +389,10 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     const s = await setup({ interactive: true });
     const stdin = new PassThrough();
     stdin.end();
-    const staged = () =>
-      readdirSync(tmpdir()).filter((name) => name.startsWith('directivebench-suite-'));
-    const before = staged();
+    // A private temporary directory: other workers stage suites in the shared one (#143).
+    const privateTmp = tempDir();
+    vi.stubEnv('TMPDIR', privateTmp);
+    expect(tmpdir()).toBe(privateTmp);
     expect(
       await benchmarkRunCommand(
         { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir },
@@ -398,7 +400,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
       ),
     ).toBe(ExitCode.Cancelled);
     expect(s.output()).toContain('Not started; nothing was stored.');
-    expect(staged()).toEqual(before);
+    expect(readdirSync(privateTmp)).toEqual([]);
     expect(await s.counts()).toEqual(NOTHING);
     expect(s.fake.starts()).toBe(0);
   });
