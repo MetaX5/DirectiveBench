@@ -20,11 +20,14 @@ bounded (1 MB per file, 10 MB per agent run), redacted like traces, stored with 
 and removed with it, and lets a human **read them on the run page**, **compare the same file
 between two agent runs side by side**, **export them to a directory from the CLI**, and **review
 baseline and candidate blind** as unlabelled A/B pairs, recording a verdict before the variants
-are revealed.
+are revealed. In a later, separate phase (Phase 3a), the file view and the side-by-side diff
+colour the text by syntax: on the server, with Shiki, for a fixed list of file extensions and
+files up to 256 KB, as React elements coloured by design-system tokens (§6.7).
 
 Source: issue #152 (backlog E08) and the maintainer's decisions of 2026-10-29 on that issue
-(limits, retention, blind review in scope, access paths). Those decisions are binding inputs here,
-not autonomous defaults.
+(limits, retention, blind review in scope, access paths), plus the maintainer's decision D20 of
+2026-10-29 on PR #155 (syntax highlighting with Shiki, server-side only, §6.7). Those decisions
+are binding inputs here, not autonomous defaults.
 
 ## 2. Motivation and problem statement
 
@@ -71,13 +74,20 @@ document are reference scenarios used to check the design, not targets.
   recorded before the variants are revealed and cannot be changed afterwards.
 - G7: Deleting a benchmark run (when such an action exists) removes its files and its blind
   review by database cascade, with no separate cleanup.
+- G8: Kept files of common text formats are easier to read: the file view and the diff colour
+  them by syntax (Phase 3a, §6.7) without shipping a highlighter to the browser, without
+  rendering any of the content as HTML and without making a page fail when highlighting cannot
+  run.
 
 ## 4. Non-goals
 
 - Keeping whole workspaces, fixture copies, the installed artifact or files the agent did not
   change (`runner.keepWorkspaces` stays the debugging switch it is).
 - Running, building or rendering the output (no preview server, no HTML or Markdown rendering of
-  output in this spec; raw text only).
+  output in this spec; raw text only). Syntax colouring (§6.7) is not rendering: it colours the
+  raw text and never interprets it as HTML or Markdown.
+- Detecting a file's language from its content, or highlighting changes inside a line (the diff
+  stays whole-line, §6.7).
 - Changing trace truncation, scoring, verdicts or display status. Blind-review verdicts are stored
   next to the run and never change its score or verdict.
 - Deciding how human verdicts aggregate into a D03 observation (D03/Q05 stays open).
@@ -100,12 +110,12 @@ document are reference scenarios used to check the design, not targets.
 ## 5a. Resolved assumptions (autonomous defaults)
 
 Written by `om-auto-write-spec` without a human in the loop. The maintainer decisions of
-2026-10-29 (limits, retention, blind review in scope, access paths) are not listed here; they are
-inputs. Every row below is a default to confirm or override before implementation.
+2026-10-29 (limits, retention, blind review in scope, access paths) and decision D20 (syntax
+highlighting, §6.7) are not listed here; they are inputs. Every row below is a default to confirm or override before implementation.
 
 | # | Question | Applied default | Why | Confirm? |
 | --- | --- | --- | --- | --- |
-| A1 | One spec or split (storage, viewer, export, diff, blind review)? | One spec, five phases, one PR each. Dependencies: 2 needs 1; 3 needs 1; 4 needs 3; 5 needs 4. Blind review could move to its own spec (own data model and integrity rules); kept here because the maintainer placed it in E08. | Phases keep PRs small; each phase leaves the app working. | reversible |
+| A1 | One spec or split (storage, viewer, export, diff, blind review)? | One spec, five phases, one PR each (plus Phase 3a, syntax highlighting, added by the maintainer's decision D20; it needs 1 and blocks none). Dependencies: 2 needs 1; 3 needs 1; 4 needs 3; 5 needs 4. Blind review could move to its own spec (own data model and integrity rules); kept here because the maintainer placed it in E08. | Phases keep PRs small; each phase leaves the app working. | reversible |
 | A2 | Where are files stored? | In SQLite, new table `agent_run_files` with `ON DELETE CASCADE` from `agent_runs`. | Retention "removed with the run" follows from the existing cascade; persistence stays in repositories (SPEC-014 §3.2); the web app reads without file-system access. Cost: up to 10 MB per agent run in the database. | reversible before release |
 | A3 | Unit of "1 MB" and "10 MB"? | **Changed in review round 1.** Bytes of UTF-8 text: `OUTPUT_FILE_MAX_BYTES = 1_048_576`, `OUTPUT_RUN_MAX_BYTES = 10_485_760` (MiB, as the rest of the codebase), each applied to both the original bytes kept and the stored (redacted) bytes (FR-123-05). UI copy says "1 MB" / "10 MB". | Matches existing limits (`2 MiB` per assertion read). Counting stored bytes makes the database bound exact; counting original bytes keeps the redaction margin argument of FR-123-06 valid. | reversible |
 | A4 | Which files take the run budget first? | Ascending original size, then path. | Many small source files are kept whole; a large generated file or dependency folder cannot starve them. Generic, deterministic. | reversible |
@@ -181,6 +191,24 @@ inputs. Every row below is a default to confirm or override before implementatio
 | --- | --- |
 | FR-123-60 | `AgentAdapter` SHALL gain `findOutputSecrets(text: string, options: { textEnd: 'file-end' \| 'cut' }): readonly TextRange[]` (`TextRange = { start, end }`, UTF-16 offsets into `text`, end exclusive): the ranges the adapter's own redaction would replace in that text, including secrets only it knows (the API key in API Key Mode, read from the adapter's environment as `run` does), with the private-key fragment rule and, for `textEnd: 'cut'`, the known-secret prefix rule of FR-123-07. It returns offsets, not redacted text, so the engine can place the cut on the original text (FR-123-06) and count replacements (FR-123-07). Secrets never leave the adapter; only offsets do. The core gains `findSecretRanges(text, knownSecrets, { textEnd })` implementing every rule of FR-123-07; the Claude Code adapter implements `findOutputSecrets` with it and its known secrets, the mock agent with no known secrets. `redactSecrets` and `redactStreamText` keep their behaviour for traces; a test asserts that, on the trace redaction test corpus with `textEnd: 'file-end'`, replacing the returned ranges leaves no known secret, no `SECRET_PATTERNS` match and no private-key body. |
 
+### 6.7 Syntax highlighting (web, Phase 3a, decision D20)
+
+Maintainer decision D20 of 2026-10-29 (UI decisions on PR #155; D1 to D19 were approved there).
+It is delivered in its own phase after Phase 1 (§21, Phase 3a) and blocks neither capture nor
+export. Until it lands, `FileView` and `SideBySideDiff` show plain text as specified above.
+Rationale and rejected alternatives: [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md).
+
+| ID | Requirement |
+| --- | --- |
+| FR-123-70 | **Server only.** Highlighting SHALL run only on the server, in `apps/web/lib/syntax-highlight.ts` (which imports `server-only`), called by App Router Server Components. No highlighter code, grammar or theme SHALL ship to the browser; components receive tokens as plain data. The highlighter uses Shiki's fine-grained core (`createHighlighterCore`) with only the grammars of FR-123-71 and Shiki's JavaScript regular-expression engine, so no WebAssembly and no native code is loaded. It is created once per server process (a lazily created, memoised promise); a failed creation is not memoised, so a later request retries. It never starts a process or touches the file system beyond module loading (SPEC-014 §3.3). |
+| FR-123-71 | **Language from the extension only.** The language SHALL be chosen from the last extension of the file's basename, compared case-insensitively, through the fixed map `SYNTAX_LANGUAGE_BY_EXTENSION`: `js`, `mjs`, `cjs` → `javascript`; `jsx` → `jsx`; `ts`, `mts`, `cts` → `typescript`; `tsx` → `tsx`; `json` → `json`; `css` → `css`; `scss` → `scss`; `html`, `htm` → `html`; `php` → `php`; `md`, `markdown` → `markdown`; `yaml`, `yml` → `yaml`; `sh`, `bash` → `shellscript`; `py` → `python`. Any other extension, a file without one (`Makefile`) or a dotfile with no further dot (`.env`) is plain text. There is no detection from content, shebang or Markdown fence info: a fenced block inside a Markdown file is coloured only as far as the bundled grammars cover it, never by loading another grammar. Grammars that a listed grammar embeds (for example HTML, CSS, JavaScript or SQL inside PHP) are loaded as its dependencies; they are not reachable by extension unless listed. `languageForPath(path)` returns the language or `null`. |
+| FR-123-72 | **Tokens, never HTML.** The highlighter SHALL produce tokens (`codeToTokens`), not an HTML string, and components SHALL render each token as a React text node inside a `span`. No `dangerouslySetInnerHTML`, `innerHTML` or HTML string from Shiki is used anywhere (the files are untrusted, §12). A token's colour SHALL be one of the fixed CSS variables of FR-123-73, mapped to a known class or style value; a token whose colour is anything else is rendered without colour. `highlightLines(text, language)` returns `HighlightedLine[]` (`HighlightedLine = readonly { text: string; token: SyntaxTokenKind \| null }[]`, one entry per line) and the concatenated token text of each line SHALL equal that line of the input exactly (a unit test asserts it for every listed language). |
+| FR-123-73 | **Colours from design-system tokens.** The theme SHALL be one DirectiveBench theme built with Shiki's CSS-variables theme (`createCssVariablesTheme`, `variablePrefix: '--syntax-'`), so each token's colour is a `var(--syntax-token-*)` reference and the light and dark values come from new design-system tokens in `apps/web/app/globals.css` (defined for `:root` and `.dark`, documented on the Storybook tokens page): `--syntax-foreground`, `--syntax-token-comment`, `--syntax-token-keyword`, `--syntax-token-string`, `--syntax-token-string-expression`, `--syntax-token-constant`, `--syntax-token-function`, `--syntax-token-parameter`, `--syntax-token-punctuation` and `--syntax-token-link`. Switching the theme needs no second highlighting pass. Each colour SHALL reach at least 4.5:1, in both themes, against every background it appears on: the code surface of `FileView` (plain lines), the D11 tints (`bg-destructive/10` for removed lines, `bg-success/10` for added lines) and the D12 neutral tint (`bg-info/10`) composited over that surface. The D5 line-number gutter is not highlighted and is unchanged. |
+| FR-123-74 | **Size bound and failure.** A file (or a side of a diff) SHALL be highlighted only when its kept content is at most `SYNTAX_HIGHLIGHT_MAX_BYTES` (262,144 UTF-8 bytes, 256 KiB, measured on the stored content, `stored_bytes`). Above it the text is shown plain with the visible note "Syntax highlighting is off for files over 256 KB." (`role="status"`, with the other notices of FR-123-21). Any highlighter error (creation, grammar, tokenizing) SHALL be caught in `apps/web/lib`: the text is shown plain with the note "Syntax highlighting failed, so this file is shown as plain text." and the error is logged on the server without file content. A highlighting failure SHALL never fail, blank or delay the page beyond the bound of NFR-123-07. Plain text because of an unknown extension shows no note. |
+| FR-123-75 | **Long lines.** Lines longer than `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` (10,000 UTF-16 code units) SHALL be shown as plain text in an otherwise highlighted file (Shiki's `tokenizeMaxLineLength`), and tokenizing one line SHALL stop after `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` (500 ms, Shiki's `tokenizeTimeLimit`), leaving the rest of that line plain. A minified one-line file under 256 KiB therefore shows as plain text, not as a slow page. |
+| FR-123-76 | **Diff stays line-based.** The diff (FR-123-31, D9 whole-line) SHALL be computed on the plain lines exactly as without highlighting. Each side is tokenized as a whole text (so a block comment or string spanning lines is coloured correctly) and the resulting `HighlightedLine` of each line index is attached to that side's row; filler rows, markers (`-`, `+`, `<`, `>`), `sr-only` labels and row tints are unchanged. Each side is checked against FR-123-74 on its own, so one side can be highlighted and the other plain with its note. Both sides use the language of the compared path, so the colouring never differs by variant (no blind-review signal, FR-123-52). Line splitting is the same as `FileView`'s (CR and CRLF shown as LF, §11), so token lines and diff lines always correspond. |
+| FR-123-77 | **Packaging.** The published `directivebench` package's runtime `dependencies` SHALL stay `next`, `react` and `react-dom` (SPEC-004 §4.3): the highlighter is bundled into the web app's server build, not required from `node_modules` at run time. Next.js 16.4 lists `shiki` in its default `serverExternalPackages` (`next/dist/lib/server-external-packages.jsonc`), so importing `shiki` as is would be left external and fail in the installed tarball; the implementation SHALL make it bundled (for example by importing the fine-grained `@shikijs/*` entry points, which are not on that list, or another Next.js setting) and SHALL prove it with `pnpm build && pnpm verify:pack`, whose smoke test renders a highlighted file from the installed tarball (FR-123-72 tokens present in the HTML). |
+
 ## 7. Non-functional requirements
 
 - NFR-123-01 (target, not an acceptance criterion): capture adds at most 1 s per agent run for
@@ -202,6 +230,15 @@ inputs. Every row below is a default to confirm or override before implementatio
   strings) plus one read window is alive at a time, whatever the number of cases, repetitions
   and variants (FR-123-10). Without this, 50 repetitions x 10 cases x 2 variants at 10 MiB would
   retain about 10 GiB.
+- NFR-123-07 (Phase 3a): highlighting work per request is bounded by `SYNTAX_HIGHLIGHT_MAX_BYTES`
+  per shown text (at most two in a diff), `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` per line and
+  `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS` per line; these bounds are tested exactly (256 KiB
+  highlighted, 256 KiB plus one byte plain with the note). Target, not an acceptance criterion:
+  highlighting a generated 256 KiB TypeScript file takes under 1 s after the highlighter exists,
+  in a unit timing test with a generous bound (lesson 2026-10-21 on timing tests). The browser
+  receives no highlighter code: the client JavaScript of the pages does not grow by Shiki (checked
+  on the build output, FR-123-70). The token data adds to the HTML and RSC payload of a page;
+  the 256 KiB bound keeps that bounded per shown text.
 
 ## 8. Domain entities and contracts
 
@@ -287,6 +324,16 @@ flowchart LR
   `OUTPUT_REDACTION_MARGIN_BYTES` (4 KiB, asserted to be at least the longest minimum match
   length of the core patterns); in `apps/web/lib`: `FILE_DIFF_MAX_EDIT_LINES`,
   `BLIND_REVIEW_NOTE_MAX_CHARS` (2,000; shared Zod schema).
+- Phase 3a, in `apps/web/lib/syntax-highlight.ts` (FR-123-70 to FR-123-77):
+  `SYNTAX_HIGHLIGHT_MAX_BYTES = 262_144`, `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS = 10_000`,
+  `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS = 500`, `SYNTAX_LANGUAGE_BY_EXTENSION` (the fixed map of
+  FR-123-71), `languageForPath(path): SyntaxLanguage | null`,
+  `highlightLines(text, language): Promise<HighlightResult>` with `HighlightResult =
+  { kind: 'highlighted'; lines: HighlightedLine[] } | { kind: 'plain'; reason: 'no-language' |
+  'too-large' | 'failed' }`, and `SyntaxTokenKind` (the token names of FR-123-73: `comment`,
+  `keyword`, `string`, `string-expression`, `constant`, `function`, `parameter`, `punctuation`,
+  `link`). `FileView` and each `SideBySideDiff` side gain an optional prop with the
+  `HighlightResult`; without it they render plain text as before.
 
 ### 8.3 Repository functions (`@directivebench/database`)
 
@@ -363,6 +410,14 @@ Before building, read `apps/web/design-system.md` and the Storybook. Copy uses n
 - New components (A14, ⚠ needs the maintainer's approval): `FileView` (line-numbered text),
   `SideBySideDiff` (two `FileView` columns with aligned change markers) and the file-status badge
   mapping. Each gets stories and a Storybook page per SPEC-122 "Contributing".
+- **Syntax highlighting (Phase 3a, D20, §6.7)**: `FileView` and both sides of `SideBySideDiff`
+  colour tokens with the `--syntax-*` tokens; the line-number gutter (D5), markers, filler rows
+  and row tints (D11, D12) look the same as without highlighting. Colour is never the only
+  carrier of meaning (it adds none). The notes "Syntax highlighting is off for files over 256
+  KB." and "Syntax highlighting failed, so this file is shown as plain text." are `role="status"`
+  sentences with the other notices (D3), in a diff above the side they concern. The tokens page
+  of the Storybook lists the new tokens with their contrast in both themes; the `FileView` and
+  `SideBySideDiff` pages describe the highlighted, too-large and failed states.
 
 Prototype: .ai/specs/assets/agent-run-output-files/ (static mockups rendered by
 `om-auto-write-spec`; illustrative layout only, not a design approval and not built from the
@@ -379,6 +434,17 @@ design-system components):
   prompt can make the agent write anything). The web app renders them as escaped text only (no
   `dangerouslySetInnerHTML`, no Markdown or HTML rendering, no links built from content); paths in
   URLs are query parameters matched against stored rows, never used as file-system paths.
+- **Syntax highlighting does not change that (§6.7).** It runs on the server over the stored,
+  already redacted content and returns tokens; each token's text becomes a React text node, so
+  React escapes it, and Shiki's HTML output (`codeToHtml`) is never used. A token's colour comes
+  only from the fixed DirectiveBench theme and is mapped to known classes, never taken from the
+  content. The language comes from a fixed extension map, so file content cannot select or load
+  a grammar. Hostile content can make tokenizing slow; that work is bounded by
+  `SYNTAX_HIGHLIGHT_MAX_BYTES`, the line length and per-line time limits (NFR-123-07), and a
+  failure falls back to plain text (FR-123-74). Errors are logged without file content. Shiki is
+  a pure JavaScript library with no install script, no WebAssembly in the chosen engine and no
+  network access; it adds to the supply-chain surface of the web build, covered by the lockfile
+  and `pnpm audit --prod` (SPEC-004 §4, [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md)).
 - **Export** writes untrusted paths to disk: FR-123-42 validation, `resolveInside`, exclusive
   create, empty target directory. The lesson "validate untrusted paths against the narrowest root"
   applies.
@@ -414,6 +480,7 @@ design-system components):
 | Verdict on a decided pair or a revealed review | Action returns `already-decided` / `revealed`; the page shows "This pair already has a verdict." / "This review was revealed; verdicts are closed." |
 | Start review with no eligible pair | Button not offered; a forged action returns "No pair of completed agent runs with kept files." |
 | Run or agent run not found / foreign ids | Not-found page. |
+| Syntax highlighter cannot be created or throws on a file (Phase 3a) | Plain text with "Syntax highlighting failed, so this file is shown as plain text."; server log without file content; the page renders (FR-123-74). The next request retries creation. |
 
 ## 14. Edge cases
 
@@ -437,6 +504,25 @@ design-system components):
   readable.
 - Redaction marker inside the agent's own text (`[REDACTED]` written by the agent): kept as text
   and not counted; the count is the number of ranges the redaction replaced (FR-123-07).
+- Syntax highlighting (Phase 3a, §6.7):
+  - Unknown extension, no extension or a dotfile (`README`, `Makefile`, `.env`, `.txt`): plain
+    text, no note (FR-123-71).
+  - Upper-case or mixed-case extension (`App.TSX`): highlighted as `tsx`.
+  - A file of exactly 256 KiB of stored content is highlighted; one byte more is plain with the
+    note (FR-123-74). A truncated file (cut at 1 MB) is over the bound and plain.
+  - A huge single line (a minified bundle under 256 KiB): the line is over
+    `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` and shown plain; a slow line stops at the per-line time
+    limit (FR-123-75).
+  - A file whose content does not match its extension (JSON in a `.ts` file, broken syntax):
+    coloured as far as the grammar manages; never an error, never a different grammar.
+  - Binary, deleted, artifact and not-kept files have no text (FR-123-08), so nothing is
+    highlighted; their notices are unchanged.
+  - A diff where one side is under the bound and the other over it: the first side is
+    highlighted, the second plain with its note (FR-123-76).
+  - A `[REDACTED]` marker inside a string or comment is coloured as part of it; it stays
+    readable text.
+  - The highlighter fails to load in the installed package or throws on a file: plain text with
+    the failure note, the page still renders (FR-123-74, FR-123-77).
 
 ## 15. Testing strategy
 
@@ -481,6 +567,30 @@ design-system components):
   a variant label next to a case and repetition, a changed-file path of a pair, or a trace
   fragment; after the reveal the Agent runs section is back.
 - Storybook: new components in both themes with axe.
+- Syntax highlighting (Phase 3a, §6.7):
+  - Unit (`apps/web/lib`, 100% coverage): `languageForPath` for every extension of
+    `SYNTAX_LANGUAGE_BY_EXTENSION`, upper case, no extension, dotfiles, an unknown extension and
+    a path with several dots; `highlightLines` for one sample per listed language with the
+    JavaScript engine (no error; the token text of each line equals the input line; every token
+    kind is one of `SyntaxTokenKind` or `null`), a multi-line comment spanning lines, the size
+    bound exactly (262,144 bytes highlighted, 262,145 plain with `too-large`, counted in UTF-8
+    bytes with multi-byte characters at the boundary), a line over
+    `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS` returned as one plain token, a highlighter whose creation
+    rejects and one that throws on tokenizing (both `failed`, and creation is retried on the next
+    call), and content that looks like HTML (`<script>`, `<img onerror>`) returned as token text.
+    Diff integration: the rows of a highlighted diff carry the `HighlightedLine` of their line
+    index on each side, filler rows none.
+  - Timing (NFR-123-07): a generated 256 KiB TypeScript file, generous bound.
+  - Storybook: `FileView` and `SideBySideDiff` stories for highlighted text (one per token kind
+    present, in both variants `change` and `neutral`), the too-large note and the failed note, in
+    both themes with axe (contrast checked by axe in stories only until a page exists).
+  - Playwright: once a page renders highlighted text (Phase 3 or 4, or Phase 3a if it lands
+    later), `e2e/ui-contrast.spec.ts` measures every `--syntax-*` colour as rendered against the
+    plain code surface and the D11 and D12 tinted rows in both themes (at least 4.5:1), and a
+    page test asserts that a hostile file containing `<script>` renders as text and that no
+    Shiki chunk is loaded by the browser.
+  - Packaging: `pnpm build && pnpm verify:pack` renders a highlighted file from the installed
+    tarball (FR-123-77).
 
 ## 16. Acceptance criteria
 
@@ -509,19 +619,51 @@ design-system components):
   metadata only, and each capture is collectable after its `onAgentRun` resolved (FR-123-10).
 - [ ] AC-11: An `assertion-error` agent run keeps and shows the files captured before its
   assertions (A6).
+- [ ] AC-12 (Phase 3a): A kept file with a listed extension and at most 256 KB of content is
+  shown with syntax colours in `FileView` and on both sides of `SideBySideDiff`, rendered from
+  server-side tokens as React elements; the browser loads no highlighter code, and the installed
+  tarball does the same with only `next`, `react` and `react-dom` as runtime dependencies
+  (FR-123-70, FR-123-72, FR-123-77).
+- [ ] AC-13 (Phase 3a): A file over 256 KB is shown plain with "Syntax highlighting is off for
+  files over 256 KB."; a highlighter failure shows plain text with its note and the page still
+  renders; an unknown extension is plain with no note (FR-123-71, FR-123-74).
+- [ ] AC-14 (Phase 3a): Every `--syntax-*` colour reaches at least 4.5:1 in both themes on the
+  plain code surface and on the D11 and D12 row tints, measured in `e2e/ui-contrast.spec.ts` on a
+  page (FR-123-73).
+- [ ] AC-15 (Phase 3a): A file containing HTML or script markup is shown as text, never
+  interpreted (no `dangerouslySetInnerHTML`, §12).
 
 ## 17. Dependencies
 
 - SPEC-118 (Claude Code adapter, `installedPaths`, redaction of traces), SPEC-112 (pairs,
   interleaving), SPEC-110 (workspace lifecycle), SPEC-113 (run page), SPEC-006 (schema; update
   its table list in the implementation PR), SPEC-007 and SPEC-014 (security and engineering
-  rules), SPEC-122 (design-system contribution for new components).
-- No new package dependency.
+  rules), SPEC-122 (design-system contribution for new components), SPEC-004 §4 (dependency
+  policy).
+- Phases 1, 2, 3, 4 and 5: no new package dependency.
+- **Phase 3a: one new dependency, `shiki` (MIT, 4.x; 4.5.0 on 2026-10-29), in `apps/web` only**,
+  added on the maintainer's decision D20 and recorded in
+  [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md) (AGENTS.md rule 9).
+  Why it is needed: readable code needs accurate grammars, and writing tokenizers for thirteen
+  languages by hand is not "a few lines of local code" (SPEC-014 §5.6). Why Shiki: it uses the
+  TextMate grammars that VS Code uses, so colouring matches what authors see in their editor; it
+  runs on the server and returns tokens, so nothing ships to the browser and no HTML string is
+  needed; its fine-grained core loads only the listed grammars and its JavaScript engine needs no
+  WebAssembly or native code (SPEC-004 §4.2). It is bundled into the web build, not added to the
+  CLI's runtime `dependencies` (FR-123-77, SPEC-004 §4.3). Rejected: **lowlight** and
+  **refractor** (highlight.js and Prism grammars as syntax trees) are less accurate on modern
+  TypeScript, TSX, PHP and nested languages than TextMate grammars; **highlight.js** directly is
+  large when its languages are bundled and its main feature beyond them, language
+  auto-detection, is explicitly unwanted (FR-123-71) and returns an HTML string; a
+  **client-side highlighter** (any library) would ship grammars to the browser; **no
+  highlighting** was the state before D20.
 
 ## 18. Open questions
 
 None blocking. The autonomous defaults are listed in §5a; A14 needs the maintainer's
-confirmation before Phase 3 starts.
+confirmation before Phase 3 starts. Phase 3a follows decision D20 and has no open question;
+whether the token data of a 256 KB file makes pages too heavy is measured in that phase
+(NFR-123-07), and the bound is the lever if it does.
 
 ## 19. Future extensions
 
@@ -537,13 +679,17 @@ confirmation before Phase 3 starts.
 - **Implemented:** none.
 - **Partially implemented:** none.
 - **Not implemented:** everything in this spec. Today `changedFiles` (paths only) is stored and
-  workspaces are removed after each agent run.
+  workspaces are removed after each agent run. Syntax highlighting (Phase 3a) is not
+  implemented either.
 
 ## 21. Phasing and implementation plan
 
 Each phase is one PR and leaves the app working. Order: Phase 1, then Phase 2 (needs 1) and
 Phase 3 (needs 1 and A14) in either order, then Phase 4 (reuses Phase 3's `FileView`), then
-Phase 5 (reuses Phase 4's diff, adds migration `0004`).
+Phase 5 (reuses Phase 4's diff, adds migration `0004`). Phase 3a (syntax highlighting, D20)
+comes after Phase 1 and needs the `FileView` and `SideBySideDiff` components (PR #155); it can
+land before, between or after Phases 3 to 5, and none of Phases 2 to 5 waits for it: without it
+the pages show plain text.
 
 ### Phase 1: Capture and storage
 
@@ -575,6 +721,21 @@ Phase 5 (reuses Phase 4's diff, adds migration `0004`).
 2. "Output files" card on `/results/[id]`; `/results/[id]/agent-runs/[agentRunId]` page;
    Playwright tests.
 
+### Phase 3a: Syntax highlighting (decision D20, after Phase 1)
+
+1. Add `shiki` to `apps/web` (ADR-0014); `apps/web/lib/syntax-highlight.ts` with
+   `server-only`, the fine-grained core, the JavaScript engine, the grammars of FR-123-71, the
+   constants and functions of §8.2, and unit tests to 100% (§15).
+2. The `--syntax-*` tokens in `globals.css` for both themes, measured against the code surface
+   and the D11 and D12 tints before they are committed; the Storybook tokens page.
+3. `FileView` and `SideBySideDiff` render a `HighlightResult` when given one (FR-123-72,
+   FR-123-76), with stories and docs for the highlighted, too-large and failed states.
+4. Wire the Server Components of the pages that exist (Phase 3, 4 or 5) to call
+   `highlightLines`; a page built later calls it from the start.
+5. `pnpm build && pnpm verify:pack` with a highlighted file in the installed tarball
+   (FR-123-77); `e2e/ui-contrast.spec.ts` and the hostile-markup page test once a page renders
+   highlighted text (AC-14, AC-15); browser QA agent and Codex review per AGENTS.md §2.14.
+
 ### Phase 4: Compare
 
 1. Bounded line diff in `apps/web/lib` with unit tests.
@@ -588,4 +749,4 @@ Phase 5 (reuses Phase 4's diff, adds migration `0004`).
    including the existing Agent runs section (FR-123-52a); Playwright flow test (start, verdict, reveal, keyboard, 320px, both themes) that
    asserts no agent-run id or variant label appears in the HTML or the RSC payload before the
    reveal.
-3. Browser QA agent and Codex review per AGENTS.md §2.14 for Phases 3 to 5.
+3. Browser QA agent and Codex review per AGENTS.md §2.14 for Phases 3, 3a, 4 and 5.
