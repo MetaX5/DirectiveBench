@@ -50,8 +50,25 @@ export type HighlightResult =
 export const SYNTAX_HIGHLIGHT_MAX_BYTES = 262_144;
 /** Longer lines stay plain inside a highlighted file (FR-123-75, Shiki tokenizeMaxLineLength). */
 export const SYNTAX_HIGHLIGHT_MAX_LINE_CHARS = 10_000;
-/** Tokenizing one line stops after this time; the rest of it stays plain (tokenizeTimeLimit). */
+/**
+ * Tokenizing one line stops after this time; the rest of it stays plain (tokenizeTimeLimit).
+ * Cooperative only (FR-123-75): it is checked between regular-expression matches and counts
+ * the lazy compilation of a grammar's expressions, so where it cuts a line depends on the
+ * machine's speed.
+ */
 export const SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS = 500;
+
+/** `lineTimeLimitMs` value that turns the per-line time limit off (Shiki's convention). */
+export const SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT = 0;
+
+export interface HighlightOptions {
+  /**
+   * Per-line time limit; defaults to SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS. Only code that needs
+   * output independent of machine speed (tests, the Storybook fixtures) passes
+   * SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT.
+   */
+  lineTimeLimitMs?: number;
+}
 
 /** The fixed extension map of FR-123-71; no detection from content. */
 export const SYNTAX_LANGUAGE_BY_EXTENSION = {
@@ -162,6 +179,7 @@ function toLine(tokens: readonly ThemedToken[]): HighlightedLine {
 export async function highlightLines(
   text: string,
   language: SyntaxLanguage | null,
+  { lineTimeLimitMs = SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS }: HighlightOptions = {},
 ): Promise<HighlightResult> {
   if (language === null) return { kind: 'plain', reason: 'no-language' };
   if (Buffer.byteLength(text, 'utf8') > SYNTAX_HIGHLIGHT_MAX_BYTES) {
@@ -176,7 +194,7 @@ export async function highlightLines(
       theme: THEME_NAME,
       // Shiki leaves a line plain from this length on; the spec keeps lines of exactly the limit.
       tokenizeMaxLineLength: SYNTAX_HIGHLIGHT_MAX_LINE_CHARS + 1,
-      tokenizeTimeLimit: SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
+      tokenizeTimeLimit: lineTimeLimitMs,
     });
     return { kind: 'highlighted', lines: tokens.map(toLine) };
   } catch (error) {

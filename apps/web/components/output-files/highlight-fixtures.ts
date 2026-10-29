@@ -4,7 +4,8 @@ import generated from './highlight-fixtures.json';
 
 // Story data for syntax highlighting (SPEC-123 §6.7). Stories cannot run the server-only
 // highlighter, so the tokens of these samples are precomputed by lib/syntax-highlight.ts into
-// highlight-fixtures.json. test/highlight-fixtures.test.ts fails when the JSON is stale;
+// highlight-fixtures.json, without the per-line time limit so they do not depend on the speed
+// of the machine. test/highlight-fixtures.test.ts fails when the JSON is stale;
 // regenerate it with `UPDATE_HIGHLIGHT_FIXTURES=1 pnpm --filter @directivebench/web exec
 // vitest run test/highlight-fixtures.test.ts`.
 

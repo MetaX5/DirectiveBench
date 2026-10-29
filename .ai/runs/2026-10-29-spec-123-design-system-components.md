@@ -217,6 +217,35 @@ Not verified:
   temporary page (above). The diff row attachment is checked by Storybook play functions, not
   by a unit test (components are outside unit coverage).
 
+CI fix after the D20 push (run 40943388665, "Unit tests (100% coverage)"):
+
+- **Failure 1, fixtures differ on CI.** Root cause, reproduced: Shiki's cooperative
+  `tokenizeTimeLimit` (500 ms, checked with `Date.now()` by vscode-textmate) also counts the
+  lazy compilation of a grammar's regular expressions. On the slow runner the first PHP line
+  ran out of time, so the rest of it became one `<?php` token instead of `<?` (keyword) and
+  `php`. Locally the same output appears with `tokenizeTimeLimit: 1` on a fresh highlighter
+  (first pass `<?php`, second pass `<?` + `php`) and with a `Date.now` stub advancing 1 s per
+  read. Fix: `highlightLines` takes `{ lineTimeLimitMs }` (default
+  `SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS`; `SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT = 0` turns it
+  off); the fixtures and every exact-token test use the no-limit option. The committed JSON
+  already equalled the no-limit output. Regression test
+  `test/highlight-fixtures.test.ts > do not depend on the speed of the machine`: under the slow
+  clock the shipped limit changes the output, and the no-limit computation still equals the
+  fixtures. A mocked test checks that the default passes 500 ms and 10,001 to Shiki.
+- **Product code:** no behaviour change. The limit stays on in production: FR-123-75 makes it
+  cooperative only, a cut line is still complete text (only fewer colours), and the
+  enforceable bound is FR-123-78's worker deadline in Phase 3a. Warming the grammars would not
+  make output deterministic either (rules compile on first use, on any line) and would add
+  start-up work.
+- **Failure 2, timeout (13.8 s on CI).** The exact 262,144-byte test tokenized 256 KiB of code,
+  and its last line was a 6,000-character identifier (the slow-regex case, 0.7 s locally). It
+  now uses one short line of code plus one line over `SYNTAX_HIGHLIGHT_MAX_LINE_CHARS`, which
+  Shiki skips: same byte bound, 19 ms. The 256 KiB wall-clock test (30 s bound) was replaced by
+  `expectLinearTime` (CPU-time growth from 1.4 KiB to 45 KiB against a linear baseline, the
+  repository's helper). The fixture tests got a named 60 s timeout (4.8 s under load).
+- Reproduced CI capacity with `taskset -c 0,1 pnpm test --force` and two `yes` processes: web
+  394 tests pass, 100% coverage.
+
 ## Problems and deviations
 
 - Contributing asks for a state matrix with frozen hover, focus and pressed states. These

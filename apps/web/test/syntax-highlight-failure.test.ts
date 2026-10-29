@@ -103,4 +103,21 @@ describe('highlightLines failures', () => {
       ],
     });
   });
+
+  it('passes the shipped limits to Shiki unless a caller turns the time limit off', async () => {
+    const codeToTokens = vi.fn((_code: string, _options: object) => ({
+      tokens: [[{ content: 'a' }]],
+    }));
+    create.mockResolvedValue({ codeToTokens });
+    const { highlightLines, SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT } = await load();
+
+    await highlightLines('a', 'typescript');
+    await highlightLines('a', 'typescript', {
+      lineTimeLimitMs: SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT,
+    });
+    expect(codeToTokens.mock.calls.map(([, options]) => options)).toEqual([
+      expect.objectContaining({ tokenizeMaxLineLength: 10_001, tokenizeTimeLimit: 500 }),
+      expect.objectContaining({ tokenizeMaxLineLength: 10_001, tokenizeTimeLimit: 0 }),
+    ]);
+  });
 });
