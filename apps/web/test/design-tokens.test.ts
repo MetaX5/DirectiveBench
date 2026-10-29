@@ -21,6 +21,10 @@ function sources(dir: string): string[] {
 
 const files = scope.roots.flatMap(sources);
 
+// Parsing every checked file with TypeScript takes ~0.2 s alone but over 5 s (vitest's default)
+// on the loaded 2-core CI runner while every package's suite runs in parallel (#149).
+const SOURCE_SCAN_TIMEOUT_MS = 30_000;
+
 // MDX documentation pages (SPEC-122 FR-122-4) are checked on the classes they render: the
 // values of their className attributes. Their prose and code examples name forbidden classes
 // on purpose. Returns [line, text] pairs; other files are checked line by line.
@@ -210,26 +214,33 @@ describe('arbitrary Tailwind values', () => {
     expect(arbitraryValues(source)).toEqual([]);
   });
 
-  it('appear only as documented exceptions (FR-121-5)', () => {
-    const hits = files.flatMap((file) => {
-      const path = relative(root, file);
-      const source = readFileSync(file, 'utf8');
-      const words = file.endsWith('.mdx')
-        ? checkedText(file, source).flatMap(([line, text]) =>
-            arbitraryValues(JSON.stringify(text)).map(([, word]): [number, string] => [line, word]),
+  it(
+    'appear only as documented exceptions (FR-121-5)',
+    () => {
+      const hits = files.flatMap((file) => {
+        const path = relative(root, file);
+        const source = readFileSync(file, 'utf8');
+        const words = file.endsWith('.mdx')
+          ? checkedText(file, source).flatMap(([line, text]) =>
+              arbitraryValues(JSON.stringify(text)).map(([, word]): [number, string] => [
+                line,
+                word,
+              ]),
+            )
+          : arbitraryValues(source, file);
+        return words
+          .filter(
+            ([, word]) =>
+              !arbitraryAllowlist.some(
+                ([allowed, pattern]) => allowed === path && pattern.test(word),
+              ),
           )
-        : arbitraryValues(source, file);
-      return words
-        .filter(
-          ([, word]) =>
-            !arbitraryAllowlist.some(
-              ([allowed, pattern]) => allowed === path && pattern.test(word),
-            ),
-        )
-        .map(([line, word]) => `${path}:${line} ${word}`);
-    });
-    expect(hits).toEqual([]);
-  });
+          .map(([line, word]) => `${path}:${line} ${word}`);
+      });
+      expect(hits).toEqual([]);
+    },
+    SOURCE_SCAN_TIMEOUT_MS,
+  );
 
   it('keeps no stale allowlist entry', () => {
     for (const [file, pattern] of arbitraryAllowlist) {
