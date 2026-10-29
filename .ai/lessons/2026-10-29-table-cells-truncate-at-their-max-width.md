@@ -28,6 +28,10 @@ Also: a comment containing `#122` failed the design-token guard's hex-colour rul
   with Playwright after editing the row DOM to worst-case values, answer "which change fits"
   in one run before any code change.
 
+- Seed geometry tests with the real worst cases of the data model, not tidy samples: artifact
+  names can be paths (`dir/AGENTS.md`) and snake_case, which do not break like kebab-case. Cells
+  holding such user text need `wrap-anywhere`, or they set the table's floor.
+
 ## How to apply
 
 Before fixing a table overflow, measure header widths and the container's overflow at the

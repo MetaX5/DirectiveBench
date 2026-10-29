@@ -173,7 +173,9 @@ export default async function ArtifactsPage({
                   const e = a.latestEvaluation;
                   return (
                     <TR key={a.id} data-artifact-id={a.id}>
-                      <TD className="font-medium">
+                      {/* Names can be paths (`dir/AGENTS.md`) or snake_case and repository names
+                          one long word; without wrap-anywhere they would widen the table. */}
+                      <TD className="font-medium wrap-anywhere">
                         <Link href={`/artifacts/${a.id}`} className="hover:underline">
                           {a.name}
                         </Link>
@@ -191,7 +193,7 @@ export default async function ArtifactsPage({
                         {a.description ?? '—'}
                       </TD>
                       <TD>
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1 wrap-anywhere">
                           {a.categories.map((c) => (
                             <Badge key={c.slug} variant="secondary">
                               {c.name}
@@ -200,7 +202,7 @@ export default async function ArtifactsPage({
                         </div>
                       </TD>
                       <TD
-                        className="text-ui text-muted-foreground"
+                        className="text-ui text-muted-foreground wrap-anywhere"
                         title={a.repositories.map((r) => r.name).join(', ')}
                       >
                         {repositoriesLabel(a.repositories)}

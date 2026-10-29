@@ -4,17 +4,18 @@ import { DEMO_ARTIFACT, MOCK_LABEL, withDatabase } from './support';
 /**
  * Issue 122: at 1920x1080 with the sidebar visible, every column of the Artifacts table fits
  * without horizontal scrolling. Next to the demo artifact (with its mock evaluation) a seeded
- * artifact carries the widest realistic values: a long kebab-case name, a long description,
- * four categories and two repositories with long names.
+ * instruction carries the widest realistic values: a nested path as its name (agents-md,
+ * claude-md and similar artifacts are named `<dir>/<file>`), a long description, four
+ * categories and two repositories with long names without spaces or hyphens.
  */
 
 const ARTIFACT = 'art_e2e122fullhd';
 const VERSION = 'artv_e2e122fullhd';
 const REPOSITORIES = [
-  { id: 'repo_e2e122a', name: 'client-platform-monorepo-frontend' },
+  { id: 'repo_e2e122a', name: 'client_platform_monorepo_frontend_services' },
   { id: 'repo_e2e122b', name: 'team-shared-agent-skills-library' },
 ];
-const LONG_NAME = 'validate-external-input-for-public-http-endpoints';
+const LONG_NAME = 'packages/benchmark-engine/src/fixtures/typescript/nested/AGENTS.md';
 const CATEGORIES = ['code-quality', 'security', 'backend', 'documentation'];
 
 test.beforeAll(() =>
@@ -22,10 +23,10 @@ test.beforeAll(() =>
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO artifacts (id, slug, name, type, description, created_at, updated_at)
-       VALUES (?, ?, ?, 'skill', ?, ?, ?)`,
+       VALUES (?, ?, ?, 'instruction', ?, ?, ?)`,
     ).run(
       ARTIFACT,
-      LONG_NAME,
+      'packages-benchmark-engine-src-fixtures-typescript-nested-agents-md',
       LONG_NAME,
       'Use when writing code that parses or accepts user-supplied input from forms, files, ' +
         'HTTP requests and environment variables; enforces strict validation with explicit errors.',
@@ -35,7 +36,7 @@ test.beforeAll(() =>
     db.prepare(
       `INSERT INTO artifact_versions
          (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
-       VALUES (?, ?, 1, ?, 'skill-md', 'SKILL.md', '[]', '{}', ?)`,
+       VALUES (?, ?, 1, ?, 'agents-md', 'AGENTS.md', '[]', '{}', ?)`,
     ).run(VERSION, ARTIFACT, 'c'.repeat(64), now);
     for (const [index, repository] of REPOSITORIES.entries()) {
       db.prepare(

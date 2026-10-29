@@ -36,10 +36,12 @@ accessible overflow. Playwright covers the geometry.
 - **Opt-in mechanism:** the page wraps its content in `<div data-layout="wide">`, and `main` in
   `app/layout.tsx` carries `has-data-[layout=wide]:max-w-wide`. Server-only, no route logic in
   the layout, and no other page matches.
-- **No `wrap-anywhere` on name, category or repository cells.** It would let the browser break
-  kebab-case names mid-word at narrower widths instead of scrolling the table. Real names break
-  at hyphens; a single unbroken word wider than the spare space still makes the table scroll in
-  its focusable container (documented in SPEC-101 §11).
+- **`wrap-anywhere` on the name, category and repository cells.** At first left out (to keep
+  names whole at narrower widths), then added after the browser QA agent showed that real names
+  do not break: agents-md and similar artifacts are named `<dir>/<file>` (`packages/core/src/
+  artifacts.ts`), and snake_case names and one-word repository names have no break point. A
+  nested path pushed the table to 1651px in a 1344px container. The cost: a path breaks inside
+  a segment when its column is narrow; the full name stays visible.
 
 ## Work performed
 
@@ -50,9 +52,9 @@ accessible overflow. Playwright covers the geometry.
 3. `globals.css` token, `lib/utils.ts` tailwind-merge registration, `layout.tsx` variant,
    `artifacts/page.tsx` wrapper; `tokeny.md`, `design-system.md`, Storybook `spacing.mdx`
    (layout table row at 1664px) and `what-is-missing.mdx` (issue 122 done).
-4. `apps/web/e2e/artifacts-full-hd.spec.ts`: seeds an artifact with a long name and
-   description, four categories and two long-named repositories next to the demo artifact's mock
-   run; asserts at 1920x1080 in light and dark that the document and the table container do not
+4. `apps/web/e2e/artifacts-full-hd.spec.ts`: seeds an instruction named by a nested path
+   (`packages/…/AGENTS.md`) with a long description, four categories and two repositories with
+   one-word names (one snake_case) next to the demo artifact's mock run; asserts at 1920x1080 in light and dark that the document and the table container do not
    scroll, that every header ends inside the container and Status is in view; and that `/`,
    `/repositories` and `/results` keep 1152px while `/artifacts` gets 1440px. Screenshots
    are kept as test output.
@@ -74,6 +76,19 @@ accessible overflow. Playwright covers the geometry.
 Not verified: other browsers than Chromium; zoom levels other than 100%.
 
 ## Problems and deviations
+
+- Browser QA agent (round 1, Playwright on the built app, 1 major, 1 minor, 2 nits):
+  - **Major, confirmed and fixed:** path-like and snake_case names overflowed the table again
+    (1385 to 1533px in a 1344px container, Status cut). The e2e seed used only kebab-case.
+    Red first: the e2e with a nested-path name failed on the previous commit (1651 > 1344), then
+    `wrap-anywhere` on the three cells made it pass.
+  - Minor: at 1440 and 1366 the table scrolls 14 and 88px inside its container. That is outside
+    the target (1920) and is the documented narrow-viewport behaviour.
+  - Nits that were there before this change: the mock badge wraps to two lines; the focusable table
+    container has no accessible name (the page passes no `aria-label` to `Table`). Follow-up.
+  - Passed: 1920 in both themes and with the theme toggle; widths 320 to 2560 without document
+    scroll; keyboard order and focus rings; filters and invalid URL values keep the wide layout;
+    13 other pages keep 1152px; no console errors; muted text 6.01:1 (light), 6.23:1 (dark).
 
 - A comment `(#122)` in `page.tsx` failed the hex-colour guard; rewritten as "issue 122"
   (recorded in the lesson).
