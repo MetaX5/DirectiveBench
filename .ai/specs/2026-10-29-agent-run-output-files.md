@@ -40,7 +40,7 @@ not autonomous defaults.
 - [D09](research/decisions/D09-suite-must-discriminate-before-version-verdicts.md) records that
   "a human comparison also needs the agent's output files, which DirectiveBench does not keep
   yet".
-- Code today: `runAgent` in `packages/benchmark-engine/src/orchestrator.ts` computes
+- Code today: `executeAgentRun` in `packages/benchmark-engine/src/orchestrator.ts` computes
   `changedFiles` (paths and change kind only) and removes the run directory in `finally` unless
   `runner.keepWorkspaces` is set. `keepWorkspaces` keeps whole workspaces unbounded,
   unredacted and outside the database, and nothing shows them; it is a debugging switch, not a
@@ -83,7 +83,7 @@ document are reference scenarios used to check the design, not targets.
 - Deciding how human verdicts aggregate into a D03 observation (D03/Q05 stays open).
 - Cloud storage, sharing, multi-user reviewer identity.
 - A run-deletion feature (none exists today; §8.1 makes deletion cascade when it is built).
-- Binary file content (§6.1 FR-123-05).
+- Binary file content (§6.1 FR-123-08).
 
 ## 5. User stories
 
@@ -107,10 +107,10 @@ inputs. Every row below is a default to confirm or override before implementatio
 | --- | --- | --- | --- | --- |
 | A1 | One spec or split (storage, viewer, export, diff, blind review)? | One spec, five phases, one PR each. Dependencies: 2 needs 1; 3 needs 1; 4 needs 3; 5 needs 4. Blind review could move to its own spec (own data model and integrity rules); kept here because the maintainer placed it in E08. | Phases keep PRs small; each phase leaves the app working. | reversible |
 | A2 | Where are files stored? | In SQLite, new table `agent_run_files` with `ON DELETE CASCADE` from `agent_runs`. | Retention "removed with the run" follows from the existing cascade; persistence stays in repositories (SPEC-014 §3.2); the web app reads without file-system access. Cost: up to 10 MB per agent run in the database. | reversible before release |
-| A3 | Unit of "1 MB" and "10 MB"? | Bytes of UTF-8 text: `OUTPUT_FILE_MAX_BYTES = 1_048_576`, `OUTPUT_RUN_MAX_BYTES = 10_485_760` (MiB, as the rest of the codebase). UI copy says "1 MB" / "10 MB". | Matches existing limits (`2 MiB` per assertion read). | reversible |
+| A3 | Unit of "1 MB" and "10 MB"? | **Changed in review round 1.** Bytes of UTF-8 text: `OUTPUT_FILE_MAX_BYTES = 1_048_576`, `OUTPUT_RUN_MAX_BYTES = 10_485_760` (MiB, as the rest of the codebase), each applied to both the original bytes kept and the stored (redacted) bytes (FR-123-05). UI copy says "1 MB" / "10 MB". | Matches existing limits (`2 MiB` per assertion read). Counting stored bytes makes the database bound exact; counting original bytes keeps the redaction margin argument of FR-123-06 valid. | reversible |
 | A4 | Which files take the run budget first? | Ascending original size, then path. | Many small source files are kept whole; a large generated file or dependency folder cannot starve them. Generic, deterministic. | reversible |
 | A5 | Binary files? | Metadata only (size, sha256, "binary, not kept"); content is kept only when it is valid UTF-8 without NUL. | Redaction cannot be guaranteed for binary data (fail closed, SPEC-014 §4); lesson "store only content that passes `isUtf8`". | reversible |
-| A6 | Which agent runs keep files? | Execution status `completed`, `agent-error` and `timeout`, when the workspace pin still holds. Not `cancelled` or `infrastructure-error` (before the agent stage, or a replaced workspace). | Partial output of a failed run is the most useful debugging evidence; a replaced workspace is untrusted. | reversible |
+| A6 | Which agent runs keep files? | **Changed in review round 1.** Capture runs when the adapter returned `completed`, `agent-error` or `timeout` and the pin check after the agent run passed (FR-123-01). Files captured then are **kept whatever the run's final status**: also when it later becomes `infrastructure-error` (`assertion-error`, `stray-processes`, `workspace-replaced` after an assertion command, an exception in the overlay or assertions) or `cancelled` during assertions. Runs that end before the capture (cancelled before or right after the agent, refused workspace, replaced workspace after the agent, a `STOP_CODES` code, the engine's timeout fallback) keep none. | Partial output of a failed run is the most useful debugging evidence, and an `assertion-error` run is exactly the "debug an assertion" case. The capture ran before the overlay and before any untrusted assertion command, so a later status change does not make it less trustworthy; a workspace replaced *by the agent* is untrusted and never captured. | reversible |
 | A7 | Files under the installed artifact's paths? | Not kept; listed as "artifact file, not kept". | They are the artifact, not output, and in a `none` baseline their presence would reveal the variant in blind review. | reversible |
 | A8 | Blind review unit and eligibility? | A pair is the baseline and candidate agent run of one case and repetition, both `completed` with files kept. Other pairs are listed as excluded with a count. | Pairs match SPEC-112's interleaved design; failures would reveal more than the files. | reversible |
 | A9 | When is a blind review revealed? | Once per review, for all pairs at once, by an explicit "Reveal variants" action with inline confirmation. Verdicts are immutable once recorded; after the reveal no verdict can be recorded. | Revealing pair by pair would teach the reviewer each side's style and bias the remaining pairs. | reversible |
@@ -126,15 +126,17 @@ inputs. Every row below is a default to confirm or override before implementatio
 
 | ID | Requirement |
 | --- | --- |
-| FR-123-01 | After the agent stage and **before** the verification overlay is applied, the engine SHALL build the workspace manifest and the change list (`diffManifests`) for every agent run whose status is `completed`, `agent-error` or `timeout`, **whose adapter returned (its process tree has exited)** and whose workspace pin was checked and still holds (the `replacedAfter('the agent run')` check ran and passed). Excluded: the engine's own timeout fallback ("Agent did not stop after timeout"), where the agent may still be writing; and runs ending with a code in `STOP_CODES`, for which that check is skipped today. It SHALL capture the files of that change list (FR-123-02…08) and return them with the agent-run record. Cancelled and infrastructure-error runs keep no files (A6). Capturing after the overlay would mix verification files into the output. |
-| FR-123-02 | For each `added` or `modified` path, the engine SHALL open the file through the pinned workspace without following a symlink in any path component (`O_NOFOLLOW` on each component, or a walk relative to directory handles, with the identity check of the lesson on `O_NOFOLLOW`), `fstat` the opened handle and compare its size and modification time with the manifest entry; a full read also compares the sha256 of the bytes read. A mismatch fails the capture (FR-123-09). It SHALL keep: path, change kind, original size, sha256 of the original bytes (from the manifest, not from the caller), and, when kept, the content. A `deleted` path is recorded with metadata only. |
-| FR-123-03 | **Limits.** Content is kept within `OUTPUT_FILE_MAX_BYTES` (1 MiB) per file and `OUTPUT_RUN_MAX_BYTES` (10 MiB) per agent run, counted as **original bytes kept** (redaction then changes the stored length by at most a few bytes per match; `stored_bytes` records the result). Files are processed in ascending original size, then path (A4). A file over the per-file limit is cut at the last whole UTF-8 character within the limit and marked `truncated` with reason `file-limit`; a file cut by the remaining run budget is marked `truncated`, reason `run-limit`; a file for which no budget is left keeps no content, `not-kept`, reason `run-limit`. |
-| FR-123-04 | **Bounded read and a safe cut.** The engine SHALL read at most `cut + OUTPUT_REDACTION_MARGIN_BYTES` bytes of a file (margin 4 KiB), never the whole of a larger file, where `cut` is the number of original bytes it may keep. The cut is placed on the **original** bytes, never on redacted text: the kept prefix is original bytes `[0, cut)`, redacted; any redaction match found in the read window (known secret or pattern) that starts before `cut` and ends at or after it moves the cut to that match's start, and the stored text ends with the redaction marker. A match cut short by the end of the read window cannot reach into the kept prefix, because the prefix ends at least `OUTPUT_REDACTION_MARGIN_BYTES` before the window ends and no known secret or pattern match is longer than the margin (named limit; a longer known secret is refused at readiness, as the 8-character minimum is today). Tests: a secret straddling the cut, earlier redactions that shorten the text, and a cut-short secret at the end of the window. |
-| FR-123-05 | **Text only.** Content is kept only when the bytes read are valid UTF-8 (`isUtf8`, after trimming an incomplete final character of a cut read) and contain no NUL byte; otherwise the file is `not-kept`, reason `binary`. |
-| FR-123-06 | **Artifact files.** Paths equal to or under the `installedPaths` of the agent run are `not-kept`, reason `artifact-path` (A7). |
-| FR-123-07 | **Redaction.** Kept text SHALL be redacted before it is cut and before it leaves the engine, with the same redaction the adapter applies to its trace, including the secrets only the adapter knows (the API key in API Key Mode). The number of redactions in the kept text is recorded per file. |
-| FR-123-08 | **Persistence.** The runner SHALL insert the captured files in the same transaction that inserts the agent run (`insertAgentRun`), and set `agent_runs.output_files_kept = 1` for an agent run whose capture ran (also when it changed no file), so "no files changed" differs from "files not kept" (runs stored before this spec, cancelled runs). |
-| FR-123-09 | A failure while capturing (unreadable file, `UnsafeFileError`, a limit of the manifest, a file that changed after the manifest) SHALL NOT change the agent run's status, score or assertions: the capture records `output_files_kept = 0` and the warning `output-files-not-kept` with the reason (redacted), and the run continues. The output files are evidence for humans, not part of the measurement. |
+| FR-123-01 | **When capture runs.** After the agent stage and **before** the verification overlay is applied, the engine SHALL capture the output files of every agent run whose adapter returned `completed`, `agent-error` or `timeout` (its process tree has exited) and whose workspace pin was checked after the agent run and still holds (the `replacedAfter('the agent run')` check ran and passed). Excluded: runs cancelled before that point (the `signal.aborted` check right after the adapter returns comes first); the engine's own timeout fallback ("Agent did not stop after timeout"), where the agent may still be writing; and runs ending with a code in `STOP_CODES`, for which that check is skipped today. Capturing after the overlay would mix verification files into the output. Once taken, the capture is kept on **every later return path** of the agent run (A6): the `stray-processes`, `workspace-replaced` (after an assertion command), `assertion-error` and exception paths and a cancellation during assertions all persist it with their record. An agent run that ends before the capture keeps no files and stores the reason (FR-123-08). |
+| FR-123-02 | **Manifest and change list.** For a `completed` run the capture SHALL reuse the measurement manifest (`after = buildManifest(workspaceDir)`) and its `changedFiles`; it builds no second manifest. A `buildManifest` failure there (a manifest limit, an `UnsafeFileError`) keeps today's behaviour: the run becomes `infrastructure-error` through the existing `catch`, before any capture, so no files are kept and the reason is stored. For an `agent-error` or `timeout` run, which today returns before any post-agent manifest, the capture SHALL build the same manifest with the same limits (`DEFAULT_FILE_LIMITS`) and `diffManifests(before, after)` inside the capture's own error handling, so its failure falls under FR-123-09 and never changes the status. |
+| FR-123-03 | **Stored `changed_files` of failed runs.** When the capture of an `agent-error` or `timeout` run succeeds, its change list SHALL also become the record's `changedFiles` (stored in `agent_runs.changed_files`, shown by SPEC-113 as "Changed files"), replacing today's `[]`. When that capture fails, `changedFiles` stays `[]`. No assertion runs for these runs, so score, passed, verdict and display status are unchanged (AC-9). `completed` runs are unchanged. |
+| FR-123-04 | **Reading a file.** For each `added` or `modified` path the engine SHALL open the file through the pinned workspace without following a symlink in any path component (`O_NOFOLLOW` on each component, or a walk relative to directory handles, with the identity check of [the `O_NOFOLLOW` lesson](../lessons/2026-10-19-verify-opened-file-identity.md)), `fstat` the opened handle and compare its **size** with the manifest entry's `size`. It reads at most the window of FR-123-06 into memory and streams the rest of the handle only into a sha256 hash, then compares the hash of **all** bytes read with the manifest entry's `sha256`. `ManifestFile` is `{ path, sha256, size }` and has no modification time; none is compared or added. A mismatch fails the capture (FR-123-09). Hashing the remainder is bounded by the manifest's own 100 MiB total. The engine SHALL keep per file: path, change kind, original size and sha256 (from the manifest), and, when kept, the content. A `deleted` path is recorded with metadata only. |
+| FR-123-05 | **Limits.** Content is kept within `OUTPUT_FILE_MAX_BYTES` (1 MiB) per file and `OUTPUT_RUN_MAX_BYTES` (10 MiB) per agent run. For each file the budget is `min(OUTPUT_FILE_MAX_BYTES, run budget left)`, and the kept prefix SHALL satisfy both: original bytes kept `<= budget` and stored (redacted) UTF-8 bytes `<= budget`. The run budget is reduced by the stored bytes. Files are processed in ascending original size, then path (A4). A file cut by the per-file limit is `truncated`, reason `file-limit`; a file cut by the run budget is `truncated`, reason `run-limit`; a file for which no budget is left keeps no content, `not-kept`, reason `run-limit`. |
+| FR-123-06 | **Redact, then cut, without a finite match length.** For a file of `size` bytes with budget `b`, the engine reads the window `[0, min(size, b + OUTPUT_REDACTION_MARGIN_BYTES))` (margin 4 KiB), never the whole of a larger file, trims an incomplete final UTF-8 character and decodes it. It then collects **secret ranges** on the decoded window text (FR-123-07) and places the cut `c` on the original text: the largest character boundary with `c <= b` (in original bytes) whose redacted prefix fits `b` stored bytes; if `c` falls inside a secret range, `c` moves to that range's start (the range is dropped, the file is `truncated`). The stored content is the original text `[0, c)` with each range inside it replaced by `REDACTION_MARKER`. No match length is assumed: every rule that can cross the cut also matches when it is cut short by the end of the window (FR-123-07), so a secret that starts before `c` is always a range that contains `c` or ends before it. The margin is needed only so a pattern secret starting at or before `c` has its shortest recognisable prefix inside the window: `OUTPUT_REDACTION_MARGIN_BYTES` SHALL be at least the longest minimum match length of the core secret patterns (a unit test asserts this against the pattern list). |
+| FR-123-07 | **Redaction, fail-closed, for every adapter.** The secret ranges of a window are the union of (a) the core ranges, `findSecretRanges(text, [], { textEnd })` in `@directivebench/core`, and (b) the adapter's ranges, `findOutputSecrets(text, { textEnd })` (FR-123-60), where `textEnd` is `file-end` when the window holds the whole file and `cut` otherwise. Overlapping and adjacent ranges are merged. The rules are: every known-secret occurrence; every match of the core `SECRET_PATTERNS` (only the token part where the pattern keeps a prefix, as `authorization: bearer`); **every private-key fragment, as `redactStreamText` does today**: the text after a `BEGIN … PRIVATE KEY` marker up to the next key marker or the end of the text, and the text before an `END … PRIVATE KEY` marker not preceded by its `BEGIN`; and, when `textEnd` is `cut`, the longest suffix of the text that is a prefix of a known secret. Because the engine always adds (a), an adapter that returns no range still cannot leak pattern secrets or key material, and an unmatched `BEGIN` block is never kept (the gap `redactSecrets` leaves today, which the mock adapter would otherwise inherit). The engine checks every adapter range (integers, `0 <= start < end <= text.length`) and fails the capture on an invalid one (FR-123-09). The **redaction count** of a file is the number of merged ranges inside the kept prefix, so a `[REDACTED]` the agent wrote itself is never counted. Regression test (Codex review round 1), run with each adapter's ranges and with an adapter returning none: a file whose `-----BEGIN PRIVATE KEY-----` marker ends 64 bytes before the per-file limit, followed by an 8 KiB key body and its `END` marker (so `END` lies beyond the read window); the stored text SHALL end at or before the `BEGIN` marker's end and contain none of the 64 body bytes that the previous design kept. |
+| FR-123-08 | **Text only.** Content is kept only when the window bytes are valid UTF-8 (`isUtf8`, after trimming an incomplete final character of a cut read) and contain no NUL byte; otherwise the file is `not-kept`, reason `binary`. Paths equal to or under the `installedPaths` of the agent run are `not-kept`, reason `artifact-path` (A7). |
+| FR-123-09 | **Failure never changes the measurement.** A failure while capturing (unreadable file, `UnsafeFileError`, a manifest limit of an `agent-error` or `timeout` run, a file whose size or sha256 differs from the manifest, an invalid adapter range) SHALL NOT change the agent run's status, score, assertions or `changedFiles` (beyond FR-123-03): the capture is recorded as not kept with its reason (redacted with the same rules) and the run continues. The manifest-limit failure of a `completed` run is not a capture failure: it is today's measurement failure (FR-123-02). The output files are evidence for humans, not part of the measurement. |
+| FR-123-10 | **Delivery and memory.** The capture's content SHALL NOT be stored in `AgentRunRecord`. The engine delivers it as a separate `OutputFilesCapture` argument of the awaited callback, `onAgentRun(record, capture)`, and drops every reference to it when the callback has resolved; `runBenchmark` keeps only `record.outputFiles`, a metadata summary (§8.2), in `agentRuns` and in the returned `BenchmarkOutcome`. Peak capture memory is therefore one agent run's capture (at most `OUTPUT_RUN_MAX_BYTES` of stored text plus one read window) and does not grow with the number of completed agent runs. **Standalone engine:** without `onAgentRun` nothing could keep the content, so the engine does not capture at all and sets `record.outputFiles` to `not-captured` with reason `no-consumer`; scoring is unaffected. |
+| FR-123-11 | **Persistence.** The runner's `onAgentRun` SHALL insert the captured files in the same transaction that inserts the agent run (`insertAgentRun`), set `agent_runs.output_files_kept = 1` for an agent run whose capture succeeded (also when it changed no file), so "no files changed" differs from "files not kept", and otherwise store `output_files_kept = 0` with `output_files_reason` (FR-123-01, FR-123-09). Rows stored before this spec read as not kept with no reason. The reason is not added to `record.warnings`, because agent-run warnings are aggregated into the benchmark run's warnings (`agentConditionWarnings`), which would change the run's warning list. |
 
 ### 6.2 Run page (web, read-only)
 
@@ -157,7 +159,7 @@ inputs. Every row below is a default to confirm or override before implementatio
 | ID | Requirement |
 | --- | --- |
 | FR-123-40 | `directivebench benchmark export <run-id> --out <dir> [--json]` SHALL write every kept file of the benchmark run to `<dir>/files/<caseId>/<variant>-<repetition>/<path>` (under `files/`, so no case id can collide with the manifest) and a `<dir>/manifest.json` with the run id, suite name and version, candidate and baseline labels, and per agent run its execution status and every changed file (path, change, size, sha256 of the original, `kept: full \| truncated \| none`, reason, redactions). It prints a summary (files written, truncated, not kept); `--json` prints the manifest summary as one JSON object. |
-| FR-123-41 | `<dir>` SHALL not exist or be an empty directory (else exit 2, nothing written). The command opens the database read-only (as `benchmark run`'s refusals, lesson 2026-10-22) and refuses a missing or unmigrated database with exit 2, naming `directivebench init`. An unknown run id exits 2 with the message "No benchmark run <id>". |
+| FR-123-41 | `<dir>` SHALL not exist (it is then created with a non-recursive `mkdir`; a missing parent is exit 2) or be an empty directory (else exit 2, nothing written). The emptiness check is not relied on: before writing any file the command **claims** its two outputs, first `<dir>/manifest.json` opened with exclusive create (`wx`, content written at the end through that handle), then `<dir>/files` created with a non-recursive `mkdir`; `EEXIST` on either is exit 2 with nothing written, so a directory filled between the check and the write, or a concurrent export into it, is refused rather than merged into (SPEC-014 §3.7). Directories below `files/` are created one segment at a time with a non-recursive `mkdir` inside the claimed `files/`. The command opens the database read-only (as `benchmark run`'s refusals, lesson 2026-10-22) and refuses a missing or unmigrated database with exit 2, naming `directivebench init`. An unknown run id exits 2 with the message "No benchmark run <id>". |
 | FR-123-42 | **Paths are untrusted.** Every stored path and case id SHALL be validated before it reaches the file system: relative POSIX, segments not empty, `.` or `..`, no NUL, no backslash, no drive or UNC prefix, resolved with `resolveInside(<dir>)`. Files are created with exclusive create (`wx`), so nothing existing is overwritten or followed. A path that fails validation is not written and is listed in the manifest with reason `unsafe-path`; a path whose exclusive create fails with `EEXIST` (names that differ only in case or Unicode normalisation on a case-insensitive file system) is listed with reason `path-collision`. Both keep exit code 0 and are named in the summary. |
 | FR-123-43 | Exit codes: 0 written (also with truncated, not-kept, `unsafe-path` or `path-collision` entries, which the summary names), 2 usage or refusal, 1 runtime error (a partially written directory is reported with its path, never deleted silently). |
 
@@ -168,7 +170,7 @@ inputs. Every row below is a default to confirm or override before implementatio
 | FR-123-50 | The run page SHALL offer "Start blind review" for a completed benchmark run with at least one eligible pair (A8); otherwise it says why it is unavailable ("No pair of completed agent runs with kept files"). Starting is a server action; the repository runs one `withTransaction` whose first statement is `INSERT INTO blind_reviews … ON CONFLICT(benchmark_run_id) DO NOTHING RETURNING id`; when nothing is returned it selects and returns the existing review, otherwise it inserts the pairs in the same transaction. Two concurrent starts yield one review (tested with two parallel calls; idempotent, unique per run, A10). Inside the transaction it asserts that both agent runs of every pair belong to the run and the case and differ. |
 | FR-123-51 | At creation, for each eligible pair the repository SHALL assign the baseline and candidate agent runs to sides A and B with `crypto.randomInt`, and shuffle the pair order. The assignment is stored; it is never derived from ids, order or time. |
 | FR-123-52 | **Nothing reveals the variant before the reveal.** For an unrevealed review, `/results/[id]/blind-review?pair=<position>&path=<path>` (its own route, keyed only by pair position and path; it never takes or emits agent-run ids) SHALL show only: the case prompt, the pair's position ("Pair 3 of 6"), and the files of side A and side B side by side with the diff of FR-123-31, labelled "A" and "B". It SHALL NOT show or send to the browser the variant, the agent-run id, repetition, execution status, score, assertion results, duration, tokens, trace, warnings, the baseline label, or artifact-path entries. The repository function that serves an unrevealed pair returns only those fields, so a page cannot leak what it never receives. |
-| FR-123-52a | **Labelled views are closed during a blind review.** While a run has an unrevealed review, the run page's "Output files" card, the agent-run files page and the compare page SHALL NOT show labelled outputs, file counts or sizes; they show "A blind review of this run is in progress. Labelled output files are hidden until you reveal it." with a link to the review. The CLI export is not blocked (the user runs it deliberately) but prints a warning that a blind review of the run is in progress. Residual, stated on the review page: scores and assertion results on the run page stay visible, and content written by the agent may still hint at the variant; a reviewer who wants the strictest blindness starts the review before reading the run's results. |
+| FR-123-52a | **Labelled views are closed during a blind review.** While a run has an unrevealed review, every web view that ties an agent run to its variant SHALL be closed, in the HTML **and** in the RSC payload (the server does not render or serialise the data, so collapsed `<details>` or client props cannot carry it): (1) the new "Output files" card, the agent-run files page and the compare page (no labelled outputs, file counts or sizes; also when requested by a known agent-run id); (2) **the existing "Agent runs" section of `apps/web/app/results/[id]/page.tsx`**, which today renders per agent run a variant-labelled badge, case and repetition, score and pass/fail, skill activation, error, the assertion table and raw assertion details, the "Changed files" list, usage and the full stored trace (including tool-call input fragments): the page SHALL render none of these per-agent-run elements (no `data-testid="agent-run"` element, no agent-run id). Each closed view shows "A blind review of this run is in progress. Labelled output files and agent runs are hidden until you reveal it." with a link to the review. The page decides with `hasUnrevealedBlindReview` before rendering and does not pass per-agent-run rows to any component. What stays visible: the per-variant aggregate cards (mean score, pass rate, valid runs, error rate, mean duration, skill invocation rate), the comparison and verdict, the agent profile and the run-level warnings, none of which names an agent run, case and repetition together. The CLI export is not blocked (the user runs it deliberately) but prints a warning that a blind review of the run is in progress. Residual, stated on the review page: the aggregates above stay visible, and content written by the agent may still hint at the variant; a reviewer who wants the strictest blindness starts the review before reading the run's results. |
 | FR-123-53 | **Verdict.** Per pair the reviewer chooses "A is better", "B is better" or "About the same", with an optional note (at most 2,000 characters). The server action validates with Zod and records it with one conditional statement: it succeeds only while the pair has no verdict and its review is not revealed. A recorded verdict cannot be changed; the page shows it as recorded. |
 | FR-123-54 | **Reveal.** "Reveal variants" (inline confirmation: "Revealing ends the blind review. Pairs without a verdict stay without one.") sets `revealed_at` with one conditional statement. After the reveal the page shows per pair which side was baseline and candidate, the verdict, and a summary: "Candidate preferred in X of N pairs, baseline in Y, about the same in Z, no verdict in W." The summary is also shown on the run page next to (not inside) the verdict, labelled "Human blind review", and never changes score, verdict or display status. |
 | FR-123-55 | A mock-agent run can be blind-reviewed (to exercise the flow), and its review keeps `MockBadge` and the label "Mock agent: not an AI evaluation". |
@@ -177,14 +179,14 @@ inputs. Every row below is a default to confirm or override before implementatio
 
 | ID | Requirement |
 | --- | --- |
-| FR-123-60 | `AgentAdapter` SHALL gain `redactOutput(text: string): string`, the redaction the adapter applies to its own trace texts, including secrets only it knows. The Claude Code adapter implements it with `redactStreamText(text, secrets)`; the mock agent with `redactSecrets(text)`. The engine calls it for every kept file (FR-123-07). Secrets never leave the adapter. |
+| FR-123-60 | `AgentAdapter` SHALL gain `findOutputSecrets(text: string, options: { textEnd: 'file-end' \| 'cut' }): readonly TextRange[]` (`TextRange = { start, end }`, UTF-16 offsets into `text`, end exclusive): the ranges the adapter's own redaction would replace in that text, including secrets only it knows (the API key in API Key Mode, read from the adapter's environment as `run` does), with the private-key fragment rule and, for `textEnd: 'cut'`, the known-secret prefix rule of FR-123-07. It returns offsets, not redacted text, so the engine can place the cut on the original text (FR-123-06) and count replacements (FR-123-07). Secrets never leave the adapter; only offsets do. The core gains `findSecretRanges(text, knownSecrets, { textEnd })` implementing every rule of FR-123-07; the Claude Code adapter implements `findOutputSecrets` with it and its known secrets, the mock agent with no known secrets. `redactSecrets` and `redactStreamText` keep their behaviour for traces; a test asserts that, on the trace redaction test corpus with `textEnd: 'file-end'`, replacing the returned ranges leaves no known secret, no `SECRET_PATTERNS` match and no private-key body. |
 
 ## 7. Non-functional requirements
 
 - NFR-123-01 (target, not an acceptance criterion): capture adds at most 1 s per agent run for
   10 generated text files of 1 MiB each, measured by a timing test with a generous bound on the CI
-  runner (lesson 2026-10-21 on timing tests); one bounded read and one linear redaction pass per
-  file.
+  runner (lesson 2026-10-21 on timing tests); one bounded read, one streaming hash and one linear
+  range pass per file.
 - NFR-123-02 (target): the diff of two generated 1 MiB files with 1,000 changed lines finishes
   in under 1 s in a unit timing test with a generous bound; the hard guarantee is the edit bound
   `FILE_DIFF_MAX_EDIT_LINES`, which is tested exactly.
@@ -195,17 +197,23 @@ inputs. Every row below is a default to confirm or override before implementatio
   flow, driven by mock-agent runs; Storybook stories in both themes with axe for new components.
 - NFR-123-05: No paid or authenticated call in tests; the capture is tested with the mock agent
   and the fake `claude` executable of SPEC-118.
+- NFR-123-06: Engine memory for captured content is bounded per agent run, not per benchmark
+  run: at most one capture (`OUTPUT_RUN_MAX_BYTES` of stored text, about twice that as JS
+  strings) plus one read window is alive at a time, whatever the number of cases, repetitions
+  and variants (FR-123-10). Without this, 50 repetitions x 10 cases x 2 variants at 10 MiB would
+  retain about 10 GiB.
 
 ## 8. Domain entities and contracts
 
 ### 8.1 Data model
 
-Two additive migrations, one per phase that needs it: `0003_agent_run_output_files.sql` (Phase 1: `agent_runs.output_files_kept`, `agent_run_files`) and `0004_blind_reviews.sql` (Phase 5: `blind_reviews`, `blind_review_pairs`). Existing rows keep working:
+Two additive migrations, one per phase that needs it: `0003_agent_run_output_files.sql` (Phase 1: `agent_runs.output_files_kept`, `agent_runs.output_files_reason`, `agent_run_files`) and `0004_blind_reviews.sql` (Phase 5: `blind_reviews`, `blind_review_pairs`). Existing rows keep working:
 `output_files_kept` defaults to 0, so old runs read as "not kept".
 
 | Table | Column | Type | Notes |
 | --- | --- | --- | --- |
-| `agent_runs` | `output_files_kept` | integer (boolean) not null default 0 | FR-123-08. |
+| `agent_runs` (existing, two new columns) | `output_files_kept` | integer (boolean) not null default 0 | FR-123-11. |
+| | `output_files_reason` | text null | redacted reason when not kept (FR-123-01, FR-123-09); null when kept and for rows before this spec |
 | `agent_run_files` (new) | `id` | text pk | `createId('afile')` |
 | | `agent_run_id` | text not null, FK `agent_runs(id)` `ON DELETE CASCADE` | |
 | | `path` | text not null | workspace-relative POSIX path as in `changed_files`; untrusted display text |
@@ -215,8 +223,8 @@ Two additive migrations, one per phase that needs it: `0003_agent_run_output_fil
 | | `kept` | text not null: `full` \| `truncated` \| `none` | |
 | | `reason` | text null: `file-limit` \| `run-limit` \| `binary` \| `deleted` \| `artifact-path` | null when `full` |
 | | `content` | text null | redacted UTF-8 text; null when `kept = none` |
-| | `stored_bytes` | integer not null default 0 | UTF-8 bytes of `content` |
-| | `redactions` | integer not null default 0 | |
+| | `stored_bytes` | integer not null default 0 | UTF-8 bytes of `content` (counted against the limits, FR-123-05) |
+| | `redactions` | integer not null default 0 | number of merged secret ranges replaced in `content` (FR-123-07) |
 | | | unique (`agent_run_id`, `path`); index `agent_run_id` | |
 | `blind_reviews` (new) | `id` | text pk | `createId('brev')` |
 | | `benchmark_run_id` | text not null unique, FK `benchmark_runs(id)` `ON DELETE CASCADE` | one per run (A10) |
@@ -234,7 +242,7 @@ Two additive migrations, one per phase that needs it: `0003_agent_run_output_fil
 Variant and repetition of a side are read from `agent_runs` through the foreign key; they are
 not duplicated. The only read paths are repository functions; the unrevealed-pair function
 selects no variant field (FR-123-52). Nothing here holds a secret: content is redacted before it
-reaches the runner (FR-123-07), and notes are the user's own text.
+reaches the runner (FR-123-06, FR-123-07), and notes are the user's own text.
 
 Retention: `agent_run_files` and blind reviews go with their benchmark run through the cascade
 (`benchmark_runs` → `agent_runs` → `agent_run_files`, `benchmark_runs` → `blind_reviews` →
@@ -249,7 +257,7 @@ flowchart LR
     entity_1["agent_run_files"]:::newEntity
     entity_2["blind_reviews"]:::newEntity
     entity_3["blind_review_pairs"]:::newEntity
-    entity_4["agent_runs (changed: output_files_kept)"]:::newEntity
+    entity_4["agent_runs (existing, gains output_files_kept, output_files_reason)"]:::existingEntity
     entity_5["benchmark_runs"]:::existingEntity
 
     entity_4 -->|"n-1, cascade"| entity_5
@@ -262,17 +270,28 @@ flowchart LR
 
 ### 8.2 Engine and adapter contracts
 
-- `AgentRunRecord` (engine) gains `outputFiles: CapturedFile[] | null` (null = not kept) with
+- `AgentRunRecord` (engine) gains only metadata (FR-123-10): `outputFiles: { status: 'kept' |
+  'not-kept' | 'not-captured'; reason: string | null; files: number; truncated: number;
+  notKept: number; storedBytes: number }`. It never holds file content.
+- The content travels separately: `OutputFilesCapture = { files: CapturedFile[] }` with
   `CapturedFile = { path, change, sizeBytes, sha256, kept, reason, content, storedBytes,
-  redactions }`.
-- `AgentAdapter` gains `redactOutput(text)` (FR-123-60).
+  redactions }`, passed as the second argument of
+  `onAgentRun(record: AgentRunRecord, capture: OutputFilesCapture | null): Promise<void>` (null
+  when no files are kept; the reason is then in `record.outputFiles.reason`). The engine keeps no
+  reference to it after the awaited callback resolves. Existing one-argument callbacks still
+  type-check.
+- `AgentAdapter` gains `findOutputSecrets(text, { textEnd })` (FR-123-60); the core gains
+  `findSecretRanges(text, knownSecrets, { textEnd })` and the `TextRange` type.
+- `ManifestFile` stays `{ path, sha256, size }`; nothing is added to it (FR-123-04).
 - Named constants in `benchmark-engine`: `OUTPUT_FILE_MAX_BYTES`, `OUTPUT_RUN_MAX_BYTES`,
-  `OUTPUT_REDACTION_MARGIN_BYTES`; in `apps/web/lib`: `FILE_DIFF_MAX_EDIT_LINES`,
+  `OUTPUT_REDACTION_MARGIN_BYTES` (4 KiB, asserted to be at least the longest minimum match
+  length of the core patterns); in `apps/web/lib`: `FILE_DIFF_MAX_EDIT_LINES`,
   `BLIND_REVIEW_NOTE_MAX_CHARS` (2,000; shared Zod schema).
 
 ### 8.3 Repository functions (`@directivebench/database`)
 
-- `insertAgentRun` extended with `outputFiles` (same transaction).
+- `insertAgentRun` extended with the capture's files, `output_files_kept` and
+  `output_files_reason` (same transaction, FR-123-11).
 - `listAgentRunFiles(db, agentRunId)` → metadata only (no `content`).
 - `getAgentRunFile(db, { benchmarkRunId, agentRunId, path })` → one file with content, or null.
 - `startBlindReview(db, benchmarkRunId)` → review id (FR-123-50: conditional insert first,
@@ -293,8 +312,8 @@ flowchart LR
 ```mermaid
 flowchart LR
     A["Agent (claude or mock), existing"] --> W["Workspace, existing"]
-    W --> C["Engine capture (new): manifest diff, bounded read, redactOutput, limits"]
-    C --> R["Runner insertAgentRun (changed): agent run + files in one transaction"]
+    W --> C["Engine capture (new): manifest diff, bounded read, secret ranges, cut, limits"]
+    C -->|"onAgentRun(record, capture), awaited; capture released after"| R["Runner insertAgentRun (changed): agent run + files in one transaction"]
     R --> D[("SQLite: agent_run_files, blind_reviews (new)")]
     D --> P["Web pages (new): files, compare, blind review"]
     P -->|"server actions: start, verdict, reveal"| D
@@ -363,12 +382,19 @@ design-system components):
 - **Export** writes untrusted paths to disk: FR-123-42 validation, `resolveInside`, exclusive
   create, empty target directory. The lesson "validate untrusted paths against the narrowest root"
   applies.
-- **Secrets**: content is redacted by the adapter's `redactOutput` before persistence (redaction
-  at the sink, lesson 2026-10-20); the API key is never in the engine, database or UI. Residual:
+- **Secrets**: content is redacted in the engine before it is handed to persistence, with the
+  union of the core's fail-closed ranges and the adapter's `findOutputSecrets` ranges
+  (FR-123-06/07, redaction at the sink, lesson 2026-10-20); the API key never leaves the adapter
+  (only offsets do) and is never in the database or UI. Incomplete private-key blocks are
+  redacted to the end of the read window for every adapter, and the cut never splits a secret
+  range. Residual:
   pattern redaction cannot catch every secret shape; the fixture and prompt are the user's own,
   and the agent's environment is allowlisted (SPEC-118 §12). Binary content is never kept.
-- **Capture reads**: bounded per file (FR-123-04), symlinks and special files already refused by
-  the manifest, reads through the pinned workspace.
+- **Capture reads**: bounded per file (FR-123-06; the rest of a larger file is only hashed),
+  symlinks and special files already refused by the manifest, reads through the pinned
+  workspace, size and sha256 checked against the manifest (FR-123-04).
+- **Memory**: content is never retained in engine records (FR-123-10); a hostile agent writing
+  the maximum into every run cannot make the engine hold more than one run's capture.
 - **Blind review integrity**: side assignment with `crypto.randomInt`; unrevealed reads never
   select variant fields; verdict and reveal are single conditional statements (SPEC-014 §3.7).
   Residual: file content itself may name the skill (for example a comment the agent wrote); the
@@ -379,7 +405,9 @@ design-system components):
 
 | Failure | Behaviour |
 | --- | --- |
-| Capture fails (unreadable file, manifest limit) | Agent run unchanged; `output_files_kept = 0`, warning `output-files-not-kept` with a redacted reason; run page says "Output files were not kept for this agent run: <reason>". |
+| Capture fails (unreadable file, manifest limit of an `agent-error` or `timeout` run, invalid adapter range) | Agent run unchanged; `output_files_kept = 0`, `output_files_reason` holds the redacted reason; run page says "Output files were not kept for this agent run: <reason>". |
+| Manifest limit after a `completed` agent run | As today: the run becomes `infrastructure-error` (measurement failure, FR-123-02); no files are kept and the reason is stored. |
+| Run becomes `infrastructure-error` after the capture (`assertion-error`, `stray-processes`, `workspace-replaced` after an assertion command) | Files captured before the overlay are kept and shown (A6); the run's status and error are unchanged. |
 | A file disappears or changes between manifest and read | The capture fails as in the row above (fail closed: a workspace that changes after the agent stopped is not trustworthy evidence). |
 | Export target not empty / exists as a file | Exit 2, nothing written. |
 | Export write error mid-way | Exit 1, message names the directory and the last file written; nothing is deleted. |
@@ -391,6 +419,10 @@ design-system components):
 
 - Capture on a timed-out agent whose process did not exit: not attempted (FR-123-01); the page
   says "Output files were not kept: the agent did not stop after its timeout."
+- An `agent-error` or `timeout` run with a successful capture: `changed_files` now lists its
+  changes instead of `[]` (FR-123-03); a failed capture leaves it `[]`.
+- A private-key block, or any secret, crossing the cut or the end of the read window: redacted to
+  the window end and never split by the cut (FR-123-06/07).
 - Agent changes no file: `output_files_kept = 1`, "The agent did not change any file."
 - Agent rewrites a file with identical bytes: not in the change list (hash equal), as today.
 - Thousands of files (`npm install` by the agent): the manifest limits (5,000 files, 100 MiB)
@@ -403,24 +435,49 @@ design-system components):
   "1 pair excluded: an agent run did not complete".
 - Benchmark run still running: no blind review start; files of finished agent runs are already
   readable.
-- Redaction marker inside the agent's own text (`[REDACTED]` written by the agent): counted only
-  for markers the redaction added (count before and after).
+- Redaction marker inside the agent's own text (`[REDACTED]` written by the agent): kept as text
+  and not counted; the count is the number of ranges the redaction replaced (FR-123-07).
 
 ## 15. Testing strategy
 
-- Unit (`benchmark-engine`): capture with limits (exact boundaries 1 MiB and 10 MiB, multi-byte
-  characters at the cut, ascending-size order), binary and NUL detection, artifact-path exclusion,
-  redaction with a known secret straddling the cut, failure path keeping the run status.
-- Unit (`agent-adapters`): `redactOutput` of both adapters.
+- Unit (`benchmark-engine`): capture with limits (exact boundaries 1 MiB and 10 MiB on original
+  and stored bytes, multi-byte characters at the cut, ascending-size order), binary and NUL
+  detection, artifact-path exclusion, size and sha256 mismatch against the manifest (including a
+  change after the window), failure path keeping the run status, score and `changedFiles`.
+  Redaction at the cut: a known secret and a pattern token straddling the cut, a known secret
+  straddling the window end (prefix rule), earlier redactions that shorten and lengthen the text,
+  an agent-written `[REDACTED]` not counted, an invalid adapter range failing the capture, and the
+  **bounded-read private-key regression of FR-123-07** (BEGIN marker ending 64 bytes before the
+  limit, 8 KiB body, END beyond the window: no body byte stored) with the mock adapter, the Claude
+  Code adapter and an adapter returning no range. Status paths: files kept for `assertion-error`,
+  `stray-processes` and `workspace-replaced` after an assertion command; none for the timeout
+  fallback, a `STOP_CODES` code or a cancellation before the capture; manifest limit of a
+  `completed` run still `infrastructure-error`; `changedFiles` of `agent-error`/`timeout` runs.
+  Memory (FR-123-10): `outcome.agentRuns` and every record passed to `onAgentRun` hold no
+  `content` (asserted on the keys); with `global.gc` exposed (for example
+  `v8.setFlagsFromString('--expose-gc')` and `runInNewContext('gc')`), a `WeakRef` to each
+  capture passed to `onAgentRun` is cleared after its callback resolved while the benchmark run
+  continues, so retained memory does not grow with completed runs; without `onAgentRun` nothing
+  is captured (`not-captured`, `no-consumer`).
+- Unit (`core`): `findSecretRanges` for every rule of FR-123-07 with both `textEnd` values;
+  `OUTPUT_REDACTION_MARGIN_BYTES` at least the longest minimum pattern match.
+- Unit (`agent-adapters`): `findOutputSecrets` of both adapters (known API key, prefix rule at a
+  cut end, key fragments), and the corpus test of FR-123-60.
 - Unit (`database`): migration up/down pinned to its journal prefix (lesson 2026-10-22),
   cascade removal, repository functions, conditional verdict and reveal (including a concurrent
   second call), unrevealed reads selecting no variant field (asserted on the returned keys).
 - Unit (`apps/web/lib`): diff (identical, disjoint, above the bound), Zod schemas, action outcome
   mapping.
 - Unit (`apps/cli`): export layout, manifest, unsafe paths (`..`, absolute, backslash, NUL),
-  non-empty target, read-only database refusal.
+  non-empty target, read-only database refusal, and the race of FR-123-41 (`manifest.json` or
+  `files/` created after the emptiness check: exit 2, nothing written).
 - Playwright (`apps/web/e2e`): files page, compare page, blind review start, verdict, reveal,
-  keyboard-only, 320px, both themes, driven by a mock-agent run.
+  keyboard-only, 320px, both themes, driven by a mock-agent run. **Identification attempt
+  (C2):** with an unrevealed review, the test fetches `/results/[id]` as HTML and as an RSC
+  request, plus the files and compare pages with the agent-run ids recorded before the review
+  started, and asserts that none contains an agent-run id, a `data-testid="agent-run"` element,
+  a variant label next to a case and repetition, a changed-file path of a pair, or a trace
+  fragment; after the reveal the Agent runs section is back.
 - Storybook: new components in both themes with axe.
 
 ## 16. Acceptance criteria
@@ -430,19 +487,25 @@ design-system components):
 - [ ] AC-2: A file over 1 MB is cut at 1 MB and says so; an agent run over 10 MB marks the files
   cut or not kept by the run limit.
 - [ ] AC-3: A planted secret (known key and a token pattern) in an output file is stored and shown
-  redacted, with the redaction count.
+  redacted, with the redaction count; a private-key block cut by the bounded read keeps no body
+  byte with every adapter (FR-123-07 regression).
 - [ ] AC-4: Binary, deleted and artifact files are listed as not kept, with the reason.
 - [ ] AC-5: The compare page shows the same path of two agent runs side by side with a bounded,
   accessible diff.
 - [ ] AC-6: `benchmark export` writes the files and manifest; unsafe paths are refused and listed;
   a non-empty target is refused.
 - [ ] AC-7: A blind review shows no variant information and no agent-run id before the reveal
-  (asserted on the HTML, the RSC payload and the repository result), labelled views are closed
-  while it is unrevealed, records immutable verdicts, and reveals all pairs at once with
+  (asserted on the HTML, the RSC payload and the repository result), labelled views, including
+  the existing Agent runs section of the run page, are closed while it is unrevealed, records immutable verdicts, and reveals all pairs at once with
   the summary.
 - [ ] AC-8: Removing a benchmark run row removes its files, review and pairs (cascade test).
 - [ ] AC-9: Score, verdict and display status of a run are identical with and without capture
-  (regression test on a stored mock run).
+  (regression test on a stored mock run); only `changed_files` of `agent-error` and `timeout`
+  runs changes (FR-123-03).
+- [ ] AC-10: Engine memory does not retain captured content: records and the outcome hold
+  metadata only, and each capture is collectable after its `onAgentRun` resolved (FR-123-10).
+- [ ] AC-11: An `assertion-error` agent run keeps and shows the files captured before its
+  assertions (A6).
 
 ## 17. Dependencies
 
@@ -481,15 +544,19 @@ Phase 5 (reuses Phase 4's diff, adds migration `0004`).
 
 ### Phase 1: Capture and storage
 
-1. Migration `0003` and Drizzle schema for `agent_runs.output_files_kept` and `agent_run_files`;
-   migration up/down test; cascade test.
-2. `AgentAdapter.redactOutput` in the contract, the mock agent and the Claude Code adapter, with
-   tests.
-3. Engine capture (`captureOutputFiles` in `benchmark-engine/src/files.ts` or a new
-   `output-files.ts`): limits, order, UTF-8/NUL check, artifact-path exclusion, redaction, failure
-   path; wired into `runAgent` before the overlay for `completed`, `agent-error`, `timeout`.
-4. Runner: `insertAgentRun` stores files in the same transaction; repository read functions
-   `listAgentRunFiles`, `getAgentRunFile`.
+1. Migration `0003` and Drizzle schema for `agent_runs.output_files_kept`,
+   `agent_runs.output_files_reason` and `agent_run_files`; migration up/down test; cascade test.
+2. `findSecretRanges` in `@directivebench/core` and `AgentAdapter.findOutputSecrets` in the
+   contract, the mock agent and the Claude Code adapter, with tests (FR-123-07, FR-123-60).
+3. Engine capture (`captureOutputFiles` in a new `benchmark-engine/src/output-files.ts`): bounded
+   read with size and sha256 check, range union, cut, limits, order, UTF-8/NUL check,
+   artifact-path exclusion, failure path; wired into `executeAgentRun` before the overlay for
+   `completed` (reusing the measurement manifest) and `agent-error`/`timeout` (own manifest
+   inside the capture's error handling), carried on every later return path (A6), delivered by
+   `onAgentRun(record, capture)` and released afterwards (FR-123-10); the memory and
+   private-key regression tests of §15.
+4. Runner: `insertAgentRun` stores files and the reason in the same transaction; repository read
+   functions `listAgentRunFiles`, `getAgentRunFile`.
 5. Verify with `directivebench demo` that a mock run stores files and scores are unchanged
    (AC-9).
 
@@ -515,7 +582,7 @@ Phase 5 (reuses Phase 4's diff, adds migration `0004`).
 1. Migration `0004` for `blind_reviews` and `blind_review_pairs`; repository functions with conditional
    verdict and reveal; tests including concurrency and no-variant-field reads.
 2. Server actions with Zod schemas; blind review page, run-page card, closing of labelled views
-   (FR-123-52a); Playwright flow test (start, verdict, reveal, keyboard, 320px, both themes) that
+   including the existing Agent runs section (FR-123-52a); Playwright flow test (start, verdict, reveal, keyboard, 320px, both themes) that
    asserts no agent-run id or variant label appears in the HTML or the RSC payload before the
    reveal.
 3. Browser QA agent and Codex review per AGENTS.md §2.14 for Phases 3 to 5.
