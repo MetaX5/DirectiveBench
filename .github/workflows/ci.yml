@@ -55,7 +55,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
       - name: Unit and package tests with the 100% coverage threshold
-        run: pnpm test
+        # --continue: every package reports its failures, not only the first one.
+        run: pnpm test --continue
 
   unit-windows:
     name: Unit tests (100% coverage, Windows)
@@ -65,7 +66,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
       - name: Unit and package tests with the 100% coverage threshold
-        run: pnpm test
+        run: pnpm test --continue
 
   build:
     name: Build and package
