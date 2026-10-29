@@ -184,6 +184,8 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
   `getBenchmarkRunDetail` for one agent run; a narrower repository read is a follow-up) and one
   nit (no e2e for `timeout`/`agent-error` badges in the existing "Agent runs" section). CI on
   `8219a9b`: all nine checks passed; PR mergeable.
+- D35 delta (Codex, `--base 9045154`): round 1 needs-attention (the 320px test could pass
+  without scrolling), fixed in `87f633d` with a mutation check; round 2: approve, no findings.
 
 ## Problems and deviations
 
