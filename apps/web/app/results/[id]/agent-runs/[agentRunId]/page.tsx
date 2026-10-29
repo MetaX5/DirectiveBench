@@ -110,8 +110,8 @@ export default async function AgentRunFilesPage({
                     return (
                       <li key={file.id}>
                         <Link
-                          // The fragment brings the file into view where it is stacked under the list
-                          // (320 px, browser QA finding 1).
+                          // The fragment brings the file into view where it is stacked under the
+                          // list; on wide screens its target is hidden, so nothing scrolls.
                           href={`${agentRunFilesHref(detail.run.id, agentRun.id, file.path)}#file`}
                           aria-current={current ? 'page' : undefined}
                           className={cn(
@@ -136,7 +136,12 @@ export default async function AgentRunFilesPage({
               </nav>
             </CardContent>
           </Card>
-          <Card id="file" className="min-w-0 scroll-mt-4 lg:flex-1">
+          <Card className="relative min-w-0 lg:flex-1">
+            {/* The #file target of the file links. It exists only where the file is stacked
+                under the list (below lg): side by side, the hidden target makes the browser
+                keep the scroll position, so the header stays in view (maintainer decision
+                on PR 162, browser QA finding 1). */}
+            <span id="file" aria-hidden className="absolute top-0 scroll-mt-4 lg:hidden" />
             <CardContent>{selected ? <FileView file={selected} /> : null}</CardContent>
           </Card>
         </div>

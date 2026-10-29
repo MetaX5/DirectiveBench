@@ -225,6 +225,31 @@ test('the files page works with the keyboard only', async ({ page }) => {
   expect(steps).toBeLessThan(20);
 });
 
+test('on a wide screen choosing a file keeps the page where it is (maintainer decision on #162)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich));
+  const heading = page.getByRole('heading', { level: 1 });
+  const link = page
+    .getByRole('navigation', { name: 'Changed files' })
+    .getByRole('link', { name: /zz-not-kept\.txt/ });
+  // Playwright may scroll a little to reach the link; the page itself must not scroll further.
+  await link.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
+  await link.click();
+  await expect(page.getByRole('heading', { level: 3, name: 'zz-not-kept.txt' })).toBeVisible();
+  await expect(page).toHaveURL(/path=zz-not-kept\.txt#file$/);
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  await expect(heading).toBeInViewport();
+  await expect(page.getByRole('link', { name: 'Back to the run' })).toBeInViewport();
+  // Opening the URL with the fragment in a fresh document does not scroll either.
+  await page.goto('about:blank');
+  await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich, '?path=zz-not-kept.txt#file'));
+  await expect(page.getByRole('heading', { level: 3, name: 'zz-not-kept.txt' })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
 test('at 320px choosing a file brings it into view (browser QA finding 1)', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich));

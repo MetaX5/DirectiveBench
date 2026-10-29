@@ -111,6 +111,17 @@ alternatives) on 2026-10-29, relayed by the coordinator. The text below is the a
   pre-spec row: "Output files were not kept for this agent run."; the list card then shows
   `EmptyState`? Proposed: no list card at all in these states, only the sentence in one `Card`.
 
+- **D35 Scroll to the file only where it is stacked (maintainer decision on PR #162,
+  2026-10-29).** Choosing a file scrolls to the file only below `lg`, where the list stacks
+  above it; side by side the page does not scroll and the header stays in view. Implemented
+  without JavaScript: the `#file` target is an absolutely positioned, `aria-hidden` span at the
+  top of the file card with `lg:hidden`, so on wide screens it has no box and both the browser
+  and Next.js's hash scroll (`scrollIntoView` on the target) leave the page where it is. Focus
+  stays on the activated file link at both widths. Tests: wide (1280x720, scroll position
+  unchanged after the click, header and back link in view, a fresh load of the `#file` URL
+  stays at the top) and 320px (the file heading is in view). The wide test failed on the
+  previous build (scroll position changed) and passes now.
+
 No other decision is needed: badges, notices, file header, line numbers, scroll region and copy
 inside the file view come from D1 to D19 and FR-123-21; plain text per the brief.
 
@@ -147,8 +158,8 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
   horizontal page scroll), with no console error; seeded states checked the same way.
 - Browser QA agent (Playwright, `agent-browser` not installed) on the built app: one confirmed
   defect (medium): at 320px, choosing a file reloaded the page at the top while the file is
-  stacked below the list, so nothing seemed to change. Fixed: file links carry `#file` and the
-  file card has `id="file"` (`scroll-mt-4`); regression test at 320x640. Its low-severity
+  stacked below the list, so nothing seemed to change. Fixed: file links carry `#file`;
+  regression test at 320x640 (narrowed to small screens by D35). Its low-severity
   suggestions: size placement uneven (fixed: the size now has its own line); seeded
   `changed_files` did not match the seeded files (fixed in the seed); a repeated `?path=` shows
   the first file (D33 as approved, unchanged); the file `h3` sits after the list card's `h2` (the
@@ -174,9 +185,9 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
 
 - `demoRunId` returns the oldest run, and the first seed used a fixed date earlier than the demo
   run, so "the demo run" resolved to the seed. Seeds now use the current time (lesson below).
-- Browser QA fix beyond D30/D31: choosing a file also scrolls the file card to the top of the
-  viewport on wide screens (the `#file` fragment), which hides the page header until the user
-  scrolls up. The size of a file in the list is on its own line under the badges.
+- Browser QA fix beyond D30/D31: the `#file` fragment first also scrolled the file card to the
+  top on wide screens, hiding the header. Resolved by D35. The size of a file in the
+  list is on its own line under the badges.
 - The "Agent runs" section's status badge now uses the same helper as the card (same mapping,
   no visible change).
 
