@@ -22,6 +22,13 @@
       "when": 1792663143937,
       "tag": "0002_add_baseline_artifact_version",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793303532610,
+      "tag": "0003_agent_run_output_files",
+      "breakpoints": true
     }
   ]
 }

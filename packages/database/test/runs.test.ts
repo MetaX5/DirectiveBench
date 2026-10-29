@@ -6,6 +6,8 @@ import {
   getBenchmarkRunDetail,
   importSuiteVersion,
   insertAgentRun,
+  getAgentRunFile,
+  listAgentRunFiles,
   ARTIFACT_RUNS_PAGE_LIMIT,
   ARTIFACT_VERSION_COMPARISON_LIMIT,
   countArtifactRuns,
@@ -13,6 +15,7 @@ import {
   listVersionComparisonRuns,
   listBenchmarkRuns,
   schema,
+  type AgentRunFileInput,
   type AgentRunInput,
   type FinishBenchmarkRunInput,
 } from '../src/index';
@@ -44,6 +47,24 @@ function agentRunInput(
     usage: { inputTokens: 1 },
     error: null,
     assertions: [],
+    outputFilesKept: false,
+    outputFilesReason: null,
+    outputFiles: [],
+    ...overrides,
+  };
+}
+
+function outputFile(path: string, overrides: Partial<AgentRunFileInput> = {}): AgentRunFileInput {
+  return {
+    path,
+    change: 'added',
+    sizeBytes: 5,
+    sha256: 'f'.repeat(64),
+    kept: 'full',
+    reason: null,
+    content: 'hello',
+    storedBytes: 5,
+    redactions: 0,
     ...overrides,
   };
 }
@@ -207,6 +228,113 @@ describe('insertAgentRun', () => {
     ).rejects.toThrow();
     expect(await handle.db.select().from(schema.agentRuns)).toEqual([]);
     expect(await handle.db.select().from(schema.assertionResults)).toEqual([]);
+  });
+});
+
+describe('agent run output files (SPEC-123 FR-123-11, §8.3)', () => {
+  it('stores the files with the agent run and the kept flag, and reads them back', async () => {
+    const handle = getHandle();
+    const runId = await seedRun(handle, await seedTargets(handle));
+    const truncated = outputFile('src/big.txt', {
+      kept: 'truncated',
+      reason: 'file-limit',
+      sizeBytes: 2_000_000,
+      content: 'x[REDACTED]',
+      storedBytes: 11,
+      redactions: 1,
+    });
+    const deleted = outputFile('old.txt', {
+      change: 'deleted',
+      sizeBytes: null,
+      sha256: null,
+      kept: 'none',
+      reason: 'deleted',
+      content: null,
+      storedBytes: 0,
+    });
+    const agentRunId = await insertAgentRun(
+      handle,
+      agentRunInput(runId, {
+        outputFilesKept: true,
+        outputFiles: [truncated, outputFile('a.txt'), deleted],
+      }),
+    );
+    const notKept = await insertAgentRun(
+      handle,
+      agentRunInput(runId, {
+        caseId: 'case-b',
+        outputFilesReason: 'a file changed after the agent stopped: a.txt',
+      }),
+    );
+
+    const detail = await getBenchmarkRunDetail(handle.db, runId);
+    expect(detail?.agentRuns.map((r) => [r.id, r.outputFilesKept, r.outputFilesReason])).toEqual([
+      [agentRunId, true, null],
+      [notKept, false, 'a file changed after the agent stopped: a.txt'],
+    ]);
+
+    const listed = await listAgentRunFiles(handle.db, agentRunId);
+    expect(listed.map((f) => f.path)).toEqual(['a.txt', 'old.txt', 'src/big.txt']);
+    // Metadata only: the listing never carries content.
+    for (const file of listed) expect(Object.keys(file)).not.toContain('content');
+    expect(listed[2]).toEqual({
+      ...truncated,
+      content: undefined,
+      id: expect.stringMatching(/^afile_/),
+      agentRunId,
+    });
+    expect(await listAgentRunFiles(handle.db, notKept)).toEqual([]);
+
+    expect(
+      await getAgentRunFile(handle.db, { benchmarkRunId: runId, agentRunId, path: 'src/big.txt' }),
+    ).toEqual({ ...truncated, id: listed[2]?.id, agentRunId });
+    expect(
+      await getAgentRunFile(handle.db, { benchmarkRunId: runId, agentRunId, path: 'missing' }),
+    ).toBeNull();
+  });
+
+  it('serves a file only through the benchmark run its agent run belongs to', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets);
+    const otherRun = await seedRun(handle, targets);
+    const agentRunId = await insertAgentRun(
+      handle,
+      agentRunInput(runId, { outputFilesKept: true, outputFiles: [outputFile('a.txt')] }),
+    );
+    expect(
+      await getAgentRunFile(handle.db, { benchmarkRunId: otherRun, agentRunId, path: 'a.txt' }),
+    ).toBeNull();
+  });
+
+  it('stores neither the agent run nor any file when one file cannot be saved', async () => {
+    const handle = getHandle();
+    const runId = await seedRun(handle, await seedTargets(handle));
+    // Two files with one path violate the unique (agent_run_id, path) index.
+    await expect(
+      insertAgentRun(
+        handle,
+        agentRunInput(runId, {
+          outputFilesKept: true,
+          outputFiles: [outputFile('a.txt'), outputFile('a.txt')],
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(await handle.db.select().from(schema.agentRuns)).toEqual([]);
+    expect(await handle.db.select().from(schema.agentRunFiles)).toEqual([]);
+  });
+
+  it('removes the files with their benchmark run (cascade, AC-8)', async () => {
+    const handle = getHandle();
+    const runId = await seedRun(handle, await seedTargets(handle));
+    await insertAgentRun(
+      handle,
+      agentRunInput(runId, { outputFilesKept: true, outputFiles: [outputFile('a.txt')] }),
+    );
+    expect(await handle.db.$count(schema.agentRunFiles)).toBe(1);
+    handle.sqlite.prepare('delete from benchmark_runs where id = ?').run(runId);
+    expect(await handle.db.$count(schema.agentRuns)).toBe(0);
+    expect(await handle.db.$count(schema.agentRunFiles)).toBe(0);
   });
 });
 

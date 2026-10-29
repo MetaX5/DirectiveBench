@@ -335,8 +335,47 @@ export const agentRuns = sqliteTable(
     usage: text('usage', { mode: 'json' }).$type<Record<string, number> | null>(),
     error: text('error'),
     createdAt: text('created_at').notNull(),
+    /**
+     * Whether the agent run's output files were captured (SPEC-123 FR-123-11): 1 also when the
+     * agent changed no file, so "no files changed" differs from "files not kept".
+     */
+    outputFilesKept: integer('output_files_kept', { mode: 'boolean' }).notNull().default(false),
+    /** Redacted reason when the files were not kept; null when kept and for older rows. */
+    outputFilesReason: text('output_files_reason'),
   },
   (t) => [index('agent_runs_benchmark_run_idx').on(t.benchmarkRunId)],
+);
+
+/**
+ * The files one agent run added, modified or deleted, with their redacted, bounded content
+ * (SPEC-123 §8.1). Paths and content are agent output: untrusted display text.
+ */
+export const agentRunFiles = sqliteTable(
+  'agent_run_files',
+  {
+    id: text('id').primaryKey(),
+    agentRunId: text('agent_run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    change: text('change', { enum: ['added', 'modified', 'deleted'] }).notNull(),
+    /** Original size in bytes; null for a deleted file. */
+    sizeBytes: integer('size_bytes'),
+    /** sha256 of the original bytes (from the manifest); null for a deleted file. */
+    sha256: text('sha256'),
+    kept: text('kept', { enum: ['full', 'truncated', 'none'] }).notNull(),
+    reason: text('reason', {
+      enum: ['file-limit', 'run-limit', 'binary', 'deleted', 'artifact-path'],
+    }),
+    /** Redacted UTF-8 text; null when nothing is kept. */
+    content: text('content'),
+    /** UTF-8 bytes of `content`, counted against the limits. */
+    storedBytes: integer('stored_bytes').notNull().default(0),
+    /** Merged secret ranges replaced in `content`. */
+    redactions: integer('redactions').notNull().default(0),
+  },
+  // The unique index leads with agent_run_id, so it also serves lookups by agent run.
+  (t) => [uniqueIndex('agent_run_files_agent_run_path_unique').on(t.agentRunId, t.path)],
 );
 
 export const assertionResults = sqliteTable(

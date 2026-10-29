@@ -11,6 +11,7 @@ import {
   runBenchmark,
   validateDefinition,
   type AgentRunRecord,
+  type OutputFilesCapture,
 } from '@directivebench/benchmark-engine';
 import {
   acquireNextJob,
@@ -529,7 +530,7 @@ export class LocalRunner {
           keepWorkspaces: this.options.keepWorkspaces,
           executionApproved: Boolean(suiteVersion.version.executionApprovedAt),
           signal: controller.signal,
-          onAgentRun: (record) => this.persistAgentRun(runId, record),
+          onAgentRun: (record, capture) => this.persistAgentRun(runId, record, capture),
         });
         await finishBenchmarkRun(db, runId, {
           status: 'completed',
@@ -599,7 +600,16 @@ export class LocalRunner {
     };
   }
 
-  private async persistAgentRun(benchmarkRunId: string, record: AgentRunRecord): Promise<void> {
+  /**
+   * Stores the agent run, its assertion results and its captured output files in one transaction
+   * (SPEC-123 FR-123-11). The capture is not retained after this call.
+   */
+  private async persistAgentRun(
+    benchmarkRunId: string,
+    record: AgentRunRecord,
+    capture: OutputFilesCapture | null,
+  ): Promise<void> {
+    const kept = record.outputFiles.status === 'kept';
     await insertAgentRun(this.options.handle, {
       benchmarkRunId,
       caseId: record.caseId,
@@ -624,6 +634,19 @@ export class LocalRunner {
         deterministic: a.deterministic,
         message: a.message,
         details: a.details,
+      })),
+      outputFilesKept: kept,
+      outputFilesReason: kept ? null : record.outputFiles.reason,
+      outputFiles: (capture?.files ?? []).map((file) => ({
+        path: file.path,
+        change: file.change,
+        sizeBytes: file.sizeBytes,
+        sha256: file.sha256,
+        kept: file.kept,
+        reason: file.reason,
+        content: file.content,
+        storedBytes: file.storedBytes,
+        redactions: file.redactions,
       })),
     });
   }

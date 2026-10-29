@@ -719,7 +719,7 @@ function redactValue(value: unknown, secrets: readonly string[]): unknown {
  * CLI writes its stream with `JSON.stringify`, whose escaping this reproduces. Longest first, so a
  * form is replaced before a shorter one inside it.
  */
-function withJsonForms(secrets: readonly string[]): string[] {
+export function withJsonForms(secrets: readonly string[]): string[] {
   const forms = new Set<string>();
   for (const secret of secrets) {
     const once = JSON.stringify(secret).slice(1, -1);
