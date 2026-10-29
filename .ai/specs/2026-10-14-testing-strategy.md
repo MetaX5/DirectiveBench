@@ -3,7 +3,7 @@ id: SPEC-012
 title: Testing Strategy
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-10-29
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, SPEC-111, SPEC-112, ADR-0005, ADR-0006]
 ---
@@ -95,12 +95,13 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 ## 8. CI (GitHub Actions)
 
-Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Matrix: Node 24 on `ubuntu-latest` (required); Node 22.x minimum supported version and `macos-latest`/`windows-latest` (target, added once stable). Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
+Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Platforms: Node 24 on `ubuntu-latest` for every job, and the unit tests also on `macos-latest` (required, issue #120). `windows-latest` (best effort, NFR-118-04) and the Node 22.x minimum supported version are targets: Windows failed 154 tests in its first full run and is tracked in issue #160. Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
 
 | Job | Steps |
 | --- | --- |
 | `lint` | `pnpm audit --prod`, `pnpm format:check`, `pnpm lint`, `pnpm typecheck` |
 | `unit` | `pnpm test` with the 100% coverage threshold (§3); coverage reports uploaded as an artifact |
+| `unit-macos` | `pnpm test --continue` on `macos-latest` with the same 100% threshold; `--continue` reports every package's failures |
 | `build` | `pnpm build`, `pnpm verify:pack` (§5) |
 | `e2e` | `pnpm build`, install Playwright Chromium, `pnpm test:e2e` against a temporary instance with a SQLite data dir (§4); traces uploaded on failure |
 
@@ -111,4 +112,5 @@ No secrets are configured for the default workflow.
 - **Implemented (verified on 2026-10-15, Node 24.21, Linux — 468 tests, all passing, 100% line/branch/function/statement coverage in every package):** Vitest suites per package with the §3 coverage threshold (`vitest.shared.ts`) — `core` 95, `database` 59 (one test file per repository plus `client.test.ts`; databases from `test/support/test-database.ts`), `agent-adapters` 34 (incl. detection with fake executables on a temp `PATH`), `benchmark-engine` 109 (incl. env allowlist, process-group kill, output truncation, symlink/FIFO/traversal rejection, every assertion type, orchestrator error and cancellation paths), `runner` 31 (incl. concurrency > 1, two runners on one database claiming every job exactly once, heartbeat failure, stop during start), `cli` 74 (incl. `serve` supervision with injected spawn/fetch/process, `init`, `demo`, `doctor`), `web` 66 (server actions against a real temp database, `proxy.ts` Host allowlist, `lib/` helpers); `pnpm build && pnpm verify:pack` (§5, all steps passed).
 - **Implemented (verified by `pnpm test:e2e`, 17/17 passing against the built CLI on 2026-10-15, three consecutive runs):** the browser integration tests of §4.
 - **Implemented — CI (§8):** four parallel jobs (`lint`, `unit`, `build`, `e2e`) with the shared setup action. The previous single-job workflow ran green on PR #1 on 2026-10-14; the four-job workflow is verified locally job by job (commands above) and has not run on GitHub yet. Making the jobs required checks is a repository setting.
-- **Not implemented:** PostgreSQL backend tests with testcontainers (planned with the optional PostgreSQL backend), adapter conformance suite, recorded-fixture contract tests, live test gating, multi-OS / Node 22 CI matrix.
+- **Implemented — macOS unit gate (issue #120, verified by the `Unit tests (100% coverage, macOS)` job on PR #159):** the full suite with the 100% threshold on `macos-latest`. It made five tests portable: `setsid` replaced by Perl's `POSIX::setsid()`, kill-escalation tests timed out only after the fake is ready, a non-UTF-8 file name committed through the git index, the linear-time check of `resultsByVersion` moved to `expectLinearTime`, and a guard against `kill(0)`.
+- **Not implemented:** PostgreSQL backend tests with testcontainers (planned with the optional PostgreSQL backend), adapter conformance suite, recorded-fixture contract tests, live test gating, the Windows unit gate (issue #160), Node 22 CI matrix.
