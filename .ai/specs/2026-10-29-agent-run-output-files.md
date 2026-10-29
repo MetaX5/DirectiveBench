@@ -653,7 +653,7 @@ design-system components):
   rules), SPEC-122 (design-system contribution for new components), SPEC-004 §4 (dependency
   policy).
 - Phases 1, 2, 3, 4 and 5: no new package dependency.
-- **Phase 3a: one new dependency, `shiki` (MIT, 4.x; 4.5.0 on 2026-10-29), in `apps/web` only**,
+- **Phase 3a: Shiki (MIT, 4.x; 4.5.0 on 2026-10-29) as `@shikijs/core`, `@shikijs/engine-javascript` and `@shikijs/langs`, in `apps/web` only**,
   added on the maintainer's decision D20 and recorded in
   [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md) (AGENTS.md rule 9).
   Why it is needed: readable code needs accurate grammars, and writing tokenizers for thirteen
@@ -735,7 +735,7 @@ the pages show plain text.
 
 ### Phase 3a: Syntax highlighting (decision D20, after Phase 1)
 
-1. Add `shiki` to `apps/web` (ADR-0014); `apps/web/lib/syntax-highlight.ts` with
+1. Add `@shikijs/core`, `@shikijs/engine-javascript` and `@shikijs/langs` to `apps/web` (ADR-0014); `apps/web/lib/syntax-highlight.ts` with
    `server-only`, the fine-grained core, the JavaScript engine, the grammars of FR-123-71, the
    constants and functions of §8.2, and unit tests to 100% (§15).
 2. The `--syntax-*` tokens in `globals.css` for both themes, measured against the code surface
