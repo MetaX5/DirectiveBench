@@ -37,26 +37,29 @@ Sources: product brief (Vision, D04, D08), SPEC-001, AGENTS.md §7.
 
 ## Components
 
-| Component         | Import                                   | Use when                                       | Do not use when                                  |
-| ----------------- | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
-| Button            | `@/components/ui/button`                 | Starting an action on this page                | Going to another page (use a link)               |
-| Badge             | `@/components/ui/badge`                  | A status or property in one to three words     | Something clickable, or a sentence               |
-| Card              | `@/components/ui/card`                   | One section of a page                          | Inside another card                              |
-| Input             | `@/components/ui/input`                  | A single-line text value, with a visible label | A choice from a known list                       |
-| Textarea          | `@/components/ui/textarea`               | Text over several lines, with a visible label  | A single-line value (use Input)                  |
-| NativeSelect      | `@/components/ui/native-select`          | One value from a short known list              | Many options that need search (missing)          |
-| Table             | `@/components/ui/table`                  | Rows with the same columns                     | Label and value pairs of one item                |
-| Pre               | `@/components/ui/primitives`             | JSON, code, raw output                         | A path inside a sentence (use `font-mono`)       |
-| PageHeader        | `@/components/common`                    | The top of every page, once                    | A section title (use CardTitle)                  |
-| EmptyState        | `@/components/common`                    | A list with nothing to show                    | An error                                         |
-| NotInitialized    | `@/components/common`                    | No local database                              | An empty list                                    |
-| PlannedSection    | `@/components/common`                    | A whole page that is not built                 | One planned part of a working page (muted Badge) |
-| StatusBadge       | `@/components/common`                    | A run's outcome                                | A job's queue state                              |
-| JobStatusBadge    | `@/components/common`                    | A job's queue state                            | A run's outcome                                  |
-| MockBadge         | `@/components/common`                    | Every mock-agent result                        | Real agents                                      |
-| NotSandboxedBadge | `@/components/common`                    | A local-process suite                          | Sandboxed runs (not built)                       |
-| Markdown          | `@/components/artifacts/markdown`        | Rendering an artifact's Markdown               | App-authored text                                |
-| Nav, ThemeToggle  | `@/components/nav`, `@/components/theme` | Only in the app shell                          | Anywhere else                                    |
+| Component         | Import                                         | Use when                                          | Do not use when                                  |
+| ----------------- | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| Button            | `@/components/ui/button`                       | Starting an action on this page                   | Going to another page (use a link)               |
+| Badge             | `@/components/ui/badge`                        | A status or property in one to three words        | Something clickable, or a sentence               |
+| Card              | `@/components/ui/card`                         | One section of a page                             | Inside another card                              |
+| Input             | `@/components/ui/input`                        | A single-line text value, with a visible label    | A choice from a known list                       |
+| Textarea          | `@/components/ui/textarea`                     | Text over several lines, with a visible label     | A single-line value (use Input)                  |
+| NativeSelect      | `@/components/ui/native-select`                | One value from a short known list                 | Many options that need search (missing)          |
+| Table             | `@/components/ui/table`                        | Rows with the same columns                        | Label and value pairs of one item                |
+| Pre               | `@/components/ui/primitives`                   | JSON, code, raw output                            | A path inside a sentence (use `font-mono`)       |
+| PageHeader        | `@/components/common`                          | The top of every page, once                       | A section title (use CardTitle)                  |
+| EmptyState        | `@/components/common`                          | A list with nothing to show                       | An error                                         |
+| NotInitialized    | `@/components/common`                          | No local database                                 | An empty list                                    |
+| PlannedSection    | `@/components/common`                          | A whole page that is not built                    | One planned part of a working page (muted Badge) |
+| StatusBadge       | `@/components/common`                          | A run's outcome                                   | A job's queue state                              |
+| JobStatusBadge    | `@/components/common`                          | A job's queue state                               | A run's outcome                                  |
+| MockBadge         | `@/components/common`                          | Every mock-agent result                           | Real agents                                      |
+| NotSandboxedBadge | `@/components/common`                          | A local-process suite                             | Sandboxed runs (not built)                       |
+| Markdown          | `@/components/artifacts/markdown`              | Rendering an artifact's Markdown                  | App-authored text                                |
+| FileView          | `@/components/output-files/file-view`          | One file an agent run wrote (proposed)            | JSON or command output (use Pre)                 |
+| SideBySideDiff    | `@/components/output-files/side-by-side-diff`  | One path of two agent runs (proposed)             | One file (use FileView)                          |
+| FileStatusBadges  | `@/components/output-files/file-status-badges` | An output file's change and kept state (proposed) | A run's outcome (use StatusBadge)                |
+| Nav, ThemeToggle  | `@/components/nav`, `@/components/theme`       | Only in the app shell                             | Anywhere else                                    |
 
 Pages may import the primitives from `@/components/ui/primitives`, which re-exports them
 (SPEC-122 P1).

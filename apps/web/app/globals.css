@@ -46,6 +46,12 @@
   --palette-blue-45: oklch(0.45 0.12 250);
   --palette-blue-55: oklch(0.55 0.13 250);
   --palette-blue-72: oklch(0.72 0.12 250);
+  --palette-violet-48: oklch(0.48 0.18 300);
+  --palette-violet-75: oklch(0.75 0.13 300);
+  --palette-teal-47: oklch(0.47 0.09 190);
+  --palette-teal-75: oklch(0.75 0.1 190);
+  --palette-orange-48: oklch(0.48 0.14 40);
+  --palette-orange-75: oklch(0.75 0.12 40);
 
   --radius: 0.625rem;
   --background: var(--palette-white);
@@ -88,6 +94,16 @@
   --chart-3: var(--palette-lime-600);
   --chart-4: var(--palette-lime-700);
   --chart-5: var(--palette-lime-800);
+  --syntax-foreground: var(--palette-neutral-950);
+  --syntax-token-comment: var(--palette-neutral-550);
+  --syntax-token-keyword: var(--palette-violet-48);
+  --syntax-token-string: var(--palette-teal-47);
+  --syntax-token-string-expression: var(--palette-green-45);
+  --syntax-token-constant: var(--palette-blue-45);
+  --syntax-token-function: var(--palette-orange-48);
+  --syntax-token-parameter: var(--palette-amber-45);
+  --syntax-token-punctuation: var(--palette-neutral-700);
+  --syntax-token-link: var(--palette-lime-900);
   --page-inline: 1rem;
 
   --button-secondary-hover: color-mix(in oklch, var(--secondary), var(--foreground) 5%);
@@ -136,6 +152,16 @@
   --sidebar-accent-foreground: var(--palette-neutral-50);
   --sidebar-border: color-mix(in oklab, var(--palette-white) 10%, transparent);
   --sidebar-ring: var(--palette-neutral-400);
+  --syntax-foreground: var(--palette-neutral-50);
+  --syntax-token-comment: var(--palette-neutral-400);
+  --syntax-token-keyword: var(--palette-violet-75);
+  --syntax-token-string: var(--palette-teal-75);
+  --syntax-token-string-expression: var(--palette-green-72);
+  --syntax-token-constant: var(--palette-blue-72);
+  --syntax-token-function: var(--palette-orange-75);
+  --syntax-token-parameter: var(--palette-amber-80);
+  --syntax-token-punctuation: var(--palette-neutral-200);
+  --syntax-token-link: var(--palette-lime-400);
 }
 
 @theme inline {
@@ -175,6 +201,16 @@
   --color-scorebar-red-phase: var(--scorebar-red-phase);
   --color-scorebar-green-phase: var(--scorebar-green-phase);
   --color-scorebar-track: var(--scorebar-track);
+  --color-syntax-foreground: var(--syntax-foreground);
+  --color-syntax-token-comment: var(--syntax-token-comment);
+  --color-syntax-token-keyword: var(--syntax-token-keyword);
+  --color-syntax-token-string: var(--syntax-token-string);
+  --color-syntax-token-string-expression: var(--syntax-token-string-expression);
+  --color-syntax-token-constant: var(--syntax-token-constant);
+  --color-syntax-token-function: var(--syntax-token-function);
+  --color-syntax-token-parameter: var(--syntax-token-parameter);
+  --color-syntax-token-punctuation: var(--syntax-token-punctuation);
+  --color-syntax-token-link: var(--syntax-token-link);
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --font-heading: var(--font-sans);
   --font-sans: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;

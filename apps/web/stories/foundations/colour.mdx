@@ -16,7 +16,7 @@ from `tokeny.md` and previewed with the stored CSS values, so they cannot drift 
 | ----------- | ----------------------------------------------------------------------------------- | ------------------------ | ------------ |
 | Raw palette | Literal OKLCH values (`--palette-*`)                                                | `app/globals.css` only   | tokeny.md D2 |
 | Semantic    | Purpose names: `background`, `muted-foreground`, `destructive`, `border-control`, … | Every component and page | tokeny.md D1 |
-| Component   | A value one component needs: `button-secondary-hover`, `scorebar-*`                 | That component only      | SPEC-120     |
+| Component   | A value one component needs: `button-secondary-hover`, `scorebar-*`, `syntax-*`     | That component only      | SPEC-120     |
 
 ## Rules
 
@@ -41,6 +41,10 @@ from `tokeny.md` and previewed with the stored CSS values, so they cannot drift 
 8. Text reaches 4.5:1 and large text and UI elements 3:1, in both themes, measured on the
    real composited surface. Disabled elements are exempt. Source: AGENTS.md §7, tokeny.md
    decision 10, SPEC-119 FR-8.
+9. Syntax colours (`syntax-foreground`, `syntax-token-*`, SPEC-123 D20) are only for code in
+   `FileView` and `SideBySideDiff`, set from server-side tokens. They mean nothing on their
+   own and reach 4.5:1 on the code surface and on the removed, added and neutral diff tints
+   (S01 to S10). Source: tokeny.md, SPEC-123 FR-123-73.
 
 ## Semantic and component tokens
 
@@ -73,3 +77,4 @@ the safe side.
 | A subtle surface (selected row, code block) | `bg-muted` or `bg-muted/40`                                                 | `bg-accent` (reserved for shadcn internals) |
 | A separator or card outline                 | `border` (the default border colour)                                        | `border-control`                            |
 | A field border                              | `border-control`                                                            | `border-input`                              |
+| Syntax colours in code                      | `FileView` or `SideBySideDiff` with a `highlight` result                    | `text-syntax-token-*` on other text         |
