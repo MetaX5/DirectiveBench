@@ -11,7 +11,7 @@ import {
   type AgentRunResult,
   type WorkspacePin,
 } from '@directivebench/agent-adapters';
-import { hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
+import { findSecretRanges, hashManifest, sha256, type ArtifactBundle } from '@directivebench/core';
 import type { BenchmarkDefinitionInput } from '../src/definition';
 import { prepareSuiteImport } from '../src/import';
 import { runBenchmark, type AgentRunRecord } from '../src/orchestrator';
@@ -68,6 +68,7 @@ function claudeAdapter(root: string, executable: string): AgentAdapter {
     }),
     installArtifact: (workspace: WorkspacePin, artifact: ArtifactBundle) =>
       installClaudeArtifact(workspace, artifact),
+    findOutputSecrets: (text, options) => findSecretRanges(text, [], options),
     run: async (request: AgentRunRequest): Promise<AgentRunResult> => {
       const outcome = await runClaudeCode({
         executable,

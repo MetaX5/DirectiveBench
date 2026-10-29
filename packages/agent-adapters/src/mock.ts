@@ -1,7 +1,12 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
-import type { ArtifactBundle } from '@directivebench/core';
+import {
+  findSecretRanges,
+  type ArtifactBundle,
+  type TextEnd,
+  type TextRange,
+} from '@directivebench/core';
 import type {
   AgentAdapter,
   AgentDetection,
@@ -58,6 +63,11 @@ export class MockAgentAdapter implements AgentAdapter {
     usageReporting: false,
     deterministic: true,
   };
+
+  /** The mock knows no secret of its own: the core rules only (SPEC-123 FR-123-60). */
+  findOutputSecrets(text: string, options: { textEnd: TextEnd }): readonly TextRange[] {
+    return findSecretRanges(text, [], options);
+  }
 
   async detect(): Promise<AgentDetection> {
     return {

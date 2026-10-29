@@ -8,7 +8,7 @@ export const REDACTION_MARKER = '[REDACTED]';
 export const MIN_KNOWN_SECRET_LENGTH = 8;
 
 /** Token shapes of common providers. Patterns are intentionally conservative. */
-const SECRET_PATTERNS: readonly RegExp[] = [
+export const SECRET_PATTERNS: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{16,}/g,
   /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g,
   /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
@@ -18,6 +18,13 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bAKIA[0-9A-Z]{16}\b/g,
   /(authorization:\s*bearer\s+)[^\s"']+/gi,
 ];
+
+/**
+ * The shortest text each of {@link SECRET_PATTERNS} matches, in the same order (a unit test checks
+ * each against a sample). A reader that cuts text must look at least this far past the cut to
+ * recognise a secret that starts before it (SPEC-123 FR-123-06).
+ */
+export const SECRET_PATTERN_MIN_LENGTHS: readonly number[] = [23, 23, 24, 31, 26, 15, 20, 22];
 
 const PRIVATE_KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
 const PRIVATE_KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/g;
@@ -68,4 +75,97 @@ export function redactSecrets(text: string, knownSecrets: readonly string[] = []
 /** Environment variable names that are treated as secrets and never forwarded or logged. */
 export function isSecretEnvName(name: string): boolean {
   return /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION)/i.test(name);
+}
+
+/** A span of a text in UTF-16 code units, `end` exclusive. */
+export interface TextRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Whether a text holds the whole of what it was read from (`file-end`), or was cut from a longer
+ * one (`cut`), so a secret can continue beyond its end.
+ */
+export type TextEnd = 'file-end' | 'cut';
+
+/** Sorts ranges and merges overlapping and adjacent ones; empty ranges are dropped. */
+export function mergeTextRanges(ranges: readonly TextRange[]): TextRange[] {
+  const sorted = ranges.filter((r) => r.end > r.start).sort((a, b) => a.start - b.start);
+  const merged: TextRange[] = [];
+  for (const range of sorted) {
+    const last = merged.at(-1);
+    if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+    else merged.push({ ...range });
+  }
+  return merged;
+}
+
+const KEY_MARKER = /-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----/g;
+
+/**
+ * The ranges of `text` that hold a secret, under the rules of SPEC-123 FR-123-07, merged and
+ * sorted. Unlike {@link redactSecrets}, it returns offsets into the original text, so a caller
+ * can cut the text without splitting a secret and count what it replaced:
+ *
+ * - every occurrence of a known secret (at least {@link MIN_KNOWN_SECRET_LENGTH} characters);
+ * - every match of {@link SECRET_PATTERNS}, only the token where a pattern keeps a prefix;
+ * - every private-key fragment, failing closed as trace redaction does: the text after a `BEGIN`
+ *   marker up to the next key marker or the end of the text, and the text before an `END` marker
+ *   that does not follow its `BEGIN`;
+ * - for `textEnd: 'cut'`, the longest suffix of the text that starts a known secret.
+ *
+ * One pass per rule; every pattern is linear in the text.
+ */
+export function findSecretRanges(
+  text: string,
+  knownSecrets: readonly string[],
+  options: { textEnd: TextEnd },
+): TextRange[] {
+  const ranges: TextRange[] = [];
+  const secrets = knownSecrets.filter((secret) => secret.length >= MIN_KNOWN_SECRET_LENGTH);
+  for (const secret of secrets) {
+    for (let at = text.indexOf(secret); at !== -1; at = text.indexOf(secret, at + 1)) {
+      ranges.push({ start: at, end: at + secret.length });
+    }
+  }
+  for (const pattern of SECRET_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const prefix = match[1] ?? '';
+      ranges.push({ start: match.index + prefix.length, end: match.index + match[0].length });
+    }
+  }
+  let from = 0;
+  let previous: string | undefined;
+  for (const match of text.matchAll(KEY_MARKER)) {
+    if (previous === 'BEGIN' || match[1] === 'END') ranges.push({ start: from, end: match.index });
+    from = match.index + match[0].length;
+    previous = match[1];
+  }
+  if (previous === 'BEGIN') ranges.push({ start: from, end: text.length });
+  if (options.textEnd === 'cut') {
+    for (const secret of secrets) {
+      for (let length = Math.min(secret.length - 1, text.length); length > 0; length -= 1) {
+        if (text.endsWith(secret.slice(0, length))) {
+          ranges.push({ start: text.length - length, end: text.length });
+          break;
+        }
+      }
+    }
+  }
+  return mergeTextRanges(ranges);
+}
+
+/**
+ * `text` with every range replaced by {@link REDACTION_MARKER}. `ranges` must be merged and
+ * sorted ({@link mergeTextRanges}) and lie inside the text.
+ */
+export function replaceTextRanges(text: string, ranges: readonly TextRange[]): string {
+  let result = '';
+  let from = 0;
+  for (const range of ranges) {
+    result += text.slice(from, range.start) + REDACTION_MARKER;
+    from = range.end;
+  }
+  return result + text.slice(from);
 }

@@ -3,6 +3,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import { createId, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import {
+  agentRunFiles,
   agentRuns,
   artifacts,
   artifactVersions,
@@ -15,6 +16,12 @@ import {
 export type BenchmarkRunRecord = typeof benchmarkRuns.$inferSelect;
 export type AgentRunRecord = typeof agentRuns.$inferSelect;
 export type AssertionResultRecord = typeof assertionResults.$inferSelect;
+/** One kept (or listed but not kept) output file of an agent run, with its content. */
+export type AgentRunFileRecord = typeof agentRunFiles.$inferSelect;
+/** The metadata of an output file, without its content (SPEC-123 §8.3). */
+export type AgentRunFileSummary = Omit<AgentRunFileRecord, 'content'>;
+/** An output file as the engine captured it, before it has an id (SPEC-123 FR-123-11). */
+export type AgentRunFileInput = Omit<AgentRunFileRecord, 'id' | 'agentRunId'>;
 
 export interface CreateBenchmarkRunInput {
   jobId: string | null;
@@ -57,14 +64,26 @@ export interface AgentRunInput {
   usage: Record<string, number> | null;
   error: string | null;
   assertions: Omit<AssertionResultRecord, 'id' | 'agentRunId'>[];
+  /**
+   * Whether the output files were captured (SPEC-123 FR-123-11); true also when the agent changed
+   * no file.
+   */
+  outputFilesKept: boolean;
+  /** Redacted reason when the files were not kept, else null. */
+  outputFilesReason: string | null;
+  /** The captured files; empty when none were kept. */
+  outputFiles: AgentRunFileInput[];
 }
 
-/** Persists one agent run with its assertion results atomically. */
+/**
+ * Persists one agent run with its assertion results and its output files atomically
+ * (SPEC-123 FR-123-11).
+ */
 export async function insertAgentRun(
   handle: DatabaseHandle,
   input: AgentRunInput,
 ): Promise<string> {
-  const { assertions, ...run } = input;
+  const { assertions, outputFiles, ...run } = input;
   const id = createId('arun');
   await withTransaction(handle, async (db) => {
     await db.insert(agentRuns).values({ id, ...run, createdAt: nowIso() });
@@ -73,8 +92,56 @@ export async function insertAgentRun(
         .insert(assertionResults)
         .values({ id: createId('ares'), agentRunId: id, ...assertion });
     }
+    for (const file of outputFiles) {
+      await db.insert(agentRunFiles).values({ id: createId('afile'), agentRunId: id, ...file });
+    }
   });
   return id;
+}
+
+/** The output files of an agent run without their content, ordered by path (SPEC-123 §8.3). */
+export async function listAgentRunFiles(
+  db: Database,
+  agentRunId: string,
+): Promise<AgentRunFileSummary[]> {
+  return db
+    .select({
+      id: agentRunFiles.id,
+      agentRunId: agentRunFiles.agentRunId,
+      path: agentRunFiles.path,
+      change: agentRunFiles.change,
+      sizeBytes: agentRunFiles.sizeBytes,
+      sha256: agentRunFiles.sha256,
+      kept: agentRunFiles.kept,
+      reason: agentRunFiles.reason,
+      storedBytes: agentRunFiles.storedBytes,
+      redactions: agentRunFiles.redactions,
+    })
+    .from(agentRunFiles)
+    .where(eq(agentRunFiles.agentRunId, agentRunId))
+    .orderBy(asc(agentRunFiles.path));
+}
+
+/**
+ * One output file with its content, or null when the agent run does not belong to the benchmark
+ * run or has no file at that path (SPEC-123 §8.3, FR-123-22).
+ */
+export async function getAgentRunFile(
+  db: Database,
+  input: { benchmarkRunId: string; agentRunId: string; path: string },
+): Promise<AgentRunFileRecord | null> {
+  const [row] = await db
+    .select({ file: agentRunFiles })
+    .from(agentRunFiles)
+    .innerJoin(agentRuns, eq(agentRunFiles.agentRunId, agentRuns.id))
+    .where(
+      and(
+        eq(agentRuns.benchmarkRunId, input.benchmarkRunId),
+        eq(agentRunFiles.agentRunId, input.agentRunId),
+        eq(agentRunFiles.path, input.path),
+      ),
+    );
+  return row?.file ?? null;
 }
 
 export interface FinishBenchmarkRunInput {

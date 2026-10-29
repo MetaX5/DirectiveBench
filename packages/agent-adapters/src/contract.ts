@@ -1,4 +1,4 @@
-import type { ArtifactBundle, ModelSelection } from '@directivebench/core';
+import type { ArtifactBundle, ModelSelection, TextEnd, TextRange } from '@directivebench/core';
 import type { WorkspacePin } from './workspace-pin';
 
 /**
@@ -195,6 +195,15 @@ export interface AgentAdapter {
    */
   installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact>;
   run(request: AgentRunRequest): Promise<AgentRunResult>;
+  /**
+   * The ranges of `text` (an output file the agent wrote, or a window of one) that this adapter's
+   * own redaction would replace, as UTF-16 offsets with `end` exclusive (SPEC-123 FR-123-60):
+   * secrets only the adapter knows (e.g. its API key) plus the core rules of `findSecretRanges`,
+   * with the known-secret prefix rule when `textEnd` is `cut`. Secrets never leave the adapter;
+   * only offsets do. The engine unions these ranges with the core's own, so an adapter that
+   * returns none still leaks no pattern secret or key material.
+   */
+  findOutputSecrets(text: string, options: { textEnd: TextEnd }): readonly TextRange[];
 }
 
 export class UnsupportedCapabilityError extends Error {
