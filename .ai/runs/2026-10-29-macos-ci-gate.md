@@ -77,6 +77,15 @@ Not verified: a real Mac outside CI; Windows (issue #160).
   passed there); the escape-session failure did. The race was reproduced on Linux with a
   delayed start instead.
 
+## Review
+
+- **Codex adversarial review, round 1 (needs-attention, 2 × P2, both confirmed):**
+  - The escalation test measured the grace from the spawn, so a slow start could hide a SIGKILL
+    sent without waiting. It now measures from the abort. Red first: with the grace set to 0 and
+    a 0.4 s start, it fails (12.8 ms < 290).
+  - SPEC-012 called the macOS job required, but branch protection does not enforce it yet. The
+    spec now says so; the setting waits for the maintainer.
+
 ## Lessons recorded
 
 - [Tests must run on macOS too; never kill a pid parsed from output without checking it](../lessons/2026-10-29-tests-must-run-on-macos-too.md)

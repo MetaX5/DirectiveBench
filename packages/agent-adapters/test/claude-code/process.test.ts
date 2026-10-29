@@ -200,11 +200,15 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     const controller = new AbortController();
     const pending = runClaudeProcess(input({ signal: controller.signal, killGraceMs: 300 }));
     await waitFor(() => fake.pid());
+    // The grace is measured from the timeout, not from the spawn: a slow start must not hide a
+    // SIGKILL sent without waiting (Codex review of PR #159).
+    const aborted = performance.now();
     controller.abort(new DOMException('The agent run timed out', 'TimeoutError'));
     const result = await pending;
+    const afterAbort = performance.now() - aborted;
     track(fake.pid(), fake.childPid());
     expect(result).toMatchObject({ timedOut: true, cancelled: false, signal: 'SIGKILL' });
-    expect(result.durationMs).toBeGreaterThanOrEqual(290);
+    expect(afterAbort).toBeGreaterThanOrEqual(290);
     expect(alive(-(fake.pid() as number))).toBe(false);
   });
 
