@@ -45,8 +45,8 @@ jobs:
             packages/*/coverage
           retention-days: 7
 
-  # Linux, macOS and Windows are supported platforms (NFR-118-04, NFR-102-04; issue #120). The same
-  # suite and the same 100% threshold run on each; POSIX-only tests are skipped on Windows by name.
+  # Linux and macOS are supported platforms (NFR-118-04); the same suite and the same 100%
+  # threshold run on both (issue #120). Windows (best effort) is tracked separately.
   unit-macos:
     name: Unit tests (100% coverage, macOS)
     runs-on: macos-latest
@@ -56,16 +56,6 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Unit and package tests with the 100% coverage threshold
         # --continue: every package reports its failures, not only the first one.
-        run: pnpm test --continue
-
-  unit-windows:
-    name: Unit tests (100% coverage, Windows)
-    runs-on: windows-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-      - name: Unit and package tests with the 100% coverage threshold
         run: pnpm test --continue
 
   build:
