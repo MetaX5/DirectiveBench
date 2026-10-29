@@ -15,6 +15,7 @@ How the tokens appear in code:
 | `space-page-inline`, `space-page-block`, `space-section`, `space-grid`, `space-stack`, `space-inline`, `space-inline-tight` | `--spacing-page-inline` (from `--page-inline`), `--spacing-page-block`, … | `px-page-inline`, `py-page-block`, `mb-section`, `gap-grid`, `space-y-stack`, `gap-inline`, `gap-inline-tight` |
 | `radius-surface` | `--radius-surface` | `rounded-surface` |
 | `size-content-max` | `--container-content` | `max-w-content` |
+| `size-content-wide` | `--container-wide` | `max-w-wide` |
 | `control-height`, `-sm`, `-xs` | `--spacing-control`, `-sm`, `-xs` | `h-control`, `size-control`, … |
 | `sidebar-width` | `--spacing-sidebar` | `w-sidebar` |
 | `button-secondary-hover` | `--button-secondary-hover` | `hover:bg-button-secondary-hover` |
@@ -96,6 +97,7 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 | **`space-inline`**, **`space-inline-tight`** | `--spacing-inline`, `--spacing-inline-tight` | semantic | 0.5rem; 0.25rem | D9 | a row of controls; icon next to a label | page layout |
 | **`radius-surface`** | `--radius-surface` | semantic | 0 | P1 (Lyra), D7 | all surfaces and controls | |
 | **`size-content-max`** | `--container-content` | semantic | 72rem | `app/layout.tsx` | maximum width of `main` | |
+| **`size-content-wide`** | `--container-wide` | semantic | 96rem | issue 122 (`app/layout.tsx`) | maximum width of `main` on a page whose content has `data-layout="wide"`: wide tables such as the Artifacts list | text, forms and detail pages |
 | `card-spacing` | none (inline in `components/ui/card.tsx`) | component | 1rem, .75rem for size `sm` | P1 (already in `components/ui/card.tsx`) | Card | other components |
 | **`control-height`**, **`control-height-sm`**, **`control-height-xs`** | `--spacing-control`, `--spacing-control-sm`, `--spacing-control-xs` | component | 2rem / 1.75rem / 1.5rem | FR-6 (32px) | Button, Input, NativeSelect | |
 | **`button-secondary-hover`** | `--button-secondary-hover` | component | color-mix(in oklch, secondary, foreground 5%) | FR-6 (currently an inline class) | secondary button hover | |
