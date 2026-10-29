@@ -253,13 +253,21 @@ test('on a wide screen choosing a file keeps the page where it is (maintainer de
 test('at 320px choosing a file brings it into view (browser QA finding 1)', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich));
-  const last = page
+  // Precondition: the file is stacked far below the top of the list, out of view.
+  const fileHeading = (path: string) => page.getByRole('heading', { level: 3, name: path });
+  await expect(fileHeading('a/hostile.html')).not.toBeInViewport();
+  const link = page
     .getByRole('navigation', { name: 'Changed files' })
-    .getByRole('link', { name: /zz-not-kept\.txt/ });
-  await last.scrollIntoViewIfNeeded();
-  await last.click();
-  await expect(page.getByRole('heading', { level: 3, name: 'zz-not-kept.txt' })).toBeInViewport();
-  await expect(page).toHaveURL(/path=zz-not-kept\.txt#file$/);
+    .getByRole('link', { name: /big\.log/ });
+  await expect(link).toBeInViewport();
+  await link.click();
+  await expect(page).toHaveURL(/path=big\.log#file$/);
+  await expect(fileHeading('big.log')).toBeInViewport();
+  await expect(link).toBeFocused();
+  // A fresh document with the #file URL also opens at the file.
+  await page.goto('about:blank');
+  await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich, '?path=empty.txt#file'));
+  await expect(fileHeading('empty.txt')).toBeInViewport();
 });
 
 for (const theme of ['light', 'dark'] as const) {

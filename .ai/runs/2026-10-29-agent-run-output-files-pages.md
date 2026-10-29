@@ -119,8 +119,12 @@ alternatives) on 2026-10-29, relayed by the coordinator. The text below is the a
   and Next.js's hash scroll (`scrollIntoView` on the target) leave the page where it is. Focus
   stays on the activated file link at both widths. Tests: wide (1280x720, scroll position
   unchanged after the click, header and back link in view, a fresh load of the `#file` URL
-  stays at the top) and 320px (the file heading is in view). The wide test failed on the
-  previous build (scroll position changed) and passes now.
+  stays at the top) and 320px (precondition: the file is out of view; choosing an early file
+  brings its heading into view, focus stays on the link, and a fresh load of a `#file` URL opens
+  at the file). The wide test failed on the previous build (scroll position changed). Codex's
+  delta round found the first 320px test too weak (the chosen file could already be in view);
+  the strengthened test fails when the target is always hidden (mutation `lg:hidden` to
+  `hidden`) and passes with the fix.
 
 No other decision is needed: badges, notices, file header, line numbers, scroll region and copy
 inside the file view come from D1 to D19 and FR-123-21; plain text per the brief.
