@@ -1,7 +1,12 @@
 import { lstat, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { ArtifactBundle } from '@directivebench/core';
+import {
+  findSecretRanges,
+  type ArtifactBundle,
+  type TextEnd,
+  type TextRange,
+} from '@directivebench/core';
 import {
   CLAUDE_API_KEY_VARIABLE,
   CLAUDE_AUTH_MODES,
@@ -31,7 +36,7 @@ import { claudeArtifactProfile, installClaudeArtifact } from './install';
 import { claudeRunOutcome } from './normalize';
 import { notStartedEnd, runClaudeCode } from './run';
 import { baselineSkillNameIssue } from './skill-name';
-import { ClaudeStreamParser, redactStreamText } from './stream-parser';
+import { ClaudeStreamParser, redactStreamText, withJsonForms } from './stream-parser';
 
 export const CLAUDE_CODE_ADAPTER_ID = 'claude-code';
 
@@ -155,10 +160,24 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     return installClaudeArtifact(workspace, artifact);
   }
 
+  /** The API key of API Key Mode, read from the environment as `run` reads it; else ''. */
+  private apiKey(): string {
+    return this.options.authMode === 'api-key' ? (this.env[CLAUDE_API_KEY_VARIABLE] ?? '') : '';
+  }
+
+  /**
+   * The core rules plus this adapter's API key in API Key Mode, in its plain and JSON-escaped
+   * forms, as trace redaction knows it (SPEC-123 FR-123-60). Only offsets leave the adapter.
+   */
+  findOutputSecrets(text: string, options: { textEnd: TextEnd }): readonly TextRange[] {
+    const apiKey = this.apiKey();
+    return findSecretRanges(text, withJsonForms(apiKey === '' ? [] : [apiKey]), options);
+  }
+
   async run(request: AgentRunRequest): Promise<AgentRunResult> {
     const started = performance.now();
     const { authMode, permissionProfile, maxBudgetUsd } = this.options;
-    const apiKey = authMode === 'api-key' ? (this.env[CLAUDE_API_KEY_VARIABLE] ?? '') : '';
+    const apiKey = this.apiKey();
     const secrets = apiKey === '' ? [] : [apiKey];
     const authWarnings = claudeAuthProfile(authMode).warnings;
     // The one exit: nothing leaves without the redaction of its texts.
