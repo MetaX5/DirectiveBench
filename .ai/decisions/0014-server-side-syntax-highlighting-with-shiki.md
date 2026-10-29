@@ -29,7 +29,9 @@ which are most of what agents write. Constraints:
 
 ## Decision
 
-1. Use **Shiki** (npm `shiki`, MIT, 4.x; 4.5.0 on 2026-10-29) in `apps/web` only, called from
+1. Use **Shiki** (MIT, 4.x; 4.5.0 on 2026-10-29) through its `@shikijs/core`,
+   `@shikijs/engine-javascript` and `@shikijs/langs` packages (not the `shiki` umbrella package,
+   which Next.js keeps external, and pnpm allows importing only direct dependencies) in `apps/web` only, called from
    `apps/web/lib/syntax-highlight.ts` (`server-only`) by App Router Server Components. No
    highlighter code reaches the browser.
 2. Use the fine-grained core (`createHighlighterCore`) with a fixed list of grammars and the
@@ -40,7 +42,10 @@ which are most of what agents write. Constraints:
 4. One DirectiveBench theme built with Shiki's CSS-variables theme (`--syntax-*` variables),
    whose light and dark values are new design-system tokens.
 5. Bound the work: `SYNTAX_HIGHLIGHT_MAX_BYTES` (256 KiB), a maximum line length and a per-line
-   time limit; above them, or on any error, render plain text with a note.
+   time limit; above them, or on any error, render plain text with a note. The per-line limit is
+   cooperative only (Shiki's JavaScript scanner runs a synchronous `RegExp.exec`), so tokenizing
+   runs in a terminable `node:worker_threads` worker with an aggregate 2 s deadline per page
+   render (SPEC-123 FR-123-78), added after a Codex review.
 6. Bundle Shiki into the Next.js server build. Next.js 16.4 lists `shiki` in its default
    `serverExternalPackages`, so the implementation must make sure it is bundled (for example by
    importing the `@shikijs/*` entry points) and prove it with `pnpm verify:pack`; it is not added
@@ -82,7 +87,7 @@ which are most of what agents write. Constraints:
 ## Consequences
 
 - SPEC-123 gains §6.7, NFR-123-07, AC-12 to AC-15 and Phase 3a.
-- `apps/web/package.json` gains `shiki`; `globals.css` gains the `--syntax-*` tokens;
+- `apps/web/package.json` gains `@shikijs/core`, `@shikijs/engine-javascript` and `@shikijs/langs`; `globals.css` gains the `--syntax-*` tokens;
   `FileView` and `SideBySideDiff` accept an optional highlight result.
 - `pnpm verify:pack` must cover a highlighted file, so a Next.js upgrade that changes external
   packages is caught.
