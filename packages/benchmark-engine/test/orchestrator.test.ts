@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -1367,6 +1368,40 @@ describe('output files (SPEC-123 Phase 1)', () => {
     });
     expect(delivered[0]?.capture?.files[0]?.content).toBe('baseline');
   }, 20_000);
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'delivers the record and its files before a failing workspace cleanup (Codex round 3)',
+    async () => {
+      const input = await suite();
+      let locked = '';
+      const adapter = new FakeAdapter(async (request, variant) => {
+        // A directory without write permission: removing the workspace fails with EACCES.
+        locked = join(request.workspace.path, 'locked');
+        mkdirSync(locked);
+        writeFileSync(join(locked, 'kept.txt'), 'evidence');
+        chmodSync(locked, 0o500);
+        return writeVariant(request, variant);
+      });
+      const delivered: Delivered[] = [];
+      try {
+        const failure = await runBenchmark({
+          ...input,
+          adapter,
+          signal: signal(),
+          onAgentRun: collect(delivered),
+        }).catch((error: unknown) => error);
+        expect(failure).toMatchObject({ code: 'EACCES' });
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.record.executionStatus).toBe('completed');
+      expect(delivered[0]?.capture?.files.map((f) => [f.path, f.content])).toEqual([
+        ['locked/kept.txt', 'evidence'],
+        ['out.txt', 'baseline'],
+      ]);
+    },
+  );
 
   it('releases each capture once its callback resolved while the run goes on (FR-123-10, AC-10)', async () => {
     const input = await suite({

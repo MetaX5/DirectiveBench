@@ -302,6 +302,16 @@ function agentAbortSignal(
   };
 }
 
+/** The run-local directory of one agent run: its workspace, home and agent scratch directory. */
+function agentRunDir(
+  input: RunBenchmarkInput,
+  benchmarkCase: BenchmarkCase,
+  variant: Variant,
+  repetition: number,
+): string {
+  return join(input.workRoot, benchmarkCase.id, `${variant}-${repetition}`);
+}
+
 /** Reason stored for an agent run that ended before its output files were captured. */
 export const OUTPUT_NOT_CAPTURED_REASON =
   'the agent run ended before its output files were captured';
@@ -333,7 +343,7 @@ async function runAgentStages(
   const capturing = input.onAgentRun !== undefined;
   const caseFixtures = input.fixtures[benchmarkCase.id] as CaseFixtures;
   const started = performance.now();
-  const runDir = join(input.workRoot, benchmarkCase.id, `${variant}-${repetition}`);
+  const runDir = agentRunDir(input, benchmarkCase, variant, repetition);
   const workspaceDir = join(runDir, 'workspace');
   const homeDir = join(runDir, 'home');
   const scratchDir = join(runDir, 'agent');
@@ -650,8 +660,6 @@ async function runAgentStages(
       }
     }
     return fail('infrastructure-error', message, code);
-  } finally {
-    if (!input.keepWorkspaces) await rm(runDir, { recursive: true, force: true });
   }
 }
 
@@ -695,12 +703,23 @@ async function runAndDeliver(
   repetition: number,
   agentRuns: AgentRunRecord[],
 ): Promise<AgentRunRecord> {
-  const executed = await executeAgentRun(input, benchmarkCase, variant, repetition);
-  const record = applySkillActivationRules(executed.record, input.baselineArtifact !== undefined);
-  addAgentMetadataEvent(record);
-  agentRuns.push(record);
-  await input.onAgentRun?.(record, executed.capture);
-  return record;
+  try {
+    const executed = await executeAgentRun(input, benchmarkCase, variant, repetition);
+    const record = applySkillActivationRules(executed.record, input.baselineArtifact !== undefined);
+    addAgentMetadataEvent(record);
+    agentRuns.push(record);
+    await input.onAgentRun?.(record, executed.capture);
+    return record;
+  } finally {
+    // Only after delivery: a workspace that cannot be removed still fails the benchmark run, but
+    // can no longer discard the agent run and its captured files (Codex review round 3).
+    if (!input.keepWorkspaces) {
+      await rm(agentRunDir(input, benchmarkCase, variant, repetition), {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
 }
 
 /**
