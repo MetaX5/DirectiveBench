@@ -3,7 +3,7 @@ title: SPEC-123 Phase 3, run page "Output files" card and agent-run files page
 date: 2026-10-29
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (om-auto-implement-spec, SPEC-123 §21 Phase 3 only), issue #152
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-pages
 specs: [SPEC-123, SPEC-113, SPEC-122, SPEC-014]
 ---
@@ -161,6 +161,15 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
   an `assertion-error` run shown end to end (AC-3, AC-11 stay partial); screen readers other
   than the accessibility tree that Playwright reads.
 
+## Review
+
+- Codex adversarial review: round 1 no material findings (needs-attention only for the gate it
+  could not run); round 2 with the recorded gate and QA results: approve, no findings.
+- `om-auto-review-pr` on PR #162 (COMMENT, own PR): approve. One minor (the files page loads
+  `getBenchmarkRunDetail` for one agent run; a narrower repository read is a follow-up) and one
+  nit (no e2e for `timeout`/`agent-error` badges in the existing "Agent runs" section). CI on
+  `8219a9b`: all nine checks passed; PR mergeable.
+
 ## Problems and deviations
 
 - `demoRunId` returns the oldest run, and the first seed used a fixed date earlier than the demo
@@ -176,6 +185,9 @@ inside the file view come from D1 to D19 and FR-123-21; plain text per the brief
 - [Seeded e2e runs must be newer than the demo run; stacked details need a fragment](../lessons/2026-10-29-e2e-seeds-must-not-become-the-demo-run.md)
 
 ## Follow-ups
+
+- A repository read for one agent run within its benchmark run, so the files page does not load
+  every agent run's trace (review minor on #162).
 
 - Phase 3a: highlight the files page (`highlightLines` in this Server Component).
 - Phase 4 (compare) and Phase 5 (blind review, which must close this card and page while a review
