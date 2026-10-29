@@ -3,7 +3,7 @@ title: SPEC-123 Phase 1, capture and storage of agent run output files
 date: 2026-10-29
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (issue #152, Phase 1 approved on 2026-10-29), om-auto-implement-spec
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-capture
 specs: [SPEC-123, SPEC-006, SPEC-014, SPEC-118]
 ---
@@ -163,6 +163,40 @@ Not verified: a real `claude` session (never run, by rule); Windows (the `O_NOFO
 is simulated in `output-files-simulated-fs.test.ts`); NFR-123-01 capture time (target, no
 timing test); upgrading a data directory created by a released CLI (covered by the migration
 test on a `0002` database only); any UI (Phase 3).
+
+## Review
+
+- `om-auto-review-pr` round 1 (COMMENT, the author cannot approve): approve-equivalent, one minor
+  finding (a deleted file under the installed artifact listed as `deleted` instead of
+  `artifact-path`, FR-123-08), fixed in `0d04450` with a test.
+- Codex adversarial review:
+  - Round 1, needs-attention: (1) capture checked only canonical path strings, not the pinned
+    workspace's dev/ino, and could follow a link in an intermediate component; (2) the read
+    after the window ran to EOF, unbounded on a growing file. Fixed in the next commit:
+    `assertDirectoryInsidePin` (root dev/ino, `lstat` of every directory component, canonical
+    parent) before and after the open; reads bounded to the manifest size plus a one-byte
+    probe. Regression tests: wrong pin inode, an in-workspace directory link, a growing and a
+    shrinking file.
+  - Round 2, needs-attention (high): `buildManifest` (the agent-error/timeout capture's own
+    manifest) hashed with `createReadStream` to EOF. Fixed: `sha256File` reads at most the
+    walked size plus one byte and refuses growth. Regression test on the capture path.
+  - Round 3, needs-attention: a failing workspace `rm` in `executeAgentRun`'s `finally` rejected
+    before `onAgentRun`, discarding the record and capture. Fixed `d305e89`: the agent run
+    directory is removed in `runAndDeliver` after delivery. Regression test with a
+    non-writable directory.
+  - Round 4 (after merging `origin/main`): no material findings; approval withheld only because
+    Codex's sandbox could not run the gate.
+  - Round 5: see the PR's Review section.
+
+## Merge with main
+
+`origin/main` moved during the run (#155 design-system components and
+`apps/web/lib/syntax-highlight.ts`, #156 FR-123-78, the #122 fix). The merge `8e0fb3d`
+conflicted only in `.ai/lessons.md` (both sides added index entries at the top): kept all
+entries, this run's first. SPEC-123 §20 merged cleanly; its "Not implemented" bullet now names
+FR-123-78 and points to #155's run log for the components that landed there. Full gate rerun on
+the merged head: lint, format:check, typecheck, test (2,087 tests), build and verify:pack all
+pass.
 
 ## Problems and deviations
 
