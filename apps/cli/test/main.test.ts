@@ -12,8 +12,12 @@ const commands = vi.hoisted(() => ({
   serve: vi.fn(),
   benchmarkInitCommand: vi.fn(),
   benchmarkRunCommand: vi.fn(),
+  benchmarkExportCommand: vi.fn(),
 }));
 vi.mock('../src/benchmark-init', () => ({ benchmarkInitCommand: commands.benchmarkInitCommand }));
+vi.mock('../src/benchmark-export', () => ({
+  benchmarkExportCommand: commands.benchmarkExportCommand,
+}));
 vi.mock('../src/benchmark-run', () => ({ benchmarkRunCommand: commands.benchmarkRunCommand }));
 vi.mock('../src/commands', () => ({
   initCommand: commands.initCommand,
@@ -163,6 +167,18 @@ describe('directivebench (main)', () => {
     });
     expect(await runCli('benchmark', 'run', './suite')).toBe(ExitCode.Usage);
     expect(stderr.join('')).toContain("required option '--artifact <ref>' not specified");
+  });
+
+  it('passes benchmark export options and requires --out (SPEC-123 FR-123-40)', async () => {
+    await runCli('--data-dir', '/d', 'benchmark', 'export', 'brun_1', '--out', './x', '--json');
+    expect(commands.benchmarkExportCommand).toHaveBeenCalledWith({
+      runId: 'brun_1',
+      out: './x',
+      json: true,
+      dataDir: '/d',
+    });
+    expect(await runCli('benchmark', 'export', 'brun_1')).toBe(ExitCode.Usage);
+    expect(stderr.join('')).toContain("required option '--out <dir>' not specified");
   });
 
   it("uses the command's result as the exit code", async () => {
