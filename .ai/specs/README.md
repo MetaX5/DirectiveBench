@@ -90,7 +90,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 ## Index
 
 Specifications are drafts except SPEC-119, SPEC-120 and SPEC-121, implemented and verified on 2026-10-23, 2026-10-27 and 2026-10-28. They were created on 2026-10-14 during the bootstrap, except
-SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23), SPEC-120 (2026-10-27), SPEC-121 and SPEC-122 (2026-10-28).
+SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23), SPEC-120 (2026-10-27), SPEC-121 and SPEC-122 (2026-10-28), SPEC-123 (2026-10-29).
 `implemented/` contains verified specifications; `archive/` is currently empty.
 
 ### Foundation
@@ -138,6 +138,7 @@ SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23)
 | SPEC-120 | [Three-layer design tokens](implemented/2026-10-27-design-tokens.md) | implemented |
 | SPEC-121 | [Design-token migration and design-system guard in CI](implemented/2026-10-28-design-token-migration-and-guard.md) | implemented |
 | SPEC-122 | [Design-system documentation in Storybook](2026-10-28-design-system-storybook.md) | draft |
+| SPEC-123 | [Keep and review the files an agent run wrote](2026-10-29-agent-run-output-files.md) | draft |
 
 ### Integrations
 

@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mockup: run page output files</title><style>
+*{box-sizing:border-box}body{margin:0;font:12px/1.5 Figtree,system-ui,sans-serif;color:#0a0a0a;background:#fff}
+.side{position:fixed;top:0;left:0;bottom:0;width:180px;border-right:1px solid #e5e5e5;padding:16px;background:#fafafa}
+.side b{display:block;margin-bottom:12px}.side a{display:block;color:#525252;padding:4px 0;text-decoration:none}.side a.on{color:#0a0a0a;font-weight:600}
+main{margin-left:180px;padding:20px 24px;max-width:1180px}h1{font-size:20px;margin:0 0 4px}.sub{color:#5c5c5c;margin:0 0 16px}
+.card{border:1px solid #e5e5e5;padding:12px;margin-bottom:16px;background:#fff}.card h2{font-size:14px;margin:0 0 8px}
+.badge{display:inline-block;border:1px solid #d4d4d4;padding:0 6px;margin-right:4px;font-size:11px}
+.b-add{background:#ecfccb;border-color:#a3e635}.b-mod{background:#f5f5f5}.b-warn{background:#fef9c3;border-color:#eab308}.b-mock{background:#e0f2fe;border-color:#38bdf8}
+.grid{display:grid;grid-template-columns:260px 1fr;gap:16px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+ul.files{list-style:none;margin:0;padding:0}ul.files li{padding:6px 8px;border-bottom:1px solid #f0f0f0;font-family:ui-monospace,monospace;font-size:11px}ul.files li.on{background:#f5f5f5;border-left:3px solid #a3e635}
+pre{margin:0;background:#f5f5f5;border:1px solid #e5e5e5;padding:8px;font:11px/1.6 ui-monospace,monospace;overflow:auto;white-space:pre}
+.ln{color:#737373;display:inline-block;width:28px;text-align:right;margin-right:8px}.add{background:#ecfccb;display:block}.del{background:#fee2e2;display:block}
+.status{padding:6px 8px;margin-bottom:8px;border:1px solid #eab308;background:#fefce8}
+.btn{display:inline-block;height:32px;line-height:30px;padding:0 12px;border:1px solid #737373;background:#fff;margin-right:6px;font:inherit}
+.btn.p{background:#a3e635;border-color:#a3e635;font-weight:600}.btn.d{border-color:#dc2626;color:#991b1b}
+select,textarea{font:inherit;border:1px solid #737373;height:32px;padding:0 6px}textarea{height:56px;width:100%;padding:6px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee}th{color:#5c5c5c;font-weight:600}
+.note{color:#5c5c5c;font-size:11px;margin-top:6px}label{display:block;margin:8px 0 4px;font-weight:600}
+</style></head><body><nav class="side"><b>DirectiveBench</b><a>Dashboard</a><a>Artifacts</a><a>Benchmarks</a><a class="on">Results</a><a>Settings</a></nav><main>
+<h1>wp-block-development-benchmark</h1><p class="sub">Run run_5vR9G7vc. Baseline (v2) vs Candidate (v3). Illustrative mockup, placeholder data.</p>
+<div class="card"><h2>Comparison</h2><span class="badge b-warn">Unstable</span> Candidate 91.5% vs baseline 93.3% (-1.9 pts)</div>
+<div class="card"><h2>Output files</h2><p class="sub" style="margin:0 0 8px">Files each agent run added or changed. Up to 1 MB per file and 10 MB per agent run are kept, secrets redacted.</p>
+<table aria-label="Output files of case extend-existing-block"><thead><tr><th>Case extend-existing-block</th><th>Status</th><th>Changed files</th><th>Kept</th><th>Not complete</th><th></th></tr></thead><tbody>
+<tr><td>Baseline (v2), repetition 1</td><td>Completed</td><td>6</td><td>18 KB</td><td>0</td><td><a href="#">View files</a></td></tr>
+<tr><td>Candidate (v3), repetition 1</td><td>Completed</td><td>7</td><td>21 KB</td><td>0</td><td><a href="#">View files</a></td></tr>
+<tr><td>Baseline (v2), repetition 2</td><td>Completed</td><td>6</td><td>17 KB</td><td>1 truncated</td><td><a href="#">View files</a></td></tr>
+<tr><td>Candidate (v3), repetition 2</td><td>Timeout</td><td>4</td><td>9 KB</td><td>0</td><td><a href="#">View files</a></td></tr>
+</tbody></table><p class="note"><a href="#">Compare baseline and candidate side by side</a></p></div>
+<div class="card"><h2>Blind review</h2><p style="margin:0 0 8px">Judge the outputs as unlabelled A/B pairs. You record a verdict for each pair before the variants are revealed. 6 eligible pairs.</p><span class="btn p">Start blind review</span></div>
+</main></body></html>

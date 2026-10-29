@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Mockup: agent run files</title><style>
+*{box-sizing:border-box}body{margin:0;font:12px/1.5 Figtree,system-ui,sans-serif;color:#0a0a0a;background:#fff}
+.side{position:fixed;top:0;left:0;bottom:0;width:180px;border-right:1px solid #e5e5e5;padding:16px;background:#fafafa}
+.side b{display:block;margin-bottom:12px}.side a{display:block;color:#525252;padding:4px 0;text-decoration:none}.side a.on{color:#0a0a0a;font-weight:600}
+main{margin-left:180px;padding:20px 24px;max-width:1180px}h1{font-size:20px;margin:0 0 4px}.sub{color:#5c5c5c;margin:0 0 16px}
+.card{border:1px solid #e5e5e5;padding:12px;margin-bottom:16px;background:#fff}.card h2{font-size:14px;margin:0 0 8px}
+.badge{display:inline-block;border:1px solid #d4d4d4;padding:0 6px;margin-right:4px;font-size:11px}
+.b-add{background:#ecfccb;border-color:#a3e635}.b-mod{background:#f5f5f5}.b-warn{background:#fef9c3;border-color:#eab308}.b-mock{background:#e0f2fe;border-color:#38bdf8}
+.grid{display:grid;grid-template-columns:260px 1fr;gap:16px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+ul.files{list-style:none;margin:0;padding:0}ul.files li{padding:6px 8px;border-bottom:1px solid #f0f0f0;font-family:ui-monospace,monospace;font-size:11px}ul.files li.on{background:#f5f5f5;border-left:3px solid #a3e635}
+pre{margin:0;background:#f5f5f5;border:1px solid #e5e5e5;padding:8px;font:11px/1.6 ui-monospace,monospace;overflow:auto;white-space:pre}
+.ln{color:#737373;display:inline-block;width:28px;text-align:right;margin-right:8px}.add{background:#ecfccb;display:block}.del{background:#fee2e2;display:block}
+.status{padding:6px 8px;margin-bottom:8px;border:1px solid #eab308;background:#fefce8}
+.btn{display:inline-block;height:32px;line-height:30px;padding:0 12px;border:1px solid #737373;background:#fff;margin-right:6px;font:inherit}
+.btn.p{background:#a3e635;border-color:#a3e635;font-weight:600}.btn.d{border-color:#dc2626;color:#991b1b}
+select,textarea{font:inherit;border:1px solid #737373;height:32px;padding:0 6px}textarea{height:56px;width:100%;padding:6px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee}th{color:#5c5c5c;font-weight:600}
+.note{color:#5c5c5c;font-size:11px;margin-top:6px}label{display:block;margin:8px 0 4px;font-weight:600}
+</style></head><body><nav class="side"><b>DirectiveBench</b><a>Dashboard</a><a>Artifacts</a><a>Benchmarks</a><a class="on">Results</a><a>Settings</a></nav><main>
+<h1>Candidate (v3), repetition 2</h1><p class="sub">Case extend-existing-block. Run run_5vR9G7vc. Read only. Illustrative mockup.</p>
+<div class="grid"><div class="card"><h2>Changed files (7)</h2><ul class="files">
+<li>block.json <span class="badge b-mod">Modified</span></li>
+<li class="on">render.php <span class="badge b-mod">Modified</span></li>
+<li>src/deprecated.js <span class="badge b-add">Added</span></li>
+<li>src/view.js <span class="badge b-add">Added</span></li>
+<li>build/index.js <span class="badge b-warn">Truncated</span></li>
+<li>assets/icon.png <span class="badge">Binary, not kept</span></li>
+<li>src/old-save.js <span class="badge">Deleted</span></li></ul></div>
+<div class="card"><h2 style="font-family:ui-monospace,monospace">render.php</h2>
+<div class="status" role="status">1 secret redacted. 2,184 bytes, kept in full.</div>
+<pre><span class="ln">1</span>&lt;?php
+<span class="ln">2</span>$wrapper = get_block_wrapper_attributes( array( 'class' =&gt; 'is-dismissible' ) );
+<span class="ln">3</span>$label   = esc_attr__( 'Close notice', 'notice-block' );
+<span class="ln">4</span>// api key: [REDACTED]
+<span class="ln">5</span>?&gt;
+<span class="ln">6</span>&lt;div &lt;?php echo $wrapper; ?&gt;&gt;
+<span class="ln">7</span>  &lt;?php echo wp_kses_post( $content ); ?&gt;
+<span class="ln">8</span>  &lt;button type="button" aria-label="&lt;?php echo $label; ?&gt;"&gt;x&lt;/button&gt;
+<span class="ln">9</span>&lt;/div&gt;</pre></div></div>
+</main></body></html>
