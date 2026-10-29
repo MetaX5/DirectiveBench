@@ -73,13 +73,35 @@ export interface ExportManifest {
 }
 
 /**
+ * Characters no Windows file name may hold, plus control characters; `:` also covers drive
+ * prefixes and NTFS alternate data streams (`file:stream`).
+ */
+// eslint-disable-next-line no-control-regex
+const NON_PORTABLE_CHARACTERS = /[\u0000-\u001f<>:"|?*\\]/;
+/** Device names Windows reserves in every directory, with or without an extension. */
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+
+/**
  * A stored path is untrusted (SPEC-123 FR-123-42): it must be a relative POSIX path whose
  * segments are not empty, `.` or `..`, with no NUL, no backslash and no drive or UNC prefix.
+ * Stricter, so an export means the same on every platform: no segment may hold a character
+ * Windows forbids (`<>:"|?*`, control characters), end in a dot or a space (Windows drops them, so
+ * two names would meet) or be a reserved device name (`CON`, `nul.txt`, …).
  */
 export function isSafeRelativePath(path: string): boolean {
-  if (path.length === 0 || path.includes('\0') || path.includes('\\')) return false;
-  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return false;
-  return path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+  if (path.length === 0 || path.startsWith('/') || NON_PORTABLE_CHARACTERS.test(path)) {
+    return false;
+  }
+  return path
+    .split('/')
+    .every(
+      (segment) =>
+        segment !== '' &&
+        segment !== '.' &&
+        segment !== '..' &&
+        !/[. ]$/.test(segment) &&
+        !WINDOWS_DEVICE_NAME.test(segment),
+    );
 }
 
 function errorCode(error: unknown): unknown {

@@ -227,9 +227,32 @@ function tree(dir: string): string[] {
 describe('isSafeRelativePath (SPEC-123 FR-123-42)', () => {
   it('accepts relative POSIX paths and refuses everything else', () => {
     expect(isSafeRelativePath('src/a.js')).toBe(true);
-    expect(isSafeRelativePath('ab:c')).toBe(true);
-    expect(isSafeRelativePath('..a/b..')).toBe(true);
-    for (const path of ['', ...UNSAFE_PATHS, '..', '.', '//server/share', 'a/..']) {
+    expect(isSafeRelativePath('..a/b..x')).toBe(true);
+    expect(isSafeRelativePath('.env')).toBe(true);
+    expect(isSafeRelativePath('console.log.js')).toBe(true);
+    expect(isSafeRelativePath('src/com10.txt')).toBe(true);
+    for (const path of [
+      '',
+      ...UNSAFE_PATHS,
+      '..',
+      '.',
+      '//server/share',
+      'a/..',
+      'ab:c',
+      'file.txt:stream',
+      'a<b',
+      'a|b',
+      'what?',
+      'star*',
+      'quote"',
+      'esc\u001b[31m.txt',
+      'dot.',
+      'space ',
+      'CON',
+      'src/nul.txt',
+      'Lpt1',
+      'com9.js',
+    ]) {
       expect(isSafeRelativePath(path), path).toBe(false);
     }
   });
