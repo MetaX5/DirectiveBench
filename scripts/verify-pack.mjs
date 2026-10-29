@@ -3,10 +3,11 @@
 //   1. pack apps/cli (expects `pnpm build` to have run)
 //   2. inspect the tarball contents
 //   3. install the tarball into an empty temporary project (fetches next/react from the registry)
-//   4. run --help and --version, the headless demo, then `serve` and probe it over HTTP
+//   4. run --help and --version, the headless demo and an export of its run, then `serve` and
+//      probe it over HTTP
 //   5. stop the server with SIGTERM and require a clean exit
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -85,6 +86,28 @@ step('demo (headless mock benchmark)');
 const demo = run(bin, ['--data-dir', dataDir, 'demo'], { cwd: work });
 check(/Verdict:\s+improved/.test(demo), 'demo reports an improved verdict');
 check(demo.includes('Mock agent — not an AI evaluation'), 'demo labels mock results');
+
+step('benchmark export of the demo run (SPEC-123 §6.4)');
+const demoRunId = /Run id:\s+(\S+)/.exec(demo)?.[1];
+const exportDir = join(work, 'export');
+const exported = JSON.parse(
+  run(
+    bin,
+    ['--data-dir', dataDir, 'benchmark', 'export', demoRunId, '--out', exportDir, '--json'],
+    {
+      cwd: work,
+    },
+  ),
+);
+check(exported.written > 0 && exported.mock === true, `export wrote ${exported.written} file(s)`);
+const exportManifest = JSON.parse(readFileSync(join(exportDir, 'manifest.json'), 'utf8'));
+const firstExported = exportManifest.agentRuns
+  .flatMap((agentRun) => agentRun.files)
+  .find((file) => file.exportedTo !== null);
+check(
+  existsSync(join(exportDir, firstExported?.exportedTo ?? 'missing')),
+  'manifest.json lists files that exist',
+);
 
 step('serve');
 const port = await new Promise((resolvePort) => {
