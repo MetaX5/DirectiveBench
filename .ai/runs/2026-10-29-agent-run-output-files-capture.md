@@ -72,34 +72,109 @@ and `gc`); breaking existing `toEqual` assertions on records (handled per test).
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
+PR: #157
+
 ### Phase 1: Storage
 
-- [ ] 1.1 Migration 0003, schema, migration and cascade tests
-- [ ] 1.2 Repository functions for agent run files
+- [x] 1.1 Migration 0003, schema, migration and cascade tests — be57af5
+- [x] 1.2 Repository functions for agent run files — be57af5
 
 ### Phase 2: Redaction contract
 
-- [ ] 2.1 Core findSecretRanges
-- [ ] 2.2 Adapter findOutputSecrets for mock and Claude Code
+- [x] 2.1 Core findSecretRanges — 0731941
+- [x] 2.2 Adapter findOutputSecrets for mock and Claude Code — 47b179c
 
 ### Phase 3: Engine capture
 
-- [ ] 3.1 captureOutputFiles with bounded read, scan, cut and limits
-- [ ] 3.2 Wire capture into the orchestrator and onAgentRun
+- [x] 3.1 captureOutputFiles with bounded read, scan, cut and limits — faba0fc
+- [x] 3.2 Wire capture into the orchestrator and onAgentRun — 70f4451
 
 ### Phase 4: Runner and verification
 
-- [ ] 4.1 Runner persists the capture
-- [ ] 4.2 Specs, quality gate and real-app verification
+- [x] 4.1 Runner persists the capture — 41ed639
+- [x] 4.2 Specs, quality gate and real-app verification — c31a635, 3f6bb7b
 
 ## Decisions
 
+- **Key-marker scan semantics (FR-123-07).** The whole-file scan follows the core regex
+  `-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----`: a start whose `[A-Z ]` run ends without
+  `PRIVATE KEY-----` is no marker, exactly as for trace redaction. Only a start still undecided
+  after `KEY_MARKER_MAX_BYTES` (256) bytes, or at the end of the file, counts as an `END` marker.
+  A literal reading ("any start not followed by `PRIVATE KEY-----` within 256 bytes is an END")
+  would turn every `-----BEGIN PUBLIC KEY-----` or `-----BEGIN CERTIFICATE-----` into an END
+  marker and redact all text before it; the regex cannot match those, so they are not key
+  material. Codex round 3's overlong case (a start inside the window, an 8 KiB `[A-Z]` run) is
+  undecided at 256 bytes and is an END, as specified.
+- **Fragments from the scan, not only the orphan END.** The scan returns the private-key
+  fragments of the window by the trace-redaction rule applied to its markers (up to the first
+  marker ending after the window). This covers the orphan END beyond the window (round 2), an END
+  straddling the window end, and an overlong END that the scan ends *inside* the window (round 3),
+  which the window regex alone cannot see. The engine unions these with the core and adapter
+  ranges (fail closed).
+- **Reason texts.** `outputFiles.reason` is a short lower-case clause to follow "Output files were
+  not kept:" (e.g. `the agent did not stop after its timeout`, `the workspace was replaced during
+  the agent run`, `the agent run ended before its output files were captured`, or the redacted
+  capture error such as `a.txt changed after the agent stopped`). The standalone engine uses the
+  code `no-consumer` as FR-123-10 names it.
+- **Index.** `agent_run_files` has the unique index `(agent_run_id, path)` only; it leads with
+  `agent_run_id`, so the separate `agent_run_id` index of §8.1 would be redundant.
+- **Claude Code known secrets** include the JSON-escaped forms of the API key, as the stream
+  parser does (`withJsonForms`, now exported).
+- **Fake `claude` writes `key.txt` in API Key Mode** so the CLI test proves end to end that a key
+  the agent writes into a file is stored only redacted (AC-3).
+
 ## Work performed
+
+1. `be57af5` migration `0003_agent_run_output_files`, schema, `insertAgentRun` with files,
+   `listAgentRunFiles`, `getAgentRunFile`; migration up/rollback test pinned to journal prefix 3;
+   cascade, scoping and atomicity tests.
+2. `0731941` core `findSecretRanges`, `mergeTextRanges`, `replaceTextRanges`, `TextRange`,
+   `TextEnd`, exported `SECRET_PATTERNS` with `SECRET_PATTERN_MIN_LENGTHS` (checked per pattern).
+3. `47b179c` `AgentAdapter.findOutputSecrets`; mock (core rules) and Claude Code (API key and its
+   JSON forms in API Key Mode); corpus test of FR-123-60.
+4. `faba0fc` `benchmark-engine/src/output-files.ts`: `captureOutputFiles`, `KeyMarkerScan`,
+   `placeCut`, `trimIncompleteUtf8`, `utf16Ranges`, limits and constants; unit and
+   simulated-file-system tests.
+5. `70f4451` orchestrator wiring (`onAgentRun(record, capture)`, `outputFiles` summary, capture
+   before the overlay, kept on later return paths, status-path and memory tests).
+6. `41ed639` runner persists the capture; vertical-slice test checks the stored files.
+7. `c31a635` CLI fake-`claude` test: `output.md` kept for the candidate, a key written by the
+   agent stored as `key=[REDACTED]`.
+8. `3f6bb7b` SPEC-006 table list (§3.15) and status, SPEC-123 §20, lesson.
 
 ## Verification
 
+| Command | Result |
+| --- | --- |
+| `pnpm format:check` | pass |
+| `pnpm lint` | pass |
+| `pnpm typecheck` | pass (7 tasks) |
+| `pnpm test` | pass: 1,965 tests (cli 132, database 163, core 286, web 278, runner 234, agent-adapters 362 + 2 skipped, benchmark-engine 510), 100% coverage in every package |
+| `pnpm build` | pass |
+| `pnpm verify:pack` | pass (`Packaging verification passed`; demo, serve, health) |
+| `node apps/cli/dist/cli.js --data-dir <tmp> demo` | verdict improved, delta +50 points (as before); 6 agent runs, each `output_files_kept = 1` with one `agent_run_files` row `src/parse-age.js` (`full`, 184 or 544 bytes, 0 redactions, content equal to the written file) |
+
+Red-first proof: with the scan's key fragments removed from the union, the 9 regression tests of
+Codex rounds 2 and 3 (3 cases × mock, Claude Code, no-range adapter) fail and only the round 1
+case passes (the window regex sees its BEGIN). The memory test of FR-123-10 fails when the
+capture is deliberately retained on the record, and passes otherwise.
+
+Not verified: a real `claude` session (never run, by rule); Windows (the `O_NOFOLLOW`-less path
+is simulated in `output-files-simulated-fs.test.ts`); NFR-123-01 capture time (target, no
+timing test); upgrading a data directory created by a released CLI (covered by the migration
+test on a `0002` database only); any UI (Phase 3).
+
 ## Problems and deviations
+
+- A test token `ghp_…` followed directly by `aaa…` was matched with the `a`s (the pattern is
+  greedy over alphanumerics); the test now separates the token with a space.
+- The literal-reading deviation on overlong markers is recorded under Decisions.
 
 ## Lessons recorded
 
+- [Prove a memory-release test fails on a real leak](../lessons/2026-10-29-prove-a-memory-release-test-fails-on-a-leak.md)
+
 ## Follow-ups
+
+- Phases 2 (CLI export), 3 (run page, after A14), 3a, 4 and 5 of SPEC-123.
+- A timing test for NFR-123-01 if capture time becomes a concern.
