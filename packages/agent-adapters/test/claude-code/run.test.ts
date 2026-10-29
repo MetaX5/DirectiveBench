@@ -21,7 +21,7 @@ import {
   type ClaudeRunInput,
 } from '../../src/claude-code';
 import { pinWorkspace } from '../../src/workspace-pin';
-import { writeFakeClaude, type FakeClaudeMode } from './fake-claude';
+import { waitFor, writeFakeClaude, type FakeClaudeMode } from './fake-claude';
 import { bundle } from './helpers';
 
 const posix = describe.skipIf(process.platform === 'win32');
@@ -173,7 +173,13 @@ posix('runClaudeCode: pre-spawn inspection, then the process', () => {
 
   it('passes a kill grace through to the process', async () => {
     const { fake, input } = await setup('hang');
-    const outcome = await runClaudeCode(input({ timeoutMs: 100, killGraceMs: 100 }));
+    // Timed out only once the fake ignores SIGTERM (it writes its pid after `trap`): a fixed
+    // 100 ms timer raced the shell's start on macOS and ended it with SIGTERM (issue #120).
+    const controller = new AbortController();
+    const pending = runClaudeCode(input({ signal: controller.signal, killGraceMs: 100 }));
+    await waitFor(() => fake.pid());
+    controller.abort(new DOMException('The agent run timed out', 'TimeoutError'));
+    const outcome = await pending;
     expect(outcome.ended?.status).toBe('timeout');
     expect(outcome.process?.signal).toBe('SIGKILL');
     try {

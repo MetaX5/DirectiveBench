@@ -161,15 +161,23 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     const pipes = () =>
       process.getActiveResourcesInfo().filter((resource) => resource === 'PipeWrap').length;
     const pipesBefore = pipes();
-    // A prompt larger than the pipe buffer, which the hanging fake never reads.
+    // A prompt larger than the pipe buffer, which the hanging fake never reads. The timeout is
+    // triggered only once the fake ignores SIGTERM and every signal is refused: a fixed 100 ms
+    // timer raced the shell's start on macOS (issue #120).
+    const controller = new AbortController();
     const pending = runClaudeProcess(
-      input({ timeoutMs: 100, killGraceMs: 100, prompt: 'x'.repeat(4 * 1024 * 1024) }),
+      input({
+        signal: controller.signal,
+        killGraceMs: 100,
+        prompt: 'x'.repeat(4 * 1024 * 1024),
+      }),
     );
     const pid = await waitFor(() => fake.pid());
     track(pid, await waitFor(() => fake.childPid()));
     const refuse = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
     });
+    controller.abort(new DOMException('The agent run timed out', 'TimeoutError'));
     let result: Awaited<typeof pending>;
     try {
       result = await pending;
@@ -188,10 +196,15 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
 
   it('escalates a timeout from SIGTERM to SIGKILL after the grace period', async () => {
     const { fake, input } = setup('hang');
-    const result = await runClaudeProcess(input({ timeoutMs: 200, killGraceMs: 300 }));
+    // Timed out once the fake ignores SIGTERM: a fixed timer raced the shell's start (issue #120).
+    const controller = new AbortController();
+    const pending = runClaudeProcess(input({ signal: controller.signal, killGraceMs: 300 }));
+    await waitFor(() => fake.pid());
+    controller.abort(new DOMException('The agent run timed out', 'TimeoutError'));
+    const result = await pending;
     track(fake.pid(), fake.childPid());
     expect(result).toMatchObject({ timedOut: true, cancelled: false, signal: 'SIGKILL' });
-    expect(result.durationMs).toBeGreaterThanOrEqual(450);
+    expect(result.durationMs).toBeGreaterThanOrEqual(290);
     expect(alive(-(fake.pid() as number))).toBe(false);
   });
 
@@ -290,13 +303,17 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     const { fake, input } = setup('hang');
     const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor;
     let pending: ReturnType<typeof runClaudeProcess>;
+    const controller = new AbortController();
     // The platform is read synchronously before the spawn; restore it right after.
     Object.defineProperty(process, 'platform', { value: 'win32' });
     try {
-      pending = runClaudeProcess(input({ timeoutMs: 200, killGraceMs: 200 }));
+      pending = runClaudeProcess(input({ signal: controller.signal, killGraceMs: 200 }));
     } finally {
       Object.defineProperty(process, 'platform', platform);
     }
+    // Timed out once the fake ignores SIGTERM: a fixed timer raced the shell's start (issue #120).
+    await waitFor(() => fake.pid());
+    controller.abort(new DOMException('The agent run timed out', 'TimeoutError'));
     const result = await pending;
     const child = fake.childPid();
     track(child);

@@ -35,7 +35,7 @@ describe('command assertions', () => {
           command: [
             'sh',
             '-c',
-            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+            'perl -MPOSIX -e "setsid() >= 0 or die; exec @ARGV" sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
           ],
         }),
         context(),
@@ -61,7 +61,7 @@ describe('command assertions', () => {
           command: [
             'sh',
             '-c',
-            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid; sleep 30',
+            'perl -MPOSIX -e "setsid() >= 0 or die; exec @ARGV" sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid; sleep 30',
           ],
         }),
         context(),
