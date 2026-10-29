@@ -174,8 +174,8 @@ export default async function ArtifactsPage({
                   return (
                     <TR key={a.id} data-artifact-id={a.id}>
                       {/* Names can be paths (`dir/AGENTS.md`) or snake_case and repository names
-                          one long word; without wrap-anywhere they would widen the table. */}
-                      <TD className="font-medium wrap-anywhere">
+                          one long word: they wrap anywhere, within a minimum width. */}
+                      <TD className="min-w-40 font-medium wrap-anywhere">
                         <Link href={`/artifacts/${a.id}`} className="hover:underline">
                           {a.name}
                         </Link>
@@ -187,13 +187,13 @@ export default async function ArtifactsPage({
                         <Badge variant="outline">{a.type}</Badge>
                       </TD>
                       <TD
-                        className="max-w-xs truncate text-muted-foreground"
+                        className="max-w-60 truncate text-muted-foreground"
                         title={a.description ?? ''}
                       >
                         {a.description ?? '—'}
                       </TD>
                       <TD>
-                        <div className="flex flex-wrap gap-1 wrap-anywhere">
+                        <div className="flex flex-wrap gap-1">
                           {a.categories.map((c) => (
                             <Badge key={c.slug} variant="secondary">
                               {c.name}
@@ -202,7 +202,7 @@ export default async function ArtifactsPage({
                         </div>
                       </TD>
                       <TD
-                        className="text-ui text-muted-foreground wrap-anywhere"
+                        className="min-w-32 text-ui text-muted-foreground wrap-anywhere"
                         title={a.repositories.map((r) => r.name).join(', ')}
                       >
                         {repositoriesLabel(a.repositories)}
@@ -215,7 +215,8 @@ export default async function ArtifactsPage({
                         Not validated
                       </TD>
                       <TD className="text-right tabular-nums" data-testid="latest-score">
-                        <div className="flex flex-col items-end gap-1">
+                        {/* min-w-max keeps the mock label on one line in the table. */}
+                        <div className="flex min-w-max flex-col items-end gap-1">
                           <span>{formatScore(e?.candidateScore)}</span>
                           {isMockAgent(e?.agentAdapterId) ? <MockBadge /> : null}
                         </div>

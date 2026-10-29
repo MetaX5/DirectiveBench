@@ -96,9 +96,20 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(seeded.getByText(`${REPOSITORIES[0]!.name} +1`)).toBeVisible();
     const demo = table.getByRole('row').filter({ hasText: DEMO_ARTIFACT }).first();
     await expect(demo.getByText(MOCK_LABEL)).toBeVisible();
+    // The mock label stays on one line, and its flask icon keeps its 12px size.
+    const badge = demo.locator('[data-slot="badge"]').filter({ hasText: MOCK_LABEL });
+    const label = await badge.evaluate((element) => {
+      const text = [...element.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)!;
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const icon = element.querySelector('svg')!.getBoundingClientRect();
+      return { lines: range.getClientRects().length, icon: [icon.width, icon.height] };
+    });
+    expect(label.lines).toBe(1);
+    expect(label.icon).toEqual([12, 12]);
 
-    const { document, table: container } = await widths(page);
-    expect(document[0]).toBeLessThanOrEqual(document[1]!);
+    const { document: root, table: container } = await widths(page);
+    expect(root[0]).toBeLessThanOrEqual(root[1]!);
     expect(container).not.toBeNull();
     expect(container![0]).toBeLessThanOrEqual(container![1]!);
 
@@ -122,5 +133,5 @@ test('other pages keep the 72rem content width at 1920px', async ({ page }) => {
   }
   await page.goto('/artifacts');
   const wide = await page.locator('main').evaluate((main) => main.getBoundingClientRect().width);
-  expect(wide).toBe(90 * 16);
+  expect(wide).toBe(96 * 16);
 });

@@ -69,7 +69,7 @@ export function MockBadge() {
       variant="warning"
       title="Results come from the deterministic mock agent, not from an AI model"
     >
-      <FlaskConical className="size-3" aria-hidden />
+      <FlaskConical className="size-3 shrink-0" aria-hidden />
       Mock agent: not an AI evaluation
     </Badge>
   );

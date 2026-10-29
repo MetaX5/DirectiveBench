@@ -27,7 +27,7 @@ accessible overflow. Playwright covers the geometry.
 
 ## Decisions
 
-- **Wider main for the Artifacts page only, through a new token `--container-wide: 90rem`
+- **Wider main for the Artifacts page only, through a new token `--container-wide` (90rem, raised to 96rem in round 2)
   (`max-w-wide`).** Approved by the maintainer in chat on 2026-10-29 (design-system.md requires
   approval for a new token). Measured at 1920 with worst-case rows: the table needed 1164px in a
   1056px container. The ten other columns were at their floor (one-line headers, ~814px), so the
@@ -51,12 +51,12 @@ accessible overflow. Playwright covers the geometry.
    72rem main; main 80/90rem and no cap): see Decisions.
 3. `globals.css` token, `lib/utils.ts` tailwind-merge registration, `layout.tsx` variant,
    `artifacts/page.tsx` wrapper; `tokeny.md`, `design-system.md`, Storybook `spacing.mdx`
-   (layout table row at 1664px) and `what-is-missing.mdx` (issue 122 done).
+   (layout table row, 1760px after round 2) and `what-is-missing.mdx` (issue 122 done).
 4. `apps/web/e2e/artifacts-full-hd.spec.ts`: seeds an instruction named by a nested path
    (`packages/…/AGENTS.md`) with a long description, four categories and two repositories with
    one-word names (one snake_case) next to the demo artifact's mock run; asserts at 1920x1080 in light and dark that the document and the table container do not
    scroll, that every header ends inside the container and Status is in view; and that `/`,
-   `/repositories` and `/results` keep 1152px while `/artifacts` gets 1440px. Screenshots
+   `/repositories` and `/results` keep 1152px while `/artifacts` gets 1536px (1440px before round 2). Screenshots
    are kept as test output.
 5. SPEC-101 §11 "List width (issue #122)" and a checked acceptance criterion.
 6. Lesson `2026-10-29-table-cells-truncate-at-their-max-width.md`.
@@ -71,7 +71,7 @@ accessible overflow. Playwright covers the geometry.
 | `pnpm build`, `pnpm verify:pack` | pass |
 | `pnpm test:e2e` | 62 passed (again after the QA fix: 62 passed) |
 | `pnpm test:storybook` | 224 passed |
-| Built CLI + demo, widths 320 to 2560 on `/artifacts`, `/`, `/repositories`, `/results` | no document overflow at any width; `/artifacts` main 1440 from 1664px, others 1152; the table scrolls in its container below ~1500px with the demo row |
+| Built CLI + demo, widths 320 to 2560 on `/artifacts`, `/`, `/repositories`, `/results` | no document overflow at any width; `/artifacts` main 1440 from 1664px (round 1; 1536 from 1760px after round 2), others 1152; the table scrolls in its container below ~1500px with the demo row |
 
 | Codex adversarial review (`codex exec -s read-only`, after the QA fix) | approve, no material findings |
 
@@ -97,7 +97,24 @@ Not verified: other browsers than Chromium; zoom levels other than 100%; a real 
 - SPEC-116 was not changed: its density and responsive rules still hold; the Full HD criterion
   is specific to the artifact list and lives in SPEC-101 §11.
 
+## Maintainer feedback (round 2)
+
+The maintainer rejected the wrapping mock badge and its shrunken icon (reported as a nit in
+round 1). Changes, red first: the e2e test asserts one line box for the label and a 12x12 icon;
+it failed on the PR head (3 lines).
+- `MockBadge` icon `shrink-0` (an `svg` in a flex row shrank when the text wrapped).
+- The Latest score cell content is `min-w-max`, so the label stays on one line.
+- That widened the table to 1403px in a 1344px container with the columns at their floors
+  (Description already cut to 15rem). The maintainer chose to raise `--container-wide` from
+  90rem to 96rem (table 1440px) over squeezing Description to 12rem.
+- Description `max-w-60` (15rem); Name `min-w-40` and Repository `min-w-32`, so wrap-anywhere
+  does not collapse them; categories no longer wrap anywhere ("Documentation" broke mid-word).
+- Gate after the change: format, lint, typecheck, test (100%), build, verify:pack, e2e 62
+  passed, Storybook 224 passed.
+
 ## Lessons recorded
+
+- [A label squeezed onto several lines, or a shrunken icon, means the layout does not fit](../lessons/2026-10-29-a-label-squeezed-to-fit-is-not-a-fit.md)
 
 - [A truncated table cell keeps its max width as a floor](../lessons/2026-10-29-table-cells-truncate-at-their-max-width.md)
 
