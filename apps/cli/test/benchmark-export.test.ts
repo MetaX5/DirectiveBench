@@ -8,6 +8,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -442,7 +443,7 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     it('refuses a non-empty directory and a file', async () => {
       const root = newScratch();
       const full = join(root, 'full');
-      mkdirSync(full);
+      mkdirSync(full, { mode: 0o755 });
       writeFileSync(join(full, 'keep.txt'), 'mine');
       expect((await exportError(demoRunId, full)).message).toContain('is not empty');
       expect(readdirSync(full)).toEqual(['keep.txt']);
@@ -486,7 +487,7 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     it('refuses when manifest.json is created after the emptiness check (FR-123-41 race)', async () => {
       const out = newScratch();
       fsHooks.before = (op, path) => {
-        if (op === 'open' && path === join(out, 'manifest.json')) writeFileSync(path, 'other');
+        if (op === 'open' && path === 'manifest.json') writeFileSync(join(out, path), 'other');
       };
       const error = await exportError(demoRunId, out);
       expect(error.exitCode).toBe(ExitCode.Usage);
@@ -499,7 +500,7 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     it('refuses when files/ is created after the emptiness check', async () => {
       const out = newScratch();
       fsHooks.before = (op, path) => {
-        if (op === 'mkdir' && path === join(out, 'files')) mkdirSync(path);
+        if (op === 'mkdir' && path === 'files') mkdirSync(join(out, path));
       };
       const error = await exportError(demoRunId, out);
       expect(error.exitCode).toBe(ExitCode.Usage);
@@ -560,83 +561,83 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
       };
       await expect(exportRun(demoRunId, out)).rejects.toMatchObject({ code: 'EACCES' });
 
-      mkdirSync(out);
+      mkdirSync(out, { mode: 0o755 });
       fsHooks.before = (op, path) => {
-        if (op === 'open' && path === join(out, 'manifest.json')) throw fsError('EACCES');
+        if (op === 'open' && path === 'manifest.json') throw fsError('EACCES');
       };
       await expect(exportRun(demoRunId, out)).rejects.toMatchObject({ code: 'EACCES' });
       // Its own files/ is removed again.
       expect(readdirSync(out)).toEqual([]);
 
       fsHooks.before = (op, path) => {
-        if (op === 'mkdir' && path === join(out, 'files')) throw fsError('ENOSPC');
+        if (op === 'mkdir' && path === 'files') throw fsError('ENOSPC');
       };
       await expect(exportRun(demoRunId, out)).rejects.toMatchObject({ code: 'ENOSPC' });
       expect(readdirSync(out)).toEqual([]);
     });
   });
 
-  // Another user who can change a directory of the chain could win a race no path check can
-  // close (Codex review round 2), so such a chain is refused before anything is written.
-  describe.skipIf(process.platform === 'win32')(
-    'directories other users can change (exit 2)',
-    () => {
-      function shared(mode: number): string {
-        const dir = join(newScratch(), 'shared');
-        mkdirSync(dir);
-        chmodSync(dir, mode);
-        return dir;
+  // The export works inside its directory as the working directory, so renaming or replacing it,
+  // or any directory above it, cannot redirect writes (Codex review rounds 2 and 3); what remains
+  // is that no other user may change the export directory itself.
+  describe('the export directory as the working directory', () => {
+    function shared(mode: number): string {
+      const dir = join(newScratch(), 'shared');
+      mkdirSync(dir);
+      chmodSync(dir, mode);
+      return dir;
+    }
+    const refusal = (dir: string) =>
+      `${dir} belongs to another user or can be changed by the group or others, who could redirect the export; choose a new directory (the export creates it private) or one only you can write to. Nothing was written.`;
+
+    it('creates a private export directory, even below a directory others can write', async () => {
+      const before = process.cwd();
+      const out = join(shared(0o777), 'export');
+      expect((await exportRun(demoRunId, out)).code).toBe(ExitCode.Ok);
+      expect(process.cwd()).toBe(before);
+      if (process.platform !== 'win32') {
+        expect(statSync(out).mode & 0o777).toBe(0o700);
+        expect(statSync(join(out, 'manifest.json')).mode & 0o777).toBe(0o600);
       }
+    });
 
-      it('refuses a parent writable by others, or by a foreign group, or owned by someone else', async () => {
-        const open = shared(0o777);
-        const error = await exportError(demoRunId, join(open, 'export'));
-        expect(error.exitCode).toBe(ExitCode.Usage);
-        expect(error.message).toBe(
-          `${open} can be changed by another user, who could redirect the export; choose a directory that only you can change. Nothing was written.`,
-        );
-        expect(readdirSync(open)).toEqual([]);
-
-        const group = shared(0o775);
-        fsHooks.afterLstat = (path, stats) => {
-          if (path === group) Object.assign(stats, { gid: stats.gid + 1 });
-        };
-        expect((await exportError(demoRunId, join(group, 'export'))).message).toContain(
-          `${group} can be changed by another user`,
-        );
-
+    it.skipIf(process.platform === 'win32')(
+      'refuses an existing directory the group or others can write, or another user owns',
+      async () => {
+        const before = process.cwd();
+        for (const mode of [0o777, 0o775, 0o1777]) {
+          const target = shared(mode);
+          const error = await exportError(demoRunId, target);
+          expect(error.exitCode).toBe(ExitCode.Usage);
+          expect(error.message).toBe(refusal(target));
+          expect(readdirSync(target)).toEqual([]);
+        }
         const owned = shared(0o755);
         fsHooks.afterLstat = (path, stats) => {
-          if (path === owned) Object.assign(stats, { uid: stats.uid + 1 });
+          if (path === '.') Object.assign(stats, { uid: stats.uid + 1 });
         };
-        expect((await exportError(demoRunId, join(owned, 'export'))).message).toContain(
-          `${owned} can be changed by another user`,
-        );
-      });
+        expect((await exportError(demoRunId, owned)).message).toBe(refusal(owned));
+        expect(process.cwd()).toBe(before);
+      },
+    );
 
-      it('refuses an existing empty target writable by others', async () => {
-        const target = shared(0o777);
-        expect((await exportError(demoRunId, target)).message).toContain(
-          `${target} can be changed by another user`,
-        );
-        expect(readdirSync(target)).toEqual([]);
-      });
+    it('skips the owner and mode check where the platform has no POSIX ids (Windows)', async () => {
+      // Windows has no `process.getuid`; its ACLs are a documented residual (FR-123-42).
+      vi.spyOn(process, 'getuid').mockReturnValue(undefined as never);
+      expect((await exportRun(demoRunId, shared(0o777))).code).toBe(ExitCode.Ok);
+    });
 
-      it('skips the owner and mode checks where the platform has no POSIX ids (Windows)', async () => {
-        // Windows has no `process.getuid`; its ACLs are a documented residual (FR-123-42).
-        vi.spyOn(process, 'getuid').mockReturnValue(undefined as never);
-        const open = shared(0o777);
-        expect((await exportRun(demoRunId, join(open, 'export'))).code).toBe(ExitCode.Ok);
-      });
-
-      it("accepts a sticky shared parent and one writable only by the user's own group", async () => {
-        const sticky = shared(0o1777);
-        expect((await exportRun(demoRunId, join(sticky, 'export'))).code).toBe(ExitCode.Ok);
-        const ownGroup = shared(0o775);
-        expect((await exportRun(demoRunId, join(ownGroup, 'export'))).code).toBe(ExitCode.Ok);
-      });
-    },
-  );
+    it('stops when the directory entered is not the one looked at', async () => {
+      const before = process.cwd();
+      const out = newScratch();
+      fsHooks.afterLstat = (path, stats) => {
+        if (path === '.') Object.assign(stats, { ino: stats.ino + 1 });
+      };
+      await expect(exportRun(demoRunId, out)).rejects.toThrow(`${out} was replaced or moved`);
+      expect(readdirSync(out)).toEqual([]);
+      expect(process.cwd()).toBe(before);
+    });
+  });
 
   // Exclusive create protects only the last name of a path: another process that swaps a
   // directory of the chain, or the file itself, must never receive the content (Codex review
@@ -655,7 +656,9 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
       };
       const error = await exportError(corruptRunId, out);
       expect(error.exitCode).toBe(ExitCode.Runtime);
-      expect(error.message).toContain(`${candidateDir(out)} was replaced or moved`);
+      expect(error.message).toContain(
+        `${join('files', 'case-a', 'candidate-1')} was replaced or moved`,
+      );
       expect(readFileSync(join(candidateDir(out), 'first.txt'), 'utf8')).toBe('');
       expect(readdirSync(outside)).toEqual([]);
     });
@@ -674,7 +677,9 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
         }
       };
       const error = await exportError(corruptRunId, out);
-      expect(error.message).toContain(`${candidateDir(out)} was replaced or moved`);
+      expect(error.message).toContain(
+        `${join('files', 'case-a', 'candidate-1')} was replaced or moved`,
+      );
       // The file was created through the link, but no content reached it.
       expect(readFileSync(join(elsewhere, 'first.txt'), 'utf8')).toBe('');
     });
@@ -697,7 +702,7 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
       const out = newScratch();
       const manifestPath = join(out, 'manifest.json');
       fsHooks.before = (op, path) => {
-        if (op === 'lstat' && path === manifestPath) {
+        if (op === 'lstat' && path === 'manifest.json') {
           renameSync(manifestPath, `${manifestPath}.opened`);
           writeFileSync(manifestPath, 'someone else');
         }
@@ -711,15 +716,15 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     it('refuses a created directory that is not a directory owned by the user', async () => {
       const out = newScratch();
       fsHooks.afterLstat = (path, stats) => {
-        if (path === join(out, 'files')) Object.assign(stats, { uid: stats.uid + 1 });
+        if (path === 'files') Object.assign(stats, { uid: stats.uid + 1 });
       };
       await expect(exportRun(demoRunId, out)).rejects.toThrow(/files was replaced or moved/);
 
       const second = join(out, 'second');
       fsHooks.afterLstat = (path, stats) => {
-        if (path === second) Object.assign(stats, { isDirectory: () => false });
+        if (path === 'files') Object.assign(stats, { isDirectory: () => false });
       };
-      await expect(exportRun(demoRunId, second)).rejects.toThrow(/second was replaced or moved/);
+      await expect(exportRun(demoRunId, second)).rejects.toThrow(/files was replaced or moved/);
     });
   });
 });

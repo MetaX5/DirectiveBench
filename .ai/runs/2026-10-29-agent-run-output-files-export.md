@@ -76,11 +76,14 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
   directories are 0700 and must be owned by the user; files 0600; before any content is written
   the chain's `dev`/`ino` and the opened handle are re-checked (`ExportTree`), so a swapped
   directory, symlink or file stops the export with exit 1 and never receives content.
-- **No other user may change the chain (Codex round 2):** path checks cannot beat a process that
-  swaps and restores between them, so `<dir>` and its ancestors must be owned by the user or
-  root and not writable by others or a foreign group (sticky exempt), else exit 2. Same-user
-  processes are outside the threat: they already hold every right the export has. Residuals in
-  the spec: Windows ACLs; the user's primary group is trusted (macOS `staff`).
+- **The export directory as the working directory (Codex rounds 2 and 3):** path checks cannot
+  beat a swap-and-restore race and an ancestor permission walk misses POSIX ACLs, so the export
+  `chdir`s into `<dir>` after checking it, requires `lstat('.')` to be the directory checked, and
+  uses only relative paths; ancestors no longer matter. `<dir>` must be owned by the user and not
+  group- or other-writable (an existing 0775 directory under umask 002 is refused; the export
+  creates its own 0700 one). Same-user processes are outside the threat. Residuals in the spec:
+  Windows ACLs, macOS extended ACLs. `process.chdir` is restored in `finally`; Vitest's default
+  `forks` pool allows it.
 - **Portable names:** after self-review, `:`, `<>"|?*`, control characters, a trailing dot or
   space and Windows device names are `unsafe-path` everywhere (NTFS streams, devices, merged
   names on Windows; an ESC byte in a file name).
@@ -107,7 +110,12 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
 6. Codex round 2 (needs-attention, 1 high): a swap-and-restore between two `lstat`s defeats the
    path checks. Fixed by refusing (exit 2) a target or ancestor another user can change (owner,
    others-write, foreign-group write, sticky exempt); Windows simulated by `process.getuid`
-   returning undefined.
+   returning undefined: a3f770a.
+7. Codex round 3 (needs-attention, 1 high): a POSIX ACL can grant another user write behind the
+   group bits of a user-owned ancestor. Replaced the ancestor walk by working inside `<dir>` as
+   the working directory (`chdir`, `lstat('.')` identity against the checked directory, relative
+   paths only, cwd restored in `finally`); `<dir>` must be the user's and not group- or
+   other-writable (exit 2).
 
 ## Verification
 
@@ -139,8 +147,8 @@ After Codex round 1 the built CLI was re-run: export of the demo run wrote 6 fil
 and `files/` mode 700, files and `manifest.json` mode 600. The swap races are exercised by hooks
 in the unit tests (directory replaced, directory replaced by a symbolic link, opened file
 replaced, `manifest.json` replaced, a created directory not owned by the user), each exit 1 with
-no content in the replacement. After round 2 the built CLI refused `--out <0777 dir>/x` with
-exit 2 and left the shared directory empty.
+no content in the replacement. After round 3 the built CLI exported into `<0777 dir>/x` (created
+0700) and refused an existing 0777 or 0775 `<dir>` with exit 2.
 
 Not verified: Windows and macOS (Linux only; the junction-based symlink test and path handling
 are written to be portable); a real case-insensitive file system (simulated with an `EEXIST`

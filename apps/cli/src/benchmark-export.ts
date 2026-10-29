@@ -8,6 +8,7 @@ import {
   listAgentRunFiles,
   type AgentRunFileSummary,
   type BenchmarkRunDetail,
+  type Database,
 } from '@directivebench/database';
 import { CliError, ExitCode, resolveAssets } from './runtime';
 import { openInitializedDatabase } from './setup';
@@ -127,24 +128,30 @@ class ExportChangedError extends Error {
   }
 }
 
+/** The export directory, once it is the working directory (see `enterTarget`). */
+const HERE = '.';
+const FILES_DIR = 'files';
+const MANIFEST_FILE = 'manifest.json';
+/** Exported files and directories are private to the user, like the data directory. */
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+/** POSIX permission bits that let the group or others add, rename or remove entries. */
+const GROUP_OR_OTHER_WRITE = 0o022;
+
 /**
- * The export directory and every directory created below it, with the identity each had when it
- * was checked or created. Node has no directory-relative (`openat`) file API, so every write goes
- * through a path; before content is written, the path's whole chain is checked again, and the
- * opened file must be the entry the path names, so a directory or file that was swapped for
- * another one, or for a symbolic link, stops the export before content reaches it (SPEC-123
- * FR-123-42). Path-based checks cannot close a race against a process that swaps and restores
- * between them; `assertOnlyUserCanChange` keeps other users out of the chain, so only the user
- * (or root) could run such a process.
+ * The export directory and every directory created below it, by path relative to the export
+ * directory, with the identity each had when it was checked or created. Before content is
+ * written, the chain is checked again and the opened file must be the entry its path names, so a
+ * directory or file swapped for another one, or for a symbolic link, stops the export before
+ * content reaches it (SPEC-123 FR-123-42). Directories this export creates are private (0700) and
+ * must be owned by the user, so only the user, who already holds every permission the export has,
+ * could swap anything in them.
  */
 class ExportTree {
   private readonly dirs = new Map<string, Identity>();
 
-  constructor(
-    readonly dir: string,
-    dirStats: Stats,
-  ) {
-    this.dirs.set(dir, identityOf(dirStats));
+  constructor(hereStats: Stats) {
+    this.dirs.set(HERE, identityOf(hereStats));
   }
 
   has(path: string): boolean {
@@ -182,55 +189,9 @@ class ExportTree {
   }
 }
 
-/** Exported files and directories are private to the user, like the data directory. */
-const PRIVATE_DIR_MODE = 0o700;
-const PRIVATE_FILE_MODE = 0o600;
-/** POSIX permission bits: written by the group, written by others, and the sticky bit. */
-const GROUP_WRITE = 0o020;
-const OTHER_WRITE = 0o002;
-const STICKY = 0o1000;
-
 /**
- * Whether a user other than the current one (or root) can rename or replace entries in this
- * directory: it belongs to someone else, or it is writable by others, or by a group that is not
- * the user's own, without the sticky bit (which limits renames to each entry's owner, as in
- * `/tmp`).
- */
-function anotherUserCanChange(stats: Stats, uid: number, gid: number): boolean {
-  if (stats.uid !== 0 && stats.uid !== uid) return true;
-  if ((stats.mode & STICKY) !== 0) return false;
-  return (
-    (stats.mode & OTHER_WRITE) !== 0 || ((stats.mode & GROUP_WRITE) !== 0 && stats.gid !== gid)
-  );
-}
-
-/**
- * Refuses (exit 2) an export whose directory, or any directory above it, another user could
- * change: such a user could swap a directory for a symbolic link between a check and a write, a
- * race that path-based checks cannot close because Node has no directory-relative `openat`
- * (Codex review round 2). Within that chain only the current user and root can change anything,
- * and they already hold every permission the export has. Windows has no POSIX owner or mode bits;
- * its ACLs are not checked (residual, SPEC-123 FR-123-42).
- */
-async function assertOnlyUserCanChange(start: string): Promise<void> {
-  const uid = process.getuid?.();
-  const gid = process.getgid?.();
-  if (uid !== undefined && gid !== undefined) {
-    for (let current = start; ; current = dirname(current)) {
-      if (anotherUserCanChange(await lstat(current), uid, gid)) {
-        throw new CliError(
-          `${current} can be changed by another user, who could redirect the export; choose a directory that only you can change. Nothing was written.`,
-          ExitCode.Usage,
-        );
-      }
-      if (dirname(current) === current) return;
-    }
-  }
-}
-
-/**
- * Resolves `--out` to `<canonical parent>/<name>`: the parent must exist (it is not created) and
- * its symbolic links are resolved once, so later writes do not pass through them.
+ * Resolves `--out` to `<canonical parent>/<name>` for messages and the first look; the parent must
+ * exist (it is not created).
  */
 async function targetPath(out: string): Promise<string> {
   const lexical = resolve(out);
@@ -249,9 +210,15 @@ async function targetPath(out: string): Promise<string> {
 
 /**
  * Accepts a missing `<dir>` (created with a non-recursive `mkdir`, mode 0700) or an empty
- * directory; refuses anything else, including a symbolic link, with exit 2 (FR-123-41).
+ * directory, refusing anything else, including a symbolic link, with exit 2 (FR-123-41), and makes
+ * it the working directory. From then on every path is relative to that directory, which works
+ * like a directory handle (Node has no `openat`): renaming or replacing `<dir>` or any directory
+ * above it no longer changes where the export writes (Codex review rounds 2 and 3). The directory
+ * entered must be the one looked at before (same `dev` and `ino`, so a symbolic link swapped in
+ * meanwhile is refused), and on POSIX it must be owned by the user and not writable by the group
+ * or others, so no other user can rename or replace what the export creates in it.
  */
-async function prepareTarget(dir: string): Promise<ExportTree> {
+async function enterTarget(dir: string): Promise<ExportTree> {
   let stats;
   try {
     stats = await lstat(dir);
@@ -265,9 +232,7 @@ async function prepareTarget(dir: string): Promise<ExportTree> {
       }
       throw mkdirError;
     }
-    const tree = new ExportTree(dir, await lstat(dir));
-    await tree.record(dir);
-    return tree;
+    stats = await lstat(dir);
   }
   if (stats.isSymbolicLink()) {
     throw new CliError(
@@ -281,14 +246,23 @@ async function prepareTarget(dir: string): Promise<ExportTree> {
       ExitCode.Usage,
     );
   }
-  if ((await readdir(dir)).length > 0) {
+  process.chdir(dir);
+  const here = await lstat(HERE);
+  if (here.dev !== stats.dev || here.ino !== stats.ino) throw new ExportChangedError(dir);
+  const uid = process.getuid?.();
+  if (uid !== undefined && (here.uid !== uid || (here.mode & GROUP_OR_OTHER_WRITE) !== 0)) {
+    throw new CliError(
+      `${dir} belongs to another user or can be changed by the group or others, who could redirect the export; choose a new directory (the export creates it private) or one only you can write to. Nothing was written.`,
+      ExitCode.Usage,
+    );
+  }
+  if ((await readdir(HERE)).length > 0) {
     throw new CliError(
       `${dir} is not empty; choose a new or empty directory. Nothing was written.`,
       ExitCode.Usage,
     );
   }
-  await assertOnlyUserCanChange(dir);
-  return new ExportTree(dir, stats);
+  return new ExportTree(here);
 }
 
 /**
@@ -297,28 +271,26 @@ async function prepareTarget(dir: string): Promise<ExportTree> {
  * comes first so that undoing a lost claim only ever removes a directory, with `rmdir`, which
  * fails on anything that is not an empty directory: it cannot delete another writer's file.
  */
-async function claimOutputs(tree: ExportTree): Promise<FileHandle> {
-  const filesDir = join(tree.dir, 'files');
-  const manifestPath = join(tree.dir, 'manifest.json');
+async function claimOutputs(tree: ExportTree, dir: string): Promise<FileHandle> {
   try {
-    await mkdir(filesDir, { mode: PRIVATE_DIR_MODE });
+    await mkdir(FILES_DIR, { mode: PRIVATE_DIR_MODE });
   } catch (error) {
     if (errorCode(error) === 'EEXIST') {
       throw new CliError(
-        `${filesDir} already exists; another export is writing to ${tree.dir}. Nothing was written.`,
+        `${join(dir, FILES_DIR)} already exists; another export is writing to ${dir}. Nothing was written.`,
         ExitCode.Usage,
       );
     }
     throw error;
   }
-  await tree.record(filesDir);
+  await tree.record(FILES_DIR);
   try {
-    return await open(manifestPath, 'wx', PRIVATE_FILE_MODE);
+    return await open(MANIFEST_FILE, 'wx', PRIVATE_FILE_MODE);
   } catch (error) {
-    await rmdir(filesDir);
+    await rmdir(FILES_DIR);
     if (errorCode(error) === 'EEXIST') {
       throw new CliError(
-        `${manifestPath} already exists; another export is writing to ${tree.dir}. Nothing was written.`,
+        `${join(dir, MANIFEST_FILE)} already exists; another export is writing to ${dir}. Nothing was written.`,
         ExitCode.Usage,
       );
     }
@@ -335,16 +307,12 @@ async function claimOutputs(tree: ExportTree): Promise<FileHandle> {
  * system, or a file and a directory of the same name).
  */
 class FileWriter {
-  private readonly filesRoot: string;
-
-  constructor(private readonly tree: ExportTree) {
-    this.filesRoot = join(tree.dir, 'files');
-  }
+  constructor(private readonly tree: ExportTree) {}
 
   /** Writes `content` to `segments` below `files/`; false on a name collision. */
   async write(segments: string[], content: string): Promise<boolean> {
-    let current = this.filesRoot;
-    const chain = [this.tree.dir, current];
+    let current = FILES_DIR;
+    const chain = [HERE, current];
     for (const segment of segments.slice(0, -1)) {
       current = join(current, segment);
       chain.push(current);
@@ -357,8 +325,9 @@ class FileWriter {
       }
       await this.tree.record(current);
     }
+    const target = join(FILES_DIR, ...segments);
     // Validated segments cannot escape; this is the fail-closed check of FR-123-42.
-    const target = resolveInside(this.filesRoot, segments.join('/'));
+    resolveInside(FILES_DIR, segments.join('/'));
     let handle: FileHandle;
     try {
       handle = await open(target, 'wx', PRIVATE_FILE_MODE);
@@ -429,131 +398,145 @@ export async function benchmarkExportCommand(flags: BenchmarkExportFlags): Promi
     const detail = await getBenchmarkRunDetail(handle.db, flags.runId);
     if (!detail) throw new CliError(`No benchmark run ${flags.runId}`, ExitCode.Usage);
     const dir = await targetPath(flags.out);
-    await assertOnlyUserCanChange(dirname(dir));
-    const tree = await prepareTarget(dir);
-    const manifestHandle = await claimOutputs(tree);
-    const writer = new FileWriter(tree);
-    const summary: ExportSummary = {
-      agentRuns: detail.agentRuns.length,
-      files: 0,
-      written: 0,
-      truncated: 0,
-      notKept: 0,
-      unsafePath: 0,
-      pathCollision: 0,
-    };
-    let lastWritten: string | null = null;
+    const previousCwd = process.cwd();
     try {
-      const agentRuns: ExportedAgentRun[] = [];
-      for (const run of detail.agentRuns) {
-        const runDir = `${run.variant}-${run.repetition}`;
-        // A case id is one path segment; an unsafe one makes every file of the run unsafe.
-        const caseSafe = isSafeRelativePath(run.caseId) && !run.caseId.includes('/');
-        const files: ExportedFile[] = [];
-        for (const file of await listAgentRunFiles(handle.db, run.id)) {
-          summary.files++;
-          const entry: ExportedFile = {
-            path: file.path,
-            change: file.change,
-            sizeBytes: file.sizeBytes,
-            sha256: file.sha256,
-            kept: file.kept,
-            reason: file.reason,
-            redactions: file.redactions,
-            exportedTo: null,
-            exportReason: null,
-          };
-          files.push(entry);
-          if (file.kept === 'none') {
-            summary.notKept++;
-            continue;
-          }
-          if (!caseSafe || !isSafeRelativePath(file.path)) {
-            entry.exportReason = 'unsafe-path';
-            summary.unsafePath++;
-            continue;
-          }
-          const stored = await getAgentRunFile(handle.db, {
-            benchmarkRunId: detail.run.id,
-            agentRunId: run.id,
-            path: file.path,
-          });
-          const content = stored?.content;
-          // Fail closed: a kept file always has content; anything else is a corrupt row.
-          if (typeof content !== 'string') {
-            throw new Error(`the stored file ${quoted(file.path)} has no content`);
-          }
-          const segments = [run.caseId, runDir, ...file.path.split('/')];
-          if (!(await writer.write(segments, content))) {
-            entry.exportReason = 'path-collision';
-            summary.pathCollision++;
-            continue;
-          }
-          entry.exportedTo = `files/${segments.join('/')}`;
-          lastWritten = entry.exportedTo;
-          summary.written++;
-          if (file.kept === 'truncated') summary.truncated++;
-        }
-        agentRuns.push({
-          caseId: run.caseId,
-          variant: run.variant,
-          repetition: run.repetition,
-          executionStatus: run.executionStatus,
-          outputFilesKept: run.outputFilesKept,
-          outputFilesReason: run.outputFilesReason,
-          files,
-        });
-      }
-      const manifest: ExportManifest = {
-        manifestVersion: EXPORT_MANIFEST_VERSION,
-        runId: detail.run.id,
-        status: detail.run.status,
-        suite: {
-          id: detail.suite.slug,
-          name: detail.suite.name,
-          version: detail.suiteVersion.version,
-        },
-        candidate: { artifact: detail.artifact.slug, version: detail.artifactVersion.version },
-        baseline: baselineOf(detail),
-        agent: {
-          adapterId: detail.run.agentAdapterId,
-          version: detail.run.agentVersion,
-          mock: detail.run.agentAdapterId === MOCK_AGENT_ID,
-        },
-        agentRuns,
-        summary,
-      };
-      await tree.verify([dir], join(dir, 'manifest.json'), manifestHandle);
-      await manifestHandle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-      if (flags.json) {
-        console.log(
-          JSON.stringify(
-            {
-              runId: manifest.runId,
-              out: dir,
-              manifest: join(dir, 'manifest.json'),
-              mock: manifest.agent.mock,
-              status: manifest.status,
-              ...summary,
-            },
-            null,
-            2,
-          ),
-        );
-      } else {
-        for (const line of exportSummaryText(manifest, dir)) console.log(line);
-      }
-      return ExitCode.Ok;
-    } catch (error) {
-      // Nothing is deleted: the user decides what to do with a partial export (FR-123-43).
-      throw new CliError(
-        `The export to ${dir} failed after ${summary.written} file(s) (last written: ${lastWritten ?? 'none'}); the directory is left as it is and its manifest.json is incomplete: ${(error as Error).message}`,
-        ExitCode.Runtime,
-      );
+      return await exportInto(dir, detail, handle.db, flags);
     } finally {
-      await manifestHandle.close();
+      process.chdir(previousCwd);
     }
   } finally {
     handle.close();
+  }
+}
+
+/** Writes the export into `dir`, which becomes the working directory (see `enterTarget`). */
+async function exportInto(
+  dir: string,
+  detail: BenchmarkRunDetail,
+  db: Database,
+  flags: BenchmarkExportFlags,
+): Promise<number> {
+  const tree = await enterTarget(dir);
+  const manifestHandle = await claimOutputs(tree, dir);
+  const writer = new FileWriter(tree);
+  const summary: ExportSummary = {
+    agentRuns: detail.agentRuns.length,
+    files: 0,
+    written: 0,
+    truncated: 0,
+    notKept: 0,
+    unsafePath: 0,
+    pathCollision: 0,
+  };
+  let lastWritten: string | null = null;
+  try {
+    const agentRuns: ExportedAgentRun[] = [];
+    for (const run of detail.agentRuns) {
+      const runDir = `${run.variant}-${run.repetition}`;
+      // A case id is one path segment; an unsafe one makes every file of the run unsafe.
+      const caseSafe = isSafeRelativePath(run.caseId) && !run.caseId.includes('/');
+      const files: ExportedFile[] = [];
+      for (const file of await listAgentRunFiles(db, run.id)) {
+        summary.files++;
+        const entry: ExportedFile = {
+          path: file.path,
+          change: file.change,
+          sizeBytes: file.sizeBytes,
+          sha256: file.sha256,
+          kept: file.kept,
+          reason: file.reason,
+          redactions: file.redactions,
+          exportedTo: null,
+          exportReason: null,
+        };
+        files.push(entry);
+        if (file.kept === 'none') {
+          summary.notKept++;
+          continue;
+        }
+        if (!caseSafe || !isSafeRelativePath(file.path)) {
+          entry.exportReason = 'unsafe-path';
+          summary.unsafePath++;
+          continue;
+        }
+        const stored = await getAgentRunFile(db, {
+          benchmarkRunId: detail.run.id,
+          agentRunId: run.id,
+          path: file.path,
+        });
+        const content = stored?.content;
+        // Fail closed: a kept file always has content; anything else is a corrupt row.
+        if (typeof content !== 'string') {
+          throw new Error(`the stored file ${quoted(file.path)} has no content`);
+        }
+        const segments = [run.caseId, runDir, ...file.path.split('/')];
+        if (!(await writer.write(segments, content))) {
+          entry.exportReason = 'path-collision';
+          summary.pathCollision++;
+          continue;
+        }
+        entry.exportedTo = `files/${segments.join('/')}`;
+        lastWritten = entry.exportedTo;
+        summary.written++;
+        if (file.kept === 'truncated') summary.truncated++;
+      }
+      agentRuns.push({
+        caseId: run.caseId,
+        variant: run.variant,
+        repetition: run.repetition,
+        executionStatus: run.executionStatus,
+        outputFilesKept: run.outputFilesKept,
+        outputFilesReason: run.outputFilesReason,
+        files,
+      });
+    }
+    const manifest: ExportManifest = {
+      manifestVersion: EXPORT_MANIFEST_VERSION,
+      runId: detail.run.id,
+      status: detail.run.status,
+      suite: {
+        id: detail.suite.slug,
+        name: detail.suite.name,
+        version: detail.suiteVersion.version,
+      },
+      candidate: { artifact: detail.artifact.slug, version: detail.artifactVersion.version },
+      baseline: baselineOf(detail),
+      agent: {
+        adapterId: detail.run.agentAdapterId,
+        version: detail.run.agentVersion,
+        mock: detail.run.agentAdapterId === MOCK_AGENT_ID,
+      },
+      agentRuns,
+      summary,
+    };
+    await tree.verify([HERE], MANIFEST_FILE, manifestHandle);
+    await manifestHandle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    if (flags.json) {
+      console.log(
+        JSON.stringify(
+          {
+            runId: manifest.runId,
+            out: dir,
+            manifest: join(dir, 'manifest.json'),
+            mock: manifest.agent.mock,
+            status: manifest.status,
+            ...summary,
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      for (const line of exportSummaryText(manifest, dir)) console.log(line);
+    }
+    return ExitCode.Ok;
+  } catch (error) {
+    // Nothing is deleted: the user decides what to do with a partial export (FR-123-43).
+    throw new CliError(
+      `The export to ${dir} failed after ${summary.written} file(s) (last written: ${lastWritten ?? 'none'}); the directory is left as it is and its manifest.json is incomplete: ${(error as Error).message}`,
+      ExitCode.Runtime,
+    );
+  } finally {
+    await manifestHandle.close();
   }
 }

@@ -11,7 +11,7 @@ source: .ai/runs/2026-10-29-agent-run-output-files-export.md
 
 `benchmark export` (SPEC-123 Phase 2) wrote untrusted stored paths with `open(path, 'wx')` and
 directories with a non-recursive `mkdir`, and claimed its outputs with `manifest.json` (`wx`)
-before `files/`. The Codex adversarial review (PR #161, rounds 1 and 2) found two races the tests did not
+before `files/`. The Codex adversarial review (PR #161, rounds 1 to 3) found two races the tests did not
 cover: another process can rename a directory of the chain and put a symbolic link in its place,
 and `open` follows every component except the last, so `wx` happily creates the file outside;
 and after a lost `files/` claim, `unlink(manifest.json)` removes whatever is at that name by then,
@@ -22,11 +22,14 @@ silently broke the engine's capture in the same test file (the demo run kept no 
 
 - `wx`/`O_EXCL` and `O_NOFOLLOW` protect the last component only, and Node has no `openat`.
   Re-checking the chain (`dev`/`ino` of each directory, `lstat(path)` against `handle.stat()`)
-  catches a swap that stays, but Codex round 2 showed a swapper that restores the directory
-  between two `lstat`s defeats any sequence of path checks. Close the race by permissions
-  instead: refuse when another user can change any directory of the chain (owner not the user or
-  root; writable by others or a foreign group without the sticky bit), and create your own
-  directories 0700; then only the user, who already has every right, could race.
+  catches a swap that stays, but a swapper that restores the directory between two `lstat`s
+  defeats any sequence of path checks (Codex round 2), and permission checks on the ancestors
+  miss POSIX ACL grants hidden behind the group bits (Codex round 3). What works in Node: make
+  the target directory the working directory (`process.chdir`), check that the directory entered
+  is the one looked at (`lstat('.')` against the earlier `lstat`), then use only relative paths:
+  the working directory is a directory handle, so renaming the target or any ancestor no longer
+  redirects writes. Require the target to be owned by the user and not group- or
+  other-writable, and create everything below it 0700, so only the user could swap anything.
 - Undo a claim with an operation that cannot destroy someone else's data: create the directory
   first and undo it with `rmdir` (fails unless it is an empty directory); never `unlink` a path
   you created earlier, because ownership of an inode is not ownership of its name.
@@ -35,8 +38,8 @@ silently broke the engine's capture in the same test file (the demo run kept no 
 
 ## How to apply
 
-Any code that writes untrusted names below a directory: check that no other user can change the
-target or its ancestors, create directories 0700 one segment at a time, files 0600 with `wx`,
+Any code that writes untrusted names below a directory: enter it as the working directory (and
+restore the previous one in `finally`), check owner and mode of `.`, create directories 0700 one segment at a time, files 0600 with `wx`,
 verify the chain and the handle before writing, and test it with hooks that rename a directory,
 replace it with a symbolic link, replace the opened file right before the write, or report a
 foreign owner, group or mode (`apps/cli/test/benchmark-export.test.ts`).
