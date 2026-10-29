@@ -53,6 +53,8 @@ Last filed: 2026-10-29
 | E07 | [#147](https://github.com/MetaX5/DirectiveBench/issues/147) | Verify Claude Code benchmarks in API Key Mode | — | — | no |
 | E07-T01 | [#103](https://github.com/MetaX5/DirectiveBench/issues/103) | Opt-in live check in API Key Mode; record results in SPEC-203 | #147 | E06-S03 (#96) | no |
 
+| E08 | [#152](https://github.com/MetaX5/DirectiveBench/issues/152) | Keep and show the files an agent run wrote, so a human can review the output | — | — | no |
+
 E07-T01 was E06-S04-T01. Local Subscription Mode was verified in #126; on 2026-10-29 the
 maintainer moved the API Key Mode half of AC-22 into E07, because no API key is available yet.
 
