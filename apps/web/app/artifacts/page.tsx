@@ -64,8 +64,9 @@ export default async function ArtifactsPage({
   const categories = (await listCategories(handle.db)).filter((c) => c.archivedAt === null);
   const notice = invalidParamsNotice(invalid);
 
+  // The table has eleven columns; the wide layout fits them at 1920px with the sidebar (issue 122).
   return (
-    <>
+    <div data-layout="wide">
       <PageHeader
         title="Artifacts"
         description="Skills, instructions and rules from every registered repository."
@@ -243,6 +244,6 @@ export default async function ArtifactsPage({
           )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }

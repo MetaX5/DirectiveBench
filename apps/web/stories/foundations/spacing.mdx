@@ -33,11 +33,12 @@ tokeny.md decision 11.
 
 ## Layout
 
-| Width        | What changes                                                                                                                                                 | Source                                         |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| 320px        | No sidebar: a header with the product name and theme toggle, then a "Navigation" disclosure. Page padding 16px. Badges wrap and nothing is clipped at 390px. | `app/layout.tsx`, SPEC-119 FR-7                |
-| 768px (`md`) | The 224px sidebar (`w-sidebar`) appears and stays in view while the page scrolls. Page padding becomes 32px. Two-column card grids start.                    | `app/layout.tsx`, tokeny.md D9                 |
-| 1440px       | `main` stops growing at 72rem (`max-w-content`) and centres in the space beside the sidebar.                                                                 | `app/layout.tsx`, tokeny.md `size-content-max` |
+| Width        | What changes                                                                                                                                                 | Source                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| 320px        | No sidebar: a header with the product name and theme toggle, then a "Navigation" disclosure. Page padding 16px. Badges wrap and nothing is clipped at 390px. | `app/layout.tsx`, SPEC-119 FR-7                 |
+| 768px (`md`) | The 224px sidebar (`w-sidebar`) appears and stays in view while the page scrolls. Page padding becomes 32px. Two-column card grids start.                    | `app/layout.tsx`, tokeny.md D9                  |
+| 1440px       | `main` stops growing at 72rem (`max-w-content`) and centres in the space beside the sidebar.                                                                 | `app/layout.tsx`, tokeny.md `size-content-max`  |
+| 1664px       | On a wide table page (content with `data-layout="wide"`, such as Artifacts) `main` grows to 90rem (`max-w-wide`) instead, so the table fits at 1920px.       | `app/layout.tsx`, tokeny.md `size-content-wide` |
 
 ## Spacing, size and width tokens
 
