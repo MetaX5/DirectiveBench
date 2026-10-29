@@ -81,3 +81,6 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
 - A test that asserts outcomes rather than time still needs a named timeout when it does a lot
   of real work: an offset sweep over a file-backed database (20 ms alone) and a fake-git test
   spawning eight Node.js fakes (0.3 s alone) exceeded vitest's 5 s default under load.
+  So does a CPU-bound scan of the source tree: the design-token guard that parses every
+  `apps/web` source with TypeScript took 0.2 s alone, 1.6 s under `taskset -c 0,1 pnpm test
+  --force` and up to 5.2 s on CI, where it timed out (update 2026-10-29, issue #149).
