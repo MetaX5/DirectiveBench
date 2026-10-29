@@ -186,7 +186,8 @@ test on a `0002` database only); any UI (Phase 3).
     non-writable directory.
   - Round 4 (after merging `origin/main`): no material findings; approval withheld only because
     Codex's sandbox could not run the gate.
-  - Round 5: see the PR's Review section.
+  - Round 5 (head `8e0fb3d`, given the passing gate results of that head): **approve**, no
+    material findings.
 
 ## Merge with main
 
