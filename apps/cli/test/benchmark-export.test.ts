@@ -4,10 +4,13 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import type { Stats } from 'node:fs';
 import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,10 +31,12 @@ import {
 import { demoCommand } from '../src/commands';
 import { CliError, ExitCode } from '../src/runtime';
 
-// Every `mkdir` and `open` of the export passes through `fsHooks.before`, so a test can make one
-// fail or win a race at an exact point (lesson 2026-10-21: simulate errors the code cannot repair).
+// Every `mkdir`, `open` and `lstat` of the export passes through `fsHooks.before`, and every
+// `lstat` result through `fsHooks.afterLstat`, so a test can make one fail or win a race at an
+// exact point (lesson 2026-10-21: simulate errors the code cannot repair).
 const fsHooks = vi.hoisted(() => ({
-  before: null as null | ((op: 'mkdir' | 'open', path: string) => void),
+  before: null as null | ((op: 'mkdir' | 'open' | 'lstat', path: string) => void),
+  afterLstat: null as null | ((path: string, stats: Stats) => void),
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FsPromises>();
@@ -45,6 +50,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       fsHooks.before?.('open', String(path));
       return actual.open(path, ...rest);
     }) as typeof actual.open,
+    lstat: (async (path: string, ...rest: never[]) => {
+      fsHooks.before?.('lstat', String(path));
+      const stats = await actual.lstat(path, ...rest);
+      fsHooks.afterLstat?.(String(path), stats);
+      return stats;
+    }) as typeof actual.lstat,
   };
 });
 
@@ -188,12 +199,23 @@ afterAll(() => {
 
 afterEach(() => {
   fsHooks.before = null;
+  fsHooks.afterLstat = null;
   vi.restoreAllMocks();
   if (scratch) rmSync(scratch, { recursive: true, force: true });
+  for (const dir of siblings.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+/** A second scratch directory, removed with the first. */
+function newScratchSibling(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'db-cli-export-other-')));
+  siblings.push(dir);
+  return dir;
+}
+const siblings: string[] = [];
+
 function newScratch(): string {
-  scratch = mkdtempSync(join(tmpdir(), 'db-cli-export-out-'));
+  // Canonical, as the export reports it (macOS's temporary directory is behind a symlink).
+  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'db-cli-export-out-')));
   return scratch;
 }
 
@@ -468,11 +490,12 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
       const error = await exportError(demoRunId, out);
       expect(error.exitCode).toBe(ExitCode.Usage);
       expect(error.message).toContain('another export');
+      // Its own files/ is removed again; the other writer's manifest is untouched.
       expect(readFileSync(join(out, 'manifest.json'), 'utf8')).toBe('other');
       expect(readdirSync(out)).toEqual(['manifest.json']);
     });
 
-    it('refuses when files/ is created after the emptiness check and removes its own claim', async () => {
+    it('refuses when files/ is created after the emptiness check', async () => {
       const out = newScratch();
       fsHooks.before = (op, path) => {
         if (op === 'mkdir' && path === join(out, 'files')) mkdirSync(path);
@@ -521,7 +544,11 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     it('rethrows unexpected file-system errors while preparing and claiming the target', async () => {
       const root = newScratch();
       writeFileSync(join(root, 'file'), '');
-      // lstat of a path below a file: ENOTDIR, not a refusal.
+      // The parent's canonical path below a file: ENOTDIR, not a refusal.
+      await expect(exportRun(demoRunId, join(root, 'file', 'sub', 'export'))).rejects.toMatchObject(
+        { code: 'ENOTDIR' },
+      );
+      // lstat of the target below a file: ENOTDIR as well.
       await expect(exportRun(demoRunId, join(root, 'file', 'export'))).rejects.toMatchObject({
         code: 'ENOTDIR',
       });
@@ -537,13 +564,99 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
         if (op === 'open' && path === join(out, 'manifest.json')) throw fsError('EACCES');
       };
       await expect(exportRun(demoRunId, out)).rejects.toMatchObject({ code: 'EACCES' });
+      // Its own files/ is removed again.
+      expect(readdirSync(out)).toEqual([]);
 
       fsHooks.before = (op, path) => {
         if (op === 'mkdir' && path === join(out, 'files')) throw fsError('ENOSPC');
       };
       await expect(exportRun(demoRunId, out)).rejects.toMatchObject({ code: 'ENOSPC' });
-      // The claimed manifest is removed again.
       expect(readdirSync(out)).toEqual([]);
+    });
+  });
+
+  // Exclusive create protects only the last name of a path: another process that swaps a
+  // directory of the chain, or the file itself, must never receive the content (Codex review
+  // round 1). Node has no `openat`, so the export re-checks identities before writing.
+  describe('replaced directories and files (exit 1, no content written into them)', () => {
+    const candidateDir = (out: string) => join(out, 'files', 'case-a', 'candidate-1');
+
+    it('stops when a directory of the chain is replaced before the file is opened', async () => {
+      const out = newScratch();
+      const outside = join(newScratchSibling(), 'moved');
+      fsHooks.before = (op, path) => {
+        if (op === 'open' && path.endsWith('first.txt')) {
+          renameSync(candidateDir(out), outside);
+          mkdirSync(candidateDir(out));
+        }
+      };
+      const error = await exportError(corruptRunId, out);
+      expect(error.exitCode).toBe(ExitCode.Runtime);
+      expect(error.message).toContain(`${candidateDir(out)} was replaced or moved`);
+      expect(readFileSync(join(candidateDir(out), 'first.txt'), 'utf8')).toBe('');
+      expect(readdirSync(outside)).toEqual([]);
+    });
+
+    it('stops when a directory of the chain becomes a symbolic link to another place', async () => {
+      const out = newScratch();
+      const elsewhere = newScratchSibling();
+      fsHooks.before = (op, path) => {
+        if (op === 'open' && path.endsWith('first.txt')) {
+          rmSync(candidateDir(out), { recursive: true });
+          symlinkSync(
+            elsewhere,
+            candidateDir(out),
+            process.platform === 'win32' ? 'junction' : 'dir',
+          );
+        }
+      };
+      const error = await exportError(corruptRunId, out);
+      expect(error.message).toContain(`${candidateDir(out)} was replaced or moved`);
+      // The file was created through the link, but no content reached it.
+      expect(readFileSync(join(elsewhere, 'first.txt'), 'utf8')).toBe('');
+    });
+
+    it('stops when the opened file is replaced before its content is written', async () => {
+      const out = newScratch();
+      fsHooks.before = (op, path) => {
+        if (op === 'lstat' && path.endsWith('first.txt')) {
+          renameSync(path, `${path}.opened`);
+          writeFileSync(path, 'someone else');
+        }
+      };
+      const error = await exportError(corruptRunId, out);
+      expect(error.message).toContain('first.txt was replaced or moved');
+      expect(readFileSync(join(candidateDir(out), 'first.txt'), 'utf8')).toBe('someone else');
+      expect(readFileSync(join(candidateDir(out), 'first.txt.opened'), 'utf8')).toBe('');
+    });
+
+    it('does not write the manifest when manifest.json was replaced', async () => {
+      const out = newScratch();
+      const manifestPath = join(out, 'manifest.json');
+      fsHooks.before = (op, path) => {
+        if (op === 'lstat' && path === manifestPath) {
+          renameSync(manifestPath, `${manifestPath}.opened`);
+          writeFileSync(manifestPath, 'someone else');
+        }
+      };
+      const error = await exportError(demoRunId, out);
+      expect(error.exitCode).toBe(ExitCode.Runtime);
+      expect(readFileSync(manifestPath, 'utf8')).toBe('someone else');
+      expect(readFileSync(`${manifestPath}.opened`, 'utf8')).toBe('');
+    });
+
+    it('refuses a created directory that is not a directory owned by the user', async () => {
+      const out = newScratch();
+      fsHooks.afterLstat = (path, stats) => {
+        if (path === join(out, 'files')) Object.assign(stats, { uid: stats.uid + 1 });
+      };
+      await expect(exportRun(demoRunId, out)).rejects.toThrow(/files was replaced or moved/);
+
+      const second = join(out, 'second');
+      fsHooks.afterLstat = (path, stats) => {
+        if (path === second) Object.assign(stats, { isDirectory: () => false });
+      };
+      await expect(exportRun(demoRunId, second)).rejects.toThrow(/second was replaced or moved/);
     });
   });
 });

@@ -51,7 +51,7 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
 ### Phase 2: Verification and docs
 
 - [x] 2.1 Full gate and a real export of a `directivebench demo` run with the built CLI
-- [ ] 2.2 SPEC-123 §20 status for verified behaviour, run log, lessons
+- [x] 2.2 SPEC-123 §20 status for verified behaviour, run log, lessons — abd798a
 
 ## Decisions
 
@@ -68,9 +68,18 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
   message.
 - **Order of checks.** Database and run id first, then the target, so an unknown run id or a
   missing database leaves the file system untouched.
-- **A claim that loses the `files/` race removes its own `manifest.json`** (created exclusively by
-  this call), so "nothing written" holds; a runtime error after the claim leaves everything in
-  place and names the directory and the last file written (FR-123-43).
+- **Claim order `files/` then `manifest.json`** (changed after Codex round 1): a lost
+  `manifest.json` claim removes the export's own empty `files/` with `rmdir`, which cannot delete
+  another writer's data; a runtime error after the claim leaves everything in place and names the
+  directory and the last file written (FR-123-43).
+- **Replaced directories (Codex round 1):** `<dir>`'s parent is canonicalised once; created
+  directories are 0700 and must be owned by the user; files 0600; before any content is written
+  the chain's `dev`/`ino` and the opened handle are re-checked (`ExportTree`), so a swapped
+  directory, symlink or file stops the export with exit 1 and never receives content. Residual
+  (in the spec): an empty file can be left where a same-user swapper points.
+- **Portable names:** after self-review, `:`, `<>"|?*`, control characters, a trailing dot or
+  space and Windows device names are `unsafe-path` everywhere (NTFS streams, devices, merged
+  names on Windows; an ESC byte in a file name).
 - **A kept row without content** (corrupt database) fails closed as a runtime error rather than
   writing an empty file.
 - **Terminal output quotes untrusted text** (`JSON.stringify` of case ids and paths in the
@@ -87,7 +96,10 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
 2. `apps/cli/src/benchmark-export.ts`, `main.ts` registration, tests
    (`apps/cli/test/benchmark-export.test.ts`, `main.test.ts`), `verify:pack` step, README CLI
    line: 66c26d6.
-3. SPEC-123 FR-123-42 clarification, §20 status, Phase 5 plan note, this run log.
+3. SPEC-123 FR-123-42 clarification, §20 status, Phase 5 plan note, this run log: abd798a.
+4. Self-review: portable-name validation: 74f6b1c.
+5. Codex adversarial review round 1 (needs-attention, 2 high): chain identity verification,
+   claim order, private modes, canonical parent, regression tests; lesson.
 
 ## Verification
 
@@ -96,7 +108,7 @@ non-recursive `mkdir`); case-insensitive collisions (EEXIST becomes `path-collis
 | `pnpm lint` | pass |
 | `pnpm format:check` | pass |
 | `pnpm typecheck` | pass (7/7 tasks) |
-| `pnpm test` | pass, 100% coverage everywhere; `directivebench` 150 tests (17 new export tests) |
+| `pnpm test` | pass, 100% coverage everywhere; `directivebench` 155 tests (22 export tests) |
 | `pnpm build` | pass |
 | `pnpm verify:pack` | pass, including "export wrote 6 file(s)" and "manifest.json lists files that exist" |
 
@@ -115,6 +127,12 @@ stayed empty), a missing parent (not created), an unknown run id, a missing data
 `src/parse-age.js`, `src/parse-age.js/inner.txt`, a name with an ESC byte): exit 0, four listed as
 `unsafe-path`, two as `path-collision`, no file outside the export directory.
 
+After Codex round 1 the built CLI was re-run: export of the demo run wrote 6 files, `<dir>`
+and `files/` mode 700, files and `manifest.json` mode 600. The swap races are exercised by hooks
+in the unit tests (directory replaced, directory replaced by a symbolic link, opened file
+replaced, `manifest.json` replaced, a created directory not owned by the user), each exit 1 with
+no content in the replacement.
+
 Not verified: Windows and macOS (Linux only; the junction-based symlink test and path handling
 are written to be portable); a real case-insensitive file system (simulated with an `EEXIST`
 hook); a real Claude Code run (not needed: export reads stored rows only).
@@ -125,7 +143,7 @@ hook); a real Claude Code run (not needed: export reads stored rows only).
 
 ## Lessons recorded
 
-None so far.
+- [Exclusive create guards only the last name of a path; undo a claim with `rmdir`](../lessons/2026-10-29-exclusive-create-guards-only-the-last-name.md)
 
 ## Follow-ups
 

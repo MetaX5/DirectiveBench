@@ -1,5 +1,6 @@
-import { lstat, mkdir, open, readdir, unlink, type FileHandle } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import type { Stats } from 'node:fs';
+import { lstat, mkdir, open, readdir, realpath, rmdir, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { MOCK_AGENT_ID, resolveInside } from '@directivebench/agent-adapters';
 import {
   getAgentRunFile,
@@ -108,31 +109,117 @@ function errorCode(error: unknown): unknown {
   return (error as NodeJS.ErrnoException).code;
 }
 
+/** A directory entry's identity: the same `dev` and `ino` means the same file or directory. */
+interface Identity {
+  dev: number;
+  ino: number;
+}
+
+const identityOf = (stats: Stats): Identity => ({ dev: stats.dev, ino: stats.ino });
+
+/** Raised when a path of the export no longer names what the export created or checked there. */
+class ExportChangedError extends Error {
+  override name = 'ExportChangedError';
+  constructor(path: string) {
+    super(
+      `${path} was replaced or moved while the export was writing, so it stopped without writing into it`,
+    );
+  }
+}
+
 /**
- * Accepts a missing `<dir>` (created with a non-recursive `mkdir`) or an empty directory; refuses
- * anything else, including a symbolic link, with exit 2 (FR-123-41).
+ * The export directory and every directory created below it, with the identity each had when it
+ * was checked or created. Node has no directory-relative (`openat`) file API, so every write goes
+ * through a path; before content is written, the path's whole chain is checked again, and the
+ * opened file must be the entry the path names. A directory or file swapped for another one, or
+ * for a symbolic link, by another process is detected before any content reaches it, so no
+ * content is written outside the export directory (SPEC-123 FR-123-42).
  */
-async function prepareTarget(dir: string): Promise<void> {
+class ExportTree {
+  private readonly dirs = new Map<string, Identity>();
+
+  constructor(
+    readonly dir: string,
+    dirStats: Stats,
+  ) {
+    this.dirs.set(dir, identityOf(dirStats));
+  }
+
+  has(path: string): boolean {
+    return this.dirs.has(path);
+  }
+
+  /**
+   * Records a directory this export has just created. It must be a directory owned by the current
+   * user (POSIX), so one put in its place between `mkdir` and this check is refused.
+   */
+  async record(path: string): Promise<void> {
+    const stats = await lstat(path);
+    const uid = process.getuid?.();
+    if (!stats.isDirectory() || (uid !== undefined && stats.uid !== uid)) {
+      throw new ExportChangedError(path);
+    }
+    this.dirs.set(path, identityOf(stats));
+  }
+
+  /**
+   * Checks that `chain` (recorded directories, outermost first) still names the same directories
+   * and that `path` names the file `handle` has open.
+   */
+  async verify(chain: readonly string[], path: string, handle: FileHandle): Promise<void> {
+    for (const dir of chain) {
+      const stats = await lstat(dir);
+      const recorded = this.dirs.get(dir) as Identity;
+      if (!stats.isDirectory() || stats.dev !== recorded.dev || stats.ino !== recorded.ino) {
+        throw new ExportChangedError(dir);
+      }
+    }
+    const opened = await handle.stat();
+    const named = await lstat(path);
+    if (named.dev !== opened.dev || named.ino !== opened.ino) throw new ExportChangedError(path);
+  }
+}
+
+/**
+ * Resolves `--out` to `<canonical parent>/<name>`: the parent must exist (it is not created) and
+ * its symbolic links are resolved once, so later writes do not pass through them.
+ */
+async function targetPath(out: string): Promise<string> {
+  const lexical = resolve(out);
+  try {
+    return join(await realpath(dirname(lexical)), basename(lexical));
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      throw new CliError(
+        `The parent directory of ${lexical} does not exist; nothing was written.`,
+        ExitCode.Usage,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Accepts a missing `<dir>` (created with a non-recursive `mkdir`, mode 0700) or an empty
+ * directory; refuses anything else, including a symbolic link, with exit 2 (FR-123-41).
+ */
+async function prepareTarget(dir: string): Promise<ExportTree> {
   let stats;
   try {
     stats = await lstat(dir);
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') throw error;
     try {
-      await mkdir(dir);
-      return;
+      await mkdir(dir, { mode: PRIVATE_DIR_MODE });
     } catch (mkdirError) {
-      if (errorCode(mkdirError) === 'ENOENT') {
-        throw new CliError(
-          `The parent directory of ${dir} does not exist; nothing was written.`,
-          ExitCode.Usage,
-        );
-      }
       if (errorCode(mkdirError) === 'EEXIST') {
         throw new CliError(`${dir} appeared while exporting; nothing was written.`, ExitCode.Usage);
       }
       throw mkdirError;
     }
+    const tree = new ExportTree(dir, await lstat(dir));
+    await tree.record(dir);
+    return tree;
   }
   if (stats.isSymbolicLink()) {
     throw new CliError(
@@ -152,79 +239,90 @@ async function prepareTarget(dir: string): Promise<void> {
       ExitCode.Usage,
     );
   }
+  return new ExportTree(dir, stats);
 }
 
 /**
- * Claims the two outputs before any file is written (FR-123-41): `manifest.json` with exclusive
- * create, then `files/` with a non-recursive `mkdir`. `EEXIST` on either is a refusal; a manifest
- * claimed by this call is removed again, so nothing is left behind.
+ * Claims the two outputs before any file is written (FR-123-41): `files/` with a non-recursive
+ * `mkdir`, then `manifest.json` with exclusive create. `EEXIST` on either is a refusal. `files/`
+ * comes first so that undoing a lost claim only ever removes a directory, with `rmdir`, which
+ * fails on anything that is not an empty directory: it cannot delete another writer's file.
  */
-async function claimOutputs(dir: string): Promise<FileHandle> {
-  const manifestPath = join(dir, 'manifest.json');
-  let handle: FileHandle;
+async function claimOutputs(tree: ExportTree): Promise<FileHandle> {
+  const filesDir = join(tree.dir, 'files');
+  const manifestPath = join(tree.dir, 'manifest.json');
   try {
-    handle = await open(manifestPath, 'wx');
+    await mkdir(filesDir, { mode: PRIVATE_DIR_MODE });
   } catch (error) {
     if (errorCode(error) === 'EEXIST') {
       throw new CliError(
-        `${manifestPath} already exists; another export is writing to ${dir}. Nothing was written.`,
+        `${filesDir} already exists; another export is writing to ${tree.dir}. Nothing was written.`,
         ExitCode.Usage,
       );
     }
     throw error;
   }
+  await tree.record(filesDir);
   try {
-    await mkdir(join(dir, 'files'));
+    return await open(manifestPath, 'wx', PRIVATE_FILE_MODE);
   } catch (error) {
-    await handle.close();
-    await unlink(manifestPath);
+    await rmdir(filesDir);
     if (errorCode(error) === 'EEXIST') {
       throw new CliError(
-        `${join(dir, 'files')} already exists; another export is writing to ${dir}. Nothing was written.`,
+        `${manifestPath} already exists; another export is writing to ${tree.dir}. Nothing was written.`,
         ExitCode.Usage,
       );
     }
     throw error;
   }
-  return handle;
 }
+
+/** Exported files and directories are private to the user, like the data directory. */
+const PRIVATE_DIR_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 
 /**
  * Writes kept files below the claimed `files/` directory. Every directory is created one segment
  * at a time with a non-recursive `mkdir` and every file with exclusive create, so nothing that
- * exists is overwritten or followed. All entries below `files/` are this export's own, so an
- * `EEXIST` on a name not created yet means two stored names map to one entry (case or Unicode
- * normalisation on the file system, or a file and a directory of the same name).
+ * exists is overwritten or followed, and the chain is verified before content is written
+ * (`ExportTree`). All entries below `files/` are this export's own, so an `EEXIST` on a name not
+ * created yet means two stored names map to one entry (case or Unicode normalisation on the file
+ * system, or a file and a directory of the same name).
  */
 class FileWriter {
-  private readonly created = new Set<string>();
+  private readonly filesRoot: string;
 
-  constructor(private readonly filesRoot: string) {}
+  constructor(private readonly tree: ExportTree) {
+    this.filesRoot = join(tree.dir, 'files');
+  }
 
   /** Writes `content` to `segments` below `files/`; false on a name collision. */
   async write(segments: string[], content: string): Promise<boolean> {
     let current = this.filesRoot;
+    const chain = [this.tree.dir, current];
     for (const segment of segments.slice(0, -1)) {
       current = join(current, segment);
-      if (this.created.has(current)) continue;
+      chain.push(current);
+      if (this.tree.has(current)) continue;
       try {
-        await mkdir(current);
+        await mkdir(current, { mode: PRIVATE_DIR_MODE });
       } catch (error) {
         if (errorCode(error) === 'EEXIST') return false;
         throw error;
       }
-      this.created.add(current);
+      await this.tree.record(current);
     }
     // Validated segments cannot escape; this is the fail-closed check of FR-123-42.
     const target = resolveInside(this.filesRoot, segments.join('/'));
     let handle: FileHandle;
     try {
-      handle = await open(target, 'wx');
+      handle = await open(target, 'wx', PRIVATE_FILE_MODE);
     } catch (error) {
       if (errorCode(error) === 'EEXIST') return false;
       throw error;
     }
     try {
+      await this.tree.verify(chain, target, handle);
       await handle.writeFile(content, 'utf8');
     } finally {
       await handle.close();
@@ -285,11 +383,10 @@ export async function benchmarkExportCommand(flags: BenchmarkExportFlags): Promi
   try {
     const detail = await getBenchmarkRunDetail(handle.db, flags.runId);
     if (!detail) throw new CliError(`No benchmark run ${flags.runId}`, ExitCode.Usage);
-    const dir = resolve(flags.out);
-    await prepareTarget(dir);
-    const manifestHandle = await claimOutputs(dir);
-    const filesRoot = join(dir, 'files');
-    const writer = new FileWriter(filesRoot);
+    const dir = await targetPath(flags.out);
+    const tree = await prepareTarget(dir);
+    const manifestHandle = await claimOutputs(tree);
+    const writer = new FileWriter(tree);
     const summary: ExportSummary = {
       agentRuns: detail.agentRuns.length,
       files: 0,
@@ -380,6 +477,7 @@ export async function benchmarkExportCommand(flags: BenchmarkExportFlags): Promi
         agentRuns,
         summary,
       };
+      await tree.verify([dir], join(dir, 'manifest.json'), manifestHandle);
       await manifestHandle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       if (flags.json) {
         console.log(
