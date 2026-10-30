@@ -118,6 +118,13 @@ These rules are not optional. A task is not done until the applicable steps are 
   context stays focused on decisions and integration. Give each subagent a self-contained brief
   and the exact files it may change; parallel agents must never edit the same files.
 - Run independent tasks in separate git worktrees or branches, one agent session per worktree.
+- **Keep large or temporary data off `/tmp` and clean up after yourself (hard rule).** `/tmp` is
+  often a RAM-backed `tmpfs`, and so is an agent scratchpad under it: put worktrees, clones,
+  `node_modules`, builds, data directories and benchmark data on disk, with worktrees in
+  `.ai/tmp/` (git-ignored). Every agent removes what it created (worktrees, temporary
+  directories, data directories, servers it started) before it finishes, also after a failure,
+  and a subagent brief says so. Tests and scripts that use `os.tmpdir()` remove their
+  directories ([lesson](.ai/lessons/2026-10-30-keep-heavy-data-off-tmp.md)).
 - Turn a workflow you repeat often into a skill committed to git
   (`.agents/skills/<name>/SKILL.md`, exposed to Claude Code through a symlink in
   `.claude/skills/`). Check the existing `om-*` skills before writing a new one.
