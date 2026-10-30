@@ -66,10 +66,15 @@ export function VerdictPanel({
   const status = useRef<HTMLParagraphElement>(null);
   const [editedAfter, setEditedAfter] = useState<BlindReviewFormState | null>(null);
   const fieldError = state.kind === 'fieldError' && !pending && editedAfter !== state;
+  // One submission at a time: `pending` turns true only after React schedules the action, so a
+  // second click in the same tick would post again and its "already has a verdict" answer would
+  // replace the result of the first (browser QA finding 1).
+  const submitting = useRef(false);
 
   useEffect(() => {
     // The buttons are disabled while recording, which drops their focus: the result line
     // (or the field, after a field error) takes it.
+    if (state.kind !== 'success') submitting.current = false;
     if (state.kind === 'fieldError') document.getElementById(`note-${pairId}`)?.focus();
     else if (state.kind !== 'idle') status.current?.focus();
   }, [state, pairId]);
@@ -121,7 +126,15 @@ export function VerdictPanel({
     );
   }
   return (
-    <form action={dispatch} className="space-y-stack" noValidate>
+    <form
+      action={dispatch}
+      onSubmit={(event) => {
+        if (submitting.current) event.preventDefault();
+        submitting.current = true;
+      }}
+      className="space-y-stack"
+      noValidate
+    >
       <input type="hidden" name="benchmarkRunId" value={benchmarkRunId} />
       <input type="hidden" name="pairId" value={pairId} />
       <p className="text-body">A verdict cannot be changed after you record it.</p>

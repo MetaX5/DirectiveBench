@@ -228,14 +228,17 @@ export default async function BlindReviewPage({
                           Pair {row.position}
                         </Link>
                       </TD>
-                      <TD className="font-mono wrap-anywhere">{row.caseId}</TD>
+                      <TD className="font-mono whitespace-nowrap">{row.caseId}</TD>
                       <TD>{sideLabel(row.a)}</TD>
                       <TD>{sideLabel(row.b)}</TD>
                       <TD>
                         {row.verdict === null ? 'No verdict' : BLIND_VERDICT_LABELS[row.verdict]}
                       </TD>
                       <TD>{preferredText(row.verdict, row.a, row.b)}</TD>
-                      <TD className="whitespace-pre-wrap wrap-anywhere">{row.note ?? ''}</TD>
+                      {/* A note keeps a readable width; a long one wraps and scrolls in the table (QA 2). */}
+                      <TD className="min-w-48 whitespace-pre-wrap wrap-anywhere">
+                        {row.note ?? ''}
+                      </TD>
                     </TR>
                   ))}
                 </TBody>

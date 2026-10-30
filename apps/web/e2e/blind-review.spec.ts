@@ -231,7 +231,8 @@ test.describe.serial('start, verdicts and reveal', () => {
     await expect(page).toHaveURL(/blind-review\?pair=1$/);
     await expect(page.getByText(/^Pair 1 of 2/)).toBeVisible();
     const note = page.getByRole('textbox', { name: 'Note (optional)' });
-    await note.fill('A keeps the export.\nShorter.');
+    // A long word in the note must not squeeze the result table (browser QA finding 2).
+    await note.fill(`A keeps the export.\nShorter. ${'x'.repeat(600)}`);
     await page.keyboard.press('Tab');
     await expect(page.getByRole('button', { name: 'A is better, pair 1' })).toBeFocused();
     await page.keyboard.press('Enter');
@@ -248,9 +249,20 @@ test.describe.serial('start, verdicts and reveal', () => {
 
     await status.getByRole('link', { name: 'Next pair without a verdict' }).click();
     await expect(page).toHaveURL(/pair=2$/);
-    await page.getByRole('button', { name: 'About the same, pair 2' }).click();
+    // Browser QA finding 1: clicks in the same tick post once, so the first choice is recorded
+    // and its own result line is shown (not "This pair already has a verdict.").
+    await page.getByRole('button', { name: 'About the same, pair 2' }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="B is better, pair 2"]')!
+        .click();
+    });
     await expect(page.getByTestId('verdict-status')).toHaveText(
       'Verdict recorded. All pairs have a verdict. You can reveal the variants.',
+    );
+    await expect(page.getByTestId('verdict-recorded')).toContainText(
+      'Your verdict: About the same.',
     );
 
     // A reload shows the stored verdict, not a form (immutable).
@@ -281,6 +293,20 @@ test.describe.serial('start, verdicts and reveal', () => {
     );
     const table = page.getByRole('table', { name: 'Blind review result' });
     await expect(table.getByRole('row')).toHaveCount(3);
+    // Browser QA finding 2: the case id stays on one line, at 1280px and at 320px.
+    for (const width of [1280, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      const lines = await table
+        .getByRole('cell', { name: 'implement-parse-age' })
+        .first()
+        .evaluate((cell) => {
+          const range = document.createRange();
+          range.selectNodeContents(cell);
+          return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+        });
+      expect(lines, `case id lines at ${width}px`).toBe(1);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
     await expect(table).toContainText('About the same');
     await expect(page.getByTestId('reveal-card')).toHaveCount(0);
     await expect(page.getByTestId('reveal-status')).toHaveText(
