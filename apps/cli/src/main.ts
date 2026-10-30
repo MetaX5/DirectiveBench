@@ -1,5 +1,6 @@
 import { Command, CommanderError } from 'commander';
 import packageJson from '../package.json' with { type: 'json' };
+import { benchmarkExportCommand } from './benchmark-export';
 import { benchmarkInitCommand } from './benchmark-init';
 import type { BenchmarkRunFlags } from './benchmark-plan';
 import { benchmarkRunCommand } from './benchmark-run';
@@ -112,6 +113,16 @@ benchmark
           dataDir: globalDataDir(),
         }),
       )(),
+  );
+
+benchmark
+  .command('export')
+  .description('write the output files a benchmark run kept, and a manifest, to a new directory')
+  .argument('<run-id>', 'benchmark run id')
+  .requiredOption('--out <dir>', 'new or empty directory to write to')
+  .option('--json', 'print the export summary as one JSON object')
+  .action((runId: string, options: { out: string; json?: boolean }) =>
+    run(() => benchmarkExportCommand({ ...options, runId, dataDir: globalDataDir() }))(),
   );
 
 try {
