@@ -3,7 +3,7 @@ title: macOS unit-test gate in CI (issue 120)
 date: 2026-10-29
 agent: Claude Code / claude-opus-5-5
 trigger: user request ("120"), via om-auto-fix-issue 120
-status: in-progress
+status: completed
 branch: feat/issue-120-macos-windows-ci
 specs: [SPEC-012]
 ---
@@ -76,11 +76,16 @@ record the gates in SPEC-012.
 | Red first, linear-time test: `run` made quadratic | ratio 13.2 > 3.5, it fails |
 | macOS CI before the fixes (run 40950867608) | 4 packages failed: agent-adapters 1, runner 1 (coverage 99.86%), web 1, benchmark-engine killed (137) |
 | `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm test` (Linux) | pass, 100% coverage |
-| macOS CI after the fixes | see the PR |
+| macOS CI with `--concurrency=2` on `053fdba` (run 40960059545) | ❌ only `runner` coverage 99.88% (`git-process.ts:107`), fixed by a deterministic test |
+| macOS CI on the final head `1ddd267` (run 41016857950) | ✅ all jobs; macOS job rerun (attempt 2) ✅ again |
 
 Not verified: a real Mac outside CI; Windows (issue #160).
 
 ## Problems and deviations
+
+- Two pushes got no CI because the PR conflicted with `main` (`.ai/lessons.md`), which GitHub does
+  not run `pull_request` workflows for (lesson 2026-10-22). Merging `main` fixed it; check
+  `mergeable` first when a run does not start.
 
 - The issue's EPERM and kill-grace failures did not reproduce in the first CI run on macOS (they
   passed there); the escape-session failure did. The race was reproduced on Linux with a
