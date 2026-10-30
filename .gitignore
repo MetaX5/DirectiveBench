@@ -16,6 +16,9 @@ next-env.d.ts
 .env.*
 !.env.example
 
+# Agent worktrees and temporary data (AGENTS.md §3)
+.ai/tmp/
+
 # Test artifacts
 test-results/
 playwright-report/
