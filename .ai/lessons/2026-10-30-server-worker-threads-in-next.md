@@ -33,6 +33,11 @@ the same entry in a real thread.
 - Mocks (`vi.mock`, `vi.spyOn(Date, 'now')`) do not reach a worker thread: keep deterministic
   tokenizer tests on the in-process function and use small `eval: true` workers to stand in for
   a stalled tokenizer.
+- A real worker's cold start (thread, module loading, Shiki highlighter creation) took over 2 s
+  on a loaded CI runner although it took about 200 ms locally: a test of a real worker behind a
+  wall-clock deadline must freeze that clock (`vi.useFakeTimers({ toFake: ['setTimeout',
+  'clearTimeout', 'performance'] })`, with the code reading the global `performance`, not the
+  `node:perf_hooks` export) and test the deadline with stand-in workers.
 
 ## How to apply
 

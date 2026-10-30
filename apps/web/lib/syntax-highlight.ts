@@ -1,5 +1,4 @@
 import 'server-only';
-import { performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 import {
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
@@ -62,7 +61,7 @@ interface PendingJob {
   job: HighlightJob;
   resolve: (results: HighlightResult[]) => void;
   timer: NodeJS.Timeout;
-  /** `performance.now()` at which the deadline passes. */
+  /** `performance.now()` (the global, so tests can fake it) at which the deadline passes. */
   expiresAt: number;
 }
 

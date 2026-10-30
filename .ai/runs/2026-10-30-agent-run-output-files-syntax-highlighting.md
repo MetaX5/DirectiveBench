@@ -141,6 +141,14 @@ locally (CI covers macOS unit tests).
 - The deadline counts from submission, including the queue wait (see Decisions).
 - `tsconfig` gains `allowImportingTsExtensions` for the worker chain.
 
+- CI (Linux unit job) failed the first real-thread test: the unbuilt worker's cold start
+  (type stripping, grammar modules, highlighter creation) took over 2 s on the loaded runner,
+  so the deadline correctly returned `timeout`. The real-thread tests now freeze the deadline
+  clock (`vi.useFakeTimers` for `setTimeout`, `clearTimeout`, `performance`; the pool reads the
+  global `performance`), and still pass with the deadline set to 1 ms; the deadline itself
+  stays covered by the stand-in workers. The macOS unit job of that run failed in the untouched
+  `apps/cli/test/runner-acquired.test.ts` (timing), not in this change.
+
 ## Lessons recorded
 
 - [2026-10-30-server-worker-threads-in-next](../lessons/2026-10-30-server-worker-threads-in-next.md)
@@ -149,5 +157,8 @@ locally (CI covers macOS unit tests).
 
 - Phase 4 (#165, open while this run finished): pass `highlightTexts` results to both
   `SideBySideDiff` sides of the compare page and verify FR-123-76 and AC-12 there.
+- A cold highlighter can take over 2 s on a slow or loaded machine, so the first file view
+  after a server start may show the timeout note (by spec, FR-123-78 creates the worker
+  lazily). If that shows up in use, consider starting the worker when the server starts.
 - Browser QA finding A (predates this change): an empty line renders a no-break space, so
   copying a file with blank lines gives a space per blank line (`code-lines.tsx`).

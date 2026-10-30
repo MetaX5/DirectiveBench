@@ -101,6 +101,14 @@ describe('constants (SPEC-123 §8.2)', () => {
 });
 
 describe('the highlight worker (real thread)', () => {
+  // These run the real, unbuilt worker entry in a thread. Its cold start (type stripping,
+  // grammar modules, highlighter creation) took over 2 s on a loaded CI runner, which the
+  // deadline would rightly turn into plain text; the deadline clock is frozen here so the tests
+  // check the worker's output. The deadline itself is tested with stand-in workers below.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  });
+
   it('tokenizes every text of a page render in a worker thread, in order', async () => {
     const [left, none, right] = await highlightTexts(
       [
