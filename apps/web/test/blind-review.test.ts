@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BLIND_REVIEW_CLOSED_NOTICE,
   BLIND_REVIEW_NOTE_MAX_CHARS,
   casePrompt,
+  loadUnlessBlindReview,
   eligiblePairsText,
   nextOpenPair,
   pairListLabel,
@@ -196,5 +197,40 @@ describe('revealed and run-page copy', () => {
     expect(casePrompt(definition, 'case-a')).toBe('Do it.');
     expect(casePrompt(definition, 'case-b')).toBeNull();
     expect(casePrompt({ cases: 'no' }, 'case-a')).toBeNull();
+  });
+});
+
+describe('loadUnlessBlindReview (FR-123-52a, Codex review round 1)', () => {
+  /** A check that answers the given states in order. */
+  const states = (...answers: boolean[]) => {
+    const queue = [...answers];
+    return vi.fn(async () => queue.shift()!);
+  };
+
+  it('loads and returns the data while no review is unrevealed, checking before and after', async () => {
+    const unrevealed = states(false, false);
+    const load = vi.fn(async () => 'labelled');
+    expect(await loadUnlessBlindReview(unrevealed, load)).toEqual({
+      closed: false,
+      value: 'labelled',
+    });
+    expect(unrevealed).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not load at all while a review is unrevealed', async () => {
+    const load = vi.fn(async () => 'labelled');
+    expect(await loadUnlessBlindReview(states(true), load)).toEqual({ closed: true });
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('closes the view when a review starts while the page is loading', async () => {
+    let started = false;
+    const unrevealed = vi.fn(async () => started);
+    const load = vi.fn(async () => {
+      // Another tab starts the review while this page waits (for example for highlighting).
+      started = true;
+      return 'labelled';
+    });
+    expect(await loadUnlessBlindReview(unrevealed, load)).toEqual({ closed: true });
   });
 });

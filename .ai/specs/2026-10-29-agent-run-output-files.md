@@ -3,7 +3,7 @@ id: SPEC-123
 title: Keep and review the files an agent run wrote (output files, comparison, blind review)
 status: draft
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 category: feature
 related: [SPEC-118, SPEC-112, SPEC-110, SPEC-113, SPEC-006, SPEC-007, SPEC-014, SPEC-122, SPEC-203]
 ---
@@ -749,17 +749,32 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   render (FR-123-76 and the `SideBySideDiff` side of AC-12, verified by
   `apps/web/e2e/compare-files.spec.ts` and `apps/web/e2e/ui-contrast.spec.ts` on the diff
   tints).
+- **Implemented (Phase 5, blind review; run log
+  [2026-10-30-agent-run-output-files-blind-review](../runs/2026-10-30-agent-run-output-files-blind-review.md),
+  UI decisions D46 to D57 approved by the maintainer on 2026-10-30, verified on 2026-10-30 by
+  `packages/database/test/{blind-reviews,client}.test.ts`,
+  `apps/web/test/{blind-review,actions}.test.ts`, `apps/cli/test/benchmark-export.test.ts`,
+  `apps/web/e2e/blind-review.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts` and the built app after
+  `directivebench demo`):** FR-123-50 to FR-123-55 with FR-123-52a and AC-7; migration `0004`
+  (`blind_reviews`, `blind_review_pairs`, §8.1) and the blind-review part of AC-8 (cascade);
+  §8.3 `startBlindReview`, `getBlindReviewForReviewer`, `getBlindPairFiles`,
+  `hasUnrevealedBlindReview`, `recordBlindVerdict`, `revealBlindReview`, `getBlindReviewResult`
+  (plus `getBlindReviewEligibility` for the run page); §10 server actions with
+  `BLIND_REVIEW_NOTE_MAX_CHARS`. The review page `/results/[id]/blind-review?pair=&path=`, the
+  "Blind review" card on the run page (start, progress, "Human blind review" summary next to the
+  verdict), the closed "Output files" and "Agent runs" cards, files page and compare page while
+  a review is unrevealed (checked on the HTML and the RSC payload of every labelled page with
+  the agent-run ids known before the start), immutable verdicts, the reveal with its inline
+  confirmation, and the `benchmark export` warning. The CLI export is not blocked (FR-123-52a).
 - **Partially implemented:** AC-3 and AC-11: the page shows the redaction count (seeded rows)
   and the files of an agent run whatever its execution status, but no browser test plants a
   secret through a real capture or opens an `assertion-error` run. NFR-123-01
-  (capture time) is a target without a timing test.
-- **Not implemented:** Phase 5 (blind review, migration `0004`): FR-123-50 to FR-123-55 and
-  AC-7. The design-system components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
-  `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
-  ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)),
-  not in this status; since Phase 3 the files page uses `FileView` and `FileStatusBadges`,
-  since Phase 4 the compare page uses `SideBySideDiff`, and since Phase 3a both pages use the
-  highlighter.
+  (capture time) is a target without a timing test. The design-system components (`FileView`,
+  `SideBySideDiff`, `FileStatusBadges`) and `apps/web/lib/syntax-highlight.ts` merged with
+  PR #155 are recorded in that PR's run log
+  ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)).
+- **Not implemented:** none of the phases; the open items are the browser checks of AC-3 and
+  AC-11 above.
 
 ## 21. Phasing and implementation plan
 

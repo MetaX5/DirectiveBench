@@ -32,6 +32,7 @@ import {
   selectComparePath,
   selectCompareRuns,
 } from '@/lib/compare-files';
+import { loadUnlessBlindReview } from '@/lib/blind-review';
 import { getDatabase } from '@/lib/db';
 import { BlindReviewClosedPage } from '../blind-review/closed-page';
 import { isMockAgent } from '@/lib/mock-agent';
@@ -57,223 +58,231 @@ export default async function ComparePage({
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
   const { id } = await params;
-  // Closed while the run's blind review is unrevealed, for any agent-run id or query, before
-  // anything about the agent runs is read (SPEC-123 FR-123-52a, D55).
-  if (await hasUnrevealedBlindReview(handle.db, id)) {
-    return <BlindReviewClosedPage runId={id} title="Compare output files" />;
-  }
-  const detail = await getBenchmarkRunDetail(handle.db, id);
-  if (!detail) notFound();
-  const query = parseCompareQuery(await searchParams);
-  const selection = selectCompareRuns(detail.agentRuns, query);
-  if (selection.kind === 'not-found') notFound();
+  // Closed while the run's blind review is unrevealed, for any agent-run id or query, checked
+  // before anything about the agent runs is read and again right before the render
+  // (SPEC-123 FR-123-52a, D55). The page's elements are built inside the guarded load.
+  const loaded = await loadUnlessBlindReview(
+    () => hasUnrevealedBlindReview(handle.db, id),
+    async () => {
+      const detail = await getBenchmarkRunDetail(handle.db, id);
+      if (!detail) notFound();
+      const query = parseCompareQuery(await searchParams);
+      const selection = selectCompareRuns(detail.agentRuns, query);
+      if (selection.kind === 'not-found') notFound();
 
-  const runId = detail.run.id;
-  const variantLabel = (variant: 'baseline' | 'candidate') =>
-    variant === 'baseline'
-      ? baselineLabel(detail.baselineArtifactVersion)
-      : candidateLabel(detail.artifactVersion);
+      const runId = detail.run.id;
+      const variantLabel = (variant: 'baseline' | 'candidate') =>
+        variant === 'baseline'
+          ? baselineLabel(detail.baselineArtifactVersion)
+          : candidateLabel(detail.artifactVersion);
 
-  const header = (
-    <>
-      <p className="mb-2 text-body">
-        <Link href={`/results/${encodeURIComponent(runId)}`} className="underline">
-          Back to the run
-        </Link>
-      </p>
-      <PageHeader
-        title="Compare output files"
-        description={
-          <>
-            {selection.kind === 'runs' ? (
+      const header = (
+        <>
+          <p className="mb-2 text-body">
+            <Link href={`/results/${encodeURIComponent(runId)}`} className="underline">
+              Back to the run
+            </Link>
+          </p>
+          <PageHeader
+            title="Compare output files"
+            description={
               <>
-                Case <span className="font-mono">{selection.caseId}</span> ·{' '}
+                {selection.kind === 'runs' ? (
+                  <>
+                    Case <span className="font-mono">{selection.caseId}</span> ·{' '}
+                  </>
+                ) : null}
+                run <span className="font-mono">{runId}</span>
               </>
-            ) : null}
-            run <span className="font-mono">{runId}</span>
+            }
+            actions={isMockAgent(detail.run.agentAdapterId) ? <MockBadge /> : null}
+          />
+        </>
+      );
+      if (selection.kind === 'none') {
+        return (
+          <>
+            {header}
+            <Card>
+              <CardContent className="text-body">No agent runs recorded.</CardContent>
+            </Card>
           </>
-        }
-        actions={isMockAgent(detail.run.agentAdapterId) ? <MockBadge /> : null}
-      />
-    </>
-  );
-  if (selection.kind === 'none') {
-    return (
-      <>
-        {header}
-        <Card>
-          <CardContent className="text-body">No agent runs recorded.</CardContent>
-        </Card>
-      </>
-    );
-  }
+        );
+      }
 
-  const { caseId, caseRuns, left, right } = selection;
-  const [leftFiles, rightFiles] = await Promise.all([
-    listAgentRunFiles(handle.db, left.id),
-    listAgentRunFiles(handle.db, right.id),
-  ]);
-  const union = comparePaths(leftFiles, rightFiles);
-  const chosen = selectComparePath(
-    union.map((entry) => entry.path),
-    query.path,
-  );
-  const entry = union.find((e) => e.path === chosen.path);
-  const load = (agentRunId: string, has: boolean) =>
-    has && chosen.path !== null
-      ? getAgentRunFile(handle.db, { benchmarkRunId: runId, agentRunId, path: chosen.path })
-      : Promise.resolve(null);
-  const [leftFile, rightFile] = await Promise.all([
-    load(left.id, Boolean(entry?.left)),
-    load(right.id, Boolean(entry?.right)),
-  ]);
+      const { caseId, caseRuns, left, right } = selection;
+      const [leftFiles, rightFiles] = await Promise.all([
+        listAgentRunFiles(handle.db, left.id),
+        listAgentRunFiles(handle.db, right.id),
+      ]);
+      const union = comparePaths(leftFiles, rightFiles);
+      const chosen = selectComparePath(
+        union.map((entry) => entry.path),
+        query.path,
+      );
+      const entry = union.find((e) => e.path === chosen.path);
+      const load = (agentRunId: string, has: boolean) =>
+        has && chosen.path !== null
+          ? getAgentRunFile(handle.db, { benchmarkRunId: runId, agentRunId, path: chosen.path })
+          : Promise.resolve(null);
+      const [leftFile, rightFile] = await Promise.all([
+        load(left.id, Boolean(entry?.left)),
+        load(right.id, Boolean(entry?.right)),
+      ]);
 
-  // Both sides are highlighted as one job with one deadline, in the language of the compared
-  // path, so the colouring never differs by side (SPEC-123 FR-123-76, FR-123-78). A side
-  // without kept content has nothing to colour.
-  const language = chosen.path === null ? null : languageForPath(chosen.path);
-  const sides = [leftFile, rightFile];
-  const tokenized = await highlightTexts(
-    sides.flatMap((file) => (file?.content == null ? [] : [{ text: file.content, language }])),
-  );
-  const [leftHighlight, rightHighlight] = sides.map((file) =>
-    file?.content == null ? undefined : tokenized.shift(),
-  );
+      // Both sides are highlighted as one job with one deadline, in the language of the compared
+      // path, so the colouring never differs by side (SPEC-123 FR-123-76, FR-123-78). A side
+      // without kept content has nothing to colour.
+      const language = chosen.path === null ? null : languageForPath(chosen.path);
+      const sides = [leftFile, rightFile];
+      const tokenized = await highlightTexts(
+        sides.flatMap((file) => (file?.content == null ? [] : [{ text: file.content, language }])),
+      );
+      const [leftHighlight, rightHighlight] = sides.map((file) =>
+        file?.content == null ? undefined : tokenized.shift(),
+      );
 
-  const kept = { left: left.outputFilesKept, right: right.outputFilesKept };
-  // A side whose agent run kept no files says why, not "Not present" (QA finding 1).
-  const absentNotice = (run: typeof left, count: number) =>
-    agentRunFilesNotice(run, count) ?? undefined;
-  const leftLabel = agentRunLabel(variantLabel(left.variant), left.repetition);
-  const rightLabel = agentRunLabel(variantLabel(right.variant), right.repetition);
-  const notices = [
-    compareSideNotice('Left', left, leftFiles.length),
-    compareSideNotice('Right', right, rightFiles.length),
-    union.length > 0 && chosen.missing !== null ? missingPathNotice(chosen.missing) : null,
-  ].filter((notice) => notice !== null);
+      const kept = { left: left.outputFilesKept, right: right.outputFilesKept };
+      // A side whose agent run kept no files says why, not "Not present" (QA finding 1).
+      const absentNotice = (run: typeof left, count: number) =>
+        agentRunFilesNotice(run, count) ?? undefined;
+      const leftLabel = agentRunLabel(variantLabel(left.variant), left.repetition);
+      const rightLabel = agentRunLabel(variantLabel(right.variant), right.repetition);
+      const notices = [
+        compareSideNotice('Left', left, leftFiles.length),
+        compareSideNotice('Right', right, rightFiles.length),
+        union.length > 0 && chosen.missing !== null ? missingPathNotice(chosen.missing) : null,
+      ].filter((notice) => notice !== null);
 
-  const runSelect = (name: 'left' | 'right', label: string, value: string) => (
-    <label className="flex min-w-0 max-w-full flex-col gap-1 text-ui text-muted-foreground">
-      {label}
-      <NativeSelect name={name} defaultValue={value} className="w-full max-w-full">
-        {caseRuns.map((run) => (
-          <NativeSelectOption key={run.id} value={run.id}>
-            {compareRunOptionLabel(variantLabel(run.variant), run)}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-    </label>
-  );
+      const runSelect = (name: 'left' | 'right', label: string, value: string) => (
+        <label className="flex min-w-0 max-w-full flex-col gap-1 text-ui text-muted-foreground">
+          {label}
+          <NativeSelect name={name} defaultValue={value} className="w-full max-w-full">
+            {caseRuns.map((run) => (
+              <NativeSelectOption key={run.id} value={run.id}>
+                {compareRunOptionLabel(variantLabel(run.variant), run)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </label>
+      );
 
-  return (
-    <>
-      {header}
-      <Card className="mb-4">
-        <CardContent>
-          {/* A plain GET form (D37): no client JavaScript; case and path travel along. */}
-          <form
-            action={`/results/${encodeURIComponent(runId)}/compare`}
-            aria-label="Agent runs to compare"
-            className="flex flex-wrap items-end gap-inline"
-          >
-            <input type="hidden" name="case" value={caseId} />
-            {chosen.path !== null ? <input type="hidden" name="path" value={chosen.path} /> : null}
-            {runSelect('left', 'Left', left.id)}
-            {runSelect('right', 'Right', right.id)}
-            <Button type="submit" variant="outline">
-              Compare
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      {notices.length > 0 ? (
-        <div role="status" className="mb-4 space-y-1 text-body">
-          {notices.map((notice) => (
-            <p key={notice} className="wrap-anywhere">
-              {notice}
-            </p>
-          ))}
-        </div>
-      ) : null}
-
-      {union.length === 0 ? (
-        <Card data-testid="compare-empty">
-          <CardContent className="text-body">
-            Neither agent run has a changed file to compare.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          <Card className="min-w-0">
-            <CardHeader>
-              <CardTitle>Changed paths ({union.length})</CardTitle>
-            </CardHeader>
+      return (
+        <>
+          {header}
+          <Card className="mb-4">
             <CardContent>
-              <nav aria-label="Changed paths">
-                <ul className="space-y-1">
-                  {union.map((item) => {
-                    const current = item.path === chosen.path;
-                    const pair = item.left && item.right ? pairBadge(item.left, item.right) : null;
-                    return (
-                      <li key={item.path}>
-                        <Link
-                          // The diff sits under the list at every width (D42), so the fragment
-                          // brings it into view (D44).
-                          href={`${compareHref(runId, { caseId, left: left.id, right: right.id, path: item.path })}#diff`}
-                          aria-current={current ? 'page' : undefined}
-                          className={cn(
-                            'block border-l-2 py-1 pr-1 pl-2 text-body hover:bg-muted',
-                            current ? 'border-primary-text font-medium' : 'border-transparent',
-                          )}
-                        >
-                          <span className="block font-mono wrap-anywhere">{item.path}</span>
-                          <span className="mt-1 block">
-                            {pair ? (
-                              <Badge variant={pair.variant}>{pair.label}</Badge>
-                            ) : (
-                              <FileStatusBadges
-                                // One side only: "Only left" / "Only right" when the other run
-                                // kept its files, then this side's badges (D43, QA finding 1).
-                                file={(item.left ?? item.right)!}
-                                onlyIn={onlyInSide(item, kept) ?? undefined}
-                              />
-                            )}
-                          </span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </nav>
+              {/* A plain GET form (D37): no client JavaScript; case and path travel along. */}
+              <form
+                action={`/results/${encodeURIComponent(runId)}/compare`}
+                aria-label="Agent runs to compare"
+                className="flex flex-wrap items-end gap-inline"
+              >
+                <input type="hidden" name="case" value={caseId} />
+                {chosen.path !== null ? (
+                  <input type="hidden" name="path" value={chosen.path} />
+                ) : null}
+                {runSelect('left', 'Left', left.id)}
+                {runSelect('right', 'Right', right.id)}
+                <Button type="submit" variant="outline">
+                  Compare
+                </Button>
+              </form>
             </CardContent>
           </Card>
-          <Card className="relative min-w-0">
-            <span id="diff" aria-hidden className="absolute top-0 scroll-mt-4" />
-            <CardContent>
-              {chosen.path !== null ? (
-                <SideBySideDiff
-                  path={chosen.path}
-                  left={{
-                    name: 'Left',
-                    description: leftLabel,
-                    file: leftFile,
-                    highlight: leftHighlight,
-                    absentNotice: absentNotice(left, leftFiles.length),
-                  }}
-                  right={{
-                    name: 'Right',
-                    description: rightLabel,
-                    file: rightFile,
-                    highlight: rightHighlight,
-                    absentNotice: absentNotice(right, rightFiles.length),
-                  }}
-                />
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </>
+
+          {notices.length > 0 ? (
+            <div role="status" className="mb-4 space-y-1 text-body">
+              {notices.map((notice) => (
+                <p key={notice} className="wrap-anywhere">
+                  {notice}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          {union.length === 0 ? (
+            <Card data-testid="compare-empty">
+              <CardContent className="text-body">
+                Neither agent run has a changed file to compare.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              <Card className="min-w-0">
+                <CardHeader>
+                  <CardTitle>Changed paths ({union.length})</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <nav aria-label="Changed paths">
+                    <ul className="space-y-1">
+                      {union.map((item) => {
+                        const current = item.path === chosen.path;
+                        const pair =
+                          item.left && item.right ? pairBadge(item.left, item.right) : null;
+                        return (
+                          <li key={item.path}>
+                            <Link
+                              // The diff sits under the list at every width (D42), so the fragment
+                              // brings it into view (D44).
+                              href={`${compareHref(runId, { caseId, left: left.id, right: right.id, path: item.path })}#diff`}
+                              aria-current={current ? 'page' : undefined}
+                              className={cn(
+                                'block border-l-2 py-1 pr-1 pl-2 text-body hover:bg-muted',
+                                current ? 'border-primary-text font-medium' : 'border-transparent',
+                              )}
+                            >
+                              <span className="block font-mono wrap-anywhere">{item.path}</span>
+                              <span className="mt-1 block">
+                                {pair ? (
+                                  <Badge variant={pair.variant}>{pair.label}</Badge>
+                                ) : (
+                                  <FileStatusBadges
+                                    // One side only: "Only left" / "Only right" when the other run
+                                    // kept its files, then this side's badges (D43, QA finding 1).
+                                    file={(item.left ?? item.right)!}
+                                    onlyIn={onlyInSide(item, kept) ?? undefined}
+                                  />
+                                )}
+                              </span>
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </nav>
+                </CardContent>
+              </Card>
+              <Card className="relative min-w-0">
+                <span id="diff" aria-hidden className="absolute top-0 scroll-mt-4" />
+                <CardContent>
+                  {chosen.path !== null ? (
+                    <SideBySideDiff
+                      path={chosen.path}
+                      left={{
+                        name: 'Left',
+                        description: leftLabel,
+                        file: leftFile,
+                        highlight: leftHighlight,
+                        absentNotice: absentNotice(left, leftFiles.length),
+                      }}
+                      right={{
+                        name: 'Right',
+                        description: rightLabel,
+                        file: rightFile,
+                        highlight: rightHighlight,
+                        absentNotice: absentNotice(right, rightFiles.length),
+                      }}
+                    />
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </>
+      );
+    },
   );
+  if (loaded.closed) return <BlindReviewClosedPage runId={id} title="Compare output files" />;
+  return loaded.value;
 }

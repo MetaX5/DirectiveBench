@@ -255,3 +255,21 @@ export function casePrompt(definition: unknown, caseId: string): string | null {
   if (!parsed.success) return null;
   return parsed.data.cases.find((c) => c.id === caseId)?.prompt ?? null;
 }
+
+/** Labelled data, or `closed` when a blind review of the run is unrevealed (FR-123-52a). */
+export type UnlessBlindReview<T> = { closed: true } | { closed: false; value: T };
+
+/**
+ * Loads a labelled view's data unless the run has an unrevealed blind review, checked before
+ * the load and again after it, right before the page renders: a review started in another tab
+ * while the page was loading (or waiting for syntax highlighting) closes the view too (Codex
+ * review, round 1). Nothing is awaited between the second check and the render.
+ */
+export async function loadUnlessBlindReview<T>(
+  unrevealed: () => Promise<boolean>,
+  load: () => Promise<T>,
+): Promise<UnlessBlindReview<T>> {
+  if (await unrevealed()) return { closed: true };
+  const value = await load();
+  return (await unrevealed()) ? { closed: true } : { closed: false, value };
+}

@@ -5,6 +5,7 @@ import {
   getBlindReviewEligibility,
   getBlindReviewForReviewer,
   getBlindReviewResult,
+  hasUnrevealedBlindReview,
   type AgentRunFileCounts,
   type BenchmarkRunDetail,
   type BlindReviewEligibility,
@@ -54,6 +55,7 @@ import {
   decidedText,
   eligiblePairsText,
   excludedPairsText,
+  loadUnlessBlindReview,
   startUnavailableText,
 } from '@/lib/blind-review';
 import { compareHref } from '@/lib/compare-files';
@@ -459,13 +461,18 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const baselineName = baselineLabel(baselineArtifactVersion);
   const candidateName = candidateLabel(artifactVersion);
   const warnings = runWarnings(run.warnings, profile);
-  // Decided before rendering (FR-123-52a): while a review is unrevealed no per-agent-run row
-  // reaches a component, so neither the HTML nor the RSC payload carries one.
   const review = await getBlindReviewForReviewer(handle.db, id);
-  const closed = review !== null && review.review.revealedAt === null;
   const blindResult = review?.review.revealedAt ? await getBlindReviewResult(handle.db, id) : null;
   const eligibility = review ? null : await getBlindReviewEligibility(handle.db, id);
-  const fileCounts = closed ? [] : await countAgentRunFiles(handle.db, id);
+  // Decided right before rendering, as the last read (FR-123-52a): while a review is unrevealed
+  // no per-agent-run row reaches a component, so neither the HTML nor the RSC payload carries
+  // one, also when the review starts while this page loads.
+  const labelled = await loadUnlessBlindReview(
+    () => hasUnrevealedBlindReview(handle.db, id),
+    () => countAgentRunFiles(handle.db, id),
+  );
+  const closed = labelled.closed;
+  const fileCounts = labelled.closed ? [] : labelled.value;
 
   return (
     <>

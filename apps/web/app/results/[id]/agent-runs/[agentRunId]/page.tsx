@@ -19,6 +19,7 @@ import {
   parsePathParam,
   selectFile,
 } from '@/lib/agent-run-files';
+import { loadUnlessBlindReview } from '@/lib/blind-review';
 import { getDatabase } from '@/lib/db';
 import { BlindReviewClosedPage } from '../../blind-review/closed-page';
 import { isMockAgent } from '@/lib/mock-agent';
@@ -44,44 +45,51 @@ export default async function AgentRunFilesPage({
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
   const { id, agentRunId } = await params;
-  // Closed while the run's blind review is unrevealed, for any agent-run id or query, before
-  // anything about the agent runs is read (SPEC-123 FR-123-52a, D55).
-  if (await hasUnrevealedBlindReview(handle.db, id)) {
-    return <BlindReviewClosedPage runId={id} title="Output files hidden" />;
-  }
-  const detail = await getBenchmarkRunDetail(handle.db, id);
-  // The agent run must belong to the benchmark run in the URL (FR-123-21).
-  const agentRun = detail?.agentRuns.find((r) => r.id === agentRunId);
-  if (!detail || !agentRun) notFound();
+  // Closed while the run's blind review is unrevealed, for any agent-run id or query, checked
+  // before anything about the agent runs is read and again right before the render
+  // (SPEC-123 FR-123-52a, D55).
+  const query = await searchParams;
+  const loaded = await loadUnlessBlindReview(
+    () => hasUnrevealedBlindReview(handle.db, id),
+    async () => {
+      const detail = await getBenchmarkRunDetail(handle.db, id);
+      // The agent run must belong to the benchmark run in the URL (FR-123-21).
+      const agentRun = detail?.agentRuns.find((r) => r.id === agentRunId);
+      if (!detail || !agentRun) notFound();
 
-  const files = await listAgentRunFiles(handle.db, agentRun.id);
-  const selection = selectFile(
-    files.map((f) => f.path),
-    parsePathParam((await searchParams).path),
+      const files = await listAgentRunFiles(handle.db, agentRun.id);
+      const selection = selectFile(
+        files.map((f) => f.path),
+        parsePathParam(query.path),
+      );
+      if (selection.kind === 'not-found') notFound();
+      const selected =
+        selection.kind === 'file'
+          ? await getAgentRunFile(handle.db, {
+              benchmarkRunId: detail.run.id,
+              agentRunId: agentRun.id,
+              path: selection.path,
+            })
+          : null;
+      if (selection.kind === 'file' && !selected) notFound();
+      // Syntax tokens are computed on the server, off the request thread (SPEC-123 §6.7); a file
+      // without kept content has nothing to colour.
+      const highlight =
+        selected?.content == null
+          ? undefined
+          : await highlightLines(selected.content, languageForPath(selected.path));
+
+      const variant =
+        agentRun.variant === 'baseline'
+          ? baselineLabel(detail.baselineArtifactVersion)
+          : candidateLabel(detail.artifactVersion);
+      const status = agentRunStatusBadge(agentRun);
+      const notice = agentRunFilesNotice(agentRun, files.length);
+      return { detail, agentRun, files, selected, highlight, variant, status, notice };
+    },
   );
-  if (selection.kind === 'not-found') notFound();
-  const selected =
-    selection.kind === 'file'
-      ? await getAgentRunFile(handle.db, {
-          benchmarkRunId: detail.run.id,
-          agentRunId: agentRun.id,
-          path: selection.path,
-        })
-      : null;
-  if (selection.kind === 'file' && !selected) notFound();
-  // Syntax tokens are computed on the server, off the request thread (SPEC-123 §6.7); a file
-  // without kept content has nothing to colour.
-  const highlight =
-    selected?.content == null
-      ? undefined
-      : await highlightLines(selected.content, languageForPath(selected.path));
-
-  const variant =
-    agentRun.variant === 'baseline'
-      ? baselineLabel(detail.baselineArtifactVersion)
-      : candidateLabel(detail.artifactVersion);
-  const status = agentRunStatusBadge(agentRun);
-  const notice = agentRunFilesNotice(agentRun, files.length);
+  if (loaded.closed) return <BlindReviewClosedPage runId={id} title="Output files hidden" />;
+  const { detail, agentRun, files, selected, highlight, variant, status, notice } = loaded.value;
 
   return (
     <>
