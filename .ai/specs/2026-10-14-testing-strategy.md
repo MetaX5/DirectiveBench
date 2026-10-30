@@ -78,6 +78,9 @@ Scoring and verdict logic additionally get table-driven tests covering every pre
 5. Run `demo` with a temp data dir; assert verdict `improved` and the mock label.
 6. Start `serve --no-open` with that data dir and a free port, wait for `GET /api/health` → `{"database":"ready"}`, assert `/results` lists the demo run and its detail page shows verdict `improved`, and that a foreign `Host` header is rejected with 403.
 7. Send `SIGTERM` and assert exit code `0`.
+8. Remove the temporary directory on every exit, also after a failure (it holds an npm install of
+   about 350 MB, and the temporary directory can be RAM; AGENTS.md §3). `pnpm verify:pack --keep`
+   keeps it for debugging.
 
 ## 6. Contract tests for future adapters and providers
 

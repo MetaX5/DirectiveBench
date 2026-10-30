@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { e2eTmpRoot } from './support';
 
 /**
  * Issue #17 (E01-S03, SPEC-101): artifacts of two registered repositories in one list, filters in
@@ -12,7 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
 /** The runner polls every second; leave room for a slow CI host. */
 const RUNNER_TIMEOUT = 30_000;
 
-const sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-e2e-registry-')));
+const sources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'registry-')));
 const team = join(sources, 'registry-team');
 const client = join(sources, 'registry-client');
 const skillDir = '.agents/skills/e2e-safe-preview';

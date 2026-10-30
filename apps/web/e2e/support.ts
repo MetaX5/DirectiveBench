@@ -21,6 +21,13 @@ export function dataDir(): string {
   return dir;
 }
 
+/** The run's temporary root; `playwright.config.ts` removes it when the run ends. */
+export function e2eTmpRoot(): string {
+  const dir = process.env.DIRECTIVEBENCH_E2E_TMP;
+  if (!dir) throw new Error('DIRECTIVEBENCH_E2E_TMP is set by playwright.config.ts');
+  return dir;
+}
+
 export function databasePath(): string {
   return join(dataDir(), 'directivebench.db');
 }
