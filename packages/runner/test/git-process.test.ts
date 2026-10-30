@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GIT_MAX_STDERR_BYTES, runGitProcess, type GitProcessOptions } from '../src/git-process';
 
@@ -192,6 +195,30 @@ describe('runGitProcess', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(kill).not.toHaveBeenCalled();
     expect(result).toMatchObject({ watchTriggered: false, error: null });
+  });
+
+  posixOnly('ignores a second stop request while git is already being stopped', async () => {
+    // Deterministic on every platform (issue #120): before, only a second stdout chunk racing the
+    // kill covered this, which happened on Linux but not on macOS. git ignores SIGTERM and says
+    // so through a file; the watch stops it first, then the job is cancelled during the grace.
+    const dir = mkdtempSync(join(tmpdir(), 'directivebench-git-process-'));
+    const ready = join(dir, 'ready');
+    let watchFired = false;
+    const controller = new AbortController();
+    const pending = runGitProcess(
+      SH,
+      ['-c', `trap "" TERM; : > '${ready}'; sleep 5 & wait; sleep 5`],
+      options({
+        signal: controller.signal,
+        killGraceMs: 300,
+        watch: { intervalMs: 5, exceeded: async () => (watchFired = existsSync(ready)) },
+      }),
+    );
+    while (!watchFired) await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await pending;
+    rmSync(dir, { recursive: true, force: true });
+    expect(result).toMatchObject({ watchTriggered: true, cancelled: true, timedOut: false });
   });
 
   posixOnly('survives a process group that is already gone when it is signalled', async () => {

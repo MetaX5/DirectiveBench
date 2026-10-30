@@ -35,13 +35,16 @@ describe('command assertions', () => {
           command: [
             'sh',
             '-c',
-            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+            'perl -MPOSIX -e "setsid() >= 0 or die; exec @ARGV" sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
           ],
         }),
         context(),
       );
       const details = result.details as { stdout: string; strayProcesses: boolean };
-      process.kill(Number(details.stdout.trim()), 'SIGKILL');
+      const escaped = Number(details.stdout.trim());
+      // Never kill(0): it signals the test runner's own process group (issue #120).
+      expect(escaped).toBeGreaterThan(0);
+      process.kill(escaped, 'SIGKILL');
       expect(result).toMatchObject({
         passed: false,
         message: 'Command left processes that could not be stopped',
@@ -61,7 +64,7 @@ describe('command assertions', () => {
           command: [
             'sh',
             '-c',
-            'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid; sleep 30',
+            'perl -MPOSIX -e "setsid() >= 0 or die; exec @ARGV" sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid; sleep 30',
           ],
         }),
         context(),
@@ -71,7 +74,10 @@ describe('command assertions', () => {
         strayProcesses: boolean;
         timedOut: boolean;
       };
-      process.kill(Number(details.stdout.trim()), 'SIGKILL');
+      const escaped = Number(details.stdout.trim());
+      // Never kill(0): it signals the test runner's own process group (issue #120).
+      expect(escaped).toBeGreaterThan(0);
+      process.kill(escaped, 'SIGKILL');
       expect(details).toMatchObject({ timedOut: true, strayProcesses: true });
       expect(result.message).toBe('Command left processes that could not be stopped');
     },

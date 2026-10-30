@@ -15,7 +15,7 @@ export type FakeClaudeMode =
   | 'hang'
   /** Writes a result line and exits 0, leaving a background child that closed its output. */
   | 'leave-child'
-  /** Exits 0 but leaves a process in a new session (`setsid`) that holds stdout open. */
+  /** Exits 0 but leaves a process in a new session (`setsid()`) that holds stdout open. */
   | 'escape-session'
   /** Writes 64 KiB lines of `x` to stdout without end. */
   | 'flood'
@@ -95,7 +95,8 @@ function body(mode: FakeClaudeMode, dir: string): string {
         `cat > ${q('stdin.txt')}`,
         // The escapee writes its pid only after `setsid`; wait for it, or the group kill could
         // reach it before it left the group.
-        `setsid sh -c 'echo $$ > ${join(dir, 'child.pid')}; exec sleep 600' &`,
+        // macOS has no `setsid` command; Perl's POSIX::setsid runs on Linux and macOS (issue #120).
+        `perl -MPOSIX -e 'setsid() >= 0 or die; exec @ARGV' sh -c 'echo $$ > ${join(dir, 'child.pid')}; exec sleep 600' &`,
         `while [ ! -s ${q('child.pid')} ]; do sleep 0.01; done`,
         `echo $$ > ${q('pid')}`,
         `printf '%s\\n' '${NDJSON[1]}'`,

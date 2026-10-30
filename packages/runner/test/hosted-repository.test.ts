@@ -747,18 +747,10 @@ describe('scanHostedRepository', () => {
     expect(paths).toEqual(['AGENTS.md', 'CLAUDE.md']);
   });
 
-  posixOnly('rejects a file name that is not valid UTF-8', async () => {
+  it('rejects a file name that is not valid UTF-8', async () => {
     const remote = new FixtureRemote(remotes, 'acme', 'latin1', { 'AGENTS.md': '# ok\n' });
-    writeFileSync(
-      join(
-        Buffer.from(remote.work).toString(),
-        Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString('latin1'),
-      ),
-      'x',
-    );
-    const name = Buffer.concat([Buffer.from(`${remote.work}/`), Buffer.from([0x6e, 0xe9])]);
-    writeFileSync(name, 'x');
-    remote.commit({});
+    // "café" in Latin-1: git keeps the bytes, which are not UTF-8.
+    remote.commitRawPath(Buffer.from([0x63, 0x61, 0x66, 0xe9]), 'x');
     const repository = await registered(remote);
     expect(await scan(repository)).toMatchObject({ ok: false, code: 'git-failed' });
     // A failed listing deletes the cache.

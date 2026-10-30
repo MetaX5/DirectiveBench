@@ -1,15 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { count, withDatabase } from './support';
+import { count, e2eTmpRoot, withDatabase } from './support';
 
 /** The runner polls every second; leave room for a slow CI host. */
 const REGISTRATION_TIMEOUT = 30_000;
 
 // The runner resolves symlinks (e.g. macOS /var → /private/var), so compare with the real path.
-const sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-e2e-sources-')));
+const sources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'sources-')));
 const repo = join(sources, 'team-skills');
 const plain = join(sources, 'plain-rules');
 const project = join(sources, 'scan-me');
