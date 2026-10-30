@@ -138,12 +138,18 @@ token on the real removed and added rows of the compare page in both themes. Gat
 `pnpm verify:pack` passed; `pnpm test:e2e` 90 passed; `pnpm test:storybook` 304 passed. Real
 app (built CLI, fresh `directivebench demo` plus the compare seed): the seeded and the demo
 compare pages render highlighted rows with their `removed`, `added` and `filler` tones and no
-highlighting note.
+highlighting note. A second browser QA agent (Claude in Chrome) on the compare page: all 7
+checks pass (colours in both themes, lowest token contrast on a real tinted row 5.10 light and
+5.89 dark, 4.82 with every token class injected into a removed row; diff rows, markers, labels
+and alignment unchanged; hostile Markdown as text; keyboard; 320 px in an iframe; clean
+console; no highlighter code in the browser; no notes). Two nits, no confirmed defect: the
+pre-existing no-break space on empty lines, and the PHP grammar colouring `$label` inside a
+call as a function token. Codex round 5 on the merge: approve. CI on `60015b6`: all green.
 
 Not verified: AC-16 on a real page with a stalled grammar (no way to plant one without a test
 hook; the stall is proved with stand-in workers in unit tests); the D12 neutral tint on a real
 page (only blind review, Phase 5, uses it; measured with the tint class applied on the files
-page); a browser QA agent pass on the compare page after the merge; the browser QA agent could not
+page); the browser QA agent could not
 resize the Chrome window and checked 320 px in an iframe; Windows and macOS were not run
 locally (CI covers macOS unit tests).
 
