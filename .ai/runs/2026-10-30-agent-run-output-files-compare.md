@@ -148,8 +148,8 @@ None yet.
 
 ### Phase 1: Plumbing
 
-- [x] 1.1 Compare display logic and unit tests
-- [ ] 1.2 Return UI decisions D36 to D45
+- [x] 1.1 Compare display logic and unit tests — 350c18e
+- [x] 1.2 Return UI decisions D36 to D45 (returned, waiting for the maintainer)
 
 ### Phase 2: Page
 
