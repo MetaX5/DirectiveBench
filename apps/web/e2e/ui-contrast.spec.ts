@@ -148,6 +148,24 @@ for (const theme of ['light', 'dark'] as const) {
     }
     expect(measuredBars, 'score bars with a visible fill').toBeGreaterThan(0);
 
+    // SPEC-123 D31: the selected file's left border is its non-colour cue, so it needs 3:1; the
+    // file links and the "View files" link show the focus outline.
+    const viewFiles = page
+      .getByTestId('output-files')
+      .getByRole('link', { name: /^View files of / })
+      .first();
+    await keyboardFocus(page, viewFiles);
+    await record(results, 'view files link focus outline', contrast(viewFiles, 'outline'));
+    await viewFiles.click();
+    const current = page
+      .getByRole('navigation', { name: 'Changed files' })
+      .locator('a[aria-current="page"]');
+    await expect(current).toBeVisible();
+    await page.addStyleTag({ content: '* { transition: none !important; }' });
+    await record(results, 'selected file border', contrast(current, 'border'));
+    await keyboardFocus(page, current);
+    await record(results, 'file link focus outline', contrast(current, 'outline'));
+
     await testInfo.attach('ui-contrast-ratios', {
       body: JSON.stringify(results, null, 2),
       contentType: 'application/json',

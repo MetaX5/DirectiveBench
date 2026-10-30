@@ -122,6 +122,48 @@ export async function listAgentRunFiles(
     .orderBy(asc(agentRunFiles.path));
 }
 
+/** Counts of one agent run's output files, for the run page (SPEC-123 FR-123-20). */
+export interface AgentRunFileCounts {
+  agentRunId: string;
+  /** Changed files listed, kept or not. */
+  files: number;
+  truncated: number;
+  /** Files listed without content, deleted files included. */
+  notKept: number;
+  /** UTF-8 bytes of the kept content. */
+  storedBytes: number;
+}
+
+/**
+ * The output-file counts of every agent run of a benchmark run that has at least one listed file,
+ * computed in SQL so no content is loaded (SPEC-123 FR-123-22).
+ */
+export async function countAgentRunFiles(
+  db: Database,
+  benchmarkRunId: string,
+): Promise<AgentRunFileCounts[]> {
+  const rows = await db
+    .select({
+      agentRunId: agentRunFiles.agentRunId,
+      files: sql<number>`count(*)`,
+      truncated: sql<number>`sum(case when ${agentRunFiles.kept} = 'truncated' then 1 else 0 end)`,
+      notKept: sql<number>`sum(case when ${agentRunFiles.kept} = 'none' then 1 else 0 end)`,
+      storedBytes: sql<number>`sum(${agentRunFiles.storedBytes})`,
+    })
+    .from(agentRunFiles)
+    .innerJoin(agentRuns, eq(agentRunFiles.agentRunId, agentRuns.id))
+    .where(eq(agentRuns.benchmarkRunId, benchmarkRunId))
+    .groupBy(agentRunFiles.agentRunId)
+    .orderBy(asc(agentRunFiles.agentRunId));
+  return rows.map((row) => ({
+    agentRunId: row.agentRunId,
+    files: Number(row.files),
+    truncated: Number(row.truncated),
+    notKept: Number(row.notKept),
+    storedBytes: Number(row.storedBytes),
+  }));
+}
+
 /**
  * One output file with its content, or null when the agent run does not belong to the benchmark
  * run or has no file at that path (SPEC-123 §8.3, FR-123-22).

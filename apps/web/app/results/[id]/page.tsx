@@ -1,5 +1,10 @@
 import type { Aggregate, ScoringSummary } from '@directivebench/benchmark-engine/scoring';
-import { getBenchmarkRunDetail } from '@directivebench/database';
+import {
+  countAgentRunFiles,
+  getBenchmarkRunDetail,
+  type AgentRunFileCounts,
+  type BenchmarkRunDetail,
+} from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -28,6 +33,13 @@ import {
   Table,
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
+import {
+  agentRunFilesHref,
+  agentRunLabel,
+  agentRunStatusBadge,
+  outputFilesRow,
+  wholeRunPredatesCapture,
+} from '@/lib/agent-run-files';
 import { isMockAgent } from '@/lib/mock-agent';
 import {
   agentProfileOf,
@@ -187,6 +199,107 @@ function AgentProfileCard({
   );
 }
 
+/**
+ * The "Output files" card (SPEC-123 FR-123-20, D21 to D27): one table per case with each agent
+ * run's file counts and a link to its files. Counts come from SQL; no file content is loaded.
+ */
+function OutputFilesCard({
+  runId,
+  running,
+  agentRuns,
+  counts,
+  variantLabel,
+}: {
+  runId: string;
+  running: boolean;
+  agentRuns: BenchmarkRunDetail['agentRuns'];
+  counts: AgentRunFileCounts[];
+  variantLabel: (variant: 'baseline' | 'candidate') => string;
+}) {
+  const countsByRun = new Map(counts.map((c) => [c.agentRunId, c]));
+  const cases = new Map<string, BenchmarkRunDetail['agentRuns']>();
+  for (const agentRun of agentRuns) {
+    cases.set(agentRun.caseId, [...(cases.get(agentRun.caseId) ?? []), agentRun]);
+  }
+  return (
+    <Card className="mt-4" data-testid="output-files">
+      <CardHeader>
+        <CardTitle>Output files</CardTitle>
+        <CardDescription>
+          Files each agent run added, changed or deleted. Up to 1 MB per file and 10 MB per agent
+          run are kept, with secrets redacted.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-stack">
+        {running ? (
+          <p className="text-body text-muted-foreground">
+            Files of finished agent runs appear here while the run continues.
+          </p>
+        ) : null}
+        {agentRuns.length === 0 ? (
+          <p className="text-body text-muted-foreground">No agent runs recorded.</p>
+        ) : wholeRunPredatesCapture(agentRuns) ? (
+          <p className="text-body text-muted-foreground">
+            Output files were not kept for this run.
+          </p>
+        ) : (
+          [...cases].map(([caseId, runs]) => (
+            <section key={caseId} className="space-y-1">
+              <h3 className="text-body font-medium">
+                Case <span className="font-mono">{caseId}</span>
+              </h3>
+              <Table aria-label={`Output files of case ${caseId}`}>
+                <THead>
+                  <TR>
+                    <TH>Agent run</TH>
+                    <TH>Status</TH>
+                    <TH className="text-right">Changed files</TH>
+                    <TH className="text-right">Kept</TH>
+                    <TH>Not complete</TH>
+                    <TH>
+                      <span className="sr-only">Files</span>
+                    </TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {runs.map((agentRun) => {
+                    const label = agentRunLabel(
+                      variantLabel(agentRun.variant),
+                      agentRun.repetition,
+                    );
+                    const row = outputFilesRow(agentRun, countsByRun.get(agentRun.id));
+                    const status = agentRunStatusBadge(agentRun);
+                    return (
+                      <TR key={agentRun.id} data-testid="output-files-row">
+                        <TD>{label}</TD>
+                        <TD>
+                          <Badge variant={status.variant}>{status.label}</Badge>
+                        </TD>
+                        <TD className="text-right tabular-nums">{row.changedFiles}</TD>
+                        <TD className="text-right tabular-nums">{row.kept}</TD>
+                        <TD>{row.notComplete}</TD>
+                        <TD>
+                          <Link
+                            className="text-primary-text underline"
+                            href={agentRunFilesHref(runId, agentRun.id)}
+                            aria-label={`View files of ${label}, case ${caseId}`}
+                          >
+                            View files
+                          </Link>
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </section>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
@@ -210,6 +323,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const baselineName = baselineLabel(baselineArtifactVersion);
   const candidateName = candidateLabel(artifactVersion);
   const warnings = runWarnings(run.warnings, profile);
+  const fileCounts = await countAgentRunFiles(handle.db, id);
 
   return (
     <>
@@ -344,6 +458,14 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </Card>
       ) : null}
 
+      <OutputFilesCard
+        runId={run.id}
+        running={run.status === 'running'}
+        agentRuns={agentRuns}
+        counts={fileCounts}
+        variantLabel={(variant) => (variant === 'baseline' ? baselineName : candidateName)}
+      />
+
       <Card className="mt-4">
         <CardHeader>
           <CardTitle>Agent runs</CardTitle>
@@ -367,20 +489,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                     {agentRun.caseId} · rep {agentRun.repetition}
                   </span>
                   <span className="tabular-nums">{formatScore(agentRun.score)}</span>
-                  <Badge
-                    variant={
-                      agentRun.passed
-                        ? 'success'
-                        : agentRun.passed === false
-                          ? 'destructive'
-                          : 'muted'
-                    }
-                  >
-                    {agentRun.executionStatus === 'completed'
-                      ? agentRun.passed
-                        ? 'passed'
-                        : 'failed'
-                      : agentRun.executionStatus}
+                  <Badge variant={agentRunStatusBadge(agentRun).variant}>
+                    {agentRunStatusBadge(agentRun).label}
                   </Badge>
                   {activation ? (
                     <Badge
