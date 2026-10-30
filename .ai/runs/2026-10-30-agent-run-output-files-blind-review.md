@@ -225,36 +225,117 @@ widths (D14), one `highlightTexts` job per render in the language of the path (F
    `apps/cli/test/benchmark-export.test.ts` (597b9e0).
 6. Stopped and returned D46 to D57 (no page code yet). All were approved as proposed on
    2026-10-30; the worktree was recreated from the remote branch.
+7. The UI (fa3dfc4):
+   - the review page `app/results/[id]/blind-review/page.tsx`, with its forms
+     (`blind-review-forms.tsx`: start, verdict, reveal);
+   - the "Blind review" card on the run page;
+   - the closed views (`closed-page.tsx`, the closed "Output files" and "Agent runs" cards);
+   - pair navigation, the reveal and the result helpers in `lib/blind-review.ts`;
+   - `e2e/blind-review.spec.ts` with `e2e/blind-review-seed.ts`;
+   - new controls and the real D12 neutral tint in `e2e/ui-contrast.spec.ts`;
+   - the `SideBySideDiff` docs page.
+   Without `?pair=` the review page redirects to a URL that names the pair (see the lesson).
+8. Browser QA findings 1 and 2 fixed, with Playwright regressions (94965bc).
+9. Codex round 1 finding fixed with `loadUnlessBlindReview` on the run, files and compare
+   pages, with unit tests (b2f09ed). SPEC-123 §20 and SPEC-006 (§3.16, §3.17) updated.
+
+## Decisions during the UI
+
+- **Default pair in the URL.** The page redirects `/blind-review` to `?pair=<first open>`. If it
+  did not, recording a verdict revalidated the page at the *next* open pair, and the result line
+  of D52 was lost. The first e2e run found this; the lesson below records it.
+- **Outline button borders are not measured.** The outline variant's border is 1.26:1 in light,
+  and the same holds for every outline button in the app (for example "Compare" and "Remove").
+  The verdict buttons are named by their text and their focus outline reaches 3:1, which
+  `ui-contrast` measures. The border is the design system's and is left as it is (follow-up).
+- **Browser QA findings declined:**
+  - Focus is at the start of the document after a navigation through "Start blind review" or
+    "Continue the blind review". That is a page navigation, as everywhere in the app.
+  - The reveal panel repeats the card's sentence. That is D53 as approved.
+  - Escape does not close the panel. This is not in D53; "Cancel" does.
 
 ## Verification
 
-Plumbing only (before the UI decisions), on 597b9e0:
+- **Red first:**
+  - With the closed views removed (`closed = false`, no check on the files and compare pages)
+    and the app rebuilt, `blind-review.spec.ts` failed the identification test. Its HTML and
+    RSC payloads named agent-run ids and changed paths.
+  - QA finding 1 (double submit): the regression failed on the build before the fix ("This
+    pair already has a verdict.").
+  - QA finding 2 (case id wrapping mid-word): the regression failed with the old cell classes
+    ("case id lines at 1280px").
+  - Codex round 1: a unit test flips the review state during the load.
+- **Full gate on b2f09ed**, all with `TMPDIR=/var/tmp/mateusz-tmp`:
+  - `pnpm lint` 0, `pnpm format:check` 0, `pnpm typecheck` 0.
+  - `pnpm test` 0: web 476, database 184, cli 160, engine 516, core 286, adapters 362
+    + 2 skipped, runner 235; 100% coverage, no threshold change, no `v8 ignore`.
+  - `pnpm build` 0, `pnpm verify:pack` 0 ("Packaging verification passed").
+  - `pnpm test:e2e` 103 passed: 11 in `blind-review.spec.ts`, 2 new in `ui-contrast`.
+  - `pnpm test:storybook` 304 passed.
+- **Real app:** the built CLI ran `directivebench demo` in a fresh data directory under
+  `/var/tmp/mateusz-tmp`, with a fake `claude` on `PATH` (no real `claude` was run), and was
+  served on port 4440. On the demo run, before and after the fixes:
+  - The card showed "3 pairs: …". Start went to `?pair=1`.
+  - The run page had 0 `agent-run` elements and the closed cards, in light and dark.
+  - At 320 px, `scrollWidth` was 320.
+  - Three verdicts, each with its result line, then the reveal. The summary was "Candidate
+    preferred in 1 of 3 pairs, baseline in 1, about the same in 1, no verdict in 0."; the run
+    card showed "Human blind review" and the 6 agent runs were back.
+  - No console or page errors.
+  - `benchmark export` of a second demo run with an open review printed the warning on stderr
+    and kept `--json` on stdout.
+- **Browser QA agent** (Playwright; `agent-browser` is not installed) on the built app:
+  - No high findings, and no leak that identifies a side, through the HTML, the RSC payload,
+    ids, ordering, classes or titles.
+  - Two findings confirmed and fixed (above); three declined (above).
+  - Everything else passed: invalid and forged queries, two tabs on one pair, the 2,000
+    character limit, hostile notes shown as text, keyboard and focus, both themes, 320 px,
+    contrast, and no new en or em dash.
+- **Not verified:**
+  - Screen readers other than the accessibility tree that Playwright reads.
+  - A verdict or a reveal posted from a stale tab after another tab revealed. The unit tests
+    cover the repository and the actions.
+  - AC-3 and AC-11 in a browser through a real capture (earlier phases, still open in §20).
 
-- `pnpm lint` 0, `pnpm format:check` 0, `pnpm typecheck` 0.
-- `pnpm test` 0: database 184 (19 new), web 465, cli 160, engine 516, core 286, adapters 362
-  + 2 skipped, runner 235; 100% coverage in every package.
-- Not run yet: `pnpm build`, `verify:pack`, `test:e2e`, `test:storybook`, the real app, the
-  browser QA agent and the Codex review (all after the UI).
+## Review
+
+- Codex adversarial review:
+  - Round 1, on 94965bc: needs-attention, one high finding. The files and compare pages
+    checked for an open review only before their awaits. Fixed in b2f09ed.
+  - Round 2, on b2f09ed: approve, no material findings.
 
 ## Problems and deviations
 
 - **`TMPDIR` under `$HOME` fails the fake-`claude` tests.** With
   `TMPDIR=/home/mateusz/.cache/tmp`, eight `apps/cli/test/benchmark-run.test.ts` cases failed,
-  also on `main`: the workspaces then lie below `/home/mateusz`, and the Claude Code adapter
+  also on `main`. The workspaces then lie below `/home/mateusz`, and the Claude Code adapter
   correctly refuses a workspace with an ancestor `.claude` / `.claude.json`
-  (`workspace-contains-claude-config`). The tests ran with `TMPDIR=/var/tmp/directivebench-br5`
-  (on disk, not `tmpfs`, outside `$HOME`), which is removed at the end. Recorded as a lesson
+  (`workspace-contains-claude-config`). The plumbing tests ran with
+  `TMPDIR=/var/tmp/directivebench-br5`; after the decisions, the maintainer's setting
+  `TMPDIR=/var/tmp/mateusz-tmp` (on disk, outside `$HOME`) was used. Recorded as a lesson
   update.
+- At the decision stop, the cleanup removed a `cursor-agent-logs-1000` directory from
+  `~/.cache/tmp`. It belongs to another tool (its date matched a test run of this one). From
+  then on, only this run's own paths were removed.
+- Twice a `pkill`/`pgrep -f` pattern matched this run's own shell command line and ended it
+  (exit 144). This is the known pitfall of the 2026-10-14 lesson. Servers were then stopped
+  by port only.
 
 ## Lessons recorded
 
 - Updated [Keep worktrees and large data off `/tmp`](../lessons/2026-10-30-keep-heavy-data-off-tmp.md):
   a disk `TMPDIR` must lie outside `$HOME`, or the fake-`claude` tests are refused for the
   ancestor `~/.claude`.
+- [A view guard on a server page is the last await before the render, and a default selection belongs in the URL](../lessons/2026-10-30-guard-labelled-views-at-render-time.md).
 
 ## Follow-ups
 
-None yet.
+- SPEC-123 stays open (`Refs #152`). AC-3 and AC-11 still need a browser check through a real
+  capture (a planted secret, an `assertion-error` agent run); NFR-123-01 has no timing test.
+- The outline `Button` border is 1.26:1 in light mode (design system, all outline buttons).
+- A narrower repository read for the run, files, compare and review pages, instead of
+  `getBenchmarkRunDetail` with every trace (carried over from Phase 4).
+- Restarting or discarding a review, and a blind export (§19).
 
 ## Progress
 
@@ -272,11 +353,11 @@ PR: #167
 
 ### Phase 2: UI
 
-- [ ] 2.1 Review page, run-page card and summary, closed labelled views
-- [ ] 2.2 Playwright tests and contrast
+- [x] 2.1 Review page, run-page card and summary, closed labelled views — fa3dfc4
+- [x] 2.2 Playwright tests and contrast — fa3dfc4
 
 ### Phase 3: Verification
 
-- [ ] 3.1 Full gate, red-first proof and real-app proof
+- [x] 3.1 Full gate, red-first proof and real-app proof — b2f09ed
 - [ ] 3.2 Browser QA agent, Codex adversarial review and om-auto-review-pr
-- [ ] 3.3 SPEC-123 §20, run log, lessons
+- [x] 3.3 SPEC-123 §20, run log, lessons
