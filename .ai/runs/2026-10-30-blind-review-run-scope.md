@@ -3,7 +3,7 @@ title: Scope blind-review verdict and reveal to the benchmark run named in the f
 date: 2026-10-30
 agent: Claude Code / claude-opus-5-5
 trigger: issue #170 (om-auto-fix-issue)
-status: in-progress
+status: completed
 branch: fix/blind-review-run-scope
 specs: [SPEC-123, SPEC-014]
 ---
@@ -43,7 +43,10 @@ conditional statement (SPEC-014); a mismatched run id is refused and changes not
 
 ## Work performed
 
-See the commits on `fix/blind-review-run-scope`.
+1. `758dce2` fix(database): scope blind-review verdict and reveal to the posted run (repository,
+   actions, outcome mapping, database and action tests).
+2. `c47fe49` test(web): refuse a forged verdict and reveal in the browser (`blind-review.spec.ts`).
+3. docs(specs): SPEC-123 §8.3, §10, §13, §20, this run log and the lesson.
 
 ## Verification
 
@@ -55,11 +58,24 @@ Red-first (before the fix, on f31c896 plus the new tests only):
   and `{ kind: 'success', message: 'Variants revealed. The blind review has ended.' }`, and run B's
   pair got `verdict: "a"` and its review a `revealedAt`.
 
-After the fix: see the final section below.
+After the fix:
+
+| Command | Result |
+| --- | --- |
+| `pnpm lint && pnpm format:check && pnpm typecheck` | pass |
+| `pnpm test` | pass, 7/7 tasks; 100% in `@directivebench/database` (744/337/190/658) and `@directivebench/web` (1288/992/238/1117) |
+| `pnpm build` / `pnpm verify:pack` | pass / "Packaging verification passed" |
+| `pnpm test:e2e` | 109 passed, including the new forged-post test |
+| `pnpm test:storybook` | 304 passed |
+| Codex adversarial review | round 1 needs-attention (no findings; gates not run in its sandbox), round 2 approve |
+
+Not verified: the new e2e test was not run against the pre-fix build (red-first is shown by the
+database and action tests); no exploratory browser QA agent was run, since the only UI change is
+two error strings reachable only by a forged post, covered by the e2e test.
 
 ## Problems and deviations
 
-None so far.
+None. The skill's branch name `fix/issue-170-…` was replaced by `fix/blind-review-run-scope` as the brief asked.
 
 ## Lessons recorded
 
