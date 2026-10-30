@@ -117,6 +117,8 @@ export function verdictState(outcome: RecordBlindVerdictOutcome): BlindReviewFor
       return { kind: 'error', message: 'This pair already has a verdict.' };
     case 'revealed':
       return { kind: 'error', message: 'This review was revealed; verdicts are closed.' };
+    case 'other-run':
+      return { kind: 'error', message: 'This pair belongs to another benchmark run.' };
     case 'not-found':
       return { kind: 'error', message: 'This pair no longer exists.' };
   }
@@ -129,6 +131,8 @@ export function revealState(outcome: RevealBlindReviewOutcome): BlindReviewFormS
       return { kind: 'success', message: 'Variants revealed. The blind review has ended.' };
     case 'already-revealed':
       return { kind: 'success', message: 'This review was already revealed.' };
+    case 'other-run':
+      return { kind: 'error', message: 'This review belongs to another benchmark run.' };
     case 'not-found':
       return { kind: 'error', message: 'This review no longer exists.' };
   }

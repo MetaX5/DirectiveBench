@@ -368,7 +368,8 @@ export async function startBlindReviewAction(
 
 /**
  * Records the verdict of one pair (SPEC-123 FR-123-53). The repository writes it with one
- * conditional statement, so a decided pair or a revealed review is refused, never overwritten.
+ * conditional statement, so a decided pair, a revealed review or a pair of another run's review
+ * is refused, never overwritten.
  */
 export async function recordBlindVerdictAction(
   _previous: BlindReviewFormState,
@@ -382,12 +383,17 @@ export async function recordBlindVerdictAction(
   });
   if (!input.success) return refused(input.error, 'note', fieldText(formData.get('note')));
   const { benchmarkRunId, pairId, verdict, note } = input.data;
-  const outcome = await recordBlindVerdict(requireDatabase().db, { pairId, verdict, note });
+  const outcome = await recordBlindVerdict(requireDatabase().db, {
+    benchmarkRunId,
+    pairId,
+    verdict,
+    note,
+  });
   refreshRun(benchmarkRunId);
   return verdictState(outcome);
 }
 
-/** Reveals every pair of a review and ends it (SPEC-123 FR-123-54). */
+/** Reveals every pair of a review of the posted run and ends it (SPEC-123 FR-123-54). */
 export async function revealBlindReviewAction(
   _previous: BlindReviewFormState,
   formData: FormData,
@@ -398,7 +404,7 @@ export async function revealBlindReviewAction(
   });
   if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
   const { benchmarkRunId, reviewId } = input.data;
-  const outcome = await revealBlindReview(requireDatabase().db, reviewId);
+  const outcome = await revealBlindReview(requireDatabase().db, { benchmarkRunId, reviewId });
   refreshRun(benchmarkRunId);
   return revealState(outcome);
 }

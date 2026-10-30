@@ -337,15 +337,17 @@ export async function hasUnrevealedBlindReview(
   return row !== undefined;
 }
 
-export type RecordBlindVerdictOutcome = 'recorded' | 'already-decided' | 'revealed' | 'not-found';
+export type RecordBlindVerdictOutcome =
+  'recorded' | 'already-decided' | 'revealed' | 'other-run' | 'not-found';
 
 /**
  * Records the verdict of one pair with one conditional statement: it succeeds only while the pair
- * has no verdict and its review is not revealed (FR-123-53). A recorded verdict never changes.
+ * has no verdict and belongs to the unrevealed review of `benchmarkRunId` (FR-123-53). A recorded
+ * verdict never changes, and a pair of another run's review is refused as `other-run`.
  */
 export async function recordBlindVerdict(
   db: Database,
-  input: { pairId: string; verdict: BlindVerdict; note: string | null },
+  input: { benchmarkRunId: string; pairId: string; verdict: BlindVerdict; note: string | null },
 ): Promise<RecordBlindVerdictOutcome> {
   const [updated] = await db
     .update(blindReviewPairs)
@@ -359,41 +361,57 @@ export async function recordBlindVerdict(
           db
             .select({ id: blindReviews.id })
             .from(blindReviews)
-            .where(isNull(blindReviews.revealedAt)),
+            .where(
+              and(
+                eq(blindReviews.benchmarkRunId, input.benchmarkRunId),
+                isNull(blindReviews.revealedAt),
+              ),
+            ),
         ),
       ),
     )
     .returning({ id: blindReviewPairs.id });
   if (updated) return 'recorded';
   const row = await db
-    .select({ revealedAt: blindReviews.revealedAt })
+    .select({ benchmarkRunId: blindReviews.benchmarkRunId, revealedAt: blindReviews.revealedAt })
     .from(blindReviewPairs)
     .innerJoin(blindReviews, eq(blindReviewPairs.reviewId, blindReviews.id))
     .where(eq(blindReviewPairs.id, input.pairId))
     .get();
   if (!row) return 'not-found';
+  if (row.benchmarkRunId !== input.benchmarkRunId) return 'other-run';
   return row.revealedAt === null ? 'already-decided' : 'revealed';
 }
 
-export type RevealBlindReviewOutcome = 'revealed' | 'already-revealed' | 'not-found';
+export type RevealBlindReviewOutcome = 'revealed' | 'already-revealed' | 'other-run' | 'not-found';
 
-/** Reveals every pair of a review and ends it, with one conditional statement (FR-123-54, A9). */
+/**
+ * Reveals every pair of a review and ends it, with one conditional statement that also matches
+ * the review to `benchmarkRunId`; another run's review is refused as `other-run` (FR-123-54, A9).
+ */
 export async function revealBlindReview(
   db: Database,
-  reviewId: string,
+  input: { benchmarkRunId: string; reviewId: string },
 ): Promise<RevealBlindReviewOutcome> {
   const [updated] = await db
     .update(blindReviews)
     .set({ revealedAt: nowIso() })
-    .where(and(eq(blindReviews.id, reviewId), isNull(blindReviews.revealedAt)))
+    .where(
+      and(
+        eq(blindReviews.id, input.reviewId),
+        eq(blindReviews.benchmarkRunId, input.benchmarkRunId),
+        isNull(blindReviews.revealedAt),
+      ),
+    )
     .returning({ id: blindReviews.id });
   if (updated) return 'revealed';
   const row = await db
-    .select({ id: blindReviews.id })
+    .select({ benchmarkRunId: blindReviews.benchmarkRunId })
     .from(blindReviews)
-    .where(eq(blindReviews.id, reviewId))
+    .where(eq(blindReviews.id, input.reviewId))
     .get();
-  return row ? 'already-revealed' : 'not-found';
+  if (!row) return 'not-found';
+  return row.benchmarkRunId === input.benchmarkRunId ? 'already-revealed' : 'other-run';
 }
 
 /** One side of a revealed pair. */

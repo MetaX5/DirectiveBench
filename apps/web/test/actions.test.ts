@@ -844,6 +844,31 @@ describe('blind review actions (SPEC-123 §10)', () => {
     expect(next.revalidatePath).toHaveBeenCalledWith(`/results/${runId}`, 'layout');
   });
 
+  it("refuses a verdict or a reveal posted with another run's pair or review and changes nothing (issue #170)", async () => {
+    const own = await startedReview();
+    const other = await startedReview();
+    const stored = async () => [
+      await getBlindReviewForReviewer(handle.db, own.runId),
+      await getBlindReviewForReviewer(handle.db, other.runId),
+    ];
+    const before = await stored();
+    expect(
+      await recordBlindVerdictAction(
+        idle,
+        form({ benchmarkRunId: own.runId, pairId: other.pairId, verdict: 'a', note: 'forged' }),
+      ),
+    ).toEqual({ kind: 'error', message: 'This pair belongs to another benchmark run.' });
+    expect(
+      await revealBlindReviewAction(
+        idle,
+        form({ benchmarkRunId: own.runId, reviewId: other.reviewId }),
+      ),
+    ).toEqual({ kind: 'error', message: 'This review belongs to another benchmark run.' });
+    expect(await stored()).toEqual(before);
+    expect(before.map((view) => view!.review.revealedAt)).toEqual([null, null]);
+    expect(before.flatMap((view) => view!.pairs.map((pair) => pair.verdict))).toEqual([null, null]);
+  });
+
   it('stores a missing or blank note as no note, and keeps an overlong note in the form', async () => {
     const { runId, pairId } = await startedReview();
     const long = 'x'.repeat(2_001);

@@ -351,9 +351,13 @@ flowchart LR
 - `getBlindPairFiles(db, { benchmarkRunId, position, side })` → file list and content for side
   A or B, with no variant field and no agent-run id.
 - `hasUnrevealedBlindReview(db, benchmarkRunId)` → boolean (FR-123-52a).
-- `recordBlindVerdict(db, { pairId, verdict, note })` → `recorded | already-decided | revealed |
-  not-found` (one conditional `UPDATE … WHERE verdict IS NULL AND review not revealed RETURNING`).
-- `revealBlindReview(db, reviewId)` → `revealed | already-revealed | not-found`.
+- `recordBlindVerdict(db, { benchmarkRunId, pairId, verdict, note })` → `recorded |
+  already-decided | revealed | other-run | not-found` (one conditional `UPDATE … WHERE verdict IS
+  NULL AND review of benchmarkRunId not revealed RETURNING`; a pair of another run's review is
+  `other-run`, issue #170).
+- `revealBlindReview(db, { benchmarkRunId, reviewId })` → `revealed | already-revealed |
+  other-run | not-found` (one conditional `UPDATE … WHERE id AND benchmark_run_id AND revealed_at
+  IS NULL RETURNING`; another run's review is `other-run`, issue #170).
 - `getBlindReviewResult(db, benchmarkRunId)` → variant per side and summary counts, only when
   revealed (returns null otherwise).
 
@@ -377,8 +381,10 @@ repositories; it never touches the file system or starts a process (SPEC-014 §3
 ## 10. API and interface design
 
 - Server actions in `apps/web/lib/actions.ts`: `startBlindReviewAction(benchmarkRunId)`,
-  `recordBlindVerdictAction({ pairId, verdict, note })`, `revealBlindReviewAction(reviewId)`;
-  each parses its input with a Zod schema, calls one repository function, maps the outcome to the
+  `recordBlindVerdictAction({ benchmarkRunId, pairId, verdict, note })`,
+  `revealBlindReviewAction({ benchmarkRunId, reviewId })`; each parses its input with a Zod
+  schema, calls one repository function with the posted benchmark run id (so a pair or review of
+  another run is refused in the same conditional write, never changed), maps the outcome to the
   typed result of SPEC-008 and revalidates the review path.
 - Page query parameters (`case`, `left`, `right`, `path`, `pair`, `side`) are parsed with Zod;
   an invalid or foreign value renders not-found, never a different run's data.
@@ -481,6 +487,7 @@ design-system components):
 | Export target not empty / exists as a file | Exit 2, nothing written. |
 | Export write error mid-way | Exit 1, message names the directory and the last file written; nothing is deleted. |
 | Verdict on a decided pair or a revealed review | Action returns `already-decided` / `revealed`; the page shows "This pair already has a verdict." / "This review was revealed; verdicts are closed." |
+| Verdict or reveal posted with the id of another run's pair or review (issue #170) | Repository returns `other-run` and changes nothing; the page shows "This pair belongs to another benchmark run." / "This review belongs to another benchmark run." |
 | Start review with no eligible pair | Button not offered; a forged action returns "No pair of completed agent runs with kept files." |
 | Run or agent run not found / foreign ids | Not-found page. |
 | Syntax highlighter cannot be created or throws on a file (Phase 3a) | Plain text with "Syntax highlighting failed, so this file is shown as plain text."; server log without file content; the page renders (FR-123-74). The next request retries creation. |
@@ -842,6 +849,14 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
     with the timeout note while the server answers (AC-16)" and
     `apps/web/test/syntax-highlight-worker.test.ts` (a stalled worker terminated at the deadline,
     event-loop delay probe).
+- **Run scope of verdict and reveal (issue #170; run log
+  [2026-10-30-blind-review-run-scope](../../runs/2026-10-30-blind-review-run-scope.md),
+  verified on 2026-10-30):** `recordBlindVerdict` and `revealBlindReview` take the benchmark run
+  id and match it in their conditional write (§8.3), and refuse a pair or review of another run
+  as `other-run` without a change. Verified by `packages/database/test/blind-reviews.test.ts`
+  ("refuses a verdict or a reveal for a pair or review of another run and changes nothing"),
+  `apps/web/test/actions.test.ts` (forged form posts) and `apps/web/e2e/blind-review.spec.ts`
+  ("a verdict or reveal posted under another run is refused and changes nothing").
 - The design-system components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
   `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
   ([2026-10-29-spec-123-design-system-components](../../runs/2026-10-29-spec-123-design-system-components.md)).
