@@ -9,6 +9,7 @@ export {
 } from './schema';
 export * from './repositories/artifacts';
 export * from './repositories/benchmarks';
+export * from './repositories/blind-reviews';
 export * from './repositories/catalog';
 export * from './repositories/jobs';
 export * from './repositories/runs';

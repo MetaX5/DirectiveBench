@@ -47,6 +47,9 @@ erDiagram
   benchmark_runs ||--o{ agent_runs : contains
   agent_runs ||--o{ assertion_results : produces
   agent_runs ||--o{ agent_run_files : "kept output files"
+  benchmark_runs ||--o| blind_reviews : "blind review"
+  blind_reviews ||--o{ blind_review_pairs : "pairs"
+  agent_runs ||--o{ blind_review_pairs : "side A or B"
   fixture_versions ||..o{ agent_runs : "fixture (logical ref)"
 ```
 
@@ -252,6 +255,26 @@ Planned index: (comparability_key, started_at) once comparison views query by ke
 | stored_bytes | int NOT NULL default 0 | UTF-8 bytes of `content` |
 | redactions | int NOT NULL default 0 | secret ranges replaced in `content` |
 
+### 3.16 `blind_reviews` (SPEC-123 §8.1, migration `0004`)
+| Column | Type | Notes |
+|---|---|---|
+| id | text PK | `brev_…` |
+| benchmark_run_id | text NOT NULL | FK → benchmark_runs (cascade); **U** (one review per run) |
+| created_at | text NOT NULL | |
+| revealed_at | text | set once, by a conditional update |
+
+### 3.17 `blind_review_pairs` (SPEC-123 §8.1, migration `0004`)
+| Column | Type | Notes |
+|---|---|---|
+| id | text PK | `bpair_…` |
+| review_id | text NOT NULL | FK → blind_reviews (cascade); **U** (review_id, position) |
+| position | int NOT NULL | 1-based, shuffled with `crypto.randomInt` |
+| case_id | text NOT NULL | |
+| a_agent_run_id, b_agent_run_id | text NOT NULL | FK → agent_runs (cascade); CHECK they differ; sides drawn with `crypto.randomInt` |
+| verdict | text | `a` \| `b` \| `tie` (CHECK); immutable once set |
+| note | text | the reviewer's text, at most 2,000 characters |
+| decided_at | text | |
+
 ## 4. Deletion semantics
 
 - Results are protected: `benchmark_runs` FKs to suite/artifact versions have no `ON DELETE` action, so deleting a referenced version — or an artifact/suite whose cascade would reach such a version — fails with a foreign-key error. Repository code must check first and return a domain error (prefer archiving over deletion).
@@ -294,6 +317,7 @@ Each lands with its feature spec ([SPEC-105](2026-10-14-repository-synchronizati
 - **Implemented (verified by `packages/database/test/{client,artifacts,benchmarks,jobs,runs,catalog}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-14 and 2026-10-15):** all 14 tables of §3 with listed keys and indexes (`schema.ts`, `migrations/0000_init.sql`; migrations idempotent); `node:sqlite` client with WAL, `busy_timeout = 5000`, `foreign_keys = ON`; forward-only `migrateDatabase()` applying all pending migrations in one `BEGIN IMMEDIATE` transaction; `withTransaction()` (IMMEDIATE, serialised per connection); repository functions for artifacts, catalog (categories seeding, repositories, dashboard stats), benchmarks, jobs (atomic `UPDATE … RETURNING` acquisition in FIFO order, cancellation, stale recovery, and `interruptJobs` — shared by stale recovery and the capped graceful shutdown, it marks jobs and their running benchmark runs `interrupted`, verified by `runner.test.ts` on 2026-10-15) and runs; `drizzle-kit generate` script; ID prefixes above.
 - **Implemented (verified by `packages/database/test/{client,jobs,catalog}.test.ts` on 2026-10-19):** `jobs.result` (migration `0001_add_job_result`; a test applies it to a database migrated to `0000` with an existing job, checks the row survives with `result = null`, and rehearses the rollback `ALTER TABLE jobs DROP COLUMN result` back to the `0000` table shape); job type `repository-registration` with `enqueueRepositoryRegistrationJob` and `getRepositoryRegistration` (payload and result validated on read); `registerLocalRepository` (single conditional insert, returns the existing row); `listRepositories` with an active-occurrence artifact count; `listJobs` returns `benchmark-run` jobs only.
 - **Implemented without a migration (issue #16, verified by `packages/database/test/{jobs,artifacts,catalog,client}.test.ts` on 2026-10-19):** job type `repository-scan` (`jobs.type` is unconstrained text, so no DDL changes); `enqueueRepositoryScanJob`, `getRepositoryScan`, `applyRepositoryScan`, `markRepositoryScanFailed`, `getRepository`; `registerLocalRepository` checks FR-104-18 and inserts in one `withTransaction`; `acquireNextJob` optionally limited to job types; `finishJob` guarded against overwriting a terminal status; statements outside a running `withTransaction` on the same connection wait for it.
+- **Implemented (SPEC-123 Phase 5, verified by `packages/database/test/{client,blind-reviews}.test.ts` on 2026-10-30):** `blind_reviews` and `blind_review_pairs` (§3.16, §3.17, migration `0004_blind_reviews`; a test applies it to a database migrated to `0003`, checks the unique indexes, both CHECKs, the foreign keys and the cascades, and rehearses the rollback to the `0003` shape) and the blind-review repository functions of SPEC-123 §8.3.
 - **Implemented (SPEC-123 Phase 1, verified by `packages/database/test/{client,runs}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-29):** `agent_runs.output_files_kept`/`output_files_reason` and `agent_run_files` (§3.15, migration `0003_agent_run_output_files`; a test applies it to a database migrated to `0002` with an existing agent run, which reads as not kept with no reason, and rehearses the rollback back to the `0002` shape); `insertAgentRun` stores the files in the agent run's transaction; `listAgentRunFiles` (metadata only) and `getAgentRunFile` (scoped to the benchmark run); cascade removal with the benchmark run.
 - **Partially:** deletion guards in §4 rely on FK constraints only (no explicit repository checks or domain errors; no delete operations are exposed yet).
 - **Not implemented:** pre-migration backups, downgrade detection, `(comparability_key, started_at)` index, orphan fixture cleanup, all planned tables in §7, PostgreSQL backend.

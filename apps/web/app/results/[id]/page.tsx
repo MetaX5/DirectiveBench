@@ -2,10 +2,18 @@ import type { Aggregate, ScoringSummary } from '@directivebench/benchmark-engine
 import {
   countAgentRunFiles,
   getBenchmarkRunDetail,
+  getBlindReviewEligibility,
+  getBlindReviewForReviewer,
+  getBlindReviewResult,
+  hasUnrevealedBlindReview,
   type AgentRunFileCounts,
   type BenchmarkRunDetail,
+  type BlindReviewEligibility,
+  type BlindReviewForReviewer,
+  type BlindReviewResult,
 } from '@directivebench/database';
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { AutoRefresh } from '@/components/auto-refresh';
@@ -40,6 +48,16 @@ import {
   outputFilesRow,
   wholeRunPredatesCapture,
 } from '@/lib/agent-run-files';
+import {
+  BLIND_REVIEW_CLOSED_NOTICE,
+  blindReviewHref,
+  blindReviewSummaryText,
+  decidedText,
+  eligiblePairsText,
+  excludedPairsText,
+  loadUnlessBlindReview,
+  startUnavailableText,
+} from '@/lib/blind-review';
 import { compareHref } from '@/lib/compare-files';
 import { isMockAgent } from '@/lib/mock-agent';
 import {
@@ -58,6 +76,8 @@ import {
   type AgentProfile,
 } from '@/lib/run-detail';
 import { cn, formatDate, formatDelta, formatDuration, formatScore } from '@/lib/utils';
+
+import { StartBlindReviewForm } from './blind-review/blind-review-forms';
 
 export const metadata: Metadata = { title: 'Benchmark run' };
 
@@ -311,6 +331,113 @@ function OutputFilesCard({
   );
 }
 
+/**
+ * The "Blind review" card (SPEC-123 D46, D47): start, progress or the revealed summary
+ * ("Human blind review"), next to the verdict and never inside it; it changes no score.
+ */
+function BlindReviewCard({
+  runId,
+  status,
+  mock,
+  review,
+  result,
+  eligibility,
+}: {
+  runId: string;
+  status: BenchmarkRunDetail['run']['status'];
+  mock: boolean;
+  review: BlindReviewForReviewer | null;
+  result: BlindReviewResult | null;
+  eligibility: BlindReviewEligibility | null;
+}) {
+  const href = blindReviewHref(runId);
+  let body: ReactNode;
+  if (result) {
+    body = (
+      <>
+        <p className="text-ui font-medium text-muted-foreground">Human blind review</p>
+        <p className="text-body" data-testid="blind-review-summary">
+          {blindReviewSummaryText(result.summary)}
+        </p>
+        <p className="text-ui text-muted-foreground">Revealed {formatDate(result.revealedAt)}.</p>
+        <Link className="text-body text-primary-text underline" href={href}>
+          View the review
+        </Link>
+      </>
+    );
+  } else if (review) {
+    body = (
+      <>
+        <p className="text-body" data-testid="blind-review-progress">
+          {decidedText(review.pairs)}
+        </p>
+        <Link className="text-body text-primary-text underline" href={href}>
+          Continue the blind review
+        </Link>
+      </>
+    );
+  } else {
+    // Without a review the page always reads the eligibility.
+    const counts = eligibility!;
+    const unavailable = startUnavailableText(status, counts);
+    body = (
+      <>
+        <p className="text-body">
+          Judge the outputs of baseline and candidate as unlabelled pairs A and B, then reveal which
+          was which. While the review is open, labelled output files and agent runs are hidden.
+        </p>
+        {unavailable ? (
+          <p className="text-body" data-testid="blind-review-unavailable">
+            {unavailable}
+          </p>
+        ) : (
+          <p className="text-body">{eligiblePairsText(counts.eligible)}</p>
+        )}
+        {status === 'completed' && excludedPairsText(counts).length > 0 ? (
+          <ul className="list-inside list-disc text-ui text-muted-foreground">
+            {excludedPairsText(counts).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+        {unavailable ? null : <StartBlindReviewForm benchmarkRunId={runId} />}
+      </>
+    );
+  }
+  return (
+    <Card className="mt-4" data-testid="blind-review">
+      <CardHeader>
+        <CardTitle>Blind review</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-stack">
+        {mock ? (
+          <p>
+            <MockBadge />
+          </p>
+        ) : null}
+        {body}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A labelled view while a blind review is unrevealed (FR-123-52a, D55): title and notice only. */
+function ClosedCard({ title, runId, testId }: { title: string; runId: string; testId: string }) {
+  return (
+    <Card className="mt-4" data-testid={testId}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-stack text-body">
+        <p>{BLIND_REVIEW_CLOSED_NOTICE}</p>
+        <Link className="text-primary-text underline" href={blindReviewHref(runId)}>
+          Continue the blind review
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
@@ -334,7 +461,18 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const baselineName = baselineLabel(baselineArtifactVersion);
   const candidateName = candidateLabel(artifactVersion);
   const warnings = runWarnings(run.warnings, profile);
-  const fileCounts = await countAgentRunFiles(handle.db, id);
+  const review = await getBlindReviewForReviewer(handle.db, id);
+  const blindResult = review?.review.revealedAt ? await getBlindReviewResult(handle.db, id) : null;
+  const eligibility = review ? null : await getBlindReviewEligibility(handle.db, id);
+  // Decided right before rendering, as the last read (FR-123-52a): while a review is unrevealed
+  // no per-agent-run row reaches a component, so neither the HTML nor the RSC payload carries
+  // one, also when the review starts while this page loads.
+  const labelled = await loadUnlessBlindReview(
+    () => hasUnrevealedBlindReview(handle.db, id),
+    () => countAgentRunFiles(handle.db, id),
+  );
+  const closed = labelled.closed;
+  const fileCounts = labelled.closed ? [] : labelled.value;
 
   return (
     <>
@@ -439,6 +577,15 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </Card>
       )}
 
+      <BlindReviewCard
+        runId={run.id}
+        status={run.status}
+        mock={mock}
+        review={review}
+        result={blindResult}
+        eligibility={eligibility}
+      />
+
       <AgentProfileCard
         mock={mock}
         profile={profile}
@@ -469,142 +616,162 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </Card>
       ) : null}
 
-      <OutputFilesCard
-        runId={run.id}
-        running={run.status === 'running'}
-        agentRuns={agentRuns}
-        counts={fileCounts}
-        variantLabel={(variant) => (variant === 'baseline' ? baselineName : candidateName)}
-      />
+      {closed ? (
+        <>
+          <ClosedCard title="Output files" runId={run.id} testId="output-files-closed" />
+          <ClosedCard title="Agent runs" runId={run.id} testId="agent-runs-closed" />
+        </>
+      ) : (
+        <>
+          <OutputFilesCard
+            runId={run.id}
+            running={run.status === 'running'}
+            agentRuns={agentRuns}
+            counts={fileCounts}
+            variantLabel={(variant) => (variant === 'baseline' ? baselineName : candidateName)}
+          />
 
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>Agent runs</CardTitle>
-          <CardDescription>
-            Each run used a fresh workspace from the same fixture snapshot. Assertions are evaluated
-            against the resulting files.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {agentRuns.map((agentRun) => {
-            const activation = agentRunMetadata(agentRun.trace)?.skillActivation;
-            const usage = usageText(agentRun.usage, profile);
-            const counts = traceCounts(agentRun.trace);
-            return (
-              <details key={agentRun.id} className="rounded-surface border" data-testid="agent-run">
-                <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-body">
-                  <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
-                    {agentRun.variant === 'baseline' ? baselineName : candidateName}
-                  </Badge>
-                  <span className="font-mono text-ui">
-                    {agentRun.caseId} · rep {agentRun.repetition}
-                  </span>
-                  <span className="tabular-nums">{formatScore(agentRun.score)}</span>
-                  <Badge variant={agentRunStatusBadge(agentRun).variant}>
-                    {agentRunStatusBadge(agentRun).label}
-                  </Badge>
-                  {activation ? (
-                    <Badge
-                      variant={activation.invoked ? 'outline' : 'muted'}
-                      data-testid="skill-invoked"
-                    >
-                      {activation.invoked
-                        ? `Skill invoked (${activation.invocations})`
-                        : activation.loaded
-                          ? 'Skill not invoked'
-                          : 'Skill not loaded'}
-                    </Badge>
-                  ) : null}
-                  <span className="ml-auto text-ui text-muted-foreground">
-                    {formatDuration(agentRun.durationMs)}
-                  </span>
-                </summary>
-                <div className="space-y-3 border-t p-3">
-                  {agentRun.error ? (
-                    <p className="text-body text-destructive-foreground">{agentRun.error}</p>
-                  ) : null}
-                  <Table>
-                    <THead>
-                      <TR>
-                        <TH>Assertion</TH>
-                        <TH>Type</TH>
-                        <TH>Result</TH>
-                        <TH className="text-right">Weight</TH>
-                        <TH>Message</TH>
-                      </TR>
-                    </THead>
-                    <TBody>
-                      {agentRun.assertions.map((a) => (
-                        <TR key={a.id}>
-                          <TD className="font-mono text-ui">
-                            {a.assertionId}
-                            {a.required ? ' *' : ''}
-                          </TD>
-                          <TD>
-                            <Badge variant="outline">{a.type}</Badge>
-                            {a.deterministic ? null : (
-                              <Badge variant="warning" className="ml-1">
-                                nondeterministic
-                              </Badge>
-                            )}
-                          </TD>
-                          <TD>
-                            <Badge variant={a.passed ? 'success' : 'destructive'}>
-                              {a.passed ? 'pass' : assertionErrorOf(a.details) ? 'error' : 'fail'}
-                            </Badge>
-                          </TD>
-                          <TD className="text-right tabular-nums">{a.weight}</TD>
-                          <TD className="text-ui text-muted-foreground">
-                            <p>{a.message}</p>
-                            <AssertionDetails lines={assertionDetailLines(a.type, a.details)} />
-                          </TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </Table>
-                  <p className="text-ui text-muted-foreground">
-                    Changed files:{' '}
-                    {agentRun.changedFiles.length
-                      ? agentRun.changedFiles.map((f) => `${f.path} (${f.change})`).join(', ')
-                      : 'none'}{' '}
-                    · fixture{' '}
-                    <span className="font-mono">{agentRun.fixtureVersionId.slice(0, 12)}…</span>
-                  </p>
-                  <p className="text-ui text-muted-foreground" data-testid="agent-run-usage">
-                    Tokens: {usage.tokens} · Cost: {usage.cost}
-                    {mock
-                      ? null
-                      : !agentRunMetadata(agentRun.trace)
-                        ? ' · Tool calls, permission denials, retries: not reported'
-                        : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
-                  </p>
-                  <details>
-                    <summary className="cursor-pointer text-ui text-muted-foreground">
-                      Execution trace
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle>Agent runs</CardTitle>
+              <CardDescription>
+                Each run used a fresh workspace from the same fixture snapshot. Assertions are
+                evaluated against the resulting files.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {agentRuns.map((agentRun) => {
+                const activation = agentRunMetadata(agentRun.trace)?.skillActivation;
+                const usage = usageText(agentRun.usage, profile);
+                const counts = traceCounts(agentRun.trace);
+                return (
+                  <details
+                    key={agentRun.id}
+                    className="rounded-surface border"
+                    data-testid="agent-run"
+                  >
+                    <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-3 py-2 text-body">
+                      <Badge variant={agentRun.variant === 'baseline' ? 'destructive' : 'success'}>
+                        {agentRun.variant === 'baseline' ? baselineName : candidateName}
+                      </Badge>
+                      <span className="font-mono text-ui">
+                        {agentRun.caseId} · rep {agentRun.repetition}
+                      </span>
+                      <span className="tabular-nums">{formatScore(agentRun.score)}</span>
+                      <Badge variant={agentRunStatusBadge(agentRun).variant}>
+                        {agentRunStatusBadge(agentRun).label}
+                      </Badge>
+                      {activation ? (
+                        <Badge
+                          variant={activation.invoked ? 'outline' : 'muted'}
+                          data-testid="skill-invoked"
+                        >
+                          {activation.invoked
+                            ? `Skill invoked (${activation.invocations})`
+                            : activation.loaded
+                              ? 'Skill not invoked'
+                              : 'Skill not loaded'}
+                        </Badge>
+                      ) : null}
+                      <span className="ml-auto text-ui text-muted-foreground">
+                        {formatDuration(agentRun.durationMs)}
+                      </span>
                     </summary>
-                    <Pre className="mt-2">{JSON.stringify(agentRun.trace, null, 2)}</Pre>
+                    <div className="space-y-3 border-t p-3">
+                      {agentRun.error ? (
+                        <p className="text-body text-destructive-foreground">{agentRun.error}</p>
+                      ) : null}
+                      <Table>
+                        <THead>
+                          <TR>
+                            <TH>Assertion</TH>
+                            <TH>Type</TH>
+                            <TH>Result</TH>
+                            <TH className="text-right">Weight</TH>
+                            <TH>Message</TH>
+                          </TR>
+                        </THead>
+                        <TBody>
+                          {agentRun.assertions.map((a) => (
+                            <TR key={a.id}>
+                              <TD className="font-mono text-ui">
+                                {a.assertionId}
+                                {a.required ? ' *' : ''}
+                              </TD>
+                              <TD>
+                                <Badge variant="outline">{a.type}</Badge>
+                                {a.deterministic ? null : (
+                                  <Badge variant="warning" className="ml-1">
+                                    nondeterministic
+                                  </Badge>
+                                )}
+                              </TD>
+                              <TD>
+                                <Badge variant={a.passed ? 'success' : 'destructive'}>
+                                  {a.passed
+                                    ? 'pass'
+                                    : assertionErrorOf(a.details)
+                                      ? 'error'
+                                      : 'fail'}
+                                </Badge>
+                              </TD>
+                              <TD className="text-right tabular-nums">{a.weight}</TD>
+                              <TD className="text-ui text-muted-foreground">
+                                <p>{a.message}</p>
+                                <AssertionDetails lines={assertionDetailLines(a.type, a.details)} />
+                              </TD>
+                            </TR>
+                          ))}
+                        </TBody>
+                      </Table>
+                      <p className="text-ui text-muted-foreground">
+                        Changed files:{' '}
+                        {agentRun.changedFiles.length
+                          ? agentRun.changedFiles.map((f) => `${f.path} (${f.change})`).join(', ')
+                          : 'none'}{' '}
+                        · fixture{' '}
+                        <span className="font-mono">{agentRun.fixtureVersionId.slice(0, 12)}…</span>
+                      </p>
+                      <p className="text-ui text-muted-foreground" data-testid="agent-run-usage">
+                        Tokens: {usage.tokens} · Cost: {usage.cost}
+                        {mock
+                          ? null
+                          : !agentRunMetadata(agentRun.trace)
+                            ? ' · Tool calls, permission denials, retries: not reported'
+                            : ` · Tool calls: ${counts.toolCalls} · Permission denials: ${counts.permissionDenials} · Retries: ${counts.retries}`}
+                      </p>
+                      <details>
+                        <summary className="cursor-pointer text-ui text-muted-foreground">
+                          Execution trace
+                        </summary>
+                        <Pre className="mt-2">{JSON.stringify(agentRun.trace, null, 2)}</Pre>
+                      </details>
+                      <details>
+                        <summary className="cursor-pointer text-ui text-muted-foreground">
+                          Assertion details (raw)
+                        </summary>
+                        <Pre className="mt-2">
+                          {JSON.stringify(
+                            agentRun.assertions.map((a) => ({
+                              id: a.assertionId,
+                              details: a.details,
+                            })),
+                            null,
+                            2,
+                          )}
+                        </Pre>
+                      </details>
+                    </div>
                   </details>
-                  <details>
-                    <summary className="cursor-pointer text-ui text-muted-foreground">
-                      Assertion details (raw)
-                    </summary>
-                    <Pre className="mt-2">
-                      {JSON.stringify(
-                        agentRun.assertions.map((a) => ({ id: a.assertionId, details: a.details })),
-                        null,
-                        2,
-                      )}
-                    </Pre>
-                  </details>
-                </div>
-              </details>
-            );
-          })}
-          {agentRuns.length === 0 ? (
-            <p className="text-body text-muted-foreground">No agent runs recorded.</p>
-          ) : null}
-        </CardContent>
-      </Card>
+                );
+              })}
+              {agentRuns.length === 0 ? (
+                <p className="text-body text-muted-foreground">No agent runs recorded.</p>
+              ) : null}
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <Card className="mt-4">
         <CardHeader>

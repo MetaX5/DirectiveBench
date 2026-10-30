@@ -5,6 +5,7 @@ import { MOCK_AGENT_ID, resolveInside } from '@directivebench/agent-adapters';
 import {
   getAgentRunFile,
   getBenchmarkRunDetail,
+  hasUnrevealedBlindReview,
   listAgentRunFiles,
   type AgentRunFileSummary,
   type BenchmarkRunDetail,
@@ -385,6 +386,10 @@ export function exportSummaryText(manifest: ExportManifest, dir: string): string
   return lines;
 }
 
+/** Printed when the run has an unrevealed blind review (FR-123-52a). */
+export const BLIND_REVIEW_WARNING =
+  'Warning: a blind review of this run is in progress. The export names the variant of every agent run, so reading it before you reveal the review ends its blindness.';
+
 /**
  * `directivebench benchmark export <run-id> --out <dir> [--json]` (SPEC-123 §6.4): writes every
  * kept output file of a benchmark run to `<dir>/files/<caseId>/<variant>-<repetition>/<path>` and
@@ -397,6 +402,11 @@ export async function benchmarkExportCommand(flags: BenchmarkExportFlags): Promi
   try {
     const detail = await getBenchmarkRunDetail(handle.db, flags.runId);
     if (!detail) throw new CliError(`No benchmark run ${flags.runId}`, ExitCode.Usage);
+    // Not blocked: the user runs the export deliberately (SPEC-123 FR-123-52a). On stderr, so
+    // `--json` still prints one object on stdout.
+    if (await hasUnrevealedBlindReview(handle.db, detail.run.id)) {
+      console.error(BLIND_REVIEW_WARNING);
+    }
     const dir = await targetPath(flags.out);
     const previousCwd = process.cwd();
     try {

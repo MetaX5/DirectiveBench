@@ -60,7 +60,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(4);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(5);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -558,7 +558,7 @@ describe('additive migrations', () => {
       `);
 
       // Up: the existing agent run survives and reads as "not kept" with no reason.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 4))).applied).toBe(1);
       expect(agentRunColumns(handle)).toEqual([
         ...agentRunColumns(before),
         'output_files_kept',
@@ -601,8 +601,104 @@ describe('additive migrations', () => {
       expect(
         handle.sqlite.prepare("select case_id from agent_runs where id = 'arun_old'").get(),
       ).toEqual({ case_id: 'c' });
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 4))).applied).toBe(1);
       expect(tableNames(handle)).toContain('agent_run_files');
+    } finally {
+      before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds blind_reviews and blind_review_pairs with cascades and checks, and can be rolled back (SPEC-123 §8.1)', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 4));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 4));
+      handle.sqlite.exec(`
+        insert into artifacts (id, slug, name, type, created_at, updated_at)
+          values ('art_1', 'a', 'A', 'skill', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+          values ('artv_1', 'art_1', 1, 'h', 'skill-md', 'SKILL.md', '[]', '{}', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suites (id, slug, name, created_at, updated_at)
+          values ('suite_1', 's', 'S', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_suite_versions (id, suite_id, version, schema_version, definition, fixtures, content_hash, created_at)
+          values ('suitev_1', 'suite_1', 1, 1, '{}', '{}', 'h', '2026-01-01T00:00:00.000Z');
+        insert into benchmark_runs (id, suite_version_id, artifact_version_id, agent_adapter_id, environment, status, started_at)
+          values ('run_old', 'suitev_1', 'artv_1', 'mock', '{}', 'completed', '2026-01-01T00:00:00.000Z');
+        insert into agent_runs (id, benchmark_run_id, case_id, variant, repetition, fixture_version_id, execution_status, duration_ms, changed_files, trace, created_at, output_files_kept)
+          values ('arun_b', 'run_old', 'c', 'baseline', 1, 'f', 'completed', 1, '[]', '[]', '2026-01-01T00:00:00.000Z', 1),
+                 ('arun_c', 'run_old', 'c', 'candidate', 1, 'f', 'completed', 1, '[]', '[]', '2026-01-01T00:00:00.000Z', 1);
+      `);
+
+      // Up: the two tables appear; existing tables and rows are untouched.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(tableNames(handle)).toEqual(
+        [...tableNames(before), 'blind_review_pairs', 'blind_reviews'].sort(),
+      );
+      expect(columns(handle, 'agent_runs')).toEqual(columns(before, 'agent_runs'));
+      handle.sqlite.exec(`
+        insert into blind_reviews (id, benchmark_run_id, created_at)
+          values ('brev_1', 'run_old', '2026-01-01T00:00:00.000Z');
+        insert into blind_review_pairs (id, review_id, position, case_id, a_agent_run_id, b_agent_run_id)
+          values ('bpair_1', 'brev_1', 1, 'c', 'arun_c', 'arun_b');
+      `);
+      expect(
+        handle.sqlite
+          .prepare(
+            "select revealed_at, verdict, note, decided_at from blind_review_pairs join blind_reviews on blind_reviews.id = review_id where blind_review_pairs.id = 'bpair_1'",
+          )
+          .get(),
+      ).toEqual({ revealed_at: null, verdict: null, note: null, decided_at: null });
+      // One review per run (A10), one pair per position, two different sides, a known verdict.
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into blind_reviews (id, benchmark_run_id, created_at) values ('brev_2', 'run_old', 'x')",
+        ),
+      ).toThrow(/UNIQUE/);
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into blind_review_pairs (id, review_id, position, case_id, a_agent_run_id, b_agent_run_id) values ('bpair_2', 'brev_1', 1, 'c', 'arun_b', 'arun_c')",
+        ),
+      ).toThrow(/UNIQUE/);
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into blind_review_pairs (id, review_id, position, case_id, a_agent_run_id, b_agent_run_id) values ('bpair_3', 'brev_1', 2, 'c', 'arun_b', 'arun_b')",
+        ),
+      ).toThrow(/CHECK constraint failed: blind_review_pairs_sides_differ/);
+      expect(() =>
+        handle.sqlite.exec(
+          "update blind_review_pairs set verdict = 'baseline' where id = 'bpair_1'",
+        ),
+      ).toThrow(/CHECK constraint failed: blind_review_pairs_verdict_known/);
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into blind_review_pairs (id, review_id, position, case_id, a_agent_run_id, b_agent_run_id) values ('bpair_4', 'brev_1', 2, 'c', 'arun_b', 'arun_missing')",
+        ),
+      ).toThrow(/FOREIGN KEY/);
+
+      // Cascade: removing an agent run removes its pair; removing the run removes the review.
+      handle.sqlite.exec("delete from agent_runs where id = 'arun_b'");
+      expect(handle.sqlite.prepare('select count(*) as n from blind_review_pairs').get()).toEqual({
+        n: 0,
+      });
+      handle.sqlite.exec("delete from benchmark_runs where id = 'run_old'");
+      expect(handle.sqlite.prepare('select count(*) as n from blind_reviews').get()).toEqual({
+        n: 0,
+      });
+
+      // Down (the rollback plan in the PR): drop both tables and forget the migration; the
+      // database returns to the 0003 shape and the migration re-applies.
+      handle.sqlite.exec('drop table blind_review_pairs');
+      handle.sqlite.exec('drop table blind_reviews');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(tableNames(handle)).toEqual(tableNames(before));
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(tableNames(handle)).toContain('blind_review_pairs');
     } finally {
       before.close();
       handle.close();
