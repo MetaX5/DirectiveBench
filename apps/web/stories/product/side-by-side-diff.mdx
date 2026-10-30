@@ -7,8 +7,8 @@ import * as Stories from '../../components/output-files/side-by-side-diff.storie
 
 `import { SideBySideDiff } from '@/components/output-files/side-by-side-diff'`
 
-**Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** No page uses it
-yet; the compare page (Phase 4) and the blind review (Phase 5) are planned.
+**Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** The compare
+page (`/results/[id]/compare`, Phase 4) uses it; the blind review (Phase 5) is planned.
 
 ## 1. Purpose
 
@@ -69,6 +69,7 @@ path, so the colouring never differs by variant (FR-123-52).
 | Only additions or deletions          | "2 lines added." or "2 lines removed."; the other side gets filler rows              |
 | Over the bound (1,000 changed lines) | "These files differ in more than 1,000 lines, so they are shown without alignment."  |
 | One side missing or not kept         | "No line comparison: one side has no text to compare."; that side says why           |
+| Neither side has text (both deleted) | "No line comparison: neither side has text to compare."; each side says why          |
 
 Highlighting is decided per side (FR-123-76): one side can be coloured and the other plain,
 with its note above its column ("Syntax highlighting is off for files over 256 KB." or
@@ -79,6 +80,13 @@ plain on both sides with no note.
 <Canvas of={Stories.OnlyAdditions} />
 <Canvas of={Stories.LargeDiffOverTheBound} />
 <Canvas of={Stories.OneSideMissing} />
+<Canvas of={Stories.NeitherSideHasText} />
+
+A side whose agent run kept no files at all passes `absentNotice` (for example "Output files
+were not kept for this agent run."), which replaces "Not present in this agent run.": the run
+cannot show which paths it lacks.
+
+<Canvas of={Stories.SideWithoutKeptFiles} />
 
 ## 7. Accessibility
 

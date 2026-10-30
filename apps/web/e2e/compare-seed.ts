@@ -9,6 +9,8 @@ import type { DatabaseSync } from 'node:sqlite';
  */
 
 export const COMPARE_RUN = 'run_e2e123_compare';
+/** A run with no agent run recorded yet (the compare page's "none" state). */
+export const EMPTY_RUN = 'run_e2e123_cmp_empty';
 export const COMPARE_CASE = 'compare-case';
 export const LONELY_CASE = 'lonely-case';
 export const COMPARE_AGENT_RUN = {
@@ -151,12 +153,15 @@ function seed(db: DatabaseSync): void {
     .get() as { suiteVersionId: string; artifactVersionId: string };
   const fixture = (db.prepare('select id from fixture_versions limit 1').get() as { id: string })
     .id;
-  db.prepare(
+  const run = db.prepare(
     `insert into benchmark_runs
        (id, suite_version_id, artifact_version_id, agent_adapter_id, agent_version, environment,
         status, verdict, comparability_key, summary, warnings, started_at, finished_at)
      values (?, ?, ?, 'mock', '1.0.0', '{}', 'completed', null, null, null, '[]', ?, ?)`,
-  ).run(COMPARE_RUN, ids.suiteVersionId, ids.artifactVersionId, now, now);
+  );
+  for (const id of [COMPARE_RUN, EMPTY_RUN]) {
+    run.run(id, ids.suiteVersionId, ids.artifactVersionId, now, now);
+  }
   const agentRun = db.prepare(
     `insert into agent_runs
        (id, benchmark_run_id, case_id, variant, repetition, fixture_version_id, execution_status,
@@ -256,7 +261,8 @@ function seed(db: DatabaseSync): void {
 
 /** Removes the seeded run; agent runs and their files cascade. */
 export function cleanUp(db: DatabaseSync): void {
-  db.prepare('delete from benchmark_runs where id = ?').run(COMPARE_RUN);
+  const remove = db.prepare('delete from benchmark_runs where id = ?');
+  for (const id of [COMPARE_RUN, EMPTY_RUN]) remove.run(id);
 }
 
 export function reseed(db: DatabaseSync): void {

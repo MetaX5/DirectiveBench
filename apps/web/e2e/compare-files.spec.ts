@@ -3,6 +3,7 @@ import {
   COMPARE_AGENT_RUN,
   COMPARE_CASE,
   COMPARE_RUN,
+  EMPTY_RUN,
   HOSTILE_LINE,
   LEFT_FILES,
   LONELY_CASE,
@@ -196,6 +197,19 @@ test('a case with one agent run compares it with itself (D40)', async ({ page })
   await expect(page.locator('select[name="left"]')).toHaveValue(COMPARE_AGENT_RUN.lonely);
   await expect(page.locator('select[name="right"]')).toHaveValue(COMPARE_AGENT_RUN.lonely);
   await expect(page.getByText('The files are identical.', { exact: true })).toBeVisible();
+});
+
+test('a run without agent runs says so, and requested runs are not found (review finding)', async ({
+  page,
+}) => {
+  await page.goto(comparePage(EMPTY_RUN));
+  await expect(page.getByRole('heading', { level: 1, name: 'Compare output files' })).toBeVisible();
+  await expect(page.getByText('No agent runs recorded.')).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Agent runs to compare' })).toHaveCount(0);
+  for (const query of [{ case: COMPARE_CASE }, { left: COMPARE_AGENT_RUN.baseline }]) {
+    const response = await page.goto(comparePage(EMPTY_RUN, query));
+    expect(response?.status()).toBe(404);
+  }
 });
 
 test('foreign or unknown cases and agent runs render not found (§10)', async ({ page }) => {
