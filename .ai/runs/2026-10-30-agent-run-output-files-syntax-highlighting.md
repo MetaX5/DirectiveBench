@@ -3,7 +3,7 @@ title: SPEC-123 Phase 3a, syntax highlighting in a terminable worker on the file
 date: 2026-10-30
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (om-auto-implement-spec, SPEC-123 §21 Phase 3a only, approved with Phase 4 on 2026-10-30), issue #152
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-syntax-highlighting
 specs: [SPEC-123, SPEC-014, SPEC-004, SPEC-122]
 ---
@@ -69,34 +69,85 @@ variants, changes to the `--syntax-*` colours.
 - **`.ts` import specifiers in the worker chain** (`allowImportingTsExtensions` in
   `apps/web/tsconfig.json`): Next.js bundles the entry; in unit tests Node 24 runs the same
   unbuilt entry in a real thread with type stripping, so the tests exercise the real worker.
+- **A late answer is a timeout.** The pool also checks a job's monotonic expiry when the
+  worker's answer arrives, because a busy request thread can run the message before the overdue
+  timer (Codex adversarial review round 1).
 - **Worker failures are `failed`.** A worker that cannot start, throws or exits ends its jobs as
   `failed` (the existing note) and is replaced lazily; the error is logged by name only.
 
 ## Progress
 
+PR: #166
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Worker and library
 
-- [ ] 1.1 Split the library and add the worker pool with deadline and queue
-- [ ] 1.2 Unit tests for the worker, deadline and queue
+- [x] 1.1 Split the library and add the worker pool with deadline and queue — dcf78b0
+- [x] 1.2 Unit tests for the worker, deadline and queue — dcf78b0, 4750200
 
 ### Phase 2: Page and tests
 
-- [ ] 2.1 Wire the files page, story and docs for the timeout note
-- [ ] 2.2 Page tests and syntax contrast on the page
-- [ ] 2.3 verify:pack renders a highlighted file from the tarball
+- [x] 2.1 Wire the files page, story and docs for the timeout note — ce2a3fa
+- [x] 2.2 Page tests and syntax contrast on the page — 201afc2
+- [x] 2.3 verify:pack renders a highlighted file from the tarball — 3aa430d, 3876b39
 
 ### Phase 3: Verification
 
-- [ ] 3.1 Full gate, real-app proof, browser QA, Codex review, om-auto-review-pr
+- [x] 3.1 Full gate, real-app proof, browser QA, Codex review, om-auto-review-pr
 
 ## Work performed
 
+1. Split `lib/syntax-highlight.ts` into `syntax-highlight-common.ts`, `syntax-highlight-shiki.ts`
+   (`tokenizeText`, the former in-process highlighter), `syntax-highlight-worker.ts` (entry)
+   and the server-only pool `createHighlightWorkerPool`, `highlightTexts`, `highlightLines`
+   with `SYNTAX_HIGHLIGHT_DEADLINE_MS` (2,000) and `SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS` (8);
+   `HighlightResult` reason `timeout` and its note (dcf78b0).
+2. Files page highlights the selected file; `FileView` story `HighlightTimedOut`; FileView and
+   SideBySideDiff docs (ce2a3fa).
+3. Seeded code run (`run_e2e123_code`), page tests and the on-page AC-14 contrast test
+   (201afc2); `verify:pack` checks (3aa430d, 3876b39); ADR-0014 as-built note; lesson.
+4. Codex round 1 fix: late answers count as timeouts (4750200).
+
 ## Verification
+
+| Command / check | Result |
+| --- | --- |
+| `pnpm lint`, `pnpm format:check`, `pnpm typecheck` | pass |
+| `pnpm test` | 7/7 packages, 100% statements, branches, functions and lines (web: 1,130 statements, 20 files, 426 tests) |
+| `pnpm build` | pass; `.next/server/chunks/ssr/[worker thread]-apps_web_lib_syntax-highlight-worker_ts_*.js` with Shiki bundled; no Shiki grammar or `tokenizeTimeLimit` in `.next/static/chunks` |
+| `pnpm verify:pack` | pass, including "the files page shows a highlighted file (server-side tokens)" and "runtime dependencies are only next, react and react-dom" |
+| `pnpm test:e2e` | 76 passed (one run had 1 unrelated failure in `home.spec.ts` navigation under load from a parallel agent; the full rerun passed 76/76) |
+| `pnpm test:storybook` | 68 files, 300 tests passed |
+| Red first | removing `worker.terminate()` fails 4 worker tests (stalled loop, many slow lines, queue wait, crash); removing the late-answer check fails its regression test |
+| Real app | built CLI after `directivebench demo` plus the e2e seed: `src/parse-age.js` and the seeded code files coloured, 20 concurrent page requests all highlighted with `/api/health` answering in 56 ms; `next dev` also colours the page |
+| Browser QA agent (Claude in Chrome) | all 8 checks pass: colours and contrast in both themes (lowest 5.51), notes, hostile markup as text, keyboard, 320 px (iframe), console clean, no highlighter code in the browser, invalid `?path=` gives 404 |
+| Codex adversarial review | round 1 needs-attention (late answer), fixed; round 2 no material findings; round 3 approve |
+
+Not verified: AC-16 on a real page with a stalled grammar (no way to plant one without a test
+hook; the stall is proved with stand-in workers in unit tests); FR-123-76 and the
+`SideBySideDiff` side of AC-12 (no compare page before Phase 4); the browser QA agent could not
+resize the Chrome window and checked 320 px in an iframe; Windows and macOS were not run
+locally (CI covers macOS unit tests).
 
 ## Problems and deviations
 
+- Turbopack also copies the worker entry's source to `.next/static/media/syntax-highlight-worker.<hash>.ts`
+  (an unreferenced asset, 30 lines, no highlighter code or grammar); it ships in the tarball and
+  is served at `/_next/static/media/`. The browser never requests it. Recorded in the lesson.
+- FR-123-70 names `syntax-highlight.ts` as where highlighting runs; the Shiki calls are in
+  `syntax-highlight-shiki.ts`, reached only through the worker that the server-only
+  `syntax-highlight.ts` starts (ADR-0014 as-built note, SPEC-123 §20).
+- The deadline counts from submission, including the queue wait (see Decisions).
+- `tsconfig` gains `allowImportingTsExtensions` for the worker chain.
+
 ## Lessons recorded
 
+- [2026-10-30-server-worker-threads-in-next](../lessons/2026-10-30-server-worker-threads-in-next.md)
+
 ## Follow-ups
+
+- Phase 4 (#165, open while this run finished): pass `highlightTexts` results to both
+  `SideBySideDiff` sides of the compare page and verify FR-123-76 and AC-12 there.
+- Browser QA finding A (predates this change): an empty line renders a no-break space, so
+  copying a file with blank lines gives a space per blank line (`code-lines.tsx`).
