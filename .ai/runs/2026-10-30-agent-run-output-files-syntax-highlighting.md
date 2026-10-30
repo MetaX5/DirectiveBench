@@ -123,15 +123,14 @@ PR: #166
 | Real app | built CLI after `directivebench demo` plus the e2e seed: `src/parse-age.js` and the seeded code files coloured, 20 concurrent page requests all highlighted with `/api/health` answering in 56 ms; `next dev` also colours the page |
 | Browser QA agent (Claude in Chrome) | all 8 checks pass: colours and contrast in both themes (lowest 5.51), notes, hostile markup as text, keyboard, 320 px (iframe), console clean, no highlighter code in the browser, invalid `?path=` gives 404 |
 | Codex adversarial review | round 1 needs-attention (late answer), fixed; round 2 no material findings; round 3 approve; round 4 (CI-fix delta) approve |
+| `om-auto-review-pr` | COMMENT reviews (own PR): approve; one e2e nit fixed, two minors documented |
+| CI on `8200972` | all checks green (Linux and macOS unit at 100%, build and package, integration, storybook, CodeQL) |
 
 Not verified: AC-16 on a real page with a stalled grammar (no way to plant one without a test
 hook; the stall is proved with stand-in workers in unit tests); FR-123-76 and the
 `SideBySideDiff` side of AC-12 (no compare page before Phase 4); the browser QA agent could not
 resize the Chrome window and checked 320 px in an iframe; Windows and macOS were not run
 locally (CI covers macOS unit tests).
-
-| `om-auto-review-pr` | COMMENT reviews (own PR): approve; one e2e nit fixed, two minors documented |
-| CI on `8200972` | all checks green (Linux and macOS unit at 100%, build and package, integration, storybook, CodeQL) |
 
 ## Problems and deviations
 
