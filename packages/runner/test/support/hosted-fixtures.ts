@@ -65,6 +65,19 @@ export class FixtureRemote {
     return this.head();
   }
 
+  /**
+   * Commits a file whose name is raw bytes through the index alone, so the name never has to
+   * exist on disk: APFS (macOS) and NTFS reject names that are not valid UTF-8 (issue #120).
+   */
+  commitRawPath(path: Buffer, content: string, message = 'raw path'): string {
+    const blob = git(this.work, ['hash-object', '-w', '--stdin'], content).trim();
+    const entry = Buffer.concat([Buffer.from(`100644 ${blob}\t`), path, Buffer.from('\n')]);
+    git(this.work, ['update-index', '--add', '--index-info'], entry);
+    git(this.work, ['commit', '-q', '-m', message]);
+    git(this.work, ['push', '-q', 'origin', 'HEAD:refs/heads/main']);
+    return this.head();
+  }
+
   head(): string {
     return git(this.bare, ['rev-parse', 'refs/heads/main']).trim();
   }

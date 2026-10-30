@@ -237,7 +237,7 @@ describe('runCommand', () => {
         [
           'sh',
           '-c',
-          'setsid sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
+          'perl -MPOSIX -e "setsid() >= 0 or die; exec @ARGV" sh -c "echo \\$\\$ > esc.pid; exec sleep 600" & while [ ! -s esc.pid ]; do sleep 0.01; done; cat esc.pid',
         ],
         {
           ...options(),
@@ -245,6 +245,8 @@ describe('runCommand', () => {
         },
       );
       const escaped = Number(result.stdout.trim());
+      // Never kill(0): it signals the test runner's own process group (issue #120).
+      expect(escaped).toBeGreaterThan(0);
       try {
         expect(result).toMatchObject({ exitCode: 0, strayProcesses: true, timedOut: false });
         expect(result.durationMs).toBeLessThan(30_000);

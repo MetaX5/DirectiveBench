@@ -1,6 +1,7 @@
 import type { ArtifactRunItem, VersionComparisonRun } from '@directivebench/database';
 import { ARTIFACT_VERSION_COMPARISON_LIMIT } from '@directivebench/database';
 import { describe, expect, it } from 'vitest';
+import { expectLinearTime, LINEAR_TIME_TEST_TIMEOUT_MS } from '../../../test-support/linear-time';
 import {
   compareVersions,
   groupCount,
@@ -221,22 +222,22 @@ describe('resultsByVersion (SPEC-118 FR-118-50/51)', () => {
     ).toBe(1);
   });
 
-  it('groups many distinct keys in linear time (Codex review of PR #112)', () => {
-    const many = (n: number) =>
-      Array.from({ length: n }, (_, i) => item(1, { key: `k${i}`, summary: null }));
-    const time = (runs: ArtifactRunItem[]) => {
-      const start = performance.now();
-      const [, , v1] = resultsByVersion(versions, runs, []);
-      expect(v1?.groups).toHaveLength(runs.length);
-      return performance.now() - start;
-    };
-    const small = many(2_000);
-    const large = many(20_000);
-    time(small); // warm-up
-    const ratio = time(large) / Math.max(time(small), 1);
-    // Linear: ~10×. The former search per run was quadratic: ~100× (2.1 s for 20 000 keys).
-    expect(ratio).toBeLessThan(40);
-  });
+  it(
+    'groups many distinct keys in linear time (Codex review of PR #112)',
+    async () => {
+      // The former search per run was quadratic (2.1 s for 20 000 keys). A ratio of two
+      // wall-clock samples, one under a millisecond, measured 48 on macOS (issue #120); the shared
+      // helper measures CPU time against a linear baseline (lesson 2026-10-21).
+      await expectLinearTime({
+        build: (size) =>
+          Array.from({ length: size }, (_, i) => item(1, { key: `k${i}`, summary: null })),
+        run: (runs) => resultsByVersion(versions, runs, []),
+        baseline: (runs) => new Map(runs.map((run) => [run.run.id, run])).size,
+        size: 20_000,
+      });
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 
   it('lists runs that did not complete separately, never in a group', () => {
     const running = item(3, { status: 'running', verdict: null });
