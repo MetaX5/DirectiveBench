@@ -8,6 +8,8 @@ import {
   LEFT_FILES,
   LONELY_CASE,
   NOT_KEPT_REASON,
+  RENDER_LEFT,
+  RENDER_RIGHT,
   cleanUp,
   reseed,
 } from './compare-seed';
@@ -139,11 +141,43 @@ test('each pair shows its diff summary and side notices (FR-123-31, §14, D4, D1
   await expect(right).toContainText('Added:');
 });
 
+test('both sides of the diff are highlighted, rows and markers unchanged (SPEC-123 FR-123-76, AC-12)', async ({
+  page,
+}) => {
+  await page.goto(seeded({ path: 'src/render.php' }));
+  const left = page.getByRole('region', { name: 'Left: src/render.php' });
+  const right = page.getByRole('region', { name: 'Right: src/render.php' });
+  // Every text row is tokenized; the filler row that aligns the sides is not.
+  await expect(left.locator('[data-highlighted]')).toHaveCount(RENDER_LEFT.split('\n').length - 1);
+  await expect(right.locator('[data-highlighted]')).toHaveCount(
+    RENDER_RIGHT.split('\n').length - 1,
+  );
+  await expect(left.locator('[data-tone="filler"] [data-highlighted]')).toHaveCount(0);
+  // The changed rows keep their tint and marker and carry colours too.
+  const removed = left.locator('[data-tone="removed"]');
+  await expect(removed).toContainText("$label = 'Close';");
+  await expect(removed.locator('[class*="text-syntax-token-"]').first()).toBeVisible();
+  const added = right.locator('[data-tone="added"]');
+  await expect(added.first()).toContainText("__( 'Close notice', 'notice-block' )");
+  await expect(added.first().locator('[class*="text-syntax-token-"]').first()).toBeVisible();
+  await expect(left).toContainText('Removed:');
+  await expect(right).toContainText('Added:');
+  // One language for both sides: the unchanged line is coloured the same on each.
+  const comment = (region: typeof left) =>
+    region.locator('.text-syntax-token-comment', { hasText: '// render' });
+  await expect(comment(left)).toHaveCount(1);
+  await expect(comment(right)).toHaveCount(1);
+  // No highlighting note when both sides were highlighted.
+  await expect(page.getByText(/Syntax highlighting/)).toHaveCount(0);
+});
+
 test('agent-written markup in a diff is text, never run (SPEC-123 §12)', async ({ page }) => {
   await page.goto(seeded({ path: 'only-right.md' }));
   const right = page.getByRole('region', { name: 'Right: only-right.md' });
   await expect(right).toContainText(HOSTILE_LINE);
   await expect(right.locator('img, script')).toHaveCount(0);
+  // Highlighted as Markdown since Phase 3a, and still text (AC-15).
+  await expect(right.locator('[data-highlighted]')).toHaveCount(1);
   expect(
     await page.evaluate(() => (window as { __hostileCompare?: number }).__hostileCompare),
   ).toBeUndefined();

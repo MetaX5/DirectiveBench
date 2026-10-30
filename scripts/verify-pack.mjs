@@ -78,6 +78,13 @@ check(
   !JSON.stringify(manifest.dependencies ?? {}).includes('workspace:'),
   'no workspace: dependencies',
 );
+// SPEC-004 §4.3, SPEC-123 FR-123-77: the web app's own packages (Shiki among them) are bundled.
+check(
+  Object.keys(manifest.dependencies ?? {})
+    .sort()
+    .join(' ') === 'next react react-dom',
+  'runtime dependencies are only next, react and react-dom',
+);
 console.log(`  ${files.length} files`);
 
 step('install tarball into an empty project');
@@ -154,6 +161,18 @@ if (healthy) {
   if (runPath) {
     const detail = await (await fetch(`${base}${runPath}`)).text();
     check(/data-testid="verdict">improved/.test(detail), 'run detail shows the persisted verdict');
+    // SPEC-123 FR-123-77: the highlight worker and Shiki are bundled into the server build, so
+    // the installed tarball colours the demo's JavaScript file without `shiki` installed.
+    const filesPath = /\/results\/run_[A-Za-z0-9_-]+\/agent-runs\/arun_[A-Za-z0-9_-]+/.exec(
+      detail,
+    )?.[0];
+    const filesPage = filesPath
+      ? await (await fetch(`${base}${filesPath}?path=src%2Fparse-age.js`)).text()
+      : '';
+    check(
+      filesPage.includes('data-highlighted') && filesPage.includes('text-syntax-token-keyword'),
+      'the files page shows a highlighted file (server-side tokens)',
+    );
   }
   // fetch() does not allow overriding Host, so use node:http directly.
   const rebindingStatus = await new Promise((resolveStatus) => {

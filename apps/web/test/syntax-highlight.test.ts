@@ -6,8 +6,8 @@ import {
   LINEAR_TIME_TEST_TIMEOUT_MS,
   textBaseline,
 } from '../../../test-support/linear-time';
+import { tokenizeText } from '../lib/syntax-highlight-shiki';
 import {
-  highlightLines,
   languageForPath,
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
   SYNTAX_HIGHLIGHT_MAX_BYTES,
@@ -38,11 +38,13 @@ function lines(result: HighlightResult): HighlightedLine[] {
   return result.lines;
 }
 
+// The tokenizer itself runs in this thread here (tokenizeText, the code the highlight worker
+// runs); test/syntax-highlight-worker.test.ts covers the worker, its deadline and its queue.
 // Token boundaries must not depend on the machine: Shiki's cooperative per-line time limit
 // counts lazy regex compilation, so on a slow runner it cut the first line of a cold grammar
 // (#155 CI). Every exact-token assertion below runs without it.
 const highlight = (text: string, language: SyntaxLanguage | null) =>
-  highlightLines(text, language, { lineTimeLimitMs: SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT });
+  tokenizeText(text, language, { lineTimeLimitMs: SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT });
 
 const joined = (line: HighlightedLine) => line.map((token) => token.text).join('');
 
@@ -132,7 +134,7 @@ const samples: Record<SyntaxLanguage, string> = {
   python: 'def f(x: int) -> str:\n    """Doc."""\n    return f"{x}"  # c\n',
 };
 
-describe('highlightLines', () => {
+describe('tokenizeText', () => {
   it.each(Object.entries(samples) as [SyntaxLanguage, string][])(
     'tokenizes %s with the JavaScript engine, keeping every line verbatim',
     async (language, sample) => {
@@ -247,7 +249,7 @@ describe('highlightLines', () => {
         await expectLinearTime({
           // `size` units: about 45 KiB large and 1.4 KiB small, sized for a 2-core runner.
           build: (size) => unit.repeat(size),
-          run: (source) => highlightLines(source, 'typescript'),
+          run: (source) => tokenizeText(source, 'typescript'),
           baseline: textBaseline,
           size: 16 * LINEAR_SIZE_STEP,
         });

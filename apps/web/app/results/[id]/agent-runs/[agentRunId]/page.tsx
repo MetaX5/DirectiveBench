@@ -22,6 +22,7 @@ import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { formatSize } from '@/lib/output-files';
 import { baselineLabel, candidateLabel } from '@/lib/run-detail';
+import { highlightLines, languageForPath } from '@/lib/syntax-highlight';
 import { cn } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Agent run files' };
@@ -61,6 +62,12 @@ export default async function AgentRunFilesPage({
         })
       : null;
   if (selection.kind === 'file' && !selected) notFound();
+  // Syntax tokens are computed on the server, off the request thread (SPEC-123 §6.7); a file
+  // without kept content has nothing to colour.
+  const highlight =
+    selected?.content == null
+      ? undefined
+      : await highlightLines(selected.content, languageForPath(selected.path));
 
   const variant =
     agentRun.variant === 'baseline'
@@ -142,7 +149,9 @@ export default async function AgentRunFilesPage({
                 keep the scroll position, so the header stays in view (maintainer decision
                 on PR 162, browser QA finding 1). */}
             <span id="file" aria-hidden className="absolute top-0 scroll-mt-4 lg:hidden" />
-            <CardContent>{selected ? <FileView file={selected} /> : null}</CardContent>
+            <CardContent>
+              {selected ? <FileView file={selected} highlight={highlight} /> : null}
+            </CardContent>
           </Card>
         </div>
       )}

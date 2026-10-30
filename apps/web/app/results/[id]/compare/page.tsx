@@ -34,6 +34,7 @@ import {
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { baselineLabel, candidateLabel } from '@/lib/run-detail';
+import { highlightTexts, languageForPath } from '@/lib/syntax-highlight';
 import { cn } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Compare output files' };
@@ -119,6 +120,18 @@ export default async function ComparePage({
     load(left.id, Boolean(entry?.left)),
     load(right.id, Boolean(entry?.right)),
   ]);
+
+  // Both sides are highlighted as one job with one deadline, in the language of the compared
+  // path, so the colouring never differs by side (SPEC-123 FR-123-76, FR-123-78). A side
+  // without kept content has nothing to colour.
+  const language = chosen.path === null ? null : languageForPath(chosen.path);
+  const sides = [leftFile, rightFile];
+  const tokenized = await highlightTexts(
+    sides.flatMap((file) => (file?.content == null ? [] : [{ text: file.content, language }])),
+  );
+  const [leftHighlight, rightHighlight] = sides.map((file) =>
+    file?.content == null ? undefined : tokenized.shift(),
+  );
 
   const kept = { left: left.outputFilesKept, right: right.outputFilesKept };
   // A side whose agent run kept no files says why, not "Not present" (QA finding 1).
@@ -238,12 +251,14 @@ export default async function ComparePage({
                     name: 'Left',
                     description: leftLabel,
                     file: leftFile,
+                    highlight: leftHighlight,
                     absentNotice: absentNotice(left, leftFiles.length),
                   }}
                   right={{
                     name: 'Right',
                     description: rightLabel,
                     file: rightFile,
+                    highlight: rightHighlight,
                     absentNotice: absentNotice(right, rightFiles.length),
                   }}
                 />

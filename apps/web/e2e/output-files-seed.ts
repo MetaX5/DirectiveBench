@@ -11,12 +11,15 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export const FILES_RUN = 'run_e2e123_files';
 export const OLD_RUN = 'run_e2e123_old';
+/** A run whose one agent run wrote code in listed languages (Phase 3a, syntax highlighting). */
+export const CODE_RUN = 'run_e2e123_code';
 export const AGENT_RUN = {
   rich: 'arun_e2e123_rich',
   none: 'arun_e2e123_none',
   reason: 'arun_e2e123_reason',
   old: 'arun_e2e123_old',
   oldOnly: 'arun_e2e123_oldonly',
+  code: 'arun_e2e123_code',
 };
 export const CASE_ID = 'edit-files';
 export const TIMEOUT_REASON = 'the agent did not stop after its timeout';
@@ -114,6 +117,21 @@ export const FILES: SeedFile[] = [
   },
 ];
 
+/**
+ * The code agent run's files, in path order (SPEC-123 §6.7). Together they produce every
+ * `--syntax-token-*` colour (AC-14); `build/bundle.ts` is one byte over the highlighting bound
+ * (AC-13) and `notes.txt` has no listed extension.
+ */
+export const CODE_FILES: Record<string, string> = {
+  'README.md':
+    '# Notes\n\nSee [the docs](https://example.com/docs).\n\n```sh\nnpm run build\n```\n',
+  'build/bundle.ts': `const a = 1;\n${'x'.repeat(262_145 - 'const a = 1;\n'.length)}`,
+  'notes.txt': 'const a = 1; // not highlighted\n',
+  'src/add.ts':
+    '/** Adds two numbers. */\nexport function add(a: number, b: number): string {\n  const total = a + b; // sum\n  return `${total} items`.replace(\'x\', "y");\n}\n',
+  'src/fmt.py': 'def fmt(x: int) -> str:\n    """Doc."""\n    return f"{x}"  # c\n',
+};
+
 function seed(db: DatabaseSync): void {
   // Newer than the demo run, so `demoRunId` (the oldest run) still finds the demo.
   const now = new Date().toISOString();
@@ -131,7 +149,7 @@ function seed(db: DatabaseSync): void {
         status, verdict, comparability_key, summary, warnings, started_at, finished_at)
      values (?, ?, ?, 'mock', '1.0.0', '{}', 'completed', null, null, null, '[]', ?, ?)`,
   );
-  for (const id of [FILES_RUN, OLD_RUN]) {
+  for (const id of [FILES_RUN, OLD_RUN, CODE_RUN]) {
     run.run(id, ids.suiteVersionId, ids.artifactVersionId, now, now);
   }
   const agentRun = db.prepare(
@@ -218,6 +236,21 @@ function seed(db: DatabaseSync): void {
     0,
     null,
   );
+  agentRun.run(
+    AGENT_RUN.code,
+    CODE_RUN,
+    CASE_ID,
+    'candidate',
+    1,
+    fixture,
+    'completed',
+    1,
+    1,
+    JSON.stringify(Object.keys(CODE_FILES).map((path) => ({ path, change: 'added' }))),
+    now,
+    1,
+    null,
+  );
   const file = db.prepare(
     `insert into agent_run_files
        (id, agent_run_id, path, change, size_bytes, sha256, kept, reason, content, stored_bytes,
@@ -239,12 +272,28 @@ function seed(db: DatabaseSync): void {
       f.redactions,
     ),
   );
+  Object.entries(CODE_FILES).forEach(([path, content], i) => {
+    const bytes = Buffer.byteLength(content);
+    file.run(
+      `afile_e2e123_code_${i}`,
+      AGENT_RUN.code,
+      path,
+      'added',
+      bytes,
+      'a'.repeat(64),
+      'full',
+      null,
+      content,
+      bytes,
+      0,
+    );
+  });
 }
 
 /** Removes the seeded runs; agent runs and their files cascade. */
 export function cleanUp(db: DatabaseSync): void {
   const remove = db.prepare('delete from benchmark_runs where id = ?');
-  for (const id of [FILES_RUN, OLD_RUN]) remove.run(id);
+  for (const id of [FILES_RUN, OLD_RUN, CODE_RUN]) remove.run(id);
 }
 
 export function reseed(db: DatabaseSync): void {

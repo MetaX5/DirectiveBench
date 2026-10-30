@@ -72,8 +72,9 @@ path, so the colouring never differs by variant (FR-123-52).
 | Neither side has text (both deleted) | "No line comparison: neither side has text to compare."; each side says why          |
 
 Highlighting is decided per side (FR-123-76): one side can be coloured and the other plain,
-with its note above its column ("Syntax highlighting is off for files over 256 KB." or
-"Syntax highlighting failed, so this file is shown as plain text."). An unknown extension is
+with its note above its column ("Syntax highlighting is off for files over 256 KB.",
+"Syntax highlighting failed, so this file is shown as plain text." or "Syntax highlighting
+took too long, so this file is shown as plain text."). An unknown extension is
 plain on both sides with no note.
 
 <Canvas of={Stories.HighlightOneSideOverTheLimit} />
@@ -133,12 +134,17 @@ compared path (`lib/syntax-highlight.ts`); without it the side is plain. The dif
 
 <SideBySideDiff path={path} variant="neutral" left={{ name: 'A', file: a }} right={{ name: 'B', file: b }} />
 
-// Highlighted, in a Server Component: one language for both sides, from the compared path.
+// Highlighted, in a Server Component: one language for both sides, from the compared path,
+// and both sides as one job with one deadline (FR-123-78).
 const language = languageForPath(path);
+const [leftHighlight, rightHighlight] = await highlightTexts([
+  { text: left.content, language },
+  { text: right.content, language },
+]);
 <SideBySideDiff
   path={path}
-  left={{ name: 'Left', file: left, highlight: await highlightLines(left.content, language) }}
-  right={{ name: 'Right', file: right, highlight: await highlightLines(right.content, language) }}
+  left={{ name: 'Left', file: left, highlight: leftHighlight }}
+  right={{ name: 'Right', file: right, highlight: rightHighlight }}
 />
 ```
 

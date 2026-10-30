@@ -1,209 +1,226 @@
 import 'server-only';
+import { Worker } from 'node:worker_threads';
 import {
-  createCssVariablesTheme,
-  createHighlighterCore,
-  type HighlighterCore,
-  type ThemedToken,
-} from '@shikijs/core';
-import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
-import css from '@shikijs/langs/css';
-import html from '@shikijs/langs/html';
-import javascript from '@shikijs/langs/javascript';
-import json from '@shikijs/langs/json';
-import jsx from '@shikijs/langs/jsx';
-import markdown from '@shikijs/langs/markdown';
-import php from '@shikijs/langs/php';
-import python from '@shikijs/langs/python';
-import scss from '@shikijs/langs/scss';
-import shellscript from '@shikijs/langs/shellscript';
-import tsx from '@shikijs/langs/tsx';
-import typescript from '@shikijs/langs/typescript';
-import yaml from '@shikijs/langs/yaml';
-import { displayLines } from './output-files';
+  SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
+  SYNTAX_HIGHLIGHT_MAX_BYTES,
+  type HighlightJob,
+  type HighlightJobResult,
+  type HighlightOptions,
+  type HighlightResult,
+  type SyntaxLanguage,
+} from './syntax-highlight-common';
 
-// Server-side syntax highlighting of output files (SPEC-123 §6.7, ADR-0014). Shiki's
-// fine-grained core with the JavaScript regular-expression engine (no WebAssembly) and a fixed
-// list of grammars; the result is plain token data that components render as React text nodes.
-// Only the @shikijs/* entry points are imported: Next.js keeps the `shiki` package external
-// (serverExternalPackages), and the published CLI must not need it at run time (FR-123-77).
+// Server-side syntax highlighting of output files (SPEC-123 §6.7, ADR-0014), called by App
+// Router Server Components. The request thread never runs Shiki: each page render sends its
+// texts (at most two, the sides of a diff) as one job to a `node:worker_threads` worker, and a
+// job that passes SYNTAX_HIGHLIGHT_DEADLINE_MS terminates that worker, which is the only way to
+// stop a synchronous RegExp.exec (FR-123-78). Components receive the result as plain data.
 
-/** Token colours of the DirectiveBench theme, one `--syntax-token-*` design token each. */
-export type SyntaxTokenKind =
-  | 'comment'
-  | 'keyword'
-  | 'string'
-  | 'string-expression'
-  | 'constant'
-  | 'function'
-  | 'parameter'
-  | 'punctuation'
-  | 'link';
-
-/** One display line as tokens; a null token is shown in the code text colour. */
-export type HighlightedLine = readonly { text: string; token: SyntaxTokenKind | null }[];
-
-export type HighlightResult =
-  | { kind: 'highlighted'; lines: HighlightedLine[] }
-  | { kind: 'plain'; reason: 'no-language' | 'too-large' | 'failed' };
-
-/** Largest stored content, in UTF-8 bytes, that is highlighted (FR-123-74, 256 KiB). */
-export const SYNTAX_HIGHLIGHT_MAX_BYTES = 262_144;
-/** Longer lines stay plain inside a highlighted file (FR-123-75, Shiki tokenizeMaxLineLength). */
-export const SYNTAX_HIGHLIGHT_MAX_LINE_CHARS = 10_000;
-/**
- * Tokenizing one line stops after this time; the rest of it stays plain (tokenizeTimeLimit).
- * Cooperative only (FR-123-75): it is checked between regular-expression matches and counts
- * the lazy compilation of a grammar's expressions, so where it cuts a line depends on the
- * machine's speed.
- */
-export const SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS = 500;
-
-/** `lineTimeLimitMs` value that turns the per-line time limit off (Shiki's convention). */
-export const SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT = 0;
-
-export interface HighlightOptions {
-  /**
-   * Per-line time limit; defaults to SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS. Only code that needs
-   * output independent of machine speed (tests, the Storybook fixtures) passes
-   * SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT.
-   */
-  lineTimeLimitMs?: number;
-}
-
-/** The fixed extension map of FR-123-71; no detection from content. */
-export const SYNTAX_LANGUAGE_BY_EXTENSION = {
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  jsx: 'jsx',
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'tsx',
-  json: 'json',
-  css: 'css',
-  scss: 'scss',
-  html: 'html',
-  htm: 'html',
-  php: 'php',
-  md: 'markdown',
-  markdown: 'markdown',
-  yaml: 'yaml',
-  yml: 'yaml',
-  sh: 'shellscript',
-  bash: 'shellscript',
-  py: 'python',
-} as const;
-
-export type SyntaxLanguage =
-  (typeof SYNTAX_LANGUAGE_BY_EXTENSION)[keyof typeof SYNTAX_LANGUAGE_BY_EXTENSION];
+export {
+  languageForPath,
+  SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
+  SYNTAX_HIGHLIGHT_MAX_BYTES,
+  SYNTAX_HIGHLIGHT_MAX_LINE_CHARS,
+  SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT,
+  SYNTAX_LANGUAGE_BY_EXTENSION,
+  type HighlightedLine,
+  type HighlightOptions,
+  type HighlightResult,
+  type SyntaxLanguage,
+  type SyntaxTokenKind,
+} from './syntax-highlight-common';
 
 /**
- * The language of a file from the last extension of its basename, case-insensitively; null for
- * an unknown extension, a name without one (`Makefile`) or a dotfile such as `.env`.
+ * Aggregate deadline of one page render's highlighting, from the moment it is submitted: the
+ * wait for the worker, the worker's start and highlighter creation, and every text of the job
+ * (FR-123-78, NFR-123-07). The only hard bound on time.
  */
-export function languageForPath(path: string): SyntaxLanguage | null {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0) return null;
-  const extension = name.slice(dot + 1).toLowerCase();
-  return Object.hasOwn(SYNTAX_LANGUAGE_BY_EXTENSION, extension)
-    ? SYNTAX_LANGUAGE_BY_EXTENSION[extension as keyof typeof SYNTAX_LANGUAGE_BY_EXTENSION]
-    : null;
+export const SYNTAX_HIGHLIGHT_DEADLINE_MS = 2_000;
+/** Jobs that may wait while the worker runs another; a job beyond them is not highlighted. */
+export const SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS = 8;
+
+/** One text of a page render: the file content and the language of its path, if any. */
+export interface HighlightText {
+  text: string;
+  language: SyntaxLanguage | null;
 }
 
-const THEME_NAME = 'directivebench';
-
-// Token colours are `var(--syntax-token-*)` references (FR-123-73); any other colour, including
-// `var(--syntax-foreground)`, is rendered without a colour of its own.
-const KINDS: readonly SyntaxTokenKind[] = [
-  'comment',
-  'keyword',
-  'string',
-  'string-expression',
-  'constant',
-  'function',
-  'parameter',
-  'punctuation',
-  'link',
-];
-const kindByColour = new Map(KINDS.map((kind) => [`var(--syntax-token-${kind})`, kind]));
-
-let highlighter: Promise<HighlighterCore> | null = null;
-
-/** One highlighter per server process; a failed creation is forgotten so the next call retries. */
-function getHighlighter(): Promise<HighlighterCore> {
-  highlighter ??= createHighlighterCore({
-    themes: [createCssVariablesTheme({ name: THEME_NAME, variablePrefix: '--syntax-' })],
-    langs: [
-      css,
-      html,
-      javascript,
-      json,
-      jsx,
-      markdown,
-      php,
-      python,
-      scss,
-      shellscript,
-      tsx,
-      typescript,
-      yaml,
-    ],
-    engine: createJavaScriptRegexEngine(),
-  }).catch((error: unknown) => {
-    highlighter = null;
-    throw error;
-  });
-  return highlighter;
+export interface HighlightWorkerPoolOptions {
+  /** Starts the worker thread; called lazily for a job when no worker is alive. */
+  createWorker: () => Worker;
+  deadlineMs: number;
+  maxQueuedJobs: number;
 }
 
-function toLine(tokens: readonly ThemedToken[]): HighlightedLine {
-  const line: { text: string; token: SyntaxTokenKind | null }[] = [];
-  for (const { content, color } of tokens) {
-    const token = (color && kindByColour.get(color)) || null;
-    const last = line.at(-1);
-    // Neighbours of one kind are merged: less data in the page, the same text and colour.
-    if (last && last.token === token) last.text += content;
-    else line.push({ text: content, token });
+export interface HighlightWorkerPool {
+  /** One result per text, in order; never rejects. */
+  run: (job: HighlightJob) => Promise<HighlightResult[]>;
+}
+
+interface PendingJob {
+  job: HighlightJob;
+  resolve: (results: HighlightResult[]) => void;
+  timer: NodeJS.Timeout;
+  /** `performance.now()` (the global, so tests can fake it) at which the deadline passes. */
+  expiresAt: number;
+}
+
+function plain(job: HighlightJob, reason: 'failed' | 'timeout'): HighlightResult[] {
+  return job.texts.map(() => ({ kind: 'plain', reason }));
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : 'unknown error';
+}
+
+/**
+ * One highlight worker per pool, running one job at a time with at most `maxQueuedJobs`
+ * waiting (FR-123-78). A job not answered within `deadlineMs` of being submitted terminates the
+ * worker, every job of that worker (running or waiting) ends as plain text, and the next job
+ * starts a new worker. A worker that cannot start, throws or exits ends its jobs as `failed`
+ * and is replaced in the same way. Problems are logged without file content (FR-123-74).
+ */
+export function createHighlightWorkerPool({
+  createWorker,
+  deadlineMs,
+  maxQueuedJobs,
+}: HighlightWorkerPoolOptions): HighlightWorkerPool {
+  let worker: Worker | null = null;
+  let running: PendingJob | null = null;
+  const queue: PendingJob[] = [];
+
+  function settle(pending: PendingJob, results: HighlightResult[]) {
+    clearTimeout(pending.timer);
+    pending.resolve(results);
   }
-  return line;
+
+  /** Stops the worker (also inside a synchronous loop) and ends all its jobs as plain text. */
+  function discardWorker(reason: 'failed' | 'timeout') {
+    const current = worker;
+    worker = null;
+    // terminate() resolves once the thread stopped; nothing waits for it. It does not reject.
+    void current?.terminate();
+    const jobs = running ? [running, ...queue] : [...queue];
+    running = null;
+    queue.length = 0;
+    for (const pending of jobs) settle(pending, plain(pending.job, reason));
+  }
+
+  function startWorker(): Worker {
+    const started = createWorker();
+    // The server must not wait for an idle highlighter to exit.
+    started.unref();
+    started.on('message', (result: HighlightJobResult) => {
+      if (started !== worker || !running) return;
+      // A busy request thread can deliver the answer before the overdue deadline timer: the
+      // deadline is checked here too, so a late answer never counts (Codex review round 1).
+      if (performance.now() >= running.expiresAt) {
+        timeOut();
+        return;
+      }
+      const done = running;
+      running = null;
+      settle(done, result.results);
+      startNext();
+    });
+    started.on('error', (error: unknown) => {
+      if (started !== worker) return;
+      // eslint-disable-next-line no-console -- FR-123-74 requires a server log of the failure
+      console.error(`Syntax highlighting worker failed: ${errorName(error)}`);
+      discardWorker('failed');
+    });
+    started.on('exit', (code: number) => {
+      if (started !== worker) return;
+      // eslint-disable-next-line no-console -- FR-123-74 requires a server log of the failure
+      console.error(`Syntax highlighting worker exited with code ${code}`);
+      discardWorker('failed');
+    });
+    return started;
+  }
+
+  function startNext() {
+    if (running) return;
+    const next = queue.shift();
+    if (!next) return;
+    try {
+      worker ??= startWorker();
+    } catch (error) {
+      // Not memoised: the next job tries to start a worker again (FR-123-70).
+      // eslint-disable-next-line no-console -- FR-123-74 requires a server log of the failure
+      console.error(`Syntax highlighting worker did not start: ${errorName(error)}`);
+      settle(next, plain(next.job, 'failed'));
+      startNext();
+      return;
+    }
+    running = next;
+    worker.postMessage(next.job);
+  }
+
+  // Jobs start in submission order and share one deadline, so the job whose time runs out is
+  // always the running one: every job queued behind it was submitted later.
+  function timeOut() {
+    // eslint-disable-next-line no-console -- an operator should see why a file is plain
+    console.error(`Syntax highlighting took longer than ${deadlineMs} ms; the worker was stopped`);
+    discardWorker('timeout');
+  }
+
+  return {
+    run(job) {
+      if (queue.length >= maxQueuedJobs) return Promise.resolve(plain(job, 'timeout'));
+      return new Promise((resolve) => {
+        queue.push({
+          job,
+          resolve,
+          timer: setTimeout(timeOut, deadlineMs),
+          expiresAt: performance.now() + deadlineMs,
+        });
+        startNext();
+      });
+    },
+  };
+}
+
+let pool: HighlightWorkerPool | null = null;
+
+/** The worker pool of this server process, created on first use. */
+function serverPool(): HighlightWorkerPool {
+  pool ??= createHighlightWorkerPool({
+    // This exact expression lets Next.js bundle the worker entry and its imports (FR-123-77).
+    createWorker: () => new Worker(new URL('./syntax-highlight-worker.ts', import.meta.url)),
+    deadlineMs: SYNTAX_HIGHLIGHT_DEADLINE_MS,
+    maxQueuedJobs: SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS,
+  });
+  return pool;
 }
 
 /**
- * Highlights a whole text, so comments and strings spanning lines are coloured correctly, and
- * returns one HighlightedLine per display line (the same split as FileView, FR-123-76). Never
- * throws: no language, content over SYNTAX_HIGHLIGHT_MAX_BYTES or any highlighter error gives a
- * plain result with its reason (FR-123-74).
+ * Highlights the texts of one page render (one file, or the two sides of a diff) as one job
+ * with one deadline, and returns one result per text, in order. Texts without a language or
+ * over SYNTAX_HIGHLIGHT_MAX_BYTES are answered here without the worker. Never rejects.
  */
+export async function highlightTexts(
+  texts: readonly HighlightText[],
+  { lineTimeLimitMs = SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS }: HighlightOptions = {},
+): Promise<HighlightResult[]> {
+  const job: HighlightJob = { texts: [], lineTimeLimitMs };
+  const results = texts.map(({ text, language }): HighlightResult | null => {
+    if (language === null) return { kind: 'plain', reason: 'no-language' };
+    if (Buffer.byteLength(text, 'utf8') > SYNTAX_HIGHLIGHT_MAX_BYTES) {
+      return { kind: 'plain', reason: 'too-large' };
+    }
+    job.texts.push({ text, language });
+    return null;
+  });
+  const tokenized = job.texts.length > 0 ? await serverPool().run(job) : [];
+  return results.map((result) => result ?? tokenized.shift()!);
+}
+
+/** Highlights one text (FR-123-72): `highlightTexts` with a job of its own. */
 export async function highlightLines(
   text: string,
   language: SyntaxLanguage | null,
-  { lineTimeLimitMs = SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS }: HighlightOptions = {},
+  options: HighlightOptions = {},
 ): Promise<HighlightResult> {
-  if (language === null) return { kind: 'plain', reason: 'no-language' };
-  if (Buffer.byteLength(text, 'utf8') > SYNTAX_HIGHLIGHT_MAX_BYTES) {
-    return { kind: 'plain', reason: 'too-large' };
-  }
-  const lines = displayLines(text);
-  try {
-    const shiki = await getHighlighter();
-    if (lines.length === 0) return { kind: 'highlighted', lines: [] };
-    const { tokens } = shiki.codeToTokens(lines.join('\n'), {
-      lang: language,
-      theme: THEME_NAME,
-      // Shiki leaves a line plain from this length on; the spec keeps lines of exactly the limit.
-      tokenizeMaxLineLength: SYNTAX_HIGHLIGHT_MAX_LINE_CHARS + 1,
-      tokenizeTimeLimit: lineTimeLimitMs,
-    });
-    return { kind: 'highlighted', lines: tokens.map(toLine) };
-  } catch (error) {
-    // Logged without file content (FR-123-74): only the language and the kind of error. The web
-    // app has no logger; this server-only line is the one place it writes to the console.
-    // eslint-disable-next-line no-console -- FR-123-74 requires a server log of the failure
-    console.error(
-      `Syntax highlighting failed for a ${language} file: ${error instanceof Error ? error.name : 'unknown error'}`,
-    );
-    return { kind: 'plain', reason: 'failed' };
-  }
+  const [result] = await highlightTexts([{ text, language }], options);
+  return result!;
 }

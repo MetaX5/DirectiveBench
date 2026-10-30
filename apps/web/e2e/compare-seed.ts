@@ -38,6 +38,14 @@ const lines = (prefix: string, n: number) =>
 
 const shared = 'export const same = 1;\n';
 
+/**
+ * PHP on both sides, so the diff shows syntax colours on its removed and added rows
+ * (SPEC-123 FR-123-76, AC-12, AC-14): line 2 changed, line 4 added.
+ */
+export const RENDER_LEFT = "<?php\n$label = 'Close';\necho esc_html( $label ); // render\n";
+export const RENDER_RIGHT =
+  "<?php\n$label = __( 'Close notice', 'notice-block' );\necho esc_html( $label ); // render\nreturn 1;\n";
+
 /** Files of the baseline run, by path. */
 export const LEFT_FILES: SeedFile[] = [
   {
@@ -85,7 +93,7 @@ export const LEFT_FILES: SeedFile[] = [
     change: 'modified',
     kept: 'full',
     reason: null,
-    content: 'line one\nline two\nline three\n',
+    content: RENDER_LEFT,
     sha: 'f'.repeat(64),
   },
 ];
@@ -137,7 +145,7 @@ export const RIGHT_FILES: SeedFile[] = [
     change: 'modified',
     kept: 'full',
     reason: null,
-    content: 'line one\nline 2\nline three\nline four\n',
+    content: RENDER_RIGHT,
     sha: '4'.repeat(64),
   },
 ];

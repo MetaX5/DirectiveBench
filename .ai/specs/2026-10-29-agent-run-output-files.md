@@ -732,17 +732,34 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   side-by-side diff (variant `change`) with its summaries, sides without kept files, not found
   for an unknown or foreign case or agent run, keyboard, 320px and contrast in both themes, and
   the "Compare agent runs" link per case in the "Output files" card.
+- **Implemented (Phase 3a, syntax highlighting on the files and compare pages; run log
+  [2026-10-30-agent-run-output-files-syntax-highlighting](../runs/2026-10-30-agent-run-output-files-syntax-highlighting.md),
+  verified on 2026-10-30 by `apps/web/test/{syntax-highlight,syntax-highlight-worker,syntax-highlight-failure,highlight-fixtures,output-files}.test.ts`,
+  `apps/web/e2e/agent-run-files.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts`, the FileView
+  stories, `pnpm verify:pack` and the built app after `directivebench demo`):** FR-123-70 to
+  FR-123-78, NFR-123-07 and AC-13 to AC-16 on
+  `/results/[id]/agent-runs/[agentRunId]`; AC-12 and AC-13 to AC-15 also on the compare page. Tokenizing runs in a
+  `node:worker_threads` worker (`lib/syntax-highlight-worker.ts`, Shiki calls in
+  `lib/syntax-highlight-shiki.ts`) owned by the server-only `lib/syntax-highlight.ts`, which
+  terminates it at `SYNTAX_HIGHLIGHT_DEADLINE_MS`, counted from the job's submission (queue
+  wait included); `highlightTexts` sends the texts of one page render as one job. AC-16 is
+  verified with stand-in stalled workers in unit tests (terminated at 2 s, event-loop delay
+  probe under 500 ms), not with a stalled grammar on a page. After Phase 4 merged, the compare
+  page `/results/[id]/compare` highlights both `SideBySideDiff` sides as one job per page
+  render (FR-123-76 and the `SideBySideDiff` side of AC-12, verified by
+  `apps/web/e2e/compare-files.spec.ts` and `apps/web/e2e/ui-contrast.spec.ts` on the diff
+  tints).
 - **Partially implemented:** AC-3 and AC-11: the page shows the redaction count (seeded rows)
   and the files of an agent run whatever its execution status, but no browser test plants a
   secret through a real capture or opens an `assertion-error` run. NFR-123-01
   (capture time) is a target without a timing test.
-- **Not implemented:** Phases 3a (syntax highlighting on pages) and 5 (blind review, migration
-  `0004`): FR-123-50 to FR-123-55, FR-123-70 to FR-123-78, AC-7 and AC-12 to AC-15. The design-system
-  components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
+- **Not implemented:** Phase 5 (blind review, migration `0004`): FR-123-50 to FR-123-55 and
+  AC-7. The design-system components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
   `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
   ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)),
   not in this status; since Phase 3 the files page uses `FileView` and `FileStatusBadges`,
-  since Phase 4 the compare page uses `SideBySideDiff`, and the highlighter has no page yet.
+  since Phase 4 the compare page uses `SideBySideDiff`, and since Phase 3a both pages use the
+  highlighter.
 
 ## 21. Phasing and implementation plan
 
