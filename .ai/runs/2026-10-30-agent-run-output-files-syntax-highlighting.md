@@ -29,7 +29,7 @@ page (Phase 4, built by another agent in parallel) and blind review (Phase 5). T
 Goal: the files page shows server-side syntax colours computed off the request thread with a
 hard 2 s deadline per page render, from the dev build and from the installed tarball.
 
-Non-goals: the compare page and its `SideBySideDiff` wiring (Phase 4), new UI components or
+Non-goals: building the compare page (Phase 4; its highlighting was wired here after it merged), new UI components or
 variants, changes to the `--syntax-*` colours.
 
 1. Split `lib/syntax-highlight.ts`: `syntax-highlight-common.ts` (types, limits, language map,
@@ -126,9 +126,24 @@ PR: #166
 | `om-auto-review-pr` | COMMENT reviews (own PR): approve; one e2e nit fixed, two minors documented |
 | CI on `8200972` | all checks green (Linux and macOS unit at 100%, build and package, integration, storybook, CodeQL) |
 
+**After Phase 4 (#165) merged** (orchestrator request): `origin/main` merged into the branch
+(conflicts in SPEC-123 §20 and `.ai/lessons.md` resolved keeping both sides), and the compare
+page `/results/[id]/compare` now highlights both `SideBySideDiff` sides with one
+`highlightTexts` job per page render in the language of the compared path (FR-123-76). The
+compare seed's `src/render.php` became real PHP (same diff shape: 1 line removed, 2 added). New
+e2e: both sides tokenized, filler rows not, tints and markers kept, the same comment coloured on
+both sides, the hostile Markdown side highlighted and still text; `ui-contrast` measures every
+token on the real removed and added rows of the compare page in both themes. Gate on the merge:
+`pnpm lint`, `format:check`, `typecheck` pass; `pnpm test` 7/7 at 100%; `pnpm build`;
+`pnpm verify:pack` passed; `pnpm test:e2e` 90 passed; `pnpm test:storybook` 304 passed. Real
+app (built CLI, fresh `directivebench demo` plus the compare seed): the seeded and the demo
+compare pages render highlighted rows with their `removed`, `added` and `filler` tones and no
+highlighting note.
+
 Not verified: AC-16 on a real page with a stalled grammar (no way to plant one without a test
-hook; the stall is proved with stand-in workers in unit tests); FR-123-76 and the
-`SideBySideDiff` side of AC-12 (no compare page before Phase 4); the browser QA agent could not
+hook; the stall is proved with stand-in workers in unit tests); the D12 neutral tint on a real
+page (only blind review, Phase 5, uses it; measured with the tint class applied on the files
+page); a browser QA agent pass on the compare page after the merge; the browser QA agent could not
 resize the Chrome window and checked 320 px in an iframe; Windows and macOS were not run
 locally (CI covers macOS unit tests).
 
@@ -157,8 +172,7 @@ locally (CI covers macOS unit tests).
 
 ## Follow-ups
 
-- Phase 4 (#165, open while this run finished): pass `highlightTexts` results to both
-  `SideBySideDiff` sides of the compare page and verify FR-123-76 and AC-12 there.
+- Phase 5 (blind review) should call `highlightTexts` for both sides from the start (§21 Phase 3a step 4).
 - A cold highlighter can take over 2 s on a slow or loaded machine, so the first file view
   after a server start may show the timeout note (by spec, FR-123-78 creates the worker
   lazily). If that shows up in use, consider starting the worker when the server starts.

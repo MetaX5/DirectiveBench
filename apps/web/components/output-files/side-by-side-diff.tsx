@@ -23,6 +23,11 @@ export interface DiffSide {
   /** The file on this side, or null when this agent run has no such path. */
   file: OutputFile | null;
   /**
+   * Said instead of "Not present in this agent run." when `file` is null because this agent run
+   * kept no files at all, for example "Output files were not kept for this agent run."
+   */
+  absentNotice?: string;
+  /**
    * Syntax tokens of this side's whole file, computed on the server with the language of the
    * compared path (SPEC-123 FR-123-76); without it this side is plain.
    */
@@ -80,7 +85,7 @@ export function SideBySideDiff({
     const highlightNote = info.file ? syntaxHighlightNotice(info.highlight) : null;
     const notices = info.file
       ? [...fileNotices(info.file), ...(highlightNote ? [highlightNote] : [])]
-      : ['Not present in this agent run.'];
+      : [info.absentNotice ?? 'Not present in this agent run.'];
     const tokens = info.highlight?.kind === 'highlighted' ? info.highlight.lines : null;
     const code: CodeLine[] =
       diff?.kind === 'aligned'
@@ -113,7 +118,11 @@ export function SideBySideDiff({
       <div className="space-y-1">
         <h3 className="font-mono text-body font-medium wrap-anywhere">{path}</h3>
         <p role="status" className="text-ui text-muted-foreground">
-          {diffSummary(diff, { left: left.name, right: right.name }, variant)}
+          {diffSummary(
+            leftLines === null && rightLines === null ? 'neither' : diff,
+            { left: left.name, right: right.name },
+            variant,
+          )}
         </p>
       </div>
       <div className="grid gap-grid @3xl:grid-cols-2">
