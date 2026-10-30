@@ -3,6 +3,8 @@ import { scanTextContrast } from './contrast';
 import {
   AGENT_RUN,
   CASE_ID,
+  CODE_FILES,
+  CODE_RUN,
   FILES,
   FILES_RUN,
   HOSTILE_LINES,
@@ -155,8 +157,67 @@ test('agent-written markup is shown as text, never run (SPEC-123 §12)', async (
   await expect(page.getByRole('status')).toContainText('Shown with LF line endings.');
   expect(await page.evaluate(() => (window as { __hostile?: number }).__hostile)).toBeUndefined();
   await expect(content.locator('script, img')).toHaveCount(0);
+  // Highlighted since Phase 3a, and still text: tokens are React text nodes (AC-15).
+  await expect(content.locator('[data-highlighted]')).toHaveCount(HOSTILE_LINES.length);
   // The <img src=x> was never created, so nothing fetched it.
   expect(requested.filter((url) => /\/x$/.test(url))).toEqual([]);
+});
+
+test('code files are highlighted on the server, the browser loads no highlighter (SPEC-123 §6.7)', async ({
+  page,
+}) => {
+  const scripts: string[] = [];
+  page.on('response', async (response) => {
+    if (response.request().resourceType() === 'script') scripts.push(await response.text());
+  });
+  const requested: string[] = [];
+  page.on('request', (request) => requested.push(request.url()));
+
+  // The demo run's file: every line is tokenized (AC-12).
+  const runId = await withDatabase(demoRunId);
+  await page.goto(`/results/${runId}`);
+  await page
+    .getByTestId('output-files')
+    .getByRole('link', { name: /^View files of / })
+    .first()
+    .click();
+  const demo = page.getByRole('region', { name: 'Content of src/parse-age.js' });
+  await expect(demo.locator('[data-highlighted]').first()).toBeVisible();
+  await expect(demo.locator('.text-syntax-token-keyword').first()).toBeVisible();
+
+  const open = (path: string) =>
+    page.goto(filesPage(CODE_RUN, AGENT_RUN.code, `?path=${encodeURIComponent(path)}`));
+  const region = (path: string) => page.getByRole('region', { name: `Content of ${path}` });
+
+  await open('src/add.ts');
+  const lines = CODE_FILES['src/add.ts']!.split('\n').length - 1;
+  await expect(region('src/add.ts').locator('[data-highlighted]')).toHaveCount(lines);
+  for (const kind of ['comment', 'keyword', 'string-expression', 'constant', 'function']) {
+    await expect(region('src/add.ts').locator(`.text-syntax-token-${kind}`).first()).toBeVisible();
+  }
+  await expect(region('src/add.ts')).toContainText('return `${total} items`');
+  await expect(page.getByRole('status')).toHaveCount(0);
+
+  // Over 256 KB: plain, with the note (AC-13).
+  await open('build/bundle.ts');
+  await expect(page.getByRole('status')).toHaveText(
+    'Syntax highlighting is off for files over 256 KB.',
+  );
+  await expect(region('build/bundle.ts').locator('[data-highlighted]')).toHaveCount(0);
+
+  // No listed extension: plain, no note (AC-13).
+  await open('notes.txt');
+  await expect(region('notes.txt')).toContainText('const a = 1;');
+  await expect(region('notes.txt').locator('[data-highlighted]')).toHaveCount(0);
+  await expect(page.getByRole('status')).toHaveCount(0);
+
+  // FR-123-70: no Shiki code, grammar or worker entry reached the browser.
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const body of scripts) {
+    expect(body).not.toContain('tokenizeTimeLimit');
+    expect(body).not.toContain('text.html.php');
+  }
+  expect(requested.filter((url) => url.includes('syntax-highlight'))).toEqual([]);
 });
 
 test('agent runs without a file list say why (D34)', async ({ page }) => {
@@ -283,6 +344,9 @@ for (const theme of ['light', 'dark'] as const) {
         filesPage(FILES_RUN, AGENT_RUN.rich, `?path=${encodeURIComponent(f.path)}`),
       ),
       filesPage(FILES_RUN, AGENT_RUN.reason),
+      ...Object.keys(CODE_FILES).map((path) =>
+        filesPage(CODE_RUN, AGENT_RUN.code, `?path=${encodeURIComponent(path)}`),
+      ),
     ];
     for (const width of [1280, 320]) {
       await page.setViewportSize({ width, height: 900 });

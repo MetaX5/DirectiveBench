@@ -1,4 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { AGENT_RUN, CODE_RUN, cleanUp, reseed } from './output-files-seed';
+import { withDatabase } from './support';
 
 /**
  * SPEC-120 (tokeny.md U01–U10): control boundaries, focus indicators and ScoreBar fills reach
@@ -172,3 +174,107 @@ for (const theme of ['light', 'dark'] as const) {
     });
   });
 }
+
+// SPEC-123 AC-14 (FR-123-73): every syntax colour, rendered on the files page, reaches 4.5:1 on
+// the plain code surface and on the diff row tints (D11 removed and added, D12 neutral). The
+// tints are the classes SideBySideDiff gives a row (code-lines.tsx); they are put on the
+// rendered lines here, so the colours are measured on this page's real surface.
+const SYNTAX_KINDS = [
+  'foreground',
+  'comment',
+  'keyword',
+  'string',
+  'string-expression',
+  'constant',
+  'function',
+  'parameter',
+  'punctuation',
+  'link',
+];
+const ROW_TINTS = ['', 'bg-destructive/10', 'bg-success/10', 'bg-info/10'];
+
+test.describe('syntax colours (SPEC-123 AC-14)', () => {
+  test.beforeAll(async () => withDatabase(reseed));
+  test.afterAll(async () => withDatabase(cleanUp));
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`syntax colours reach 4.5:1 on the code surface and the diff tints in ${theme}`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme: theme });
+      const measured: { kind: string; tint: string; ratio: number }[] = [];
+      for (const path of ['src/add.ts', 'src/fmt.py', 'README.md']) {
+        await page.goto(
+          `/results/${CODE_RUN}/agent-runs/${AGENT_RUN.code}?path=${encodeURIComponent(path)}`,
+        );
+        await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+        await expect(page.locator('[data-highlighted]').first()).toBeVisible();
+        for (const tint of ROW_TINTS) {
+          measured.push(
+            ...(await page.evaluate((tint) => {
+              const lines = [...document.querySelectorAll('[data-highlighted]')];
+              for (const line of lines) {
+                const row = line.parentElement!;
+                row.classList.remove('bg-destructive/10', 'bg-success/10', 'bg-info/10');
+                if (tint) row.classList.add(tint);
+              }
+              const ctx = document.createElement('canvas').getContext('2d')!;
+              const pixel = (colour: string) => {
+                ctx.clearRect(0, 0, 1, 1);
+                ctx.fillStyle = colour;
+                ctx.fillRect(0, 0, 1, 1);
+                return [...ctx.getImageData(0, 0, 1, 1).data];
+              };
+              const blend = (fg: number[], bg: number[]) =>
+                fg.slice(0, 3).map((v, i) => (v * fg[3]!) / 255 + bg[i]! * (1 - fg[3]! / 255));
+              const luminance = (rgb: number[]) =>
+                rgb.reduce((sum, v, i) => {
+                  const c = v / 255;
+                  const linear = c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+                  return sum + linear * [0.2126, 0.7152, 0.0722][i]!;
+                }, 0);
+              const rows = [];
+              for (const line of lines) {
+                for (const token of line.querySelectorAll('span')) {
+                  if (!token.textContent?.trim()) continue;
+                  const kind = /text-syntax-token-(\S+)/.exec(token.className)?.[1] ?? 'foreground';
+                  let bg = [255, 255, 255];
+                  const stack: Element[] = [];
+                  for (let p: Element | null = token; p; p = p.parentElement) stack.unshift(p);
+                  for (const p of stack) bg = blend(pixel(getComputedStyle(p).backgroundColor), bg);
+                  const fg = blend(pixel(getComputedStyle(token).color), bg);
+                  const l = [luminance(fg), luminance(bg)];
+                  rows.push({
+                    kind,
+                    tint,
+                    ratio: (Math.max(...l) + 0.05) / (Math.min(...l) + 0.05),
+                  });
+                }
+              }
+              return rows;
+            }, tint)),
+          );
+        }
+      }
+      for (const tint of ROW_TINTS) {
+        const kinds = new Set(measured.filter((m) => m.tint === tint).map((m) => m.kind));
+        expect([...kinds].sort(), `kinds measured on "${tint || 'surface'}"`).toEqual(
+          [...SYNTAX_KINDS].sort(),
+        );
+      }
+      const worst = SYNTAX_KINDS.flatMap((kind) =>
+        ROW_TINTS.map((tint) => ({
+          name: `${kind} on ${tint || 'the code surface'}`,
+          ratio: Math.min(
+            ...measured.filter((m) => m.kind === kind && m.tint === tint).map((m) => m.ratio),
+          ),
+        })),
+      );
+      for (const { name, ratio } of worst) expect.soft(ratio, name).toBeGreaterThanOrEqual(4.5);
+      await testInfo.attach('syntax-contrast-ratios', {
+        body: JSON.stringify(worst, null, 2),
+        contentType: 'application/json',
+      });
+    });
+  }
+});
