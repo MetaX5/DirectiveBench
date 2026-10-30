@@ -26,6 +26,7 @@ import {
   type AgentRunInput,
 } from '@directivebench/database';
 import {
+  BLIND_REVIEW_WARNING,
   benchmarkExportCommand,
   isSafeRelativePath,
   type ExportManifest,
@@ -309,6 +310,31 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     expect(output).toContain('Agent:            Mock agent: not an AI evaluation');
     expect(output).toContain(`Files written:    ${manifest.summary.written}`);
     expect(output).toContain(`Manifest:         ${join(out, 'manifest.json')}`);
+  });
+
+  it('warns on stderr while the run has an unrevealed blind review, and still exports (FR-123-52a)', async () => {
+    const handle = openDatabase(join(dataDir, 'directivebench.db'));
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      handle.sqlite.exec(
+        `insert into blind_reviews (id, benchmark_run_id, created_at) values ('brev_export', '${hostileRunId}', '2026-10-30T00:00:00.000Z')`,
+      );
+      const { code, output } = await exportRun(hostileRunId, join(newScratch(), 'export'), true);
+      expect(code).toBe(ExitCode.Ok);
+      expect(JSON.parse(output)).toMatchObject({ runId: hostileRunId });
+      expect(warn.mock.calls).toEqual([[BLIND_REVIEW_WARNING]]);
+
+      warn.mockClear();
+      handle.sqlite.exec(
+        "update blind_reviews set revealed_at = '2026-10-30T00:00:01.000Z' where id = 'brev_export'",
+      );
+      expect((await exportRun(hostileRunId, join(newScratch(), 'export'))).code).toBe(ExitCode.Ok);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      handle.sqlite.exec("delete from blind_reviews where id = 'brev_export'");
+      warn.mockRestore();
+      handle.close();
+    }
   });
 
   it('prints only the summary object on stdout with --json, into an existing empty directory', async () => {
