@@ -3,7 +3,7 @@ title: SPEC-123 Phase 5, blind review of baseline and candidate outputs
 date: 2026-10-30
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (om-auto-implement-spec, SPEC-123 §21 Phase 5 only), issue #152
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-blind-review
 specs: [SPEC-123, SPEC-122, SPEC-014, SPEC-006, SPEC-008]
 ---
@@ -303,6 +303,13 @@ widths (D14), one `highlightTexts` job per render in the language of the path (F
   - Round 1, on 94965bc: needs-attention, one high finding. The files and compare pages
     checked for an open review only before their awaits. Fixed in b2f09ed.
   - Round 2, on b2f09ed: approve, no material findings.
+- `om-auto-review-pr` on PR #167: a COMMENT review (own PR) with the verdict approve, no
+  blocker or major findings. Two minor findings and one nit are left as follow-ups:
+  - The verdict and reveal calls are not scoped to the form's run. A forged form with another
+    run's random pair or review id would act on that run. Fixing it means changing the §8.3
+    signatures.
+  - `assertBlindPairIntegrity` is re-exported from the package index.
+  - The nit: pages read `getBenchmarkRunDetail` with every trace.
 
 ## Problems and deviations
 
@@ -333,6 +340,8 @@ widths (D14), one `highlightTexts` job per render in the language of the path (F
 - SPEC-123 stays open (`Refs #152`). AC-3 and AC-11 still need a browser check through a real
   capture (a planted secret, an `assertion-error` agent run); NFR-123-01 has no timing test.
 - The outline `Button` border is 1.26:1 in light mode (design system, all outline buttons).
+- Scope `recordBlindVerdict` and `revealBlindReview` by the benchmark run (§8.3 change), and stop
+  re-exporting `assertBlindPairIntegrity` from the package index (review minors).
 - A narrower repository read for the run, files, compare and review pages, instead of
   `getBenchmarkRunDetail` with every trace (carried over from Phase 4).
 - Restarting or discarding a review, and a blind export (§19).
@@ -359,5 +368,5 @@ PR: #167
 ### Phase 3: Verification
 
 - [x] 3.1 Full gate, red-first proof and real-app proof — b2f09ed
-- [ ] 3.2 Browser QA agent, Codex adversarial review and om-auto-review-pr
+- [x] 3.2 Browser QA agent, Codex adversarial review and om-auto-review-pr
 - [x] 3.3 SPEC-123 §20, run log, lessons
