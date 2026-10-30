@@ -11,6 +11,7 @@ import {
   buildCommandEnv,
   buildManifest,
   diffManifests,
+  displayStatus,
   equivalenceIssues,
   executionBlockers,
   loadDefinitionFile,
@@ -327,6 +328,61 @@ describe('runBenchmark (mock agent, RED/GREEN)', () => {
       runBenchmark({ ...input, definition: docker, executionApproved: true }),
     ).rejects.toThrow(BenchmarkConfigurationError);
   });
+
+  // SPEC-123 AC-9 on the mock run `directivebench demo` stores (the runner test pins its stored
+  // verdict, delta and display status from before capture existed): capturing output files
+  // changes no score, verdict, display status, assertion result or change list.
+  it('scores the bundled mock benchmark identically with and without output capture (SPEC-123 AC-9)', async () => {
+    const store = tmp('store');
+    const prepared = await prepareSuiteImport(exampleSuite, store);
+    const artifact = await exampleArtifact();
+    const run = (onAgentRun?: Parameters<typeof runBenchmark>[0]['onAgentRun']) =>
+      runBenchmark({
+        definition: prepared.definition,
+        fixtures: prepared.fixtures,
+        fixtureStore: store,
+        artifact,
+        adapter: new MockAgentAdapter(),
+        workRoot: join(tmp('work'), 'run'),
+        executionApproved: true,
+        signal: new AbortController().signal,
+        ...(onAgentRun ? { onAgentRun } : {}),
+      });
+    const captured: number[] = [];
+    const withCapture = await run(async (_record, capture) => {
+      captured.push(capture?.files.length ?? 0);
+    });
+    const without = await run();
+    // The capture did run: every agent run kept its changed file.
+    expect(captured).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(without.agentRuns.every((r) => r.outputFiles.status === 'not-captured')).toBe(true);
+    const measured = (o: typeof without) => ({
+      verdict: o.summary.verdict,
+      candidateOutcome: o.summary.candidateOutcome,
+      displayStatus: displayStatus(o.summary.verdict, o.summary.candidateOutcome),
+      delta: o.summary.delta,
+      baseline: o.summary.baseline.meanScore,
+      candidate: o.summary.candidate.meanScore,
+      warnings: o.warnings,
+      runs: o.agentRuns.map((r) => [
+        r.variant,
+        r.repetition,
+        r.executionStatus,
+        r.score,
+        r.passed,
+        r.changedFiles,
+        r.assertions.map((a) => [a.assertionId, a.passed, a.score]),
+      ]),
+    });
+    expect(measured(withCapture)).toEqual(measured(without));
+    expect(measured(without)).toMatchObject({
+      verdict: 'improved',
+      displayStatus: 'passed',
+      delta: 0.5,
+      baseline: 0.5,
+      candidate: 1,
+    });
+  }, 60_000);
 
   it('stops when cancelled', async () => {
     const store = tmp('store');
