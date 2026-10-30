@@ -4,7 +4,7 @@
 - **Date:** 2026-10-29
 - **Deciders:** Project maintainer (decision D20 of the UI decisions on PR #155; pending review of
   this record)
-- **Related:** [SPEC-123](../specs/2026-10-29-agent-run-output-files.md) §6.7 (FR-123-70 to
+- **Related:** [SPEC-123](../specs/implemented/2026-10-29-agent-run-output-files.md) §6.7 (FR-123-70 to
   FR-123-77), NFR-123-07, §12, §17 and §21 Phase 3a;
   [SPEC-004 §4](../specs/2026-10-14-technology-stack.md#4-dependency-policy) dependency policy;
   [SPEC-014](../specs/2026-10-15-engineering-standards.md) §5.6; PR #154 (spec), PR #155

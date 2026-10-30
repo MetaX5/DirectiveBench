@@ -13,7 +13,15 @@ import {
   cleanUp,
   reseed,
 } from './output-files-seed';
-import { MOCK_LABEL, demoRunId, escapeRegExp, withDatabase } from './support';
+import {
+  MOCK_LABEL,
+  demoRunId,
+  escapeRegExp,
+  keptFiles,
+  shownFileLines,
+  storedFileLines,
+  withDatabase,
+} from './support';
 
 /**
  * SPEC-123 Phase 3: the "Output files" card on the run page and the agent-run files page
@@ -76,6 +84,26 @@ test('the demo run lists each agent run with its files and opens them (FR-123-20
 
   await page.getByRole('link', { name: 'Back to the run' }).click();
   await expect(page).toHaveURL(new RegExp(`/results/${runId}$`));
+});
+
+test('every file of every agent run of the demo run is readable in full (AC-1)', async ({
+  page,
+}) => {
+  const runId = await withDatabase(demoRunId);
+  const files = await withDatabase((db) => keptFiles(db, runId));
+  // One case, three repetitions, both variants: every one of them kept its file.
+  expect(files.map((f) => `${f.variant}-${f.repetition}`)).toEqual([
+    'baseline-1',
+    'baseline-2',
+    'baseline-3',
+    'candidate-1',
+    'candidate-2',
+    'candidate-3',
+  ]);
+  for (const file of files) {
+    await page.goto(filesPage(runId, file.agentRunId, `?path=${encodeURIComponent(file.path)}`));
+    expect(await shownFileLines(page, file.path)).toEqual(storedFileLines(file.content));
+  }
 });
 
 test('the card shows counts, reasons and pre-capture agent runs (D23, D25, D26)', async ({

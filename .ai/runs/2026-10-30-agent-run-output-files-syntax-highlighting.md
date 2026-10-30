@@ -10,7 +10,7 @@ specs: [SPEC-123, SPEC-014, SPEC-004, SPEC-122]
 
 # Run: SPEC-123 Phase 3a, syntax highlighting
 
-Source doc: .ai/specs/2026-10-29-agent-run-output-files.md
+Source doc: .ai/specs/implemented/2026-10-29-agent-run-output-files.md
 
 ## Objective
 

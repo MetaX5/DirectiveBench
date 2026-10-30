@@ -1,7 +1,7 @@
 ---
 id: SPEC-123
 title: Keep and review the files an agent run wrote (output files, comparison, blind review)
-status: draft
+status: implemented
 created: 2026-10-29
 updated: 2026-10-30
 category: feature
@@ -31,16 +31,16 @@ are binding inputs here, not autonomous defaults.
 
 ## 2. Motivation and problem statement
 
-- In the first real D03 check ([run log](../runs/2026-10-29-d03-check-wp-block-development.md))
+- In the first real D03 check ([run log](../../runs/2026-10-29-d03-check-wp-block-development.md))
   the maintainer's planned blind comparison of outputs, the human side of
-  [D03](research/decisions/D03-success-means-verdicts-hold-in-real-projects.md), could not be
+  [D03](../research/decisions/D03-success-means-verdicts-hold-in-real-projects.md), could not be
   done: "Agent workspaces are deleted after the run, and tool-call inputs in the trace are
   truncated (about 2,000 characters), so the files the agent wrote cannot be rebuilt." An attempt
   to rebuild them from traces failed on truncated JSON.
 - False assertion failures could only be spotted from trace fragments
-  ([lesson](../lessons/2026-10-29-assert-outcomes-not-one-solution.md)): 6 of 12 runs failed a
+  ([lesson](../../lessons/2026-10-29-assert-outcomes-not-one-solution.md)): 6 of 12 runs failed a
   `deprecation-registered` check, and only 2 could be checked by hand.
-- [D09](research/decisions/D09-suite-must-discriminate-before-version-verdicts.md) records that
+- [D09](../research/decisions/D09-suite-must-discriminate-before-version-verdicts.md) records that
   "a human comparison also needs the agent's output files, which DirectiveBench does not keep
   yet".
 - Code today: `executeAgentRun` in `packages/benchmark-engine/src/orchestrator.ts` computes
@@ -139,7 +139,7 @@ highlighting, §6.7) are not listed here; they are inputs. Every row below is a 
 | FR-123-01 | **When capture runs.** After the agent stage and **before** the verification overlay is applied, the engine SHALL capture the output files of every agent run whose adapter returned `completed`, `agent-error` or `timeout` (its process tree has exited) and whose workspace pin was checked after the agent run and still holds (the `replacedAfter('the agent run')` check ran and passed). Excluded: runs cancelled before that point (the `signal.aborted` check right after the adapter returns comes first); the engine's own timeout fallback ("Agent did not stop after timeout"), where the agent may still be writing; and runs ending with a code in `STOP_CODES`, for which that check is skipped today. Capturing after the overlay would mix verification files into the output. Once taken, the capture is kept on **every later return path** of the agent run (A6): the `stray-processes`, `workspace-replaced` (after an assertion command), `assertion-error` and exception paths and a cancellation during assertions all persist it with their record. An agent run that ends before the capture keeps no files and stores the reason (FR-123-08). |
 | FR-123-02 | **Manifest and change list.** For a `completed` run the capture SHALL reuse the measurement manifest (`after = buildManifest(workspaceDir)`) and its `changedFiles`; it builds no second manifest. A `buildManifest` failure there (a manifest limit, an `UnsafeFileError`) keeps today's behaviour: the run becomes `infrastructure-error` through the existing `catch`, before any capture, so no files are kept and the reason is stored. For an `agent-error` or `timeout` run, which today returns before any post-agent manifest, the capture SHALL build the same manifest with the same limits (`DEFAULT_FILE_LIMITS`) and `diffManifests(before, after)` inside the capture's own error handling, so its failure falls under FR-123-09 and never changes the status. |
 | FR-123-03 | **Stored `changed_files` of failed runs.** When the capture of an `agent-error` or `timeout` run succeeds, its change list SHALL also become the record's `changedFiles` (stored in `agent_runs.changed_files`, shown by SPEC-113 as "Changed files"), replacing today's `[]`. When that capture fails, `changedFiles` stays `[]`. No assertion runs for these runs, so score, passed, verdict and display status are unchanged (AC-9). `completed` runs are unchanged. |
-| FR-123-04 | **Reading a file.** For each `added` or `modified` path the engine SHALL open the file through the pinned workspace without following a symlink in any path component (`O_NOFOLLOW` on each component, or a walk relative to directory handles, with the identity check of [the `O_NOFOLLOW` lesson](../lessons/2026-10-19-verify-opened-file-identity.md)), `fstat` the opened handle and compare its **size** with the manifest entry's `size`. It reads at most the window of FR-123-06 into memory and streams the rest of the handle only into a sha256 hash and the **key-marker scan** of FR-123-07. The scan runs over the **whole file**, the window included, as one stateful pass in file order that keeps any pending marker start across chunk and window boundaries (memory stays bounded by `KEY_MARKER_MAX_BYTES`), then compares the hash of **all** bytes read with the manifest entry's `sha256`. `ManifestFile` is `{ path, sha256, size }` and has no modification time; none is compared or added. A mismatch fails the capture (FR-123-09). Hashing the remainder is bounded by the manifest's own 100 MiB total. The engine SHALL keep per file: path, change kind, original size and sha256 (from the manifest), and, when kept, the content. A `deleted` path is recorded with metadata only. |
+| FR-123-04 | **Reading a file.** For each `added` or `modified` path the engine SHALL open the file through the pinned workspace without following a symlink in any path component (`O_NOFOLLOW` on each component, or a walk relative to directory handles, with the identity check of [the `O_NOFOLLOW` lesson](../../lessons/2026-10-19-verify-opened-file-identity.md)), `fstat` the opened handle and compare its **size** with the manifest entry's `size`. It reads at most the window of FR-123-06 into memory and streams the rest of the handle only into a sha256 hash and the **key-marker scan** of FR-123-07. The scan runs over the **whole file**, the window included, as one stateful pass in file order that keeps any pending marker start across chunk and window boundaries (memory stays bounded by `KEY_MARKER_MAX_BYTES`), then compares the hash of **all** bytes read with the manifest entry's `sha256`. `ManifestFile` is `{ path, sha256, size }` and has no modification time; none is compared or added. A mismatch fails the capture (FR-123-09). Hashing the remainder is bounded by the manifest's own 100 MiB total. The engine SHALL keep per file: path, change kind, original size and sha256 (from the manifest), and, when kept, the content. A `deleted` path is recorded with metadata only. |
 | FR-123-05 | **Limits.** Content is kept within `OUTPUT_FILE_MAX_BYTES` (1 MiB) per file and `OUTPUT_RUN_MAX_BYTES` (10 MiB) per agent run. For each file the budget is `min(OUTPUT_FILE_MAX_BYTES, run budget left)`, and the kept prefix SHALL satisfy both: original bytes kept `<= budget` and stored (redacted) UTF-8 bytes `<= budget`. The run budget is reduced by the stored bytes. Files are processed in ascending original size, then path (A4). A file cut by the per-file limit is `truncated`, reason `file-limit`; a file cut by the run budget is `truncated`, reason `run-limit`; a file for which no budget is left keeps no content, `not-kept`, reason `run-limit`. |
 | FR-123-06 | **Redact, then cut, without a finite match length.** For a file of `size` bytes with budget `b`, the engine reads the window `[0, min(size, b + OUTPUT_REDACTION_MARGIN_BYTES))` (margin 4 KiB), never the whole of a larger file, trims an incomplete final UTF-8 character and decodes it. It then collects **secret ranges** on the decoded window text (FR-123-07) and places the cut `c` on the original text: the largest character boundary with `c <= b` (in original bytes) whose redacted prefix fits `b` stored bytes; if `c` falls inside a secret range, `c` moves to that range's start (the range is dropped, the file is `truncated`). The stored content is the original text `[0, c)` with each range inside it replaced by `REDACTION_MARKER`. No match length is assumed: every rule that can cross the cut also matches when it is cut short by the end of the window (FR-123-07), so a secret that starts before `c` is always a range that contains `c` or ends before it. The margin is needed only so a pattern secret starting at or before `c` has its shortest recognisable prefix inside the window: `OUTPUT_REDACTION_MARGIN_BYTES` SHALL be at least the longest minimum match length of the core secret patterns (a unit test asserts this against the pattern list). |
 | FR-123-07 | **Redaction, fail-closed, for every adapter.** The secret ranges of a window are the union of (a) the core ranges, `findSecretRanges(text, [], { textEnd })` in `@directivebench/core`, and (b) the adapter's ranges, `findOutputSecrets(text, { textEnd })` (FR-123-60), where `textEnd` is `file-end` when the window holds the whole file and `cut` otherwise. Overlapping and adjacent ranges are merged. The rules are: every known-secret occurrence; every match of the core `SECRET_PATTERNS` (only the token part where the pattern keeps a prefix, as `authorization: bearer`); **every private-key fragment, as `redactStreamText` does today**: the text after a `BEGIN … PRIVATE KEY` marker up to the next key marker or the end of the text, and the text before an `END … PRIVATE KEY` marker not preceded by its `BEGIN`; and, when `textEnd` is `cut`, the longest suffix of the text that is a prefix of a known secret. **Orphan `END` beyond the window (Codex review round 2):** when the window does not hold the whole file, the window's ranges are finalised only after the key-marker scan of FR-123-04 has run over the rest of the file. If the first key marker that **ends** after the window end (a marker that starts inside the window and finishes beyond it counts) is an `END` marker, the window text after its last key marker (or from offset 0 when the window has none) to the window end is a private-key fragment and becomes a range, exactly as `redactStreamText` treats text before an `END` without its `BEGIN` on the full text. A scan that cannot finish (read error, size or hash mismatch) fails the capture (FR-123-09), so no window is kept unscanned. The markers are the core ones (`-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----`), whose middle part has no length limit, so the scan is defined fail-closed: `KEY_MARKER_MAX_BYTES` is 256, and a `-----BEGIN ` or `-----END ` start, wherever it begins (inside the window or after it), whose `PRIVATE KEY-----` does not follow within 256 bytes counts as an `END` marker ending where the 256 bytes end. Clarified on 2026-10-29 (maintainer, PR #157): a start counts as `END` only while it can still become a private-key marker, i.e. its text after `-----BEGIN ` or `-----END ` is still only capital letters and spaces when the 256 bytes or the file end. A start that the core regex already rules out (`-----BEGIN PUBLIC KEY-----`, `-----BEGIN CERTIFICATE-----` and any other non-private-key block) is not a marker, so text before a public key or a certificate is not redacted. A pending `END` start inside the window that the window alone cannot classify is therefore resolved by the scan, never ignored. Because the engine always adds (a), an adapter that returns no range still cannot leak pattern secrets or key material, and an unmatched `BEGIN` block is never kept (the gap `redactSecrets` leaves today, which the mock adapter would otherwise inherit). The engine checks every adapter range (integers, `0 <= start < end <= text.length`) and fails the capture on an invalid one (FR-123-09). The **redaction count** of a file is the number of merged ranges inside the kept prefix, so a `[REDACTED]` the agent wrote itself is never counted. Regression test (Codex review round 1), run with each adapter's ranges and with an adapter returning none: a file whose `-----BEGIN PRIVATE KEY-----` marker ends 64 bytes before the per-file limit, followed by an 8 KiB key body and its `END` marker (so `END` lies beyond the read window); the stored text SHALL end at or before the `BEGIN` marker's end and contain none of the 64 body bytes that the previous design kept. Symmetric regression (Codex review round 2), with the same adapters: a key **fragment without its `BEGIN`** whose first 64 body bytes lie before the per-file limit, followed by 8 KiB more body and an `END` marker beyond the read window, the same with the `END` marker straddling the window end, and (Codex review round 3) an overlong `END` marker (`-----END ` starting 64 bytes before the limit, 8 KiB of capital letters, then ` PRIVATE KEY-----`) that starts inside the window and finishes beyond it; none of the fragment's bytes is stored. |
@@ -196,7 +196,7 @@ highlighting, §6.7) are not listed here; they are inputs. Every row below is a 
 Maintainer decision D20 of 2026-10-29 (UI decisions on PR #155; D1 to D19 were approved there).
 It is delivered in its own phase after Phase 1 (§21, Phase 3a) and blocks neither capture nor
 export. Until it lands, `FileView` and `SideBySideDiff` show plain text as specified above.
-Rationale and rejected alternatives: [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md).
+Rationale and rejected alternatives: [ADR-0014](../../decisions/0014-server-side-syntax-highlighting-with-shiki.md).
 
 | ID | Requirement |
 | --- | --- |
@@ -447,7 +447,7 @@ design-system components):
   failure falls back to plain text (FR-123-74). Errors are logged without file content. Shiki is
   a pure JavaScript library with no install script, no WebAssembly in the chosen engine and no
   network access; it adds to the supply-chain surface of the web build, covered by the lockfile
-  and `pnpm audit --prod` (SPEC-004 §4, [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md)).
+  and `pnpm audit --prod` (SPEC-004 §4, [ADR-0014](../../decisions/0014-server-side-syntax-highlighting-with-shiki.md)).
 - **Export** writes untrusted paths to disk: FR-123-42 validation, `resolveInside`, exclusive
   create, empty target directory. The lesson "validate untrusted paths against the narrowest root"
   applies.
@@ -602,45 +602,45 @@ design-system components):
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: After a mock or fake-`claude` run, every changed text file up to 1 MB is readable in
+- [x] AC-1: After a mock or fake-`claude` run, every changed text file up to 1 MB is readable in
   full on the run page for each case, variant and repetition.
-- [ ] AC-2: A file over 1 MB is cut at 1 MB and says so; an agent run over 10 MB marks the files
+- [x] AC-2: A file over 1 MB is cut at 1 MB and says so; an agent run over 10 MB marks the files
   cut or not kept by the run limit.
-- [ ] AC-3: A planted secret (known key and a token pattern) in an output file is stored and shown
+- [x] AC-3: A planted secret (known key and a token pattern) in an output file is stored and shown
   redacted, with the redaction count; a private-key block cut by the bounded read keeps no body
   byte with every adapter, also when the window holds only a fragment whose `END` marker lies
   beyond it (FR-123-07 regressions, Codex rounds 1 and 2).
-- [ ] AC-4: Binary, deleted and artifact files are listed as not kept, with the reason.
-- [ ] AC-5: The compare page shows the same path of two agent runs side by side with a bounded,
+- [x] AC-4: Binary, deleted and artifact files are listed as not kept, with the reason.
+- [x] AC-5: The compare page shows the same path of two agent runs side by side with a bounded,
   accessible diff.
-- [ ] AC-6: `benchmark export` writes the files and manifest; unsafe paths are refused and listed;
+- [x] AC-6: `benchmark export` writes the files and manifest; unsafe paths are refused and listed;
   a non-empty target is refused.
-- [ ] AC-7: A blind review shows no variant information and no agent-run id before the reveal
+- [x] AC-7: A blind review shows no variant information and no agent-run id before the reveal
   (asserted on the HTML, the RSC payload and the repository result), labelled views, including
   the existing Agent runs section of the run page, are closed while it is unrevealed, records immutable verdicts, and reveals all pairs at once with
   the summary.
-- [ ] AC-8: Removing a benchmark run row removes its files, review and pairs (cascade test).
-- [ ] AC-9: Score, verdict and display status of a run are identical with and without capture
+- [x] AC-8: Removing a benchmark run row removes its files, review and pairs (cascade test).
+- [x] AC-9: Score, verdict and display status of a run are identical with and without capture
   (regression test on a stored mock run); only `changed_files` of `agent-error` and `timeout`
   runs changes (FR-123-03).
-- [ ] AC-10: Engine memory does not retain captured content: records and the outcome hold
+- [x] AC-10: Engine memory does not retain captured content: records and the outcome hold
   metadata only, and each capture is collectable after its `onAgentRun` resolved (FR-123-10).
-- [ ] AC-11: An `assertion-error` agent run keeps and shows the files captured before its
+- [x] AC-11: An `assertion-error` agent run keeps and shows the files captured before its
   assertions (A6).
-- [ ] AC-12 (Phase 3a): A kept file with a listed extension and at most 256 KB of content is
+- [x] AC-12 (Phase 3a): A kept file with a listed extension and at most 256 KB of content is
   shown with syntax colours in `FileView` and on both sides of `SideBySideDiff`, rendered from
   server-side tokens as React elements; the browser loads no highlighter code, and the installed
   tarball does the same with only `next`, `react` and `react-dom` as runtime dependencies
   (FR-123-70, FR-123-72, FR-123-77).
-- [ ] AC-13 (Phase 3a): A file over 256 KB is shown plain with "Syntax highlighting is off for
+- [x] AC-13 (Phase 3a): A file over 256 KB is shown plain with "Syntax highlighting is off for
   files over 256 KB."; a highlighter failure shows plain text with its note and the page still
   renders; an unknown extension is plain with no note (FR-123-71, FR-123-74).
-- [ ] AC-14 (Phase 3a): Every `--syntax-*` colour reaches at least 4.5:1 in both themes on the
+- [x] AC-14 (Phase 3a): Every `--syntax-*` colour reaches at least 4.5:1 in both themes on the
   plain code surface and on the D11 and D12 row tints, measured in `e2e/ui-contrast.spec.ts` on a
   page (FR-123-73).
-- [ ] AC-15 (Phase 3a): A file containing HTML or script markup is shown as text, never
+- [x] AC-15 (Phase 3a): A file containing HTML or script markup is shown as text, never
   interpreted (no `dangerouslySetInnerHTML`, §12).
-- [ ] AC-16 (Phase 3a): A tokenizer that stalls in a synchronous loop is stopped at the
+- [x] AC-16 (Phase 3a): A tokenizer that stalls in a synchronous loop is stopped at the
   aggregate deadline by terminating the worker; the page renders plain text with "Syntax
   highlighting took too long, so this file is shown as plain text." and the server keeps answering
   other requests meanwhile (FR-123-78).
@@ -655,7 +655,7 @@ design-system components):
 - Phases 1, 2, 3, 4 and 5: no new package dependency.
 - **Phase 3a: Shiki (MIT, 4.x; 4.5.0 on 2026-10-29) as `@shikijs/core`, `@shikijs/engine-javascript` and `@shikijs/langs`, in `apps/web` only**,
   added on the maintainer's decision D20 and recorded in
-  [ADR-0014](../decisions/0014-server-side-syntax-highlighting-with-shiki.md) (AGENTS.md rule 9).
+  [ADR-0014](../../decisions/0014-server-side-syntax-highlighting-with-shiki.md) (AGENTS.md rule 9).
   Why it is needed: readable code needs accurate grammars, and writing tokenizers for thirteen
   languages by hand is not "a few lines of local code" (SPEC-014 §5.6). Why Shiki: it uses the
   TextMate grammars that VS Code uses, so colouring matches what authors see in their editor; it
@@ -689,7 +689,7 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
 ## 20. Implementation status
 
 - **Implemented (Phase 1, capture and storage; issue #152, run log
-  [2026-10-29-agent-run-output-files-capture](../runs/2026-10-29-agent-run-output-files-capture.md),
+  [2026-10-29-agent-run-output-files-capture](../../runs/2026-10-29-agent-run-output-files-capture.md),
   verified on 2026-10-29 by `packages/benchmark-engine/test/{output-files,output-files-simulated-fs,orchestrator}.test.ts`,
   `packages/core/test/secret-ranges.test.ts`, `packages/agent-adapters/test/output-secrets.test.ts`,
   `packages/database/test/{client,runs}.test.ts`, `packages/runner/test/runner.test.ts`,
@@ -704,14 +704,14 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   (including the private-key regressions of Codex rounds 1 to 3 with the mock, Claude Code and
   no-range adapters), AC-4, AC-8 (agent-run files), AC-9, AC-10 and AC-11.
 - **Implemented (Phase 2, CLI export; run log
-  [2026-10-29-agent-run-output-files-export](../runs/2026-10-29-agent-run-output-files-export.md),
+  [2026-10-29-agent-run-output-files-export](../../runs/2026-10-29-agent-run-output-files-export.md),
   verified on 2026-10-29 by `apps/cli/test/benchmark-export.test.ts`, `apps/cli/test/main.test.ts`,
   `pnpm verify:pack` (exports the demo run from the installed tarball) and the built CLI on a
   `directivebench demo` run, including hostile rows planted in its database):** FR-123-40 to
   FR-123-43 and AC-6. The blind-review warning of FR-123-52a is not implemented: there is no
   blind review before Phase 5, which adds it to the export.
 - **Implemented (Phase 3, run page and files page; run log
-  [2026-10-29-agent-run-output-files-pages](../runs/2026-10-29-agent-run-output-files-pages.md),
+  [2026-10-29-agent-run-output-files-pages](../../runs/2026-10-29-agent-run-output-files-pages.md),
   UI decisions D21 to D34 approved by the maintainer on 2026-10-29, verified by
   `apps/web/test/agent-run-files.test.ts`, `packages/database/test/runs.test.ts`
   (`countAgentRunFiles`), `apps/web/e2e/agent-run-files.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts`
@@ -722,7 +722,7 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   UI side of AC-1 (demo run files readable in full), AC-2 and AC-4 (seeded truncated, binary,
   deleted, artifact and not-kept files with their notices).
 - **Implemented (Phase 4, compare; run log
-  [2026-10-30-agent-run-output-files-compare](../runs/2026-10-30-agent-run-output-files-compare.md),
+  [2026-10-30-agent-run-output-files-compare](../../runs/2026-10-30-agent-run-output-files-compare.md),
   UI decisions D36 to D45 approved by the maintainer on 2026-10-30 (D43: "Identical" / "Differs"
   from the stored sha256), verified by `apps/web/test/{compare-files,line-diff}.test.ts`,
   `apps/web/e2e/compare-files.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts`, the
@@ -733,7 +733,7 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   for an unknown or foreign case or agent run, keyboard, 320px and contrast in both themes, and
   the "Compare agent runs" link per case in the "Output files" card.
 - **Implemented (Phase 3a, syntax highlighting on the files and compare pages; run log
-  [2026-10-30-agent-run-output-files-syntax-highlighting](../runs/2026-10-30-agent-run-output-files-syntax-highlighting.md),
+  [2026-10-30-agent-run-output-files-syntax-highlighting](../../runs/2026-10-30-agent-run-output-files-syntax-highlighting.md),
   verified on 2026-10-30 by `apps/web/test/{syntax-highlight,syntax-highlight-worker,syntax-highlight-failure,highlight-fixtures,output-files}.test.ts`,
   `apps/web/e2e/agent-run-files.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts`, the FileView
   stories, `pnpm verify:pack` and the built app after `directivebench demo`):** FR-123-70 to
@@ -744,13 +744,14 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   terminates it at `SYNTAX_HIGHLIGHT_DEADLINE_MS`, counted from the job's submission (queue
   wait included); `highlightTexts` sends the texts of one page render as one job. AC-16 is
   verified with stand-in stalled workers in unit tests (terminated at 2 s, event-loop delay
-  probe under 500 ms), not with a stalled grammar on a page. After Phase 4 merged, the compare
+  probe under 500 ms); a real stalled grammar on a page followed with the acceptance closure
+  below. After Phase 4 merged, the compare
   page `/results/[id]/compare` highlights both `SideBySideDiff` sides as one job per page
   render (FR-123-76 and the `SideBySideDiff` side of AC-12, verified by
   `apps/web/e2e/compare-files.spec.ts` and `apps/web/e2e/ui-contrast.spec.ts` on the diff
   tints).
 - **Implemented (Phase 5, blind review; run log
-  [2026-10-30-agent-run-output-files-blind-review](../runs/2026-10-30-agent-run-output-files-blind-review.md),
+  [2026-10-30-agent-run-output-files-blind-review](../../runs/2026-10-30-agent-run-output-files-blind-review.md),
   UI decisions D46 to D57 approved by the maintainer on 2026-10-30, verified on 2026-10-30 by
   `packages/database/test/{blind-reviews,client}.test.ts`,
   `apps/web/test/{blind-review,actions}.test.ts`, `apps/cli/test/benchmark-export.test.ts`,
@@ -766,15 +767,85 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   a review is unrevealed (checked on the HTML and the RSC payload of every labelled page with
   the agent-run ids known before the start), immutable verdicts, the reveal with its inline
   confirmation, and the `benchmark export` warning. The CLI export is not blocked (FR-123-52a).
-- **Partially implemented:** AC-3 and AC-11: the page shows the redaction count (seeded rows)
-  and the files of an agent run whatever its execution status, but no browser test plants a
-  secret through a real capture or opens an `assertion-error` run. NFR-123-01
-  (capture time) is a target without a timing test. The design-system components (`FileView`,
-  `SideBySideDiff`, `FileStatusBadges`) and `apps/web/lib/syntax-highlight.ts` merged with
-  PR #155 are recorded in that PR's run log
-  ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)).
-- **Not implemented:** none of the phases; the open items are the browser checks of AC-3 and
-  AC-11 above.
+- **Implemented (acceptance closure; run log
+  [2026-10-30-spec-123-close-acceptance](../../runs/2026-10-30-spec-123-close-acceptance.md),
+  verified on 2026-10-30):** the browser checks of AC-1, AC-3, AC-11 and AC-16 through a real
+  capture, NFR-123-01's timing test and AC-9 on the mock run. `apps/web/e2e/real-capture.spec.ts`
+  runs `directivebench benchmark run` of the built CLI against the e2e data directory, with a
+  fake `claude` on its PATH that writes the output files (nothing is seeded): a planted API key
+  (found only by the Claude Code adapter) and a `ghp_` token in `notes.txt` are stored and shown
+  redacted with "2 secrets redacted." and absent from the HTML and RSC payload of the files and
+  run pages (AC-3); the `assertion-error` agent runs of a case whose catastrophic pattern exceeds
+  the pattern time limit list and show the files captured before their assertions (AC-11);
+  every kept file of every agent run reads in full (AC-1, also on the demo run in
+  `apps/web/e2e/agent-run-files.spec.ts`); and `deep.ts` (10,000 lines of 25 nested braces, a
+  real input that keeps the TypeScript grammar busy for about 20 s) is stopped at the deadline,
+  shown plain with the timeout note, while `/api/health` is answered during the stall (AC-16).
+  `packages/benchmark-engine/test/output-files-timing.test.ts` measures NFR-123-01 (10 generated
+  1 MiB files, fastest of three captures in process CPU time, about 85 ms against the 1 s target,
+  also under `taskset -c 0,1` with load). `packages/benchmark-engine/test/engine.test.ts` ("scores
+  the bundled mock benchmark identically with and without output capture") compares verdict,
+  display status, scores, assertions and change lists of the mock run `directivebench demo`
+  stores.
+- **Acceptance criteria and their tests (audited 2026-10-30):**
+  - AC-1: `apps/web/e2e/agent-run-files.spec.ts` "every file of every agent run of the demo run is
+    readable in full (AC-1)" and `apps/web/e2e/real-capture.spec.ts` "every file of every agent run
+    of a fake-claude run is readable in full (AC-1)"; storage in
+    `packages/runner/test/runner.test.ts` and `apps/cli/test/benchmark-run.test.ts`.
+  - AC-2: `packages/benchmark-engine/test/output-files.test.ts` (1 MiB cut, 10 MiB run budget) and
+    `apps/web/e2e/agent-run-files.spec.ts` (notices and card counts).
+  - AC-3: `apps/web/e2e/real-capture.spec.ts` "a secret an agent wrote into a file is stored and
+    shown redacted, with the count (AC-3)", `apps/cli/test/benchmark-run.test.ts` (API key in
+    `key.txt`), and the private-key regressions of
+    `packages/benchmark-engine/test/output-files.test.ts` ("captureOutputFiles: private keys cut
+    by the bounded read", rounds 1 to 3, for the mock, Claude Code and no-range adapters) and
+    `output-files-simulated-fs.test.ts`.
+  - AC-4: `packages/benchmark-engine/test/output-files.test.ts` ("keeps changed text files in full
+    and lists deleted, binary and artifact files without content") and
+    `apps/web/e2e/agent-run-files.spec.ts` ("the files page lists every file state and shows its
+    notices").
+  - AC-5: `apps/web/e2e/compare-files.spec.ts` and `apps/web/test/line-diff.test.ts`.
+  - AC-6: `apps/cli/test/benchmark-export.test.ts` and `scripts/verify-pack.mjs`.
+  - AC-7: `apps/web/e2e/blind-review.spec.ts`, `packages/database/test/blind-reviews.test.ts` and
+    `apps/web/test/actions.test.ts`.
+  - AC-8: `packages/database/test/runs.test.ts` and `packages/database/test/blind-reviews.test.ts`
+    (cascade).
+  - AC-9: `packages/benchmark-engine/test/engine.test.ts` (mock run, with and without capture),
+    `packages/benchmark-engine/test/orchestrator.test.ts` ("captures nothing without onAgentRun,
+    and scores identically either way (AC-9)", "keeps the files of agent-error and timeout runs
+    and stores their change list") and `packages/runner/test/runner.test.ts` (the stored mock
+    run's verdict, delta and display status, pinned since before capture).
+  - AC-10: `packages/benchmark-engine/test/orchestrator.test.ts` ("captures before the overlay
+    and delivers the content beside a metadata-only record", "releases each capture once its
+    callback resolved while the run goes on").
+  - AC-11: `apps/web/e2e/real-capture.spec.ts` "an assertion-error agent run shows the files
+    captured before its assertions (AC-11, A6)" and
+    `packages/benchmark-engine/test/orchestrator.test.ts` ("keeps the files of an
+    assertion-error run (A6, AC-11)").
+  - AC-12: `apps/web/e2e/agent-run-files.spec.ts` ("code files are highlighted on the server, the
+    browser loads no highlighter"), `apps/web/e2e/compare-files.spec.ts` ("both sides of the diff
+    are highlighted") and `scripts/verify-pack.mjs` (runtime dependencies and a highlighted page
+    from the installed tarball). The browser-side check runs on the built CLI `dist` that
+    `verify:pack` packs, not on the installed copy.
+  - AC-13: `apps/web/e2e/agent-run-files.spec.ts` (over 256 KB and an unknown extension on a page),
+    `apps/web/test/syntax-highlight-failure.test.ts` (creation rejected and tokenizing throws give
+    `failed`; `highlightLines` never rejects) and the `HighlightFailed` story of `FileView`. The
+    failure note is verified on the component, not on a page: no real input made Shiki fail
+    (probed on 2026-10-30, every listed language), and the page passes the result to `FileView`
+    unchanged.
+  - AC-14: `apps/web/e2e/ui-contrast.spec.ts` ("syntax colours reach 4.5:1 on the code surface and
+    the diff tints", both themes).
+  - AC-15: `apps/web/e2e/agent-run-files.spec.ts` ("agent-written markup is shown as text, never
+    run"), `apps/web/e2e/compare-files.spec.ts`, `apps/web/test/syntax-highlight.test.ts`; no
+    `dangerouslySetInnerHTML` in `apps/web` (checked by search).
+  - AC-16: `apps/web/e2e/real-capture.spec.ts` "a file that stalls the tokenizer is shown plain
+    with the timeout note while the server answers (AC-16)" and
+    `apps/web/test/syntax-highlight-worker.test.ts` (a stalled worker terminated at the deadline,
+    event-loop delay probe).
+- The design-system components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
+  `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
+  ([2026-10-29-spec-123-design-system-components](../../runs/2026-10-29-spec-123-design-system-components.md)).
+- **Not implemented:** nothing; the future extensions of §19 are out of scope.
 
 ## 21. Phasing and implementation plan
 
