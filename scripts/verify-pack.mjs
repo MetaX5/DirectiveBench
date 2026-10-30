@@ -80,7 +80,9 @@ check(
 );
 // SPEC-004 §4.3, SPEC-123 FR-123-77: the web app's own packages (Shiki among them) are bundled.
 check(
-  Object.keys(manifest.dependencies ?? {}).sort().join(' ') === 'next react react-dom',
+  Object.keys(manifest.dependencies ?? {})
+    .sort()
+    .join(' ') === 'next react react-dom',
   'runtime dependencies are only next, react and react-dom',
 );
 console.log(`  ${files.length} files`);
