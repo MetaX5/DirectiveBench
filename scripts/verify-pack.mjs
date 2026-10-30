@@ -6,8 +6,9 @@
 //   4. run --help and --version, the headless demo and an export of its run, then `serve` and
 //      probe it over HTTP
 //   5. stop the server with SIGTERM and require a clean exit
+//   6. remove the temporary directory (about 350 MB), also after a failure; `--keep` keeps it
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,18 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cliDir = join(root, 'apps', 'cli');
 const work = mkdtempSync(join(tmpdir(), 'directivebench-pack-'));
+const keep = process.argv.slice(2).includes('--keep');
 const failures = [];
+/** The `serve` process, while it may still run, so an early exit stops it before cleanup. */
+let server;
+
+// The temporary directory holds the tarball and an npm install with Next.js. The temporary
+// directory can be RAM (AGENTS.md §3), so it is removed on every exit, also after a thrown error.
+process.once('exit', () => {
+  if (server && server.exitCode === null) server.kill('SIGKILL');
+  if (keep) console.log(`Artifacts kept in ${work}`);
+  else rmSync(work, { recursive: true, force: true });
+});
 
 function step(name) {
   console.log(`\n▶ ${name}`);
@@ -120,6 +132,7 @@ const child = spawn(bin, ['--data-dir', dataDir, 'serve', '--no-open', '--port',
   cwd: work,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
+server = child;
 let output = '';
 child.stdout.on('data', (c) => (output += c));
 child.stderr.on('data', (c) => (output += c));
@@ -162,5 +175,5 @@ if (exitCode !== 0 || !healthy) console.log(output);
 console.log(
   failures.length ? `\n${failures.length} check(s) failed` : '\nPackaging verification passed',
 );
-console.log(`Artifacts kept in ${work}`);
+if (failures.length && !keep) console.log('Run `pnpm verify:pack --keep` to keep the artifacts.');
 process.exit(failures.length ? 1 : 0);

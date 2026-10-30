@@ -34,3 +34,6 @@ with the processes the gate needs. Running agents in parallel is fine; leaving d
 - Locally, `TMPDIR` can point at a disk directory (for Claude Code:
   `"env": { "TMPDIR": "…" }` in `.claude/settings.local.json`), because `os.tmpdir()` follows it.
 - Check `du -sh /tmp/* "$TMPDIR"/*` at the end of a long session.
+- Since 2026-10-30, `pnpm verify:pack` removes its directory (about 350 MB) on every exit
+  (`--keep` keeps it), and the Playwright run removes its one temporary root. Before that,
+  every `verify:pack` run left about 350 MB behind, which is where most of the 10 GB came from.

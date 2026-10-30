@@ -1,8 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { DEMO_SUITE, withDatabase } from './support';
+import { DEMO_SUITE, e2eTmpRoot, withDatabase } from './support';
 
 /**
  * Issue #19 (E02-S01, SPEC-103, SPEC-013 M1 AC2, SPEC-001 principle 15): a rescan through the UI
@@ -13,7 +12,7 @@ import { DEMO_SUITE, withDatabase } from './support';
 /** The runner polls every second; leave room for a slow CI host. */
 const RUNNER_TIMEOUT = 30_000;
 
-const sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-e2e-versions-')));
+const sources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'versions-')));
 const repo = join(sources, 'versions-team');
 const skillDir = '.agents/skills/e2e-versioned';
 const checklist = join(repo, skillDir, 'references', 'checklist.md');
