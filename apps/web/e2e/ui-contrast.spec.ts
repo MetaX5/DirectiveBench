@@ -6,6 +6,7 @@ import {
   cleanUp as cleanUpCompare,
   reseed as reseedCompare,
 } from './compare-seed';
+import { REVIEWED_RUN, cleanUp as cleanUpBlind, reseed as reseedBlind } from './blind-review-seed';
 import { AGENT_RUN, CODE_RUN, cleanUp, reseed } from './output-files-seed';
 import { withDatabase } from './support';
 
@@ -282,12 +283,14 @@ test.describe('syntax colours (SPEC-123 AC-14)', () => {
     withDatabase((db) => {
       reseed(db);
       reseedCompare(db);
+      reseedBlind(db);
     }),
   );
   test.afterAll(async () =>
     withDatabase((db) => {
       cleanUp(db);
       cleanUpCompare(db);
+      cleanUpBlind(db);
     }),
   );
 
@@ -333,8 +336,67 @@ test.describe('syntax colours (SPEC-123 AC-14)', () => {
           .soft(ratio, `compare page: ${kind} on ${tint || 'a plain row'}`)
           .toBeGreaterThanOrEqual(4.5);
       }
+      // The blind review renders the real D12 neutral tint on lines only in A or B (Phase 5).
+      await page.goto(`/results/${REVIEWED_RUN}/blind-review?pair=1&path=src%2Fanswer.js`);
+      await expect(page.locator('[data-tone="only"] [data-highlighted]').first()).toBeVisible();
+      const neutral = await measureTokens(page);
+      expect(new Set(neutral.map((m) => m.tint))).toContain('only');
+      for (const { kind, tint, ratio } of neutral) {
+        expect
+          .soft(ratio, `blind review: ${kind} on ${tint || 'a plain row'}`)
+          .toBeGreaterThanOrEqual(4.5);
+      }
       await testInfo.attach('syntax-contrast-ratios', {
-        body: JSON.stringify({ worst, compare: diff }, null, 2),
+        body: JSON.stringify({ worst, compare: diff, neutral }, null, 2),
+        contentType: 'application/json',
+      });
+    });
+  }
+});
+
+// SPEC-123 D49 to D53: the blind review's selected pair and path borders (their non-colour
+// cues), the note field, the verdict buttons and the destructive reveal buttons reach 3:1.
+test.describe('blind review controls', () => {
+  test.beforeAll(async () => withDatabase(reseedBlind));
+  test.afterAll(async () => withDatabase(cleanUpBlind));
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`blind review controls reach 3:1 in ${theme}`, async ({ page }, testInfo) => {
+      await page.emulateMedia({ colorScheme: theme });
+      const results: Measured[] = [];
+      await page.goto(`/results/${REVIEWED_RUN}/blind-review?pair=1`);
+      await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+      await page.addStyleTag({ content: '* { transition: none !important; }' });
+      const pair = page
+        .getByRole('navigation', { name: 'Pairs' })
+        .locator('a[aria-current="page"]');
+      await record(results, 'selected pair border', contrast(pair, 'border'));
+      await keyboardFocus(page, pair);
+      await record(results, 'pair link focus outline', contrast(pair, 'outline'));
+      const path = page
+        .getByRole('navigation', { name: 'Changed paths' })
+        .locator('a[aria-current="page"]');
+      await record(results, 'selected path border', contrast(path, 'border'));
+      const note = page.getByRole('textbox', { name: 'Note (optional)' });
+      await record(results, 'note border', contrast(note, 'border'));
+      await keyboardFocus(page, note);
+      await record(results, 'note focus ring', contrast(note, 'ring'));
+      const verdict = page.getByRole('button', { name: 'A is better, pair 1' });
+      await keyboardFocus(page, verdict);
+      await record(results, 'verdict button focus outline', contrast(verdict, 'outline'));
+      const reveal = page
+        .getByTestId('reveal-card')
+        .getByRole('button', { name: 'Reveal variants' });
+      await keyboardFocus(page, reveal);
+      await record(results, 'reveal button focus outline', contrast(reveal, 'outline'));
+      await reveal.click();
+      const confirm = page
+        .getByTestId('reveal-confirmation')
+        .getByRole('button', { name: 'Reveal variants' });
+      await keyboardFocus(page, confirm);
+      await record(results, 'reveal confirmation focus outline', contrast(confirm, 'outline'));
+      await testInfo.attach('blind-review-contrast-ratios', {
+        body: JSON.stringify(results, null, 2),
         contentType: 'application/json',
       });
     });

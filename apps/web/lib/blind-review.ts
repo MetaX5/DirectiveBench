@@ -171,3 +171,87 @@ export function excludedPairsText(eligibility: BlindReviewEligibility): string[]
   }
   return lines;
 }
+
+/** What a closed labelled view says while a review is unrevealed (FR-123-52a, D55). */
+export const BLIND_REVIEW_CLOSED_NOTICE =
+  'A blind review of this run is in progress. Labelled output files and agent runs are hidden until you reveal it.';
+
+/** The pairs and what a pair page reads of them. */
+interface ReviewPair {
+  position: number;
+  caseId: string;
+  verdict: BlindVerdict | null;
+}
+
+/**
+ * The pair a review page shows (D49): the requested position, or without one the first pair
+ * without a verdict (the first pair once all are decided or the review is revealed). Null for
+ * a position the review does not have, which the page renders as not found (§10).
+ */
+export function selectBlindPair<P extends ReviewPair>(
+  pairs: readonly P[],
+  requested: number | null,
+  revealed: boolean,
+): P | null {
+  if (requested !== null) return pairs.find((pair) => pair.position === requested) ?? null;
+  const open = revealed ? undefined : pairs.find((pair) => pair.verdict === null);
+  return open ?? pairs[0] ?? null;
+}
+
+/** The next pair without a verdict after `position`, wrapping around; null when none is left. */
+export function nextOpenPair<P extends ReviewPair>(
+  pairs: readonly P[],
+  position: number,
+): P | null {
+  const after = pairs.filter((pair) => pair.position > position);
+  const before = pairs.filter((pair) => pair.position < position);
+  return [...after, ...before].find((pair) => pair.verdict === null) ?? null;
+}
+
+/** A pair in the "Pairs" list: "Pair 1 · case-a · A is better" (D49). */
+export function pairListLabel(pair: ReviewPair): string {
+  const verdict = pair.verdict === null ? 'No verdict' : BLIND_VERDICT_LABELS[pair.verdict];
+  return `Pair ${pair.position} · ${pair.caseId} · ${verdict}`;
+}
+
+/** Which variant a revealed verdict preferred (D54). */
+export function preferredText(
+  verdict: BlindVerdict | null,
+  a: { variant: 'baseline' | 'candidate' },
+  b: { variant: 'baseline' | 'candidate' },
+): string {
+  if (verdict === null) return 'No verdict';
+  if (verdict === 'tie') return 'About the same';
+  return (verdict === 'a' ? a : b).variant === 'candidate' ? 'Candidate' : 'Baseline';
+}
+
+/**
+ * Why the run page offers no "Start blind review" (D47), or null when it does: the run must be
+ * completed and have at least one eligible pair (FR-123-50).
+ */
+export function startUnavailableText(
+  status: 'running' | 'completed' | 'error' | 'cancelled' | 'interrupted',
+  eligibility: BlindReviewEligibility,
+): string | null {
+  if (status === 'running') return 'A blind review can start after the run has completed.';
+  if (status !== 'completed') {
+    return `A blind review needs a completed run. This run ended as ${status}.`;
+  }
+  return eligibility.eligible === 0 ? 'No pair of completed agent runs with kept files.' : null;
+}
+
+/** "6 pairs: one per case and repetition where both agent runs completed with kept files." */
+export function eligiblePairsText(eligible: number): string {
+  return `${count(eligible, 'pair', 'pairs')}: one per case and repetition where both agent runs completed with kept files.`;
+}
+
+const definitionCasesSchema = z.object({
+  cases: z.array(z.object({ id: z.string(), prompt: z.string() })),
+});
+
+/** The prompt of a case from the stored suite definition, or null when it cannot be read. */
+export function casePrompt(definition: unknown, caseId: string): string | null {
+  const parsed = definitionCasesSchema.safeParse(definition);
+  if (!parsed.success) return null;
+  return parsed.data.cases.find((c) => c.id === caseId)?.prompt ?? null;
+}

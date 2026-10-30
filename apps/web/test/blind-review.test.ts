@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BLIND_REVIEW_CLOSED_NOTICE,
   BLIND_REVIEW_NOTE_MAX_CHARS,
+  casePrompt,
+  eligiblePairsText,
+  nextOpenPair,
+  pairListLabel,
+  preferredText,
+  selectBlindPair,
+  startUnavailableText,
   BLIND_VERDICT_LABELS,
   blindReviewHref,
   blindReviewSummaryText,
@@ -111,5 +119,82 @@ describe('copy', () => {
       '1 pair excluded: an agent run did not complete.',
       '2 pairs excluded: the output files of an agent run were not kept.',
     ]);
+  });
+});
+
+describe('pair navigation (D49, D52)', () => {
+  const pairs = [
+    { position: 1, caseId: 'case-a', verdict: 'a' as const },
+    { position: 2, caseId: 'case-a', verdict: null },
+    { position: 3, caseId: 'case-b', verdict: 'tie' as const },
+    { position: 4, caseId: 'case-b', verdict: null },
+  ];
+
+  it('opens the requested pair, or not found for a position the review lacks', () => {
+    expect(selectBlindPair(pairs, 3, false)?.position).toBe(3);
+    expect(selectBlindPair(pairs, 5, false)).toBeNull();
+  });
+
+  it('opens the first undecided pair, or the first pair when all are decided or revealed', () => {
+    expect(selectBlindPair(pairs, null, false)?.position).toBe(2);
+    expect(selectBlindPair(pairs, null, true)?.position).toBe(1);
+    const decided = pairs.map((p) => ({ ...p, verdict: 'b' as const }));
+    expect(selectBlindPair(decided, null, false)?.position).toBe(1);
+    expect(selectBlindPair([], null, false)).toBeNull();
+  });
+
+  it('finds the next undecided pair after the current one, wrapping around', () => {
+    expect(nextOpenPair(pairs, 2)?.position).toBe(4);
+    expect(nextOpenPair(pairs, 4)?.position).toBe(2);
+    expect(nextOpenPair(pairs.slice(0, 2), 2)).toBeNull();
+  });
+
+  it('labels a pair with its case and verdict', () => {
+    expect(pairListLabel(pairs[0]!)).toBe('Pair 1 · case-a · A is better');
+    expect(pairListLabel(pairs[1]!)).toBe('Pair 2 · case-a · No verdict');
+  });
+});
+
+describe('revealed and run-page copy', () => {
+  const baseline = { variant: 'baseline' as const };
+  const candidate = { variant: 'candidate' as const };
+
+  it('names the preferred variant (D54)', () => {
+    expect(preferredText('a', candidate, baseline)).toBe('Candidate');
+    expect(preferredText('b', candidate, baseline)).toBe('Baseline');
+    expect(preferredText('a', baseline, candidate)).toBe('Baseline');
+    expect(preferredText('tie', baseline, candidate)).toBe('About the same');
+    expect(preferredText(null, baseline, candidate)).toBe('No verdict');
+  });
+
+  it('says why a review cannot start (D47, FR-123-50)', () => {
+    const some = { eligible: 2, notCompleted: 0, notKept: 0 };
+    expect(startUnavailableText('completed', some)).toBeNull();
+    expect(startUnavailableText('running', some)).toBe(
+      'A blind review can start after the run has completed.',
+    );
+    expect(startUnavailableText('error', some)).toBe(
+      'A blind review needs a completed run. This run ended as error.',
+    );
+    expect(startUnavailableText('completed', { ...some, eligible: 0 })).toBe(
+      'No pair of completed agent runs with kept files.',
+    );
+  });
+
+  it('counts eligible pairs and states the closed-view notice of FR-123-52a', () => {
+    expect(eligiblePairsText(1)).toBe(
+      '1 pair: one per case and repetition where both agent runs completed with kept files.',
+    );
+    expect(eligiblePairsText(6)).toMatch(/^6 pairs: /);
+    expect(BLIND_REVIEW_CLOSED_NOTICE).toBe(
+      'A blind review of this run is in progress. Labelled output files and agent runs are hidden until you reveal it.',
+    );
+  });
+
+  it('reads a case prompt from the stored definition, or null', () => {
+    const definition = { id: 's', cases: [{ id: 'case-a', prompt: 'Do it.', extra: 1 }] };
+    expect(casePrompt(definition, 'case-a')).toBe('Do it.');
+    expect(casePrompt(definition, 'case-b')).toBeNull();
+    expect(casePrompt({ cases: 'no' }, 'case-a')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import {
   getAgentRunFile,
   getBenchmarkRunDetail,
+  hasUnrevealedBlindReview,
   listAgentRunFiles,
 } from '@directivebench/database';
 import type { Metadata } from 'next';
@@ -32,6 +33,7 @@ import {
   selectCompareRuns,
 } from '@/lib/compare-files';
 import { getDatabase } from '@/lib/db';
+import { BlindReviewClosedPage } from '../blind-review/closed-page';
 import { isMockAgent } from '@/lib/mock-agent';
 import { baselineLabel, candidateLabel } from '@/lib/run-detail';
 import { highlightTexts, languageForPath } from '@/lib/syntax-highlight';
@@ -55,6 +57,11 @@ export default async function ComparePage({
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
   const { id } = await params;
+  // Closed while the run's blind review is unrevealed, for any agent-run id or query, before
+  // anything about the agent runs is read (SPEC-123 FR-123-52a, D55).
+  if (await hasUnrevealedBlindReview(handle.db, id)) {
+    return <BlindReviewClosedPage runId={id} title="Compare output files" />;
+  }
   const detail = await getBenchmarkRunDetail(handle.db, id);
   if (!detail) notFound();
   const query = parseCompareQuery(await searchParams);

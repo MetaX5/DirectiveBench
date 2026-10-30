@@ -8,7 +8,9 @@ import * as Stories from '../../components/output-files/side-by-side-diff.storie
 `import { SideBySideDiff } from '@/components/output-files/side-by-side-diff'`
 
 **Proposed for SPEC-123 (assumption A14), awaiting the maintainer's approval.** The compare
-page (`/results/[id]/compare`, Phase 4) uses it; the blind review (Phase 5) is planned.
+page (`/results/[id]/compare`, Phase 4) uses it with `variant="change"`, and the blind review
+(`/results/[id]/blind-review`, Phase 5) with `variant="neutral"`, sides "A" and "B" and no
+description until the reveal.
 
 ## 1. Purpose
 
