@@ -407,14 +407,24 @@ describe('verdict and reveal', () => {
     const { runId, pairs } = await startedReview(handle);
     const pairId = pairs[0]!.id;
     const outcomes = await Promise.all([
-      recordBlindVerdict(handle.db, { pairId, verdict: 'a', note: 'clearer' }),
-      recordBlindVerdict(handle.db, { pairId, verdict: 'b', note: null }),
+      recordBlindVerdict(handle.db, {
+        benchmarkRunId: runId,
+        pairId,
+        verdict: 'a',
+        note: 'clearer',
+      }),
+      recordBlindVerdict(handle.db, { benchmarkRunId: runId, pairId, verdict: 'b', note: null }),
     ]);
     expect(outcomes).toEqual(['recorded', 'already-decided']);
     const [stored] = (await getBlindReviewForReviewer(handle.db, runId))!.pairs;
     expect(stored).toMatchObject({ verdict: 'a', note: 'clearer', decidedAt: expect.any(String) });
     expect(
-      await recordBlindVerdict(handle.db, { pairId: 'bpair_missing', verdict: 'tie', note: null }),
+      await recordBlindVerdict(handle.db, {
+        benchmarkRunId: runId,
+        pairId: 'bpair_missing',
+        verdict: 'tie',
+        note: null,
+      }),
     ).toBe('not-found');
   });
 
@@ -426,14 +436,21 @@ describe('verdict and reveal', () => {
 
     expect(
       await Promise.all([
-        revealBlindReview(handle.db, reviewId),
-        revealBlindReview(handle.db, reviewId),
+        revealBlindReview(handle.db, { benchmarkRunId: runId, reviewId }),
+        revealBlindReview(handle.db, { benchmarkRunId: runId, reviewId }),
       ]),
     ).toEqual(['revealed', 'already-revealed']);
-    expect(await revealBlindReview(handle.db, 'brev_missing')).toBe('not-found');
+    expect(
+      await revealBlindReview(handle.db, { benchmarkRunId: runId, reviewId: 'brev_missing' }),
+    ).toBe('not-found');
     expect(await hasUnrevealedBlindReview(handle.db, runId)).toBe(false);
     expect(
-      await recordBlindVerdict(handle.db, { pairId: pairs[0]!.id, verdict: 'a', note: null }),
+      await recordBlindVerdict(handle.db, {
+        benchmarkRunId: runId,
+        pairId: pairs[0]!.id,
+        verdict: 'a',
+        note: null,
+      }),
     ).toBe('revealed');
     expect((await getBlindReviewForReviewer(handle.db, runId))!.review.revealedAt).toEqual(
       expect.any(String),
@@ -451,18 +468,25 @@ describe('verdict and reveal', () => {
       return variantOf(row.aAgentRunId) === variant ? 'a' : 'b';
     };
     await recordBlindVerdict(handle.db, {
+      benchmarkRunId: runId,
       pairId: pairs[0]!.id,
       verdict: sideOf(1, 'candidate'),
       note: null,
     });
     await recordBlindVerdict(handle.db, {
+      benchmarkRunId: runId,
       pairId: pairs[1]!.id,
       verdict: sideOf(2, 'baseline'),
       note: 'n',
     });
-    await recordBlindVerdict(handle.db, { pairId: pairs[2]!.id, verdict: 'tie', note: null });
+    await recordBlindVerdict(handle.db, {
+      benchmarkRunId: runId,
+      pairId: pairs[2]!.id,
+      verdict: 'tie',
+      note: null,
+    });
     const before = await handle.db.select().from(schema.agentRuns);
-    await revealBlindReview(handle.db, reviewId);
+    await revealBlindReview(handle.db, { benchmarkRunId: runId, reviewId });
 
     const result = (await getBlindReviewResult(handle.db, runId))!;
     expect(result).toMatchObject({ reviewId, revealedAt: expect.any(String) });
@@ -487,6 +511,60 @@ describe('verdict and reveal', () => {
     expect(result.pairs[1]!.note).toBe('n');
     // Scores, pass/fail and statuses of the agent runs are untouched (§4).
     expect(await handle.db.select().from(schema.agentRuns)).toEqual(before);
+  });
+
+  it('refuses a verdict or a reveal for a pair or review of another run and changes nothing (issue #170)', async () => {
+    const handle = getHandle();
+    const own = await startedReview(handle);
+    const other = await startedReview(handle);
+    const before = {
+      reviews: await handle.db.select().from(schema.blindReviews),
+      pairs: await handle.db.select().from(schema.blindReviewPairs),
+    };
+    expect(
+      await recordBlindVerdict(handle.db, {
+        benchmarkRunId: own.runId,
+        pairId: other.pairs[0]!.id,
+        verdict: 'a',
+        note: 'forged',
+      }),
+    ).toBe('other-run');
+    expect(
+      await revealBlindReview(handle.db, { benchmarkRunId: own.runId, reviewId: other.reviewId }),
+    ).toBe('other-run');
+    expect(
+      await recordBlindVerdict(handle.db, {
+        benchmarkRunId: 'run_missing',
+        pairId: own.pairs[0]!.id,
+        verdict: 'tie',
+        note: null,
+      }),
+    ).toBe('other-run');
+    expect(
+      await revealBlindReview(handle.db, { benchmarkRunId: 'run_missing', reviewId: own.reviewId }),
+    ).toBe('other-run');
+    expect(await handle.db.select().from(schema.blindReviews)).toEqual(before.reviews);
+    expect(await handle.db.select().from(schema.blindReviewPairs)).toEqual(before.pairs);
+
+    // A mismatch is refused before a decided pair or a revealed review is reported.
+    await recordBlindVerdict(handle.db, {
+      benchmarkRunId: other.runId,
+      pairId: other.pairs[0]!.id,
+      verdict: 'b',
+      note: null,
+    });
+    await revealBlindReview(handle.db, { benchmarkRunId: other.runId, reviewId: other.reviewId });
+    expect(
+      await recordBlindVerdict(handle.db, {
+        benchmarkRunId: own.runId,
+        pairId: other.pairs[0]!.id,
+        verdict: 'a',
+        note: null,
+      }),
+    ).toBe('other-run');
+    expect(
+      await revealBlindReview(handle.db, { benchmarkRunId: own.runId, reviewId: other.reviewId }),
+    ).toBe('other-run');
   });
 
   it('returns no result for a run without a review', async () => {
