@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { Page } from '@playwright/test';
 import { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -77,4 +78,45 @@ export function demoJobPayload(db: DatabaseSync): {
     .get(DEMO_ARTIFACT) as { suiteVersionId: string; artifactVersionId: string } | undefined;
   if (!row) throw new Error('The demo suite or artifact version is missing');
   return { suiteVersionId: row.suiteVersionId, artifactVersionId: row.artifactVersionId };
+}
+
+/**
+ * The text lines of the file shown in the "Content of <path>" region, without line numbers and
+ * markers (an empty line is drawn as one no-break space to keep its height), and the lines a
+ * stored text is shown as (CR LF and CR as LF, no last empty line).
+ */
+export async function shownFileLines(page: Page, path: string): Promise<string[]> {
+  const lines = await page
+    .getByRole('region', { name: `Content of ${path}` })
+    .locator('pre > span > span:last-child')
+    .allTextContents();
+  return lines.map((line) => (line === '\u00a0' ? '' : line));
+}
+
+export function storedFileLines(content: string): string[] {
+  if (content === '') return [];
+  const lines = content.replaceAll(/\r\n?/g, '\n').split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  return lines;
+}
+
+/** Every kept file of a benchmark run's agent runs, with its stored content. */
+export function keptFiles(
+  db: DatabaseSync,
+  benchmarkRunId: string,
+): { agentRunId: string; variant: string; repetition: number; path: string; content: string }[] {
+  return db
+    .prepare(
+      `select a.id as agentRunId, a.variant, a.repetition, f.path, f.content
+         from agent_run_files f join agent_runs a on a.id = f.agent_run_id
+        where a.benchmark_run_id = ? and f.kept = 'full'
+        order by a.case_id, a.variant, a.repetition, f.path`,
+    )
+    .all(benchmarkRunId) as {
+    agentRunId: string;
+    variant: string;
+    repetition: number;
+    path: string;
+    content: string;
+  }[];
 }
