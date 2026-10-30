@@ -372,6 +372,42 @@ test('not found for a pair or path the review does not have (§10, D49, D50)', a
   }
 });
 
+test('a verdict or reveal posted under another run is refused and changes nothing (issue #170)', async ({
+  page,
+}) => {
+  const forge = (form: string) =>
+    page.locator(`${form} input[name="benchmarkRunId"]`).evaluate((input, runId) => {
+      (input as HTMLInputElement).value = runId;
+    }, BLIND_RUN);
+  const stored = () =>
+    withDatabase((db) =>
+      db
+        .prepare(
+          `select r.revealed_at, p.verdict, p.note from blind_review_pairs p
+            join blind_reviews r on r.id = p.review_id where r.benchmark_run_id = ?
+            order by p.position`,
+        )
+        .all(REVIEWED_RUN),
+    );
+  const before = await stored();
+  await page.goto(review(REVIEWED_RUN, { pair: '1' }));
+  await forge('form:has(input[name="pairId"])');
+  await page.getByRole('button', { name: 'A is better, pair 1' }).click();
+  await expect(page.getByTestId('verdict-status')).toHaveText(
+    'This pair belongs to another benchmark run.',
+  );
+  await page.getByTestId('reveal-card').getByRole('button', { name: 'Reveal variants' }).click();
+  await forge('form:has(input[name="reviewId"])');
+  await page
+    .getByTestId('reveal-confirmation')
+    .getByRole('button', { name: 'Reveal variants' })
+    .click();
+  await expect(page.getByTestId('reveal-status')).toHaveText(
+    'This review belongs to another benchmark run.',
+  );
+  expect(await stored()).toEqual(before);
+});
+
 test('the unrevealed review works with the keyboard only (D57)', async ({ page }) => {
   await page.goto(review(REVIEWED_RUN, { pair: '1' }));
   await page.keyboard.press('Tab');
