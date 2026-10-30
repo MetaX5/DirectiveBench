@@ -67,10 +67,12 @@ Engine: om-auto-create-pr (steps: 9, --loop: no).
 
 ## Decisions
 
-### UI decisions D46 to D57 (proposed, waiting for the maintainer)
+### UI decisions D46 to D57 (approved by the maintainer on 2026-10-30)
 
 Not settled by SPEC-123 (§6.5, §10, §11, §13, §14), D1 to D45 or the design system. The run
-stopped after the plumbing and returns them; no page code exists yet. Settled and not repeated
+stopped after the plumbing and returned them before any page code; on 2026-10-30 the
+maintainer approved every proposed default as written (not the alternatives), relayed by the
+coordinator. The text below is the approved text. Settled and not repeated
 here: the URL `/results/[id]/blind-review?pair=<n>&path=<p>` with no agent-run id, the fields an
 unrevealed pair may show (FR-123-52), the verdict labels and the 2,000-character note (A11),
 "Pair 3 of 6" and "Pairs decided: 2 of 6", "Previous pair" / "Next pair", `SideBySideDiff`
@@ -221,7 +223,8 @@ widths (D14), one `highlightTexts` job per render in the language of the path (F
    (606dd91).
 5. The `benchmark export` warning (FR-123-52a) with a test in
    `apps/cli/test/benchmark-export.test.ts` (597b9e0).
-6. Stopped and returned D46 to D57 (no page code yet).
+6. Stopped and returned D46 to D57 (no page code yet). All were approved as proposed on
+   2026-10-30; the worktree was recreated from the remote branch.
 
 ## Verification
 
@@ -265,7 +268,7 @@ PR: #167
 - [x] 1.2 Blind-review repository functions — a431dee
 - [x] 1.3 Web lib plumbing and server actions — 606dd91
 - [x] 1.4 Export warning — 597b9e0
-- [x] 1.5 Return UI decisions D46 and later (D46 to D57, waiting)
+- [x] 1.5 Return UI decisions D46 and later (D46 to D57, approved 2026-10-30)
 
 ### Phase 2: UI
 
