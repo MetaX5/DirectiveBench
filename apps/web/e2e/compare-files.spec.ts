@@ -206,7 +206,10 @@ test('a run without agent runs says so, and requested runs are not found (review
   await expect(page.getByRole('heading', { level: 1, name: 'Compare output files' })).toBeVisible();
   await expect(page.getByText('No agent runs recorded.')).toBeVisible();
   await expect(page.getByRole('form', { name: 'Agent runs to compare' })).toHaveCount(0);
-  for (const query of [{ case: COMPARE_CASE }, { left: COMPARE_AGENT_RUN.baseline }]) {
+  for (const query of [{ case: COMPARE_CASE }, { left: COMPARE_AGENT_RUN.baseline }] as Record<
+    string,
+    string
+  >[]) {
     const response = await page.goto(comparePage(EMPTY_RUN, query));
     expect(response?.status()).toBe(404);
   }
