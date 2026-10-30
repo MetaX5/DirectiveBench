@@ -721,18 +721,28 @@ whether the token data of a 256 KB file makes pages too heavy is measured in tha
   for a foreign agent run or an unlisted path, keyboard, 320px and contrast in both themes. The
   UI side of AC-1 (demo run files readable in full), AC-2 and AC-4 (seeded truncated, binary,
   deleted, artifact and not-kept files with their notices).
+- **Implemented (Phase 4, compare; run log
+  [2026-10-30-agent-run-output-files-compare](../runs/2026-10-30-agent-run-output-files-compare.md),
+  UI decisions D36 to D45 approved by the maintainer on 2026-10-30 (D43: "Identical" / "Differs"
+  from the stored sha256), verified by `apps/web/test/{compare-files,line-diff}.test.ts`,
+  `apps/web/e2e/compare-files.spec.ts`, `apps/web/e2e/ui-contrast.spec.ts`, the
+  `SideBySideDiff` stories and the built app after `directivebench demo`):** FR-123-30 to
+  FR-123-32 and AC-5 in plain text (no syntax highlighting): `/results/[id]/compare` with the
+  union of changed paths ("Only left" / "Only right", "Identical" / "Differs"), the bounded
+  side-by-side diff (variant `change`) with its summaries, sides without kept files, not found
+  for an unknown or foreign case or agent run, keyboard, 320px and contrast in both themes, and
+  the "Compare agent runs" link per case in the "Output files" card.
 - **Partially implemented:** AC-3 and AC-11: the page shows the redaction count (seeded rows)
   and the files of an agent run whatever its execution status, but no browser test plants a
   secret through a real capture or opens an `assertion-error` run. NFR-123-01
   (capture time) is a target without a timing test.
-- **Not implemented:** Phases 3a (syntax highlighting on pages), 4 (compare) and 5 (blind
-  review, migration `0004`): FR-123-30 to FR-123-32, FR-123-50 to FR-123-55, FR-123-70 to
-  FR-123-78, AC-5, AC-7 and AC-12 to AC-15. The design-system
+- **Not implemented:** Phases 3a (syntax highlighting on pages) and 5 (blind review, migration
+  `0004`): FR-123-50 to FR-123-55, FR-123-70 to FR-123-78, AC-7 and AC-12 to AC-15. The design-system
   components (`FileView`, `SideBySideDiff`, `FileStatusBadges`) and
   `apps/web/lib/syntax-highlight.ts` merged with PR #155 are recorded in that PR's run log
   ([2026-10-29-spec-123-design-system-components](../runs/2026-10-29-spec-123-design-system-components.md)),
   not in this status; since Phase 3 the files page uses `FileView` and `FileStatusBadges`,
-  while `SideBySideDiff` and the highlighter have no page yet.
+  since Phase 4 the compare page uses `SideBySideDiff`, and the highlighter has no page yet.
 
 ## 21. Phasing and implementation plan
 

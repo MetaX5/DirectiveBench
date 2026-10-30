@@ -3,7 +3,7 @@ title: SPEC-123 Phase 4, compare the same file between two agent runs
 date: 2026-10-30
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (om-auto-implement-spec, SPEC-123 §21 Phase 4 only), issue #152
-status: in-progress
+status: completed
 branch: feat/agent-run-output-files-compare
 specs: [SPEC-123, SPEC-122, SPEC-014]
 ---
@@ -52,9 +52,11 @@ Engine: om-auto-create-pr (steps: 7, --loop: no).
 
 ## Decisions
 
-### UI decisions D36 to D45 (proposed, waiting for the maintainer)
+### UI decisions D36 to D45 (approved by the maintainer on 2026-10-30, D43 changed)
 
-Not settled by SPEC-123 (§6.3, §10, §11, §14), D1 to D35 or the design system. Settled and not
+Not settled by SPEC-123 (§6.3, §10, §11, §14), D1 to D35 or the design system. The run stopped
+after the plumbing and returned them; on 2026-10-30 the maintainer approved every proposed
+default as written, except D43, where the alternative was taken (see D43). Settled and not
 repeated here: the URL and its parameters, the defaults "left = baseline repetition 1, right =
 candidate repetition 1, path = first path in the union" (FR-123-30), invalid or foreign values
 render not found (§10), two `NativeSelect`s with "Baseline (v2), repetition 1" labels, "Only
@@ -101,11 +103,15 @@ stacking at narrow widths (D14) and "Not present in this agent run." (§14).
   diff at 1280 px); below that they stack (left first, "Left" and "Right" headings, D13/D14).
   The page keeps the normal 72rem width. Alternatives: the files page's sidebar layout from `xl`
   only, or `data-layout="wide"` (96rem, as `/artifacts`) for more room on large screens.
-- **D43 Path list entries.** Proposed: as the files page (D31): a `nav` "Changed paths" with a
-  `ul` of links, path in `font-mono`, `aria-current="page"` and the left border for the selected
-  one; a path on one side only shows `FileStatusBadges` with `onlyIn` ("Only left" first, then
-  that side's badges); a path on both sides shows no badge (each side's state is in its notices
-  above its column). Alternative: an "Identical" / "Differs" badge from the stored `sha256`.
+- **D43 Path list entries (maintainer: alternative taken).** As the files page (D31): a `nav`
+  "Changed paths" with a `ul` of links, path in `font-mono`, `aria-current="page"` and the left
+  border for the selected one; a path on one side only shows `FileStatusBadges` with `onlyIn`
+  ("Only left" first, then that side's badges). **Approved change:** a path on both sides shows
+  a badge "Identical" or "Differs" from the stored `sha256` (no content compare): "Identical"
+  when both sides have the same change kind and the same original sha256 (two deletions count as
+  identical), otherwise "Differs"; a truncated side compares in full because the sha256 is of
+  the original bytes. Variant, following D2's logic (a property, not a judgement; green means a
+  passed run): `outline` for both, like the change badges and "Only left"/"Only right".
 - **D44 Header and navigation.** Proposed: "Back to the run" link (D29), `PageHeader` title
   "Compare output files", description "Case <id> · run <id>" (D28 style), `MockBadge` for mock
   runs; the diff's side headings carry the run labels ("Left: Baseline (v2), repetition 1", D13).
@@ -116,31 +122,111 @@ stacking at narrow widths (D14) and "Not present in this agent run." (§14).
   the selects as they finish), with no auto-refresh and no extra sentence. Alternative: the line
   "Agent runs that finish later appear after a reload."
 
+### Decisions during implementation
+
+- **QA finding 1, sides without kept files.** The browser QA agent found a problem when one
+  agent run kept no files: every path of the other side was marked "Only left", and the
+  run's column said "Not present in this agent run.". Both claim to know what that run did not
+  change, which nobody knows. Fix: `onlyInSide` names a side only when the other run kept its
+  files, and `SideBySideDiff` gains an optional `absentNotice` prop. The page fills it with
+  the files-page sentence (D34), for example "Output files were not kept: <reason>.". It is an
+  additive prop of a design-system component (default behaviour unchanged), with a story
+  (`SideWithoutKeptFiles`).
+- **QA finding 2, neither side has text.** When both runs deleted a file, the summary said "one
+  side has no text". `diffSummary('neither', …)` now says "No line comparison: neither side
+  has text to compare.". This is new copy beside D4's sentence, with a story
+  (`NeitherSideHasText`).
+- QA findings declined, because they follow approved decisions:
+  - Changing runs while the form carries the current path can show the D38 fallback line.
+    That is D38 as approved.
+  - A repeated query parameter counts as absent and takes the default. That is D33's rule,
+    shared with the files page, and it shows no other run's data.
+  - Raw execution statuses in the options, and the select text cut off at 320px (the full
+    label is in the open list), are D39 as approved.
+
 ## Work performed
 
 1. Worktree `.ai/tmp/om-auto-create-pr/agent-run-output-files-compare-*` from `origin/main`
-   (71e83ae), branch `feat/agent-run-output-files-compare`.
-2. Step 1: `apps/web/lib/compare-files.ts` and `apps/web/test/compare-files.test.ts`
-   (9 tests, 100% statements, branches, functions and lines of the file). Stopped and returned
-   D36 to D45.
+   (71e83ae), branch `feat/agent-run-output-files-compare`, draft PR #165.
+2. Step 1: `apps/web/lib/compare-files.ts` with `apps/web/test/compare-files.test.ts` (350c18e).
+   Stopped and returned D36 to D45. All were approved on 2026-10-30, D43 with the
+   alternative.
+3. The worktree was recreated from the remote branch. Then (5fd3339):
+   - `pairBadge`, `selectComparePath`, `missingPathNotice`, `compareSideNotice` and
+     `compareRunOptionLabel` in the lib, at 100%.
+   - The page `app/results/[id]/compare/page.tsx`.
+   - The "Compare agent runs" link per case on the run page.
+   - `e2e/compare-files.spec.ts` with its own seed, `e2e/compare-seed.ts` (kept separate from
+     the Phase 3 seed, so the parallel Phase 3a work does not collide).
+   - `e2e/ui-contrast.spec.ts` measures the compare link focus outline, the selected-path
+     border, the path link focus outline, and the select border and focus ring.
+4. Browser QA findings 1 and 2 fixed, with unit, e2e and Storybook regressions (9142932).
+5. SPEC-123 §20, this run log, one lesson.
 
 ## Verification
 
-- `vitest run test/compare-files.test.ts` with coverage of `lib/compare-files.ts`: 9 passed,
-  100% in every metric; `eslint` and `prettier` on both files: clean. The full gate has not run
-  yet (no page exists).
+- **Red first:**
+  - With the compare page removed and the app rebuilt, `playwright test compare-files` failed
+    12 of 12.
+  - The two QA regressions failed on the build before the fix: "Only left" was still present
+    and the "neither side" sentence was missing. They pass after the fix.
+- **Full gate on the final code commit:**
+  - `pnpm lint` 0, `pnpm format:check` 0, `pnpm typecheck` 0.
+  - `pnpm test` 0 (web 421, database 164, engine 516, core 286, adapters 362 + 2 skipped,
+    runner 235, cli 159; 100% coverage everywhere).
+  - `pnpm build` 0, `pnpm verify:pack` 0 ("Packaging verification passed").
+  - `pnpm test:e2e` 85 passed (12 new), `pnpm test:storybook` 302 passed (2 new stories in
+    both themes).
+  - All commands ran with `TMPDIR=/home/mateusz/.cache/tmp`.
+- **Real app:**
+  - `directivebench demo` in a fresh data directory under `~/.cache/tmp`, with a fake `claude`
+    on `PATH` (as in the e2e config; no real `claude` was run), plus the compare seed. The
+    built CLI was served on port 4417.
+  - Compare page of the demo run and of the seeded run: light and dark, 1280px and 320px
+    (`scrollWidth` equals the viewport, no horizontal scroll), no console or page errors.
+  - Rechecked after the QA fixes on the rebuilt server (see the lesson).
+- **Browser QA agent** (Playwright; `agent-browser` is not installed) on the built app:
+  - No high or medium findings.
+  - Two low findings confirmed and fixed (see above); two declined as approved behaviour.
+  - Everything else passed:
+    - defaults, entry link and back link;
+    - not found for 10 foreign or unknown inputs;
+    - path fallback for traversal-like, HTML, long and NUL paths;
+    - hostile markup shown as text;
+    - keyboard order and focus; both themes and the theme toggle; 320px; 1280px side by side;
+    - computed contrast; no en or em dash.
+- **Not verified:**
+  - Screen readers other than the accessibility tree that Playwright reads.
+  - Syntax highlighting on the compare page (Phase 3a, built in parallel).
+  - Closing the page during a blind review (FR-123-52a, Phase 5). The page loads everything
+    in one Server Component, so a `hasUnrevealedBlindReview` check can go first.
+
+## Review
+
+- Codex adversarial review:
+  - Round 1, on 5fd3339: approve, no material findings.
+  - Round 2, on the branch with the QA fixes: approve, no material findings (52 in-memory
+    checks of the missing-file and neutral rendering).
 
 ## Problems and deviations
 
-None so far.
+- The first manual restart of the served app left the old server on the port, so the rebuilt
+  page seemed unfixed (lesson below). After the server was stopped by its port, the real app
+  showed the fixes.
+- `SideBySideDiff` gained the optional `absentNotice` prop, and `diffSummary` gained the
+  `neither` case (QA finding fixes; additive, stories added).
 
 ## Lessons recorded
 
-None yet.
+- [Check that a manual server really restarted before verifying a new build](../lessons/2026-10-30-restart-a-served-build-by-port.md)
 
 ## Follow-ups
 
-- After the maintainer settles D36 to D45: Plan steps 3 to 5.
+- Phase 3a (parallel): pass `HighlightResult` to both compare sides when it merges.
+- Phase 5: close the compare page during an unrevealed blind review (FR-123-52a).
+- Optional, from QA: show a requested path in `font-mono` or quotes in the D38 line (an
+  invisible character such as NUL is then easier to see). Optional: give the diff card its own
+  heading or landmark.
 
 ## Progress
 
@@ -151,15 +237,15 @@ PR: #165
 ### Phase 1: Plumbing
 
 - [x] 1.1 Compare display logic and unit tests — 350c18e
-- [x] 1.2 Return UI decisions D36 to D45 (returned, waiting for the maintainer)
+- [x] 1.2 Return UI decisions D36 to D45 (approved 2026-10-30, D43 changed)
 
 ### Phase 2: Page
 
-- [ ] 2.1 Compare page and entry point
-- [ ] 2.2 Playwright tests and contrast
+- [x] 2.1 Compare page and entry point — 5fd3339
+- [x] 2.2 Playwright tests and contrast — 5fd3339
 
 ### Phase 3: Verification
 
-- [ ] 3.1 Full gate and real-app proof
-- [ ] 3.2 Browser QA agent and Codex adversarial review
-- [ ] 3.3 SPEC-123 §20, run log, lessons
+- [x] 3.1 Full gate and real-app proof
+- [x] 3.2 Browser QA agent and Codex adversarial review
+- [x] 3.3 SPEC-123 §20, run log, lessons
