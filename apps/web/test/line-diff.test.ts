@@ -156,6 +156,10 @@ describe('diffSummary', () => {
     expect(diffSummary(null, sides, 'change')).toBe(
       'No line comparison: one side has no text to compare.',
     );
+    // Compare-page browser QA finding 2: both sides deleted the file.
+    expect(diffSummary('neither', sides, 'change')).toBe(
+      'No line comparison: neither side has text to compare.',
+    );
   });
 
   it('names the bound when the files are shown without alignment', () => {

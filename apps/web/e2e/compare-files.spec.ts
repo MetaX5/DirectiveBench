@@ -112,9 +112,10 @@ test('each pair shows its diff summary and side notices (FR-123-31, §14, D4, D1
       ['Not present in this agent run.'],
     ],
     ['pic.png', 'No line comparison: one side has no text to compare.', ['Binary file, not kept.']],
+    // Browser QA finding 2: both sides deleted it, so neither has text.
     [
       'deleted.txt',
-      'No line comparison: one side has no text to compare.',
+      'No line comparison: neither side has text to compare.',
       ['Deleted by the agent.'],
     ],
   ];
@@ -172,7 +173,15 @@ test('choosing other runs keeps the path, and says so when neither run has it (D
   );
   await expect(pathList(page).getByRole('listitem')).toHaveCount(LEFT_FILES.length);
   await expect(pathLink(page, 'deleted.txt')).toHaveAttribute('aria-current', 'page');
-  await expect(pathLink(page, 'same.js')).toContainText('Only left');
+  // Browser QA finding 1: a run that kept no files cannot say what it lacks, so no path is
+  // "Only left" and its column says why instead of "Not present in this agent run.".
+  await expect(pathList(page)).not.toContainText('Only left');
+  await expect(pathLink(page, 'same.js')).toContainText('Added');
+  await page.goto(seeded({ right: COMPARE_AGENT_RUN.notKept, path: 'same.js' }));
+  await expect(page.getByText('Not present in this agent run.')).toHaveCount(0);
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Output files were not kept: / }),
+  ).toHaveText(`Output files were not kept: ${NOT_KEPT_REASON}.`);
 
   // Neither side lists a file (D41).
   await page.goto(seeded({ left: COMPARE_AGENT_RUN.notKept, right: COMPARE_AGENT_RUN.notKept }));

@@ -18,13 +18,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/primitives';
-import { agentRunLabel } from '@/lib/agent-run-files';
+import { agentRunFilesNotice, agentRunLabel } from '@/lib/agent-run-files';
 import {
   compareHref,
   comparePaths,
   compareRunOptionLabel,
   compareSideNotice,
   missingPathNotice,
+  onlyInSide,
   pairBadge,
   parseCompareQuery,
   selectComparePath,
@@ -119,6 +120,10 @@ export default async function ComparePage({
     load(right.id, Boolean(entry?.right)),
   ]);
 
+  const kept = { left: left.outputFilesKept, right: right.outputFilesKept };
+  // A side whose agent run kept no files says why, not "Not present" (QA finding 1).
+  const absentNotice = (run: typeof left, count: number) =>
+    agentRunFilesNotice(run, count) ?? undefined;
   const leftLabel = agentRunLabel(variantLabel(left.variant), left.repetition);
   const rightLabel = agentRunLabel(variantLabel(right.variant), right.repetition);
   const notices = [
@@ -208,9 +213,10 @@ export default async function ComparePage({
                               <Badge variant={pair.variant}>{pair.label}</Badge>
                             ) : (
                               <FileStatusBadges
-                                // One side only: "Only left" / "Only right", then its badges (D43).
+                                // One side only: "Only left" / "Only right" when the other run
+                                // kept its files, then this side's badges (D43, QA finding 1).
                                 file={(item.left ?? item.right)!}
-                                onlyIn={item.onlyIn!}
+                                onlyIn={onlyInSide(item, kept) ?? undefined}
                               />
                             )}
                           </span>
@@ -228,8 +234,18 @@ export default async function ComparePage({
               {chosen.path !== null ? (
                 <SideBySideDiff
                   path={chosen.path}
-                  left={{ name: 'Left', description: leftLabel, file: leftFile }}
-                  right={{ name: 'Right', description: rightLabel, file: rightFile }}
+                  left={{
+                    name: 'Left',
+                    description: leftLabel,
+                    file: leftFile,
+                    absentNotice: absentNotice(left, leftFiles.length),
+                  }}
+                  right={{
+                    name: 'Right',
+                    description: rightLabel,
+                    file: rightFile,
+                    absentNotice: absentNotice(right, rightFiles.length),
+                  }}
                 />
               ) : null}
             </CardContent>

@@ -87,6 +87,19 @@ export interface ComparedPath<F> {
   onlyIn: 'left' | 'right' | null;
 }
 
+/**
+ * The side an "Only left" / "Only right" badge names (§11): only when the other agent run kept
+ * its files, since a run that kept none cannot show what it lacks (compare-page browser QA
+ * finding 1); null otherwise and for a path on both sides.
+ */
+export function onlyInSide(
+  entry: { onlyIn: 'left' | 'right' | null },
+  kept: { left: boolean; right: boolean },
+): 'left' | 'right' | null {
+  if (entry.onlyIn === null) return null;
+  return kept[entry.onlyIn === 'left' ? 'right' : 'left'] ? entry.onlyIn : null;
+}
+
 /** The union of both sides' paths, ordered by path (JavaScript string order). */
 export function comparePaths<F extends { path: string }>(
   left: readonly F[],

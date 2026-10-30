@@ -168,12 +168,16 @@ export type DiffVariant = 'change' | 'neutral';
 const count = new Intl.NumberFormat('en-US');
 const lineCount = (n: number): string => `${count.format(n)} ${n === 1 ? 'line' : 'lines'}`;
 
-/** The one-sentence result above a side-by-side diff (SPEC-123 FR-123-31, §14). */
+/**
+ * The one-sentence result above a side-by-side diff (SPEC-123 FR-123-31, §14). `diff` is null
+ * when one side has no text, and `neither` when both lack it (for example both deleted the file).
+ */
 export function diffSummary(
-  diff: LineDiff | null,
+  diff: LineDiff | null | 'neither',
   sides: { left: string; right: string },
   variant: DiffVariant,
 ): string {
+  if (diff === 'neither') return 'No line comparison: neither side has text to compare.';
   if (diff === null) return 'No line comparison: one side has no text to compare.';
   if (diff.kind === 'too-large') {
     return `These files differ in more than ${count.format(diff.maxEdits)} lines, so they are shown without alignment.`;

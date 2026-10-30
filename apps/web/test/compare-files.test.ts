@@ -5,6 +5,7 @@ import {
   compareRunOptionLabel,
   compareSideNotice,
   missingPathNotice,
+  onlyInSide,
   pairBadge,
   selectComparePath,
   parseCompareQuery,
@@ -185,5 +186,16 @@ describe('compareRunOptionLabel (D39)', () => {
         repetition: 2,
       }),
     ).toBe('Candidate (v3), repetition 2 (timeout)');
+  });
+});
+
+describe('onlyInSide (browser QA finding 1)', () => {
+  it('names the side only when the other agent run kept its files', () => {
+    const both = { left: true, right: true };
+    expect(onlyInSide({ onlyIn: 'left' }, both)).toBe('left');
+    expect(onlyInSide({ onlyIn: 'right' }, both)).toBe('right');
+    expect(onlyInSide({ onlyIn: null }, both)).toBeNull();
+    expect(onlyInSide({ onlyIn: 'left' }, { left: true, right: false })).toBeNull();
+    expect(onlyInSide({ onlyIn: 'right' }, { left: false, right: true })).toBeNull();
   });
 });

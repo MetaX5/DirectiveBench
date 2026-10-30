@@ -160,6 +160,61 @@ export const OneSideMissing: Story = {
   },
 };
 
+/** Neither side has text, for example both agent runs deleted the file. */
+export const NeitherSideHasText: Story = {
+  args: {
+    path: 'src/legacy.js',
+    left: {
+      ...baseline,
+      file: file({
+        path: 'src/legacy.js',
+        change: 'deleted',
+        kept: 'none',
+        reason: 'deleted',
+        sizeBytes: null,
+        content: null,
+      }),
+    },
+    right: {
+      ...candidate,
+      file: file({
+        path: 'src/legacy.js',
+        change: 'deleted',
+        kept: 'none',
+        reason: 'deleted',
+        sizeBytes: null,
+        content: null,
+      }),
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(
+      canvas.getByText('No line comparison: neither side has text to compare.'),
+    ).toBeVisible();
+    await expect(canvas.getAllByText('Deleted by the agent.')).toHaveLength(2);
+  },
+};
+
+/** A side whose agent run kept no files says why instead of "Not present". */
+export const SideWithoutKeptFiles: Story = {
+  args: {
+    path: 'src/deprecated.js',
+    left: {
+      ...baseline,
+      file: file({ path: 'src/deprecated.js', change: 'added', content: 'export default [];\n' }),
+    },
+    right: {
+      ...candidate,
+      file: null,
+      absentNotice: 'Output files were not kept for this agent run.',
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText('Output files were not kept for this agent run.')).toBeVisible();
+    await expect(canvas.queryByText('Not present in this agent run.')).toBeNull();
+  },
+};
+
 /** A side that was not kept (binary) or cut: its notices sit above its column. */
 export const NotKeptAndTruncatedSides: Story = {
   args: {
