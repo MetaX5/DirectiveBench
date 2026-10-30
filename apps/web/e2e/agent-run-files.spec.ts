@@ -168,7 +168,8 @@ test('code files are highlighted on the server, the browser loads no highlighter
 }) => {
   const scripts: string[] = [];
   page.on('response', async (response) => {
-    if (response.request().resourceType() === 'script') scripts.push(await response.text());
+    if (response.request().resourceType() === 'script')
+      scripts.push(await response.text().catch(() => ''));
   });
   const requested: string[] = [];
   page.on('request', (request) => requested.push(request.url()));
