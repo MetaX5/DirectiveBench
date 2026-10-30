@@ -33,6 +33,11 @@ with the processes the gate needs. Running agents in parallel is fine; leaving d
   directory and server you created. Say so in every subagent brief.
 - Locally, `TMPDIR` can point at a disk directory (for Claude Code:
   `"env": { "TMPDIR": "…" }` in `.claude/settings.local.json`), because `os.tmpdir()` follows it.
+  Pick one **outside `$HOME`** (for example `/var/tmp/<name>` when `/var/tmp` is on disk): with
+  `TMPDIR=~/.cache/tmp` the benchmark workspaces lie below the home directory, the Claude Code
+  adapter refuses them for the ancestor `~/.claude` (`workspace-contains-claude-config`), and
+  eight fake-`claude` tests in `apps/cli/test/benchmark-run.test.ts` fail (seen 2026-10-30,
+  also on `main`).
 - Check `du -sh /tmp/* "$TMPDIR"/*` at the end of a long session.
 - Since 2026-10-30, `pnpm verify:pack` removes its directory (about 350 MB) on every exit
   (`--keep` keeps it), and the Playwright run removes its one temporary root. Before that,
