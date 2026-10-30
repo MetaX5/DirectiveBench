@@ -208,6 +208,17 @@ stacking at narrow widths (D14) and "Not present in this agent run." (§14).
   - Round 2, on the branch with the QA fixes: approve, no material findings (52 in-memory
     checks of the missing-file and neutral rendering).
 
+- `om-auto-review-pr` on PR #165, a COMMENT review (own PR), verdict approve. Two minor
+  findings were fixed in 631deab:
+  - no Playwright test for the "No agent runs recorded." state;
+  - the `SideBySideDiff` docs page was stale (it still said no page used the component, and it
+    lacked the two new states).
+  One minor is left as a follow-up: the page loads `getBenchmarkRunDetail` with every trace to
+  pick two runs, the same pattern as the files page. One nit: a non-null assertion in the path
+  list.
+  After the fixes: `pnpm lint`, `format:check` and `typecheck` all 0, `pnpm test:e2e` 86
+  passed, `pnpm test:storybook` 302 passed.
+
 ## Problems and deviations
 
 - The first manual restart of the served app left the old server on the port, so the rebuilt
@@ -223,6 +234,8 @@ stacking at narrow widths (D14) and "Not present in this agent run." (§14).
 ## Follow-ups
 
 - Phase 3a (parallel): pass `HighlightResult` to both compare sides when it merges.
+- A narrower repository read for the compare and files pages (instead of
+  `getBenchmarkRunDetail` with every trace).
 - Phase 5: close the compare page during an unrevealed blind review (FR-123-52a).
 - Optional, from QA: show a requested path in `font-mono` or quotes in the D38 line (an
   invisible character such as NUL is then easier to see). Optional: give the diff card its own
