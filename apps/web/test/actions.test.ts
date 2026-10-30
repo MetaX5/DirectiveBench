@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
   acquireNextJob,
+  createBenchmarkRun,
+  finishBenchmarkRun,
+  getBlindReviewForReviewer,
+  insertAgentRun,
   getJob,
   getRepositoryRegistration,
   getRepositoryScan,
@@ -18,6 +22,9 @@ import {
   addArtifactTagAction,
   assignArtifactSuiteAction,
   cancelJobAction,
+  recordBlindVerdictAction,
+  revealBlindReviewAction,
+  startBlindReviewAction,
   enqueueBenchmarkRunAction,
   registerRepositoryAction,
   removeArtifactTagAction,
@@ -726,5 +733,177 @@ describe('artifact metadata actions (issue #64)', () => {
     const suiteId = 'suite_missing';
     expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
     expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual(gone);
+  });
+});
+
+describe('blind review actions (SPEC-123 §10)', () => {
+  const idle: MetadataFormState = { kind: 'idle' };
+
+  /** A benchmark run with one pair of completed agent runs with kept files; `status` sets it. */
+  async function seededRun(status: 'running' | 'completed' = 'completed'): Promise<string> {
+    const { versionId: artifactVersionId } = await importArtifact();
+    const { versionId: suiteVersionId } = await importSuite({ id: 'suite' }, null);
+    const runId = await createBenchmarkRun(handle.db, {
+      jobId: null,
+      suiteVersionId,
+      artifactVersionId,
+      baselineArtifactVersionId: null,
+      agentAdapterId: 'mock',
+      agentVersion: null,
+      model: null,
+      environment: {},
+    });
+    for (const variant of ['baseline', 'candidate'] as const) {
+      await insertAgentRun(handle, {
+        benchmarkRunId: runId,
+        caseId: 'case-a',
+        variant,
+        repetition: 1,
+        fixtureVersionId: 'f',
+        executionStatus: 'completed',
+        score: 1,
+        passed: true,
+        durationMs: 1,
+        changedFiles: [],
+        trace: [],
+        usage: null,
+        error: null,
+        assertions: [],
+        outputFilesKept: true,
+        outputFilesReason: null,
+        outputFiles: [],
+      });
+    }
+    if (status === 'completed') {
+      await finishBenchmarkRun(handle.db, runId, {
+        status: 'completed',
+        verdict: null,
+        summary: null,
+        comparabilityKey: null,
+        warnings: [],
+        error: null,
+      });
+    }
+    return runId;
+  }
+
+  async function startedReview() {
+    const runId = await seededRun();
+    await redirectOf(startBlindReviewAction(idle, form({ benchmarkRunId: runId })));
+    const view = (await getBlindReviewForReviewer(handle.db, runId))!;
+    return { runId, reviewId: view.review.id, pairId: view.pairs[0]!.id };
+  }
+
+  it('starts a review, or opens the existing one, on its own page', async () => {
+    const runId = await seededRun();
+    const url = `/results/${runId}/blind-review`;
+    expect(await redirectOf(startBlindReviewAction(idle, form({ benchmarkRunId: runId })))).toBe(
+      url,
+    );
+    expect(await redirectOf(startBlindReviewAction(idle, form({ benchmarkRunId: runId })))).toBe(
+      url,
+    );
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/results/${runId}`, 'layout');
+    expect((await getBlindReviewForReviewer(handle.db, runId))!.pairs).toHaveLength(1);
+  });
+
+  it('refuses a forged start with the reason, without a review', async () => {
+    const running = await seededRun('running');
+    expect(await startBlindReviewAction(idle, form({ benchmarkRunId: running }))).toEqual({
+      kind: 'error',
+      message: 'A blind review can start only after the run has completed.',
+    });
+    expect(await startBlindReviewAction(idle, form({ benchmarkRunId: 'run_missing' }))).toEqual({
+      kind: 'error',
+      message: 'This benchmark run no longer exists.',
+    });
+    expect(await startBlindReviewAction(idle, form({}))).toEqual({
+      kind: 'error',
+      message: INCOMPLETE_FORM_MESSAGE,
+    });
+    expect(next.redirect).not.toHaveBeenCalled();
+    expect(await getBlindReviewForReviewer(handle.db, running)).toBeNull();
+  });
+
+  it('records one verdict per pair and refuses a second one', async () => {
+    const { runId, pairId } = await startedReview();
+    const verdict = (fields: Record<string, string>) =>
+      recordBlindVerdictAction(idle, form({ benchmarkRunId: runId, pairId, ...fields }));
+    expect(await verdict({ verdict: 'a', note: '  Clearer.\r\nShorter.  ' })).toEqual({
+      kind: 'success',
+      message: 'Verdict recorded.',
+    });
+    expect(await verdict({ verdict: 'b', note: '' })).toEqual({
+      kind: 'error',
+      message: 'This pair already has a verdict.',
+    });
+    expect((await getBlindReviewForReviewer(handle.db, runId))!.pairs[0]).toMatchObject({
+      verdict: 'a',
+      note: '  Clearer.\nShorter.  ',
+    });
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/results/${runId}`, 'layout');
+  });
+
+  it('stores a missing or blank note as no note, and keeps an overlong note in the form', async () => {
+    const { runId, pairId } = await startedReview();
+    const long = 'x'.repeat(2_001);
+    expect(
+      await recordBlindVerdictAction(
+        idle,
+        form({ benchmarkRunId: runId, pairId, verdict: 'tie', note: long }),
+      ),
+    ).toEqual({
+      kind: 'fieldError',
+      message: 'A note can be at most 2,000 characters. Shorten it.',
+      value: long,
+    });
+    expect(
+      await recordBlindVerdictAction(idle, form({ benchmarkRunId: runId, pairId, verdict: 'tie' })),
+    ).toEqual({ kind: 'success', message: 'Verdict recorded.' });
+    expect((await getBlindReviewForReviewer(handle.db, runId))!.pairs[0]!.note).toBeNull();
+  });
+
+  it('refuses an unknown verdict or a missing pair as an incomplete form', async () => {
+    const { runId, pairId } = await startedReview();
+    const forged: Record<string, string>[] = [{ pairId, verdict: 'baseline' }, { verdict: 'a' }];
+    for (const fields of forged) {
+      expect(
+        await recordBlindVerdictAction(idle, form({ benchmarkRunId: runId, note: '', ...fields })),
+      ).toEqual({ kind: 'error', message: INCOMPLETE_FORM_MESSAGE });
+    }
+  });
+
+  it('reveals the review once and closes verdicts', async () => {
+    const { runId, reviewId, pairId } = await startedReview();
+    const reveal = (id: string) =>
+      revealBlindReviewAction(idle, form({ benchmarkRunId: runId, reviewId: id }));
+    expect(await reveal(reviewId)).toEqual({
+      kind: 'success',
+      message: 'Variants revealed. The blind review has ended.',
+    });
+    expect(await reveal(reviewId)).toEqual({
+      kind: 'success',
+      message: 'This review was already revealed.',
+    });
+    expect(await reveal('brev_missing')).toEqual({
+      kind: 'error',
+      message: 'This review no longer exists.',
+    });
+    expect(await revealBlindReviewAction(idle, form({ reviewId }))).toEqual({
+      kind: 'error',
+      message: INCOMPLETE_FORM_MESSAGE,
+    });
+    expect(
+      await recordBlindVerdictAction(
+        idle,
+        form({ benchmarkRunId: runId, pairId, verdict: 'a', note: '' }),
+      ),
+    ).toEqual({ kind: 'error', message: 'This review was revealed; verdicts are closed.' });
+    expect(
+      await recordBlindVerdictAction(
+        idle,
+        form({ benchmarkRunId: runId, pairId: 'bpair_missing', verdict: 'a', note: '' }),
+      ),
+    ).toEqual({ kind: 'error', message: 'This pair no longer exists.' });
   });
 });

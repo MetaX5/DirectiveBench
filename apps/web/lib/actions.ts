@@ -16,6 +16,9 @@ import {
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
   NotFoundError,
+  recordBlindVerdict,
+  revealBlindReview,
+  startBlindReview,
   UnsupportedRepositoryError,
   getLatestArtifactVersionId,
   getSuiteVersion,
@@ -41,6 +44,16 @@ import {
   suiteAssignmentSchema,
   type MetadataFormState,
 } from './artifact-metadata';
+import {
+  blindReviewHref,
+  recordBlindVerdictSchema,
+  revealBlindReviewSchema,
+  revealState,
+  startBlindReviewSchema,
+  startRefusal,
+  verdictState,
+  type BlindReviewFormState,
+} from './blind-review';
 import { requireDatabase } from './db';
 import { webRunBlockers } from './run-guard';
 import {
@@ -326,4 +339,66 @@ export async function unassignArtifactSuiteAction(
   const outcome = await unassignArtifactSuite(requireDatabase(), artifactId, suiteId);
   refreshArtifact(artifactId);
   return suiteMessage(outcome);
+}
+
+/** Re-renders the run page and its sub-pages (files, compare, blind review). */
+function refreshRun(benchmarkRunId: string): void {
+  revalidatePath(`/results/${encodeURIComponent(benchmarkRunId)}`, 'layout');
+}
+
+/**
+ * Starts the blind review of a completed run, or opens the one it already has, and goes to its
+ * page (SPEC-123 FR-123-50). A refused start (no eligible pair, run not completed) stays on the
+ * form with the reason.
+ */
+export async function startBlindReviewAction(
+  _previous: BlindReviewFormState,
+  formData: FormData,
+): Promise<BlindReviewFormState> {
+  const input = startBlindReviewSchema.safeParse({
+    benchmarkRunId: formData.get('benchmarkRunId'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const { benchmarkRunId } = input.data;
+  const refusal = startRefusal(await startBlindReview(requireDatabase(), benchmarkRunId));
+  if (refusal !== null) return { kind: 'error', message: refusal };
+  refreshRun(benchmarkRunId);
+  redirect(blindReviewHref(benchmarkRunId));
+}
+
+/**
+ * Records the verdict of one pair (SPEC-123 FR-123-53). The repository writes it with one
+ * conditional statement, so a decided pair or a revealed review is refused, never overwritten.
+ */
+export async function recordBlindVerdictAction(
+  _previous: BlindReviewFormState,
+  formData: FormData,
+): Promise<BlindReviewFormState> {
+  const input = recordBlindVerdictSchema.safeParse({
+    benchmarkRunId: formData.get('benchmarkRunId'),
+    pairId: formData.get('pairId'),
+    verdict: formData.get('verdict'),
+    note: formData.get('note') ?? '',
+  });
+  if (!input.success) return refused(input.error, 'note', fieldText(formData.get('note')));
+  const { benchmarkRunId, pairId, verdict, note } = input.data;
+  const outcome = await recordBlindVerdict(requireDatabase().db, { pairId, verdict, note });
+  refreshRun(benchmarkRunId);
+  return verdictState(outcome);
+}
+
+/** Reveals every pair of a review and ends it (SPEC-123 FR-123-54). */
+export async function revealBlindReviewAction(
+  _previous: BlindReviewFormState,
+  formData: FormData,
+): Promise<BlindReviewFormState> {
+  const input = revealBlindReviewSchema.safeParse({
+    benchmarkRunId: formData.get('benchmarkRunId'),
+    reviewId: formData.get('reviewId'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const { benchmarkRunId, reviewId } = input.data;
+  const outcome = await revealBlindReview(requireDatabase().db, reviewId);
+  refreshRun(benchmarkRunId);
+  return revealState(outcome);
 }
