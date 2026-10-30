@@ -45,7 +45,10 @@ which are most of what agents write. Constraints:
    time limit; above them, or on any error, render plain text with a note. The per-line limit is
    cooperative only (Shiki's JavaScript scanner runs a synchronous `RegExp.exec`), so tokenizing
    runs in a terminable `node:worker_threads` worker with an aggregate 2 s deadline per page
-   render (SPEC-123 FR-123-78), added after a Codex review.
+   render (SPEC-123 FR-123-78), added after a Codex review. As built (Phase 3a, 2026-10-30):
+   `syntax-highlight.ts` (`server-only`) owns the worker and its deadline; the Shiki calls live
+   in `syntax-highlight-shiki.ts`, which only the worker entry `syntax-highlight-worker.ts`
+   imports, because a worker thread is not a React Server Component context.
 6. Bundle Shiki into the Next.js server build. Next.js 16.4 lists `shiki` in its default
    `serverExternalPackages`, so the implementation must make sure it is bundled (for example by
    importing the `@shikijs/*` entry points) and prove it with `pnpm verify:pack`; it is not added

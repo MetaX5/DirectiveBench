@@ -128,7 +128,7 @@ export function displayLines(text: string): string[] {
 
 /**
  * The note shown with a file that has no syntax colours for a reason the reader should know
- * (SPEC-123 FR-123-74): over the size bound or a highlighter failure. An unknown language, a
+ * (SPEC-123 FR-123-74, FR-123-78): over the size bound, a highlighter failure or the deadline. An unknown language, a
  * highlighted file and no highlight result at all need no note.
  */
 export function syntaxHighlightNotice(highlight: HighlightResult | undefined): string | null {
@@ -136,6 +136,9 @@ export function syntaxHighlightNotice(highlight: HighlightResult | undefined): s
   if (highlight.reason === 'too-large') return 'Syntax highlighting is off for files over 256 KB.';
   if (highlight.reason === 'failed') {
     return 'Syntax highlighting failed, so this file is shown as plain text.';
+  }
+  if (highlight.reason === 'timeout') {
+    return 'Syntax highlighting took too long, so this file is shown as plain text.';
   }
   return null;
 }

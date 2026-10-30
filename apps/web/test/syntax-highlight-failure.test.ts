@@ -1,7 +1,8 @@
 import type * as ShikiCore from '@shikijs/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT } from '../lib/syntax-highlight-common';
 
-// Failure paths of lib/syntax-highlight.ts (FR-123-70, FR-123-74): the highlighter is memoised
+// Failure paths of the tokenizer in lib/syntax-highlight-shiki.ts (FR-123-70, FR-123-74): the highlighter is memoised
 // per module, so each test loads a fresh module with a mocked Shiki core.
 const create = vi.hoisted(() => vi.fn());
 vi.mock('@shikijs/core', async (original) => ({
@@ -13,10 +14,10 @@ const SECRET_CONTENT = 'const token = "file content that must not be logged";';
 
 async function load() {
   vi.resetModules();
-  return import('../lib/syntax-highlight');
+  return import('../lib/syntax-highlight-shiki');
 }
 
-describe('highlightLines failures', () => {
+describe('tokenizeText failures', () => {
   let logged: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
@@ -32,9 +33,9 @@ describe('highlightLines failures', () => {
 
   it('returns plain text when the highlighter cannot be created, and retries next time', async () => {
     create.mockRejectedValueOnce(new TypeError('grammar did not load'));
-    const { highlightLines } = await load();
+    const { tokenizeText } = await load();
 
-    expect(await highlightLines(SECRET_CONTENT, 'typescript')).toEqual({
+    expect(await tokenizeText(SECRET_CONTENT, 'typescript')).toEqual({
       kind: 'plain',
       reason: 'failed',
     });
@@ -42,15 +43,15 @@ describe('highlightLines failures', () => {
       'Syntax highlighting failed for a typescript file: TypeError',
     );
 
-    const retried = await highlightLines(SECRET_CONTENT, 'typescript');
+    const retried = await tokenizeText(SECRET_CONTENT, 'typescript');
     expect(retried.kind).toBe('highlighted');
     expect(create).toHaveBeenCalledTimes(2);
   });
 
   it('creates the highlighter once per process after it succeeded', async () => {
-    const { highlightLines } = await load();
-    await highlightLines('a', 'yaml');
-    await highlightLines('b', 'json');
+    const { tokenizeText } = await load();
+    await tokenizeText('a', 'yaml');
+    await tokenizeText('b', 'json');
     expect(create).toHaveBeenCalledTimes(1);
   });
 
@@ -60,9 +61,9 @@ describe('highlightLines failures', () => {
         throw new RangeError(SECRET_CONTENT);
       },
     });
-    const { highlightLines } = await load();
+    const { tokenizeText } = await load();
 
-    expect(await highlightLines(SECRET_CONTENT, 'typescript')).toEqual({
+    expect(await tokenizeText(SECRET_CONTENT, 'typescript')).toEqual({
       kind: 'plain',
       reason: 'failed',
     });
@@ -75,8 +76,8 @@ describe('highlightLines failures', () => {
 
   it('names a thrown value that is not an Error', async () => {
     create.mockRejectedValueOnce('nope');
-    const { highlightLines } = await load();
-    expect((await highlightLines('a', 'css')).kind).toBe('plain');
+    const { tokenizeText } = await load();
+    expect((await tokenizeText('a', 'css')).kind).toBe('plain');
     expect(logged).toHaveBeenCalledWith('Syntax highlighting failed for a css file: unknown error');
   });
 
@@ -92,8 +93,8 @@ describe('highlightLines failures', () => {
         ],
       }),
     });
-    const { highlightLines } = await load();
-    expect(await highlightLines('abc', 'typescript')).toEqual({
+    const { tokenizeText } = await load();
+    expect(await tokenizeText('abc', 'typescript')).toEqual({
       kind: 'highlighted',
       lines: [
         [
@@ -109,10 +110,10 @@ describe('highlightLines failures', () => {
       tokens: [[{ content: 'a' }]],
     }));
     create.mockResolvedValue({ codeToTokens });
-    const { highlightLines, SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT } = await load();
+    const { tokenizeText } = await load();
 
-    await highlightLines('a', 'typescript');
-    await highlightLines('a', 'typescript', {
+    await tokenizeText('a', 'typescript');
+    await tokenizeText('a', 'typescript', {
       lineTimeLimitMs: SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT,
     });
     expect(codeToTokens.mock.calls.map(([, options]) => options)).toEqual([

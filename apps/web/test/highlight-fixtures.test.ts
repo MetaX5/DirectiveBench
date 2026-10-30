@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { highlightSamples } from '../components/output-files/highlight-fixtures';
+import { tokenizeText } from '../lib/syntax-highlight-shiki';
 import {
-  highlightLines,
   languageForPath,
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
   SYNTAX_HIGHLIGHT_NO_LINE_TIME_LIMIT,
@@ -13,7 +13,7 @@ import {
 
 // The Storybook stories of FileView and SideBySideDiff show precomputed tokens (stories cannot
 // run server-only code). This test keeps those tokens equal to what lib/syntax-highlight.ts
-// produces now; UPDATE_HIGHLIGHT_FIXTURES=1 rewrites the file instead.
+// produces now (its tokenizer, run in this thread); UPDATE_HIGHLIGHT_FIXTURES=1 rewrites the file instead.
 //
 // The fixtures are computed without Shiki's per-line time limit. That limit is cooperative and
 // counts the lazy compilation of a grammar's regular expressions, so on a slow CI runner it cut
@@ -34,7 +34,7 @@ async function computeFixtures(
     await Promise.all(
       Object.entries(highlightSamples).map(async ([name, { path, text }]) => [
         name,
-        await highlightLines(text, languageForPath(path), options),
+        await tokenizeText(text, languageForPath(path), options),
       ]),
     ),
   );

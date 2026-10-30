@@ -143,7 +143,7 @@ describe('displayLines', () => {
   });
 });
 
-describe('syntaxHighlightNotice (SPEC-123 FR-123-74)', () => {
+describe('syntaxHighlightNotice (SPEC-123 FR-123-74, FR-123-78)', () => {
   it.each<[HighlightResult | undefined, string | null]>([
     [undefined, null],
     [{ kind: 'highlighted', lines: [] }, null],
@@ -152,6 +152,10 @@ describe('syntaxHighlightNotice (SPEC-123 FR-123-74)', () => {
     [
       { kind: 'plain', reason: 'failed' },
       'Syntax highlighting failed, so this file is shown as plain text.',
+    ],
+    [
+      { kind: 'plain', reason: 'timeout' },
+      'Syntax highlighting took too long, so this file is shown as plain text.',
     ],
   ])('%j gives %j', (highlight, notice) => {
     expect(syntaxHighlightNotice(highlight)).toBe(notice);
