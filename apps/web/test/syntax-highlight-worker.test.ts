@@ -228,6 +228,23 @@ describe('createHighlightWorkerPool deadline (FR-123-78, AC-16)', () => {
   });
 });
 
+describe('createHighlightWorkerPool late answers (Codex review round 1)', () => {
+  it('treats an answer that arrives after the deadline as a timeout, even before the timer ran', async () => {
+    const { pool, workers } = fakePool({ deadlineMs: 50 });
+    const late = pool.run(job('a'));
+    const queued = pool.run(job('b'));
+    // A busy request thread: the deadline passes while no timer callback can run.
+    const end = performance.now() + 80;
+    while (performance.now() < end) {
+      // spin
+    }
+    workers[0]!.emit('message', { results: [tokens('a')] });
+    expect(await late).toEqual([timeout]);
+    expect(await queued).toEqual([timeout]);
+    expect(workers[0]!.terminated).toBe(true);
+  });
+});
+
 describe('createHighlightWorkerPool queue', () => {
   it('runs one job at a time, in submission order, on one worker', async () => {
     const { pool, workers } = fakePool();

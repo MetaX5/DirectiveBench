@@ -1,4 +1,5 @@
 import 'server-only';
+import { performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 import {
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
@@ -61,6 +62,8 @@ interface PendingJob {
   job: HighlightJob;
   resolve: (results: HighlightResult[]) => void;
   timer: NodeJS.Timeout;
+  /** `performance.now()` at which the deadline passes. */
+  expiresAt: number;
 }
 
 function plain(job: HighlightJob, reason: 'failed' | 'timeout'): HighlightResult[] {
@@ -110,6 +113,12 @@ export function createHighlightWorkerPool({
     started.unref();
     started.on('message', (result: HighlightJobResult) => {
       if (started !== worker || !running) return;
+      // A busy request thread can deliver the answer before the overdue deadline timer: the
+      // deadline is checked here too, so a late answer never counts (Codex review round 1).
+      if (performance.now() >= running.expiresAt) {
+        timeOut();
+        return;
+      }
       const done = running;
       running = null;
       settle(done, result.results);
@@ -160,7 +169,12 @@ export function createHighlightWorkerPool({
     run(job) {
       if (queue.length >= maxQueuedJobs) return Promise.resolve(plain(job, 'timeout'));
       return new Promise((resolve) => {
-        queue.push({ job, resolve, timer: setTimeout(timeOut, deadlineMs) });
+        queue.push({
+          job,
+          resolve,
+          timer: setTimeout(timeOut, deadlineMs),
+          expiresAt: performance.now() + deadlineMs,
+        });
         startNext();
       });
     },
