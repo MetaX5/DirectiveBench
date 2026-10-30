@@ -68,18 +68,20 @@ language is never guessed from content.
 | Redacted               | "N secrets redacted." and the redaction marker in the text                  |
 | Carriage returns       | "Shown with LF line endings." (the DOM cannot show a CR, lesson 2026-10-20) |
 
-Syntax highlighting states (SPEC-123 FR-123-71, FR-123-74):
+Syntax highlighting states (SPEC-123 FR-123-71, FR-123-74, FR-123-78):
 
-| `highlight`                             | What the view shows                                                               |
-| --------------------------------------- | --------------------------------------------------------------------------------- |
-| absent                                  | Plain text, no note (no page highlights yet)                                      |
-| `highlighted`                           | Syntax colours; lines over 10,000 characters stay plain inside the file           |
-| `plain`, `no-language` (unknown suffix) | Plain text, no note                                                               |
-| `plain`, `too-large` (over 256 KB)      | Plain text and "Syntax highlighting is off for files over 256 KB."                |
-| `plain`, `failed` (highlighter error)   | Plain text and "Syntax highlighting failed, so this file is shown as plain text." |
+| `highlight`                             | What the view shows                                                                      |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| absent                                  | Plain text, no note                                                                      |
+| `highlighted`                           | Syntax colours; lines over 10,000 characters stay plain inside the file                  |
+| `plain`, `no-language` (unknown suffix) | Plain text, no note                                                                      |
+| `plain`, `too-large` (over 256 KB)      | Plain text and "Syntax highlighting is off for files over 256 KB."                       |
+| `plain`, `failed` (highlighter error)   | Plain text and "Syntax highlighting failed, so this file is shown as plain text."        |
+| `plain`, `timeout` (over the 2 s limit) | Plain text and "Syntax highlighting took too long, so this file is shown as plain text." |
 
 <Canvas of={Stories.HighlightOffOverTheLimit} />
 <Canvas of={Stories.HighlightFailed} />
+<Canvas of={Stories.HighlightTimedOut} />
 <Canvas of={Stories.UnknownExtension} />
 <Canvas of={Stories.TruncatedAtFileLimit} />
 <Canvas of={Stories.NotKept} />
@@ -126,8 +128,9 @@ Lines never wrap: a long line scrolls inside the block, so line numbers stay tru
 `content`, `redactions` (the proposed `agent_run_files` columns, SPEC-123 §8.1).
 
 `highlight?: HighlightResult` from `lib/syntax-highlight.ts`: computed on the server by
-`highlightLines(content, languageForPath(path))` (Shiki, server only, ADR-0014). The component
-only renders the tokens; it never loads the highlighter. Stories use precomputed tokens
+`highlightLines(content, languageForPath(path))` (Shiki, server only, ADR-0014), which runs in
+a worker thread with a 2 s deadline per page render (FR-123-78). The component only renders the
+tokens; it never loads the highlighter. Stories use precomputed tokens
 (`components/output-files/highlight-fixtures.json`, kept current by
 `test/highlight-fixtures.test.ts`).
 

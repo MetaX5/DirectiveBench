@@ -293,6 +293,21 @@ export const HighlightFailed: Story = {
   },
 };
 
+/**
+ * Highlighting passed its 2 s deadline, so the server stopped the highlight worker: plain text
+ * and a note; the file is still shown (FR-123-78).
+ */
+export const HighlightTimedOut: Story = {
+  args: { highlight: { kind: 'plain', reason: 'timeout' } },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('status')).toHaveTextContent(
+      'Syntax highlighting took too long, so this file is shown as plain text.',
+    );
+    await expect(canvas.getByRole('region')).toHaveTextContent('esc_attr__');
+    await expect(canvasElement.querySelectorAll('[data-highlighted]')).toHaveLength(0);
+  },
+};
+
 /** An extension the highlighter does not know: plain text and no note (FR-123-71). */
 export const UnknownExtension: Story = {
   args: {
