@@ -40,6 +40,7 @@ import {
   outputFilesRow,
   wholeRunPredatesCapture,
 } from '@/lib/agent-run-files';
+import { compareHref } from '@/lib/compare-files';
 import { isMockAgent } from '@/lib/mock-agent';
 import {
   agentProfileOf,
@@ -245,9 +246,19 @@ function OutputFilesCard({
         ) : (
           [...cases].map(([caseId, runs]) => (
             <section key={caseId} className="space-y-1">
-              <h3 className="text-body font-medium">
-                Case <span className="font-mono">{caseId}</span>
-              </h3>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-inline gap-y-1">
+                <h3 className="min-w-0 text-body font-medium wrap-anywhere">
+                  Case <span className="font-mono">{caseId}</span>
+                </h3>
+                {/* SPEC-123 D36: the compare page picks its default agent runs itself. */}
+                <Link
+                  className="text-body text-primary-text underline"
+                  href={compareHref(runId, { caseId })}
+                  aria-label={`Compare agent runs of case ${caseId}`}
+                >
+                  Compare agent runs
+                </Link>
+              </div>
               <Table aria-label={`Output files of case ${caseId}`}>
                 <THead>
                   <TR>

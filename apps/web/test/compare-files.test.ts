@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   compareHref,
   comparePaths,
+  compareRunOptionLabel,
+  compareSideNotice,
+  missingPathNotice,
+  pairBadge,
+  selectComparePath,
   parseCompareQuery,
   selectCompareRuns,
   type CompareAgentRun,
@@ -100,12 +105,85 @@ describe('comparePaths (FR-123-30)', () => {
 });
 
 describe('compareHref', () => {
-  it('encodes the run id and every query value, with or without a path', () => {
+  it('encodes the run id and every query value, leaving out the defaults', () => {
+    expect(compareHref('r', { caseId: 'c' })).toBe('/results/r/compare?case=c');
     expect(compareHref('run 1', { caseId: 'c&d', left: 'l', right: 'r' })).toBe(
       '/results/run%201/compare?case=c%26d&left=l&right=r',
     );
     expect(compareHref('r', { caseId: 'c', left: 'l', right: 'r', path: 'src/a b.js' })).toBe(
       '/results/r/compare?case=c&left=l&right=r&path=src%2Fa+b.js',
     );
+  });
+});
+
+describe('pairBadge (D43)', () => {
+  const sha = (c: string) => c.repeat(64);
+  it('says Identical for the same change and original bytes, Differs otherwise, never green', () => {
+    expect(
+      pairBadge({ change: 'modified', sha256: sha('a') }, { change: 'modified', sha256: sha('a') }),
+    ).toEqual({
+      label: 'Identical',
+      variant: 'outline',
+    });
+    expect(
+      pairBadge({ change: 'deleted', sha256: null }, { change: 'deleted', sha256: null }).label,
+    ).toBe('Identical');
+    expect(
+      pairBadge({ change: 'modified', sha256: sha('a') }, { change: 'modified', sha256: sha('b') }),
+    ).toEqual({
+      label: 'Differs',
+      variant: 'outline',
+    });
+    // Same bytes, but one run added the file and the other modified it.
+    expect(
+      pairBadge({ change: 'added', sha256: sha('a') }, { change: 'modified', sha256: sha('a') })
+        .label,
+    ).toBe('Differs');
+  });
+});
+
+describe('selectComparePath (FR-123-30, D38)', () => {
+  it('shows the requested path, the first path by default, and the first path for a missing one', () => {
+    expect(selectComparePath(['a', 'b'], 'b')).toEqual({ path: 'b', missing: null });
+    expect(selectComparePath(['a', 'b'], null)).toEqual({ path: 'a', missing: null });
+    expect(selectComparePath(['a', 'b'], 'zz')).toEqual({ path: 'a', missing: 'zz' });
+    expect(selectComparePath([], null)).toEqual({ path: null, missing: null });
+    expect(selectComparePath([], 'zz')).toEqual({ path: null, missing: 'zz' });
+    expect(missingPathNotice('src/x.js')).toBe(
+      'src/x.js is not in either agent run, so the first file is shown.',
+    );
+  });
+});
+
+describe('compareSideNotice (D41)', () => {
+  it('names the side and says why it lists no file', () => {
+    const kept = { outputFilesKept: true, outputFilesReason: null };
+    expect(compareSideNotice('Left', kept, 2)).toBeNull();
+    expect(compareSideNotice('Left', kept, 0)).toBe('Left: The agent did not change any file.');
+    expect(compareSideNotice('Right', { outputFilesKept: false, outputFilesReason: null }, 0)).toBe(
+      'Right: Output files were not kept for this agent run.',
+    );
+    expect(
+      compareSideNotice('Right', { outputFilesKept: false, outputFilesReason: 'it timed out.' }, 0),
+    ).toBe('Right: Output files were not kept: it timed out.');
+  });
+});
+
+describe('compareRunOptionLabel (D39)', () => {
+  it('adds the D23 status to the agent-run label', () => {
+    expect(
+      compareRunOptionLabel('Baseline (v2)', {
+        executionStatus: 'completed',
+        passed: true,
+        repetition: 1,
+      }),
+    ).toBe('Baseline (v2), repetition 1 (passed)');
+    expect(
+      compareRunOptionLabel('Candidate (v3)', {
+        executionStatus: 'timeout',
+        passed: null,
+        repetition: 2,
+      }),
+    ).toBe('Candidate (v3), repetition 2 (timeout)');
   });
 });

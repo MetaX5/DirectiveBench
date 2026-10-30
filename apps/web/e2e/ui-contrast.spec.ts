@@ -166,6 +166,30 @@ for (const theme of ['light', 'dark'] as const) {
     await keyboardFocus(page, current);
     await record(results, 'file link focus outline', contrast(current, 'outline'));
 
+    // SPEC-123 D36, D43, D44: the compare page's entry link, its selected path border (the
+    // non-colour cue) and the path link focus outline.
+    await page.getByRole('link', { name: 'Back to the run' }).click();
+    const compare = page
+      .getByTestId('output-files')
+      .getByRole('link', { name: /^Compare agent runs of case / })
+      .first();
+    await page.addStyleTag({ content: '* { transition: none !important; }' });
+    await keyboardFocus(page, compare);
+    await record(results, 'compare link focus outline', contrast(compare, 'outline'));
+    await compare.click();
+    const currentPath = page
+      .getByRole('navigation', { name: 'Changed paths' })
+      .locator('a[aria-current="page"]');
+    await expect(currentPath).toBeVisible();
+    await page.addStyleTag({ content: '* { transition: none !important; }' });
+    await record(results, 'selected path border', contrast(currentPath, 'border'));
+    await keyboardFocus(page, currentPath);
+    await record(results, 'path link focus outline', contrast(currentPath, 'outline'));
+    const runSelect = page.locator('select[name="left"]');
+    await record(results, 'compare select border', contrast(runSelect, 'border'));
+    await keyboardFocus(page, runSelect);
+    await record(results, 'compare select focus ring', contrast(runSelect, 'ring'));
+
     await testInfo.attach('ui-contrast-ratios', {
       body: JSON.stringify(results, null, 2),
       contentType: 'application/json',

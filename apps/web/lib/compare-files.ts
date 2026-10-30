@@ -2,7 +2,14 @@
 // FR-123-30 to FR-123-32, §10, §11). Pure functions over repository rows, so the page stays
 // presentational and every rule is unit-tested.
 
-import { parsePathParam } from './agent-run-files';
+import {
+  agentRunFilesNotice,
+  agentRunLabel,
+  agentRunStatusBadge,
+  parsePathParam,
+  type AgentRunOutputState,
+} from './agent-run-files';
+import type { FileBadge, FileChange } from './output-files';
 
 /** The agent-run fields these rules read (a subset of the repository row). */
 export interface CompareAgentRun {
@@ -80,7 +87,7 @@ export interface ComparedPath<F> {
   onlyIn: 'left' | 'right' | null;
 }
 
-/** The union of both sides' paths, ordered by path (code-point ascending, as each list is). */
+/** The union of both sides' paths, ordered by path (JavaScript string order). */
 export function comparePaths<F extends { path: string }>(
   left: readonly F[],
   right: readonly F[],
@@ -98,12 +105,73 @@ export function comparePaths<F extends { path: string }>(
   });
 }
 
-/** The URL of the compare page; `path` is left out when the default (first path) is meant. */
+/**
+ * The URL of the compare page. Left out values take their defaults: the runs of FR-123-30 (the
+ * run page's entry link, D36) and the first path.
+ */
 export function compareHref(
   benchmarkRunId: string,
-  query: { caseId: string; left: string; right: string; path?: string },
+  query: { caseId: string; left?: string; right?: string; path?: string },
 ): string {
-  const params = new URLSearchParams({ case: query.caseId, left: query.left, right: query.right });
+  const params = new URLSearchParams({ case: query.caseId });
+  if (query.left !== undefined) params.set('left', query.left);
+  if (query.right !== undefined) params.set('right', query.right);
   if (query.path !== undefined) params.set('path', query.path);
   return `/results/${encodeURIComponent(benchmarkRunId)}/compare?${params.toString()}`;
+}
+
+/**
+ * The badge of a path both agent runs changed (D43): "Identical" when both changed it the same
+ * way to the same original bytes (stored sha256, so a truncated side still compares in full),
+ * "Differs" otherwise. A property of the pair, not a judgement, so `outline` as the change
+ * badges (D2): green would read as a passed run.
+ */
+export function pairBadge(
+  left: { change: FileChange; sha256: string | null },
+  right: { change: FileChange; sha256: string | null },
+): FileBadge {
+  const identical = left.change === right.change && left.sha256 === right.sha256;
+  return { label: identical ? 'Identical' : 'Differs', variant: 'outline' };
+}
+
+export interface ComparePathSelection {
+  /** The path to show, or null when neither agent run lists a file. */
+  path: string | null;
+  /** A requested path neither agent run lists; the first path is shown instead (D38). */
+  missing: string | null;
+}
+
+/** The path to show: the requested one when listed, otherwise the first path (FR-123-30, D38). */
+export function selectComparePath(
+  paths: readonly string[],
+  requested: string | null,
+): ComparePathSelection {
+  if (requested !== null && paths.includes(requested)) return { path: requested, missing: null };
+  return { path: paths[0] ?? null, missing: requested };
+}
+
+/** "<path> is not in either agent run, so the first file is shown." (D38). */
+export function missingPathNotice(path: string): string {
+  return `${path} is not in either agent run, so the first file is shown.`;
+}
+
+/**
+ * Why one side lists no file (D41): the files-page sentence (D34) after the side's name, for
+ * example "Left: Output files were not kept for this agent run."; null when it lists files.
+ */
+export function compareSideNotice(
+  name: string,
+  run: Pick<AgentRunOutputState, 'outputFilesKept' | 'outputFilesReason'>,
+  fileCount: number,
+): string | null {
+  const notice = agentRunFilesNotice(run, fileCount);
+  return notice === null ? null : `${name}: ${notice}`;
+}
+
+/** An agent-run option: "Baseline (v2), repetition 1 (passed)" (D39). */
+export function compareRunOptionLabel(
+  variantLabel: string,
+  run: Pick<AgentRunOutputState, 'executionStatus' | 'passed'> & { repetition: number },
+): string {
+  return `${agentRunLabel(variantLabel, run.repetition)} (${agentRunStatusBadge(run).label})`;
 }
