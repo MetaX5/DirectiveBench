@@ -53,8 +53,10 @@ const SUITE_SLUG = 'e2e-real-capture';
 /** A real input that keeps the TypeScript grammar busy for about 20 s (260,000 bytes, under 256 KiB). */
 const DEEP_TS = `${'{'.repeat(25)}\n`.repeat(10_000);
 const TIMEOUT_NOTE = 'Syntax highlighting took too long, so this file is shown as plain text.';
-/** When the health request starts, well inside the 2 s highlighting deadline of the page render. */
-const HEALTH_REQUEST_DELAY_MS = 300;
+/** `SYNTAX_HIGHLIGHT_DEADLINE_MS` of `apps/web/lib/syntax-highlight.ts`. */
+const HIGHLIGHT_DEADLINE_MS = 2_000;
+/** Pause between two health requests while the stalled page is pending. */
+const HEALTH_POLL_INTERVAL_MS = 100;
 /** Four agent runs, two of which wait for the 2 s pattern time limit, on a loaded runner. */
 const BENCHMARK_RUN_TIMEOUT_MS = 120_000;
 
@@ -327,18 +329,39 @@ test('a file that stalls the tokenizer is shown plain with the timeout note whil
   page,
   request,
 }) => {
-  let pageDone = false;
-  const loaded = page.goto(filesPage(agentRuns.secrets, 'deep.ts')).then((response) => {
-    pageDone = true;
+  const url = filesPage(agentRuns.secrets, 'deep.ts');
+  // The server's own timing, without the browser: the page is answered only after the deadline
+  // stopped the worker, which `deep.ts` keeps busy for about 20 s.
+  const started = performance.now();
+  let answeredAt = Number.POSITIVE_INFINITY;
+  const pending = request.get(url).then((response) => {
+    answeredAt = performance.now();
     return response;
   });
-  // While the worker is stuck in the grammar (until the deadline stops it), the server answers.
-  await new Promise((resolve) => setTimeout(resolve, HEALTH_REQUEST_DELAY_MS));
-  const health = await request.get('/api/health');
-  expect(health.ok()).toBe(true);
-  expect(pageDone, 'the health check was answered before the stalled page').toBe(false);
-  expect((await loaded)?.ok()).toBe(true);
+  // Health requests one after another for as long as the page is pending: each answer is a
+  // moment the request thread was free. Tokenizing on that thread would leave one gap of about
+  // 20 s; the worker leaves none as long as the deadline.
+  const answers: number[] = [];
+  while (answeredAt === Number.POSITIVE_INFINITY) {
+    const health = await request.get('/api/health');
+    expect(health.ok()).toBe(true);
+    answers.push(performance.now());
+    await new Promise((resolve) => setTimeout(resolve, HEALTH_POLL_INTERVAL_MS));
+  }
+  const response = await pending;
+  expect(response.ok()).toBe(true);
+  expect(await response.text()).toContain(TIMEOUT_NOTE);
+  // The page waited for the deadline: the stall was real, and the polls cover it.
+  expect(answeredAt - started).toBeGreaterThanOrEqual(HIGHLIGHT_DEADLINE_MS);
 
+  const moments = [started, ...answers.filter((at) => at < answeredAt), answeredAt];
+  const gaps = moments.slice(1).map((at, index) => at - (moments[index] as number));
+  expect(
+    Math.max(...gaps),
+    `gaps between health answers: ${gaps.map(Math.round).join(', ')}`,
+  ).toBeLessThan(HIGHLIGHT_DEADLINE_MS);
+
+  await page.goto(url);
   await expect(page.getByRole('status')).toContainText(TIMEOUT_NOTE);
   const content = page.getByRole('region', { name: 'Content of deep.ts' });
   await expect(content.locator('[data-highlighted]')).toHaveCount(0);
