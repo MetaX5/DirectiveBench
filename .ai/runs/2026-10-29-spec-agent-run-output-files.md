@@ -35,7 +35,7 @@ confirmation and the PR stays a draft.
 1. Read the context above; confirmed in code that workspaces are removed in `runAgent`'s
    `finally`, `changedFiles` holds paths only, no run deletion exists, foreign keys are on, and
    only the adapter knows the API key (so redaction needs an adapter method).
-2. Drafted `.ai/specs/2026-10-29-agent-run-output-files.md` (SPEC-123) and added it to the index.
+2. Drafted `.ai/specs/implemented/2026-10-29-agent-run-output-files.md` (SPEC-123) and added it to the index.
 3. A fresh-context review agent returned 10 findings (redaction margin at the cut, capture racing
    a timed-out agent, phase dependencies, blindness bypass through labelled views, ids in blind
    URLs, change detection, concurrent review start, export collisions, pair integrity, untestable
@@ -60,5 +60,5 @@ None (no bug fixed, no correction received).
 ## Follow-ups
 
 - Maintainer: confirm or override A1 to A14, especially A14.
-- Implementation via `om-auto-implement-spec .ai/specs/2026-10-29-agent-run-output-files.md`,
+- Implementation via `om-auto-implement-spec .ai/specs/implemented/2026-10-29-agent-run-output-files.md`,
   phase by phase.

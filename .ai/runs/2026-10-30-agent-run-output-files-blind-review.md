@@ -10,7 +10,7 @@ specs: [SPEC-123, SPEC-122, SPEC-014, SPEC-006, SPEC-008]
 
 # Run: SPEC-123 Phase 5, blind review
 
-Source doc: .ai/specs/2026-10-29-agent-run-output-files.md
+Source doc: .ai/specs/implemented/2026-10-29-agent-run-output-files.md
 
 ## Objective
 

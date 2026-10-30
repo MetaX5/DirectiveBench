@@ -10,7 +10,7 @@ specs: [SPEC-123, SPEC-006, SPEC-014, SPEC-118]
 
 # Run: SPEC-123 Phase 1, capture and storage of agent run output files
 
-Source doc: .ai/specs/2026-10-29-agent-run-output-files.md
+Source doc: .ai/specs/implemented/2026-10-29-agent-run-output-files.md
 
 ## Objective
 
