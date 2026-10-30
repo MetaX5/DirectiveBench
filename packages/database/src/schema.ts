@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -396,4 +397,57 @@ export const assertionResults = sqliteTable(
     details: text('details', { mode: 'json' }).$type<Record<string, unknown>>(),
   },
   (t) => [index('assertion_results_agent_run_idx').on(t.agentRunId)],
+);
+
+/**
+ * A blind review of one benchmark run's baseline and candidate outputs (SPEC-123 §6.5): at most
+ * one per run (A10), revealed once for all pairs (A9).
+ */
+export const blindReviews = sqliteTable(
+  'blind_reviews',
+  {
+    id: text('id').primaryKey(),
+    benchmarkRunId: text('benchmark_run_id')
+      .notNull()
+      .references(() => benchmarkRuns.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').notNull(),
+    /** Set once, by a conditional update (FR-123-54). */
+    revealedAt: text('revealed_at'),
+  },
+  (t) => [uniqueIndex('blind_reviews_benchmark_run_unique').on(t.benchmarkRunId)],
+);
+
+/**
+ * One pair of a blind review: the baseline and candidate agent run of one case and repetition,
+ * assigned to sides A and B at random (FR-123-51). The verdict is immutable once set.
+ */
+export const blindReviewPairs = sqliteTable(
+  'blind_review_pairs',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => blindReviews.id, { onDelete: 'cascade' }),
+    /** 1-based, in the shuffled order. */
+    position: integer('position').notNull(),
+    caseId: text('case_id').notNull(),
+    aAgentRunId: text('a_agent_run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    bAgentRunId: text('b_agent_run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    verdict: text('verdict', { enum: ['a', 'b', 'tie'] }),
+    /** The reviewer's own text, at most `BLIND_REVIEW_NOTE_MAX_CHARS` (checked by the web app). */
+    note: text('note'),
+    decidedAt: text('decided_at'),
+  },
+  (t) => [
+    uniqueIndex('blind_review_pairs_review_position_unique').on(t.reviewId, t.position),
+    check('blind_review_pairs_sides_differ', sql`${t.aAgentRunId} <> ${t.bAgentRunId}`),
+    check(
+      'blind_review_pairs_verdict_known',
+      sql`${t.verdict} is null or ${t.verdict} in ('a', 'b', 'tie')`,
+    ),
+  ],
 );
