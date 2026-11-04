@@ -3,7 +3,7 @@ title: Results pages load only the agent runs they show (issue #169)
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5 (om-auto-fix-issue)
 trigger: maintainer request, GitHub issue #169
-status: in-progress
+status: completed
 branch: fix/issue-169-results-pages-load-needed-traces
 specs: [SPEC-123]
 ---
@@ -69,8 +69,23 @@ Performance probe (throwaway vitest file, not committed; 100 agent runs with ~20
 each, mean of 10 reads): `getBenchmarkRunDetail` 76.6 ms; files page reads 0.65 ms; compare
 reads 6.2 ms; blind-review header 0.50 ms.
 
-Not verified: no exploratory browser QA, since nothing visible changed (same data, same markup);
-the e2e suite is the evidence. No measurement on a real user database.
+Review (`om-auto-review-pr --autofix`, engine `om-code-review`) on head 7f8a8f0 (the change
+plus a clean merge of `main`): approve, posted as a COMMENT review. The full gate passed again on
+that head. Findings: one minor (this run log was still `in-progress`, fixed in this commit) and
+one nit (the compare and blind-review pages keep the variable name `detail` for the header,
+since compare already has a JSX `header`; kept).
+
+UI verification (`om-auto-qa-pr`, evidence only) on the built CLI after `directivebench demo`,
+with `agent-browser` 0.35.2: 12/12 checkpoints passed. They covered the files page (both
+variants, unknown id 404), compare (defaults, chosen sides, unknown id 404), and the blind
+review: none, started (the HTML contains no variant, agent-run id or repetition), closed
+labelled pages, and the reveal labels. The files, compare and blind-review pages were also
+checked at 320px in dark theme with no horizontal scroll, and the console stayed clean. The
+evidence is in the PR comment.
+
+Not verified: the RSC-payload blindness check by hand (the e2e `blind-review` spec covers it);
+an agent run of another run in the browser (the demo has one run; the repository test covers
+it); a measurement on a real user database.
 
 ## Problems and deviations
 
@@ -80,6 +95,12 @@ the e2e suite is the evidence. No measurement on a real user database.
   tests failed (repositories "outside any work tree", real-capture workspaces below
   `CLAUDE.md`). A second run under `~/.cache` was stopped before it finished, because the lesson
   already says `$HOME` fails. With `TMPDIR=/var/tmp/<name>` all 109 passed. Lesson updated.
+
+- `om-prepare-test-env` found no generated entrypoint. I did not commit generated env scripts
+  in this focused PR: the app was booted the way `playwright.config.ts` boots it (built CLI,
+  `demo` then `serve`, data directory under `/var/tmp`), and `agent-browser` 0.35.2 was
+  installed into `~/.cache/agent-tools` per `.ai/browsers/agent-browser.md`. The evidence images
+  live on the `qa-evidence-pr-179` branch, as the GitHub tracker descriptor defines.
 
 ## Lessons recorded
 
