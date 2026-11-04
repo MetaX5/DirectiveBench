@@ -3,6 +3,8 @@
 # regenerate with: om-prepare-test-env --regenerate
 # history:
 #   2026-11-04 generated (cold 14s incl. pnpm build, warm 0.4s reused; run log 2026-11-04-test-env-scripts)
+#   2026-11-04 review: record the server before the health wait and stop it on a failed start
+#              (a timed-out start left a server no script could find); pass --host explicitly
 #
 # Starts the built DirectiveBench CLI the way apps/web/playwright.config.ts boots it:
 # `pnpm build`, then `directivebench demo` and `directivebench serve` against a fresh data
@@ -19,6 +21,7 @@
 #   TEST_ENV_PORT               port on 127.0.0.1 (default 4398; the e2e suite uses 4399)
 #   TEST_ENV_ROOT               data root (default /var/tmp/directivebench-test-env-<checkout id>)
 #   TEST_ENV_CACHE_TTL_SECONDS  reuse a running environment at most this long (default 3600)
+#   TEST_ENV_READY_TIMEOUT_SECONDS  wait this long for /api/health (default 120)
 set -eu
 
 # --- project-specific variables ---------------------------------------------------------------
@@ -26,7 +29,7 @@ PORT=${TEST_ENV_PORT:-4398}
 HOST=127.0.0.1
 HEALTH_PATH=/api/health
 CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-3600}
-READY_TIMEOUT_SECONDS=120   # matches the e2e webServer timeout
+READY_TIMEOUT_SECONDS=${TEST_ENV_READY_TIMEOUT_SECONDS:-120}   # e2e webServer timeout
 LOCK_WAIT_SECONDS=300       # how long to wait for another bootstrap of this checkout
 # Build inputs: every tracked or untracked, not ignored file except .ai/ (run logs, QA state).
 BUILD_EXCLUDE_PATHSPEC=':(exclude).ai'
@@ -53,6 +56,7 @@ die() { echo "test-env-up: $*" >&2; exit 1; }
 
 case "$PORT" in ''|*[!0-9]*) die "TEST_ENV_PORT must be a number, got '$PORT'" ;; esac
 case "$CACHE_TTL_SECONDS" in ''|*[!0-9]*) die "TEST_ENV_CACHE_TTL_SECONDS must be a number" ;; esac
+case "$READY_TIMEOUT_SECONDS" in ''|*[!0-9]*) die "TEST_ENV_READY_TIMEOUT_SECONDS must be a number" ;; esac
 command -v node >/dev/null 2>&1 || die "node (>= 22.16) is required"
 command -v git >/dev/null 2>&1 || die "git is required"
 
@@ -271,29 +275,43 @@ node "$REPO_ROOT/$CLI" --data-dir "$DATA_DIR" demo >&2
 # --- 5. app start + health wait ---------------------------------------------------------------
 # A new session makes the server its own process group, so test-env-down.sh can also stop its
 # next-server child if the CLI dies first. macOS has no setsid: the CLI stops its child itself.
+# --host is explicit because serve otherwise takes DIRECTIVEBENCH_HOST from the environment.
 if command -v setsid >/dev/null 2>&1; then
-  setsid node "$REPO_ROOT/$CLI" --data-dir "$DATA_DIR" serve --no-open --port "$PORT" \
+  setsid node "$REPO_ROOT/$CLI" --data-dir "$DATA_DIR" serve --no-open --host "$HOST" --port "$PORT" \
     </dev/null >"$LOG_FILE" 2>&1 &
   PROCESS_GROUP=1
 else
-  node "$REPO_ROOT/$CLI" --data-dir "$DATA_DIR" serve --no-open --port "$PORT" \
+  node "$REPO_ROOT/$CLI" --data-dir "$DATA_DIR" serve --no-open --host "$HOST" --port "$PORT" \
     </dev/null >"$LOG_FILE" 2>&1 &
   PROCESS_GROUP=0
 fi
 APP_PID=$!
+# Record the server before waiting for it, so test-env-down.sh can stop it if this run fails.
+APP_PID=$APP_PID PROCESS_GROUP=$PROCESS_GROUP ENV_ROOT=$ENV_ROOT SCRIPTS_DIR=$SCRIPTS_DIR node -e '
+const e = process.env;
+const d = { version: 1, status: "starting", startedByThisRepo: true,
+  stopScript: e.SCRIPTS_DIR + "/test-env-down.sh",
+  app: { pid: Number(e.APP_PID), processGroup: e.PROCESS_GROUP === "1" }, dataRoot: e.ENV_ROOT };
+require("fs").writeFileSync(process.argv[1], JSON.stringify(d, null, 2) + "\n");
+' "$DESCRIPTOR"
+
+# Any failure after the launch stops what was started and removes the data root.
+start_failed() {
+  echo "test-env-up: $* (last lines of $LOG_FILE below)" >&2
+  tail -n 20 "$LOG_FILE" >&2 || true
+  TEST_ENV_LOCK_HELD=1 TEST_ENV_ROOT="$ENV_ROOT" sh "$SCRIPTS_DIR/test-env-down.sh" >&2 || true
+  exit 1
+}
 deadline=$(( $(now) + READY_TIMEOUT_SECONDS ))
 until probe "$BASE_URL$HEALTH_PATH"; do
-  if ! kill -0 "$APP_PID" 2>/dev/null; then
-    tail -n 20 "$LOG_FILE" >&2 || true
-    die "directivebench serve exited before it was ready (log: $LOG_FILE)"
-  fi
-  [ "$(now)" -ge "$deadline" ] && die "not ready after ${READY_TIMEOUT_SECONDS}s (log: $LOG_FILE)"
+  kill -0 "$APP_PID" 2>/dev/null || start_failed "directivebench serve exited before it was ready"
+  [ "$(now)" -ge "$deadline" ] && start_failed "not ready after ${READY_TIMEOUT_SECONDS}s"
   sleep 1
 done
 # The health check only proves that some server answers (lesson 2026-10-30-restart-a-served-
 # build-by-port): make sure it is the process started here.
-is_our_server "$APP_PID" || die "pid $APP_PID is not the server this script started (log: $LOG_FILE)"
-probe "$BASE_URL/" || die "the home page does not answer (log: $LOG_FILE)"
+is_our_server "$APP_PID" || start_failed "pid $APP_PID is not the server this script started"
+probe "$BASE_URL/" || start_failed "the home page does not answer"
 
 # --- 6. descriptor -----------------------------------------------------------------------------
 ELAPSED=$(( $(now) - START_TIME ))

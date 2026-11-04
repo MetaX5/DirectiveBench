@@ -79,6 +79,8 @@ agents) reuse them instead of regenerating them each run.
 | Stale lock of a dead pid | removed, boot continues, lock released after |
 | Two concurrent ups | second waits for the lock, then reuses the first one's server |
 | down, down again, down with no descriptor | exit 0 each; data root removed; descriptor `stopped` |
+| Failed start (`TEST_ENV_READY_TIMEOUT_SECONDS=0`, after the review fix) | exit 1; the started server is stopped, data root removed, port free, descriptor `stopped` |
+| `DIRECTIVEBENCH_HOST=0.0.0.0` in the caller's env (after the review fix) | still binds `127.0.0.1` (`--host` passed) |
 | `pnpm lint` | pass |
 | `pnpm format:check` | pass (`.ai/` and `*.md` are prettier-ignored, shell is not covered) |
 
@@ -95,6 +97,23 @@ repository check validates `.ai/` files beyond file naming.
 - Contract deviations: lock scope and TTL default (see Decisions); no credentials file (the app has
   no authentication).
 
+## Review
+
+`om-auto-review-pr 182`, round 1 (posted as a comment; GitHub does not let the author request
+changes on their own PR): one major and one minor, both fixed in a follow-up commit.
+
+- Major: a failure after `serve` was launched (health timeout, identity check, home probe) exited
+  without stopping it and before any descriptor named its pid, so neither script could find it
+  later. The up script now writes a `starting` descriptor right after the launch and runs the down
+  script on every failure after it. New `TEST_ENV_READY_TIMEOUT_SECONDS` (default 120) made the
+  path testable.
+- Minor: `serve` takes `DIRECTIVEBENCH_HOST` from the environment when `--host` is missing; the
+  script now passes `--host 127.0.0.1`.
+
+Full gate on the PR head: `format:check`, `lint`, `typecheck`, `build`, `verify:pack` passed;
+`pnpm test` failed once in `packages/core/test/linear-time.test.ts` (timing ratio 0.338 vs 0.286
+under load from a parallel agent) and passed 7/7 tasks on the rerun. The diff has no TypeScript.
+
 ## Lessons recorded
 
 None: the constraints met here were already recorded (keep data off `/tmp`, restart by port,
@@ -103,3 +122,5 @@ verify a pid before killing it).
 ## Follow-ups
 
 - Generate the `.ps1` flavor when someone runs QA on native Windows.
+- `packages/core/test/linear-time.test.ts` "measures an asynchronous baseline with the process
+  clock" failed once under machine load (passed on rerun); worth hardening if it recurs.
