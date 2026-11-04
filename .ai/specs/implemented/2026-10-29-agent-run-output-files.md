@@ -344,6 +344,15 @@ flowchart LR
   `output_files_reason` (same transaction, FR-123-11).
 - `listAgentRunFiles(db, agentRunId)` → metadata only (no `content`).
 - `getAgentRunFile(db, { benchmarkRunId, agentRunId, path })` → one file with content, or null.
+- `getBenchmarkRunHeader(db, benchmarkRunId)` → the run with its suite, artifact and baseline
+  versions and no agent runs, or null; `getBenchmarkRunDetail` adds the agent runs to it.
+- `getAgentRunSummary(db, { benchmarkRunId, agentRunId })` → one agent run of that benchmark run
+  without its trace or assertions, or null (also for an agent run of another benchmark run).
+- `listAgentRunSummaries(db, benchmarkRunId)` → the run's agent runs without traces or
+  assertions, in the order of `getBenchmarkRunDetail` (case, repetition, variant).
+- The files, compare and blind-review pages read only these (issue #169): the files page the
+  header and one agent run, the compare page the header and the agent-run summaries, the blind
+  review the header. Only the run page loads traces, through `getBenchmarkRunDetail`.
 - `startBlindReview(db, benchmarkRunId)` → review id (FR-123-50: conditional insert first,
   eligibility and pair integrity checked inside the same transaction).
 - `getBlindReviewForReviewer(db, benchmarkRunId)` → `{ review, pairs: { id, position, caseId,

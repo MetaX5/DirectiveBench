@@ -1,5 +1,5 @@
 import {
-  getBenchmarkRunDetail,
+  getBenchmarkRunHeader,
   getBlindPairFiles,
   getBlindReviewForReviewer,
   getBlindReviewResult,
@@ -68,7 +68,8 @@ export default async function BlindReviewPage({
   const handle = getDatabase();
   if (!handle) return <NotInitialized />;
   const { id } = await params;
-  const detail = await getBenchmarkRunDetail(handle.db, id);
+  // The header only: this page reads nothing about the agent runs before the reveal (issue 169).
+  const detail = await getBenchmarkRunHeader(handle.db, id);
   if (!detail) notFound();
   const runId = detail.run.id;
   const mock = isMockAgent(detail.run.agentAdapterId);

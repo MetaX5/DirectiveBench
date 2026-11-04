@@ -38,6 +38,11 @@ with the processes the gate needs. Running agents in parallel is fine; leaving d
   adapter refuses them for the ancestor `~/.claude` (`workspace-contains-claude-config`), and
   eight fake-`claude` tests in `apps/cli/test/benchmark-run.test.ts` fail (seen 2026-10-30,
   also on `main`).
+- The directory must also lie **outside every git work tree**, so never under the repository's
+  `.ai/tmp/`: with `TMPDIR=.ai/tmp/…` `pnpm test:e2e` failed 15 tests (seen 2026-11-04, issue
+  #169). The repository tests' "outside any work tree" directories were inside one, and the
+  real-capture runs' workspaces sat below the repository's `CLAUDE.md`. `/var/tmp/<name>` passed
+  all 109; remove it afterwards.
 - Check `du -sh /tmp/* "$TMPDIR"/*` at the end of a long session.
 - Since 2026-10-30, `pnpm verify:pack` removes its directory (about 350 MB) on every exit
   (`--keep` keeps it), and the Playwright run removes its one temporary root. Before that,

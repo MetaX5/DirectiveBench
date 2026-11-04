@@ -1,6 +1,7 @@
 import {
   getAgentRunFile,
-  getBenchmarkRunDetail,
+  getAgentRunSummary,
+  getBenchmarkRunHeader,
   hasUnrevealedBlindReview,
   listAgentRunFiles,
 } from '@directivebench/database';
@@ -52,10 +53,13 @@ export default async function AgentRunFilesPage({
   const loaded = await loadUnlessBlindReview(
     () => hasUnrevealedBlindReview(handle.db, id),
     async () => {
-      const detail = await getBenchmarkRunDetail(handle.db, id);
-      // The agent run must belong to the benchmark run in the URL (FR-123-21).
-      const agentRun = detail?.agentRuns.find((r) => r.id === agentRunId);
-      if (!detail || !agentRun) notFound();
+      // Only the header and this one agent run, without its trace (issue 169); the agent run
+      // must belong to the benchmark run in the URL (FR-123-21).
+      const [header, agentRun] = await Promise.all([
+        getBenchmarkRunHeader(handle.db, id),
+        getAgentRunSummary(handle.db, { benchmarkRunId: id, agentRunId }),
+      ]);
+      if (!header || !agentRun) notFound();
 
       const files = await listAgentRunFiles(handle.db, agentRun.id);
       const selection = selectFile(
@@ -66,7 +70,7 @@ export default async function AgentRunFilesPage({
       const selected =
         selection.kind === 'file'
           ? await getAgentRunFile(handle.db, {
-              benchmarkRunId: detail.run.id,
+              benchmarkRunId: header.run.id,
               agentRunId: agentRun.id,
               path: selection.path,
             })
@@ -81,20 +85,20 @@ export default async function AgentRunFilesPage({
 
       const variant =
         agentRun.variant === 'baseline'
-          ? baselineLabel(detail.baselineArtifactVersion)
-          : candidateLabel(detail.artifactVersion);
+          ? baselineLabel(header.baselineArtifactVersion)
+          : candidateLabel(header.artifactVersion);
       const status = agentRunStatusBadge(agentRun);
       const notice = agentRunFilesNotice(agentRun, files.length);
-      return { detail, agentRun, files, selected, highlight, variant, status, notice };
+      return { header, agentRun, files, selected, highlight, variant, status, notice };
     },
   );
   if (loaded.closed) return <BlindReviewClosedPage runId={id} title="Output files hidden" />;
-  const { detail, agentRun, files, selected, highlight, variant, status, notice } = loaded.value;
+  const { header, agentRun, files, selected, highlight, variant, status, notice } = loaded.value;
 
   return (
     <>
       <p className="mb-2 text-body">
-        <Link href={`/results/${encodeURIComponent(detail.run.id)}`} className="underline">
+        <Link href={`/results/${encodeURIComponent(header.run.id)}`} className="underline">
           Back to the run
         </Link>
       </p>
@@ -103,13 +107,13 @@ export default async function AgentRunFilesPage({
         description={
           <>
             Case <span className="font-mono">{agentRun.caseId}</span> · run{' '}
-            <span className="font-mono">{detail.run.id}</span>
+            <span className="font-mono">{header.run.id}</span>
           </>
         }
         actions={
           <>
             <Badge variant={status.variant}>{status.label}</Badge>
-            {isMockAgent(detail.run.agentAdapterId) ? <MockBadge /> : null}
+            {isMockAgent(header.run.agentAdapterId) ? <MockBadge /> : null}
           </>
         }
       />
@@ -134,7 +138,7 @@ export default async function AgentRunFilesPage({
                         <Link
                           // The fragment brings the file into view where it is stacked under the
                           // list; on wide screens its target is hidden, so nothing scrolls.
-                          href={`${agentRunFilesHref(detail.run.id, agentRun.id, file.path)}#file`}
+                          href={`${agentRunFilesHref(header.run.id, agentRun.id, file.path)}#file`}
                           aria-current={current ? 'page' : undefined}
                           className={cn(
                             'block border-l-2 py-1 pr-1 pl-2 text-body hover:bg-muted',
