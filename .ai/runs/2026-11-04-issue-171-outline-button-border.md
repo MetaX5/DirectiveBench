@@ -3,7 +3,7 @@ title: Outline button border reaches 3:1 (issue #171)
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5
 trigger: issue #171, design option A approved by the maintainer on 2026-11-04
-status: in-progress
+status: completed
 branch: fix/issue-171-outline-button-border
 specs: [SPEC-120, SPEC-122]
 ---
@@ -72,6 +72,19 @@ Measured in Chromium (e2e, Filter on a card and verdict buttons on a card):
 Computed from the token values (Storybook Colour page measures the same within 0.25): light
 4.74 page and card, 4.35 muted, 4.54 sidebar; dark 4.18 page, 3.78 card, 3.19 muted.
 
+## Review and QA
+
+- `om-auto-review-pr --autofix` (engine `om-code-review`): approve, posted as COMMENT
+  ([review](https://github.com/MetaX5/DirectiveBench/pull/181)). The full gate passed on head
+  `c232d79`. One minor was fixed in `ec114ea` (the U14.3 comment named the wrong row surface).
+- Codex adversarial review (plugin `codex` 1.0.6, `adversarial-review --base origin/main`),
+  round 1 on `ec114ea`: approve, no material findings.
+- `om-auto-qa-pr` (agent-browser 0.35.2 on the built CLI after `directivebench demo`): PASS on
+  10 checkpoints in both themes, at 1280px and 320px, keyboard only, with a clean console
+  ([evidence](https://github.com/MetaX5/DirectiveBench/pull/181#issuecomment-6637916241), images on
+  `qa-evidence-pr-181`). Scan button in a selected row (`bg-muted`), dark: 3.19 against the
+  surface and 2.81 against its own fill, as tokeny.md U14 documents.
+
 ## Problems and deviations
 
 - `// #171` in `.tsx` comments failed the D2 hex-colour rule; rewritten as "Issue 171" (lesson
@@ -81,6 +94,15 @@ Computed from the token values (Storybook Colour page measures the same within 0
 
 - [2026-11-04-issue-numbers-trip-the-hex-colour-rule](../lessons/2026-11-04-issue-numbers-trip-the-hex-colour-rule.md)
 
+## Not verified
+
+- Firefox and Safari; Windows high-contrast mode.
+- Hover in the exploratory QA: the headless agent-browser reports `(hover: hover)` false, so
+  Tailwind `hover:` styles do not apply there. Button hover was measured by the e2e spec in
+  Playwright Desktop Chrome instead.
+
 ## Follow-ups
 
-To be completed after review and QA.
+- `om-prepare-test-env` generated `.ai/scripts/test-env-up.sh`/`-down.sh` for this QA run; they
+  were not committed (out of scope for #171). Committing them in their own change would make the
+  next QA run skip generation.
