@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { SYNTAX_HIGHLIGHT_DEADLINE_MS } from '../lib/syntax-highlight-common';
 import {
   DEMO_ARTIFACT,
   dataDir,
@@ -53,8 +54,6 @@ const SUITE_SLUG = 'e2e-real-capture';
 /** A real input that keeps the TypeScript grammar busy for about 20 s (260,000 bytes, under 256 KiB). */
 const DEEP_TS = `${'{'.repeat(25)}\n`.repeat(10_000);
 const TIMEOUT_NOTE = 'Syntax highlighting took too long, so this file is shown as plain text.';
-/** `SYNTAX_HIGHLIGHT_DEADLINE_MS` of `apps/web/lib/syntax-highlight.ts`. */
-const HIGHLIGHT_DEADLINE_MS = 2_000;
 /** Pause between two health requests while the stalled page is pending. */
 const HEALTH_POLL_INTERVAL_MS = 100;
 /** Four agent runs, two of which wait for the 2 s pattern time limit, on a loaded runner. */
@@ -352,14 +351,14 @@ test('a file that stalls the tokenizer is shown plain with the timeout note whil
   expect(response.ok()).toBe(true);
   expect(await response.text()).toContain(TIMEOUT_NOTE);
   // The page waited for the deadline: the stall was real, and the polls cover it.
-  expect(answeredAt - started).toBeGreaterThanOrEqual(HIGHLIGHT_DEADLINE_MS);
+  expect(answeredAt - started).toBeGreaterThanOrEqual(SYNTAX_HIGHLIGHT_DEADLINE_MS);
 
   const moments = [started, ...answers.filter((at) => at < answeredAt), answeredAt];
   const gaps = moments.slice(1).map((at, index) => at - (moments[index] as number));
   expect(
     Math.max(...gaps),
     `gaps between health answers: ${gaps.map(Math.round).join(', ')}`,
-  ).toBeLessThan(HIGHLIGHT_DEADLINE_MS);
+  ).toBeLessThan(SYNTAX_HIGHLIGHT_DEADLINE_MS);
 
   await page.goto(url);
   await expect(page.getByRole('status')).toContainText(TIMEOUT_NOTE);

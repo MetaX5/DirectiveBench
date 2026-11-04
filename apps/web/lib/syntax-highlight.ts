@@ -1,6 +1,7 @@
 import 'server-only';
 import { Worker } from 'node:worker_threads';
 import {
+  SYNTAX_HIGHLIGHT_DEADLINE_MS,
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
   SYNTAX_HIGHLIGHT_MAX_BYTES,
   type HighlightJob,
@@ -18,6 +19,7 @@ import {
 
 export {
   languageForPath,
+  SYNTAX_HIGHLIGHT_DEADLINE_MS,
   SYNTAX_HIGHLIGHT_LINE_TIME_LIMIT_MS,
   SYNTAX_HIGHLIGHT_MAX_BYTES,
   SYNTAX_HIGHLIGHT_MAX_LINE_CHARS,
@@ -30,12 +32,6 @@ export {
   type SyntaxTokenKind,
 } from './syntax-highlight-common';
 
-/**
- * Aggregate deadline of one page render's highlighting, from the moment it is submitted: the
- * wait for the worker, the worker's start and highlighter creation, and every text of the job
- * (FR-123-78, NFR-123-07). The only hard bound on time.
- */
-export const SYNTAX_HIGHLIGHT_DEADLINE_MS = 2_000;
 /** Jobs that may wait while the worker runs another; a job beyond them is not highlighted. */
 export const SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS = 8;
 
