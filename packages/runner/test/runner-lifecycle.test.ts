@@ -66,7 +66,6 @@ cases:
 
 let handle: DatabaseHandle;
 let dataDir: string;
-const extraHandles: DatabaseHandle[] = [];
 const runners: LocalRunner[] = [];
 
 beforeEach(async () => {
@@ -79,7 +78,6 @@ afterEach(async () => {
   vi.useRealTimers();
   // Abort anything a failed assertion left running before the database is closed.
   for (const runner of runners.splice(0)) await runner.stop();
-  for (const extra of extraHandles.splice(0)) extra.close();
   handle.close();
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -309,23 +307,17 @@ describe('bounded concurrency', () => {
   });
 });
 
+// The two runners stand for two processes but share one connection: two writable `node:sqlite`
+// connections in one thread deadlock for `busy_timeout` once their transactions overlap (issue
+// #176, lesson 2026-11-04-one-writable-connection-per-test-thread). What keeps them from claiming
+// the same job is `acquireNextJob`'s single conditional UPDATE, and their polls still interleave.
 describe('two runners sharing one database', () => {
-  function secondHandle(): DatabaseHandle {
-    const extra = openDatabase(join(dataDir, 'directivebench.db'));
-    extraHandles.push(extra);
-    return extra;
-  }
-
   it('acquires a single pending job exactly once', async () => {
     const { payload, fixtureStore } = await importMini();
     const job = await enqueueBenchmarkJob(handle.db, payload);
     const adapter = new GatedAdapter();
     const a = createRunner(fixtureStore, { adapters: adapters(adapter), concurrency: 4 });
-    const b = createRunner(fixtureStore, {
-      handle: secondHandle(),
-      adapters: adapters(adapter),
-      concurrency: 4,
-    });
+    const b = createRunner(fixtureStore, { adapters: adapters(adapter), concurrency: 4 });
 
     await Promise.all([a.poll(), b.poll()]);
     expect(a.activeJobCount + b.activeJobCount).toBe(1);
@@ -344,11 +336,7 @@ describe('two runners sharing one database', () => {
     for (let i = 0; i < 5; i += 1) jobs.push(await enqueueBenchmarkJob(handle.db, payload));
     const adapter = new GatedAdapter();
     const a = createRunner(fixtureStore, { adapters: adapters(adapter), concurrency: 3 });
-    const b = createRunner(fixtureStore, {
-      handle: secondHandle(),
-      adapters: adapters(adapter),
-      concurrency: 3,
-    });
+    const b = createRunner(fixtureStore, { adapters: adapters(adapter), concurrency: 3 });
 
     await Promise.all([a.poll(), b.poll()]);
     expect(a.activeJobCount + b.activeJobCount).toBe(5);
