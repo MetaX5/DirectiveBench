@@ -129,7 +129,8 @@ test.describe('benchmarks and executions', () => {
 
     await page.goto('/benchmarks');
     const suiteRow = page.getByRole('row', { name: new RegExp(escapeRegExp(DEMO_SUITE)) });
-    await expect(suiteRow).toContainText('mock');
+    // The suites list marks a mock suite's agent with the shared badge (issue 74, FR-116-14).
+    await expect(suiteRow.getByText(MOCK_LABEL)).toBeVisible();
     await suiteRow.getByRole('link', { name: DEMO_SUITE }).click();
     await expect(page.getByRole('heading', { level: 1, name: DEMO_SUITE })).toBeVisible();
     await expect(page.getByText(MOCK_LABEL).first()).toBeVisible();

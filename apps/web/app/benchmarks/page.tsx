@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import {
   EmptyState,
+  MockBadge,
   NotInitialized,
   PageHeader,
   StatusBadge,
@@ -20,6 +21,7 @@ import {
   Table,
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
+import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmarks' };
@@ -73,7 +75,15 @@ export default async function BenchmarksPage() {
                           </Link>
                         </TD>
                         <TD>v{latestVersion?.version}</TD>
-                        <TD className="font-mono text-ui">{definition?.execution?.agent}</TD>
+                        <TD>
+                          {isMockAgent(definition?.execution?.agent) ? (
+                            <MockBadge />
+                          ) : (
+                            <span className="font-mono text-ui">
+                              {definition?.execution?.agent}
+                            </span>
+                          )}
+                        </TD>
                         <TD>
                           <div className="flex flex-wrap gap-1">
                             {definition?.technologies?.map((t) => (

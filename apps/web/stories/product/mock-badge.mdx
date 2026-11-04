@@ -14,8 +14,9 @@ mistaken for an AI evaluation. Source: AGENTS.md §7, SPEC-101 FR-101-14, SPEC-1
 
 ## 2. When to use
 
-Next to every score, verdict or run that comes from the mock agent: lists, details, the
-dashboard, a benchmark whose agent is `mock`. Check with `isMockAgent` from
+Next to every score, verdict or run that comes from the mock agent, and wherever a configured
+agent is the mock agent: lists, details, the dashboard, a benchmark whose agent is `mock` (the
+Agent column of the Benchmarks list and the suite detail). Check with `isMockAgent` from
 `lib/mock-agent.ts`.
 
 ## 3. When not to use
@@ -47,7 +48,7 @@ Fixed text. It changed in SPEC-122 (Q4) from an em dash to a colon.
 
 ## 9. Responsiveness
 
-Wraps inside the badge when its container is narrow; the icon keeps its 12px size (`shrink-0`). In the Artifacts table the score cell is `min-w-max`, so the label stays on one line.
+Wraps inside the badge when its container is narrow; the icon keeps its 12px size (`shrink-0`). In the Artifacts table the score cell is `min-w-max`, so the label stays on one line. In the Results and Benchmarks lists the Agent cell has no minimum width, so at 320px the label wraps inside its cell.
 
 <Canvas of={Stories.NarrowScreen} />
 
