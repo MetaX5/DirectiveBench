@@ -139,7 +139,7 @@ SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23)
 | SPEC-121 | [Design-token migration and design-system guard in CI](implemented/2026-10-28-design-token-migration-and-guard.md) | implemented |
 | SPEC-122 | [Design-system documentation in Storybook](2026-10-28-design-system-storybook.md) | draft |
 | SPEC-123 | [Keep and review the files an agent run wrote](implemented/2026-10-29-agent-run-output-files.md) | implemented |
-| SPEC-124 | [Create, rename and archive categories and assign them to artifacts (E03-S01)](2026-11-04-category-lifecycle-and-assignment.md) | draft |
+| SPEC-124 | [Create, rename and archive categories and assign them to artifacts (E03-S01)](2026-11-04-category-lifecycle-and-assignment.md) | approved |
 
 ### Integrations
 

@@ -1,7 +1,7 @@
 ---
 id: SPEC-124
 title: Create, rename and archive categories and assign them to artifacts (E03-S01)
-status: draft
+status: approved
 created: 2026-11-04
 updated: 2026-11-04
 category: feature
@@ -83,8 +83,9 @@ Written by `om-spec-writing --autonomous`. UI decisions are listed separately in
 **Maintainer decision (2026-11-04):** Mateusz accepted every default A1 to A22 and UD-1 to UD-9
 as written, with two changes: **A5** (names with no Latin letter or digit get a generated slug
 instead of being refused) and **UD-5** (Archive and both bulk actions confirm with the count).
-A9 (no hard delete) stays. The rows below show the decided answer. The spec stays `draft` until
-the maintainer approves it.
+A9 (no hard delete) stays. The rows below show the decided answer. The maintainer approved the
+spec on 2026-11-04, including the smallest-free rule for generated slugs (A5); implementation has
+not started.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
