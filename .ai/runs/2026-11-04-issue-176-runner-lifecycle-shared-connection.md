@@ -55,9 +55,13 @@ one queue without claiming a job twice; no timeout raised; `os.tmpdir()` directo
 | mutation check above | both two-runner tests fail as expected, then pass after revert |
 | `pnpm format:check && pnpm lint && pnpm typecheck` | pass |
 | `pnpm test` | pass, 7/7 tasks, 100% coverage in every package (runner 16 files) |
+| `pnpm build` / `pnpm verify:pack` (review gate, `TMPDIR` on disk) | pass / "Packaging verification passed" |
 
-Not verified: `pnpm build` and `pnpm verify:pack` were not run (test-only change, no `apps/*`,
-packaging or dependency change). The hazard was never seen failing (issue #176), so there is no
+Review: `om-auto-review-pr 178 --autofix` ran the full `validation.commands` gate (all pass) and
+found no blocker, major, minor or nit. The verdict was approve, posted as a comment review because
+the reviewer is the author, so no autofix round was needed.
+
+Not verified: the hazard was never seen failing (issue #176), so there is no
 red-first run of the original flake; the mechanism was proved deterministically in PR #175.
 
 ## Problems and deviations
