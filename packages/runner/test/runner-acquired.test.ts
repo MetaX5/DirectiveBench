@@ -42,10 +42,11 @@ let dataDir: string;
 const handles: DatabaseHandle[] = [];
 
 /**
- * A connection to the test's data directory. Two runners that stand for two processes share one
- * connection: `node:sqlite` waits for a lock synchronously (`busy_timeout`), so a second writable
- * connection in the same thread blocks the event loop that has to end the first connection's
- * transaction, and fails with "database is locked" (issue #174). Each real process has one.
+ * A connection to the test's data directory. Runners that stand for two processes and write at the
+ * same time share one connection: `node:sqlite` waits for a lock synchronously (`busy_timeout`),
+ * so a second writable connection in the same thread blocks the event loop that has to end the
+ * first connection's transaction, and fails with "database is locked" (issue #174). Each real
+ * process has one.
  */
 function connect(): DatabaseHandle {
   const handle = openDatabase(join(dataDir, 'directivebench.db'));
