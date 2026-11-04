@@ -3,7 +3,7 @@ title: Fix three timing-dependent tests of issue 184 from evidence
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5
 trigger: issue #184 (umbrella), maintainer-approved, om-auto-fix-issue 184
-status: in-progress
+status: completed
 branch: fix/issue-184-timing-flakes
 specs: [SPEC-014]
 ---
@@ -133,10 +133,27 @@ change, product code only for a real product bug.
 
 - `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test --force`: passed, 7/7 test
   tasks, 100% coverage.
-- (loaded loop and macOS probe results below)
+- Repeated runs on the final head 493fcfb:
+  - Linux: 10/10 full `taskset -c 0,1 pnpm test --force` suites with two `yes` on the same cores
+    passed (about 350 s each). `process.ts` was at 100% in all 10; the slug test took 1.8–2.2 s
+    and the linear-time control 2.0–2.2 s.
+  - macOS probe (throwaway branch `probe/issue-184-macos`, deleted; run 41900090326, 3 full
+    `pnpm test --continue --concurrency=2 --force` suites per shard): with the new tests 9/9
+    suites green. With main's tests for `process.ts` 6/6 green and one shard cancelled, so the
+    coverage flake did not recur in 6 suites; it is rare. A ratio job measured the linear-time
+    numbers above on macOS (correct clock 0.014–0.039).
+  - PR #186 CI on 493fcfb: all checks green.
+- Review: `om-auto-review-pr 186 --autofix` approved (posted as COMMENT) after its two findings
+  were fixed: the weak linear-time control (major, own bound 0.1 in 5b71674) and the #75 gate
+  failure (blocker, 493fcfb).
+- Not verified: the macOS `process.ts` mechanism was not reproduced directly, and the 0.338
+  linear-time failure was not reproduced; the evidence is the measured margins. #75 did not fail
+  under load alone in 76 runs before the fix.
 
 ## Problems and deviations
 
+- PR #186 was merged (f7af5bf) before this log was finalised; the final results above were
+  first posted on issue #184 and are recorded here in a docs-only follow-up from main.
 - Temporary probe test files in `packages/core/test` were picked up by one loaded full run (its
   core task failed on them); they were moved out of the work tree before the gate. Never
   committed.
@@ -151,5 +168,5 @@ change, product code only for a real product bug.
 
 ## Follow-ups
 
-- #177 (`artifact-ref.test.ts` hook timeout) stays open in #184. #75 is fixed here but left
-  open (out of the brief's scope); the maintainer may close it with this PR.
+- #177 (`artifact-ref.test.ts` hook timeout) stays open as its own watch item. The maintainer
+  closed #75 (fixed in 493fcfb) and the umbrella #184 on 2026-11-04.
