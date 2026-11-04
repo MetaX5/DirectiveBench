@@ -183,6 +183,10 @@ pnpm build            # build web app and CLI bundle
 pnpm verify:pack      # pack, install and smoke-test the npm tarball
 ```
 
+For browser QA, `sh .ai/scripts/test-env-up.sh` builds and serves the CLI with demo data (mock
+agent only) on `127.0.0.1:4398` and writes `.ai/qa/test-env.json`; `sh .ai/scripts/test-env-down.sh`
+stops it and removes its `/var/tmp` data (`om-prepare-test-env` runs and repairs these scripts).
+
 ## 7. Conventions
 
 - TypeScript strict mode; avoid `any`; validate external input with Zod at boundaries.
