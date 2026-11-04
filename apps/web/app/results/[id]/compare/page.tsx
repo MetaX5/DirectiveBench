@@ -1,8 +1,9 @@
 import {
   getAgentRunFile,
-  getBenchmarkRunDetail,
+  getBenchmarkRunHeader,
   hasUnrevealedBlindReview,
   listAgentRunFiles,
+  listAgentRunSummaries,
 } from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -64,10 +65,12 @@ export default async function ComparePage({
   const loaded = await loadUnlessBlindReview(
     () => hasUnrevealedBlindReview(handle.db, id),
     async () => {
-      const detail = await getBenchmarkRunDetail(handle.db, id);
+      // The header and the agent runs without their traces (issue 169).
+      const detail = await getBenchmarkRunHeader(handle.db, id);
       if (!detail) notFound();
+      const agentRuns = await listAgentRunSummaries(handle.db, detail.run.id);
       const query = parseCompareQuery(await searchParams);
-      const selection = selectCompareRuns(detail.agentRuns, query);
+      const selection = selectCompareRuns(agentRuns, query);
       if (selection.kind === 'not-found') notFound();
 
       const runId = detail.run.id;

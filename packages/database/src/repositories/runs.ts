@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { createId, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
@@ -246,7 +246,14 @@ export async function listBenchmarkRuns(
 /** The A/B baseline version of a run, joined beside the candidate version (SPEC-118 FR-118-13). */
 const baselineVersions = alias(artifactVersions, 'baseline_versions');
 
-export async function getBenchmarkRunDetail(db: Database, runId: string) {
+/** Case, then repetition, then variant: the order every agent-run list of a run uses. */
+const agentRunOrder = [asc(agentRuns.caseId), asc(agentRuns.repetition), asc(agentRuns.variant)];
+
+/**
+ * A run with its suite, artifact and baseline versions, without its agent runs: the header the
+ * results pages show (issue #169), or null for an unknown run.
+ */
+export async function getBenchmarkRunHeader(db: Database, runId: string) {
   const row = await db
     .select({
       run: benchmarkRuns,
@@ -269,12 +276,18 @@ export async function getBenchmarkRunDetail(db: Database, runId: string) {
     .leftJoin(baselineVersions, eq(benchmarkRuns.baselineArtifactVersionId, baselineVersions.id))
     .where(eq(benchmarkRuns.id, runId))
     .get();
+  return row ?? null;
+}
+
+/** The run with every agent run, trace and assertion result: what the run page renders. */
+export async function getBenchmarkRunDetail(db: Database, runId: string) {
+  const row = await getBenchmarkRunHeader(db, runId);
   if (!row) return null;
   const runs = await db
     .select()
     .from(agentRuns)
     .where(eq(agentRuns.benchmarkRunId, runId))
-    .orderBy(asc(agentRuns.caseId), asc(agentRuns.repetition), asc(agentRuns.variant));
+    .orderBy(...agentRunOrder);
   const ids = runs.map((r) => r.id);
   const assertions =
     ids.length === 0
@@ -290,6 +303,44 @@ export async function getBenchmarkRunDetail(db: Database, runId: string) {
 }
 
 export type BenchmarkRunDetail = NonNullable<Awaited<ReturnType<typeof getBenchmarkRunDetail>>>;
+
+/** An agent run without its trace (and without assertion results): what the files pages read. */
+export type AgentRunSummary = Omit<AgentRunRecord, 'trace'>;
+
+const { trace: _trace, ...agentRunSummaryColumns } = getTableColumns(agentRuns);
+
+/**
+ * One agent run of a benchmark run without its trace, or null when it does not exist or belongs
+ * to another benchmark run (SPEC-123 §8.3, issue #169).
+ */
+export async function getAgentRunSummary(
+  db: Database,
+  input: { benchmarkRunId: string; agentRunId: string },
+): Promise<AgentRunSummary | null> {
+  const row = await db
+    .select(agentRunSummaryColumns)
+    .from(agentRuns)
+    .where(
+      and(eq(agentRuns.benchmarkRunId, input.benchmarkRunId), eq(agentRuns.id, input.agentRunId)),
+    )
+    .get();
+  return row ?? null;
+}
+
+/**
+ * The agent runs of a benchmark run without their traces, in the order of
+ * `getBenchmarkRunDetail` (SPEC-123 §8.3, issue #169).
+ */
+export async function listAgentRunSummaries(
+  db: Database,
+  benchmarkRunId: string,
+): Promise<AgentRunSummary[]> {
+  return db
+    .select(agentRunSummaryColumns)
+    .from(agentRuns)
+    .where(eq(agentRuns.benchmarkRunId, benchmarkRunId))
+    .orderBy(...agentRunOrder);
+}
 
 /**
  * Most runs the artifact page loads (SPEC-118 FR-118-50): newest version first, then newest run.

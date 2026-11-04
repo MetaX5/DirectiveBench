@@ -4,6 +4,9 @@ import {
   importArtifactVersion,
   finishBenchmarkRun,
   getBenchmarkRunDetail,
+  getBenchmarkRunHeader,
+  getAgentRunSummary,
+  listAgentRunSummaries,
   importSuiteVersion,
   insertAgentRun,
   countAgentRunFiles,
@@ -386,6 +389,63 @@ describe('getBenchmarkRunDetail', () => {
     const handle = getHandle();
     const runId = await seedRun(handle, await seedTargets(handle));
     expect((await getBenchmarkRunDetail(handle.db, runId))?.baselineArtifactVersion).toBeNull();
+  });
+});
+
+describe('getBenchmarkRunHeader (issue #169)', () => {
+  it('returns null for an unknown run', async () => {
+    expect(await getBenchmarkRunHeader(getHandle().db, 'run_missing')).toBeNull();
+  });
+
+  it('returns the header of getBenchmarkRunDetail without the agent runs', async () => {
+    const handle = getHandle();
+    const runId = await seedRun(handle, await seedTargets(handle));
+    await insertAgentRun(handle, agentRunInput(runId, { assertions: [assertion] }));
+    const header = await getBenchmarkRunHeader(handle.db, runId);
+    const { agentRuns, ...detailHeader } = (await getBenchmarkRunDetail(handle.db, runId))!;
+    expect(agentRuns).toHaveLength(1);
+    expect(header).toEqual(detailHeader);
+    expect(header).not.toHaveProperty('agentRuns');
+  });
+});
+
+describe('getAgentRunSummary and listAgentRunSummaries (issue #169)', () => {
+  it('reads agent runs without their traces, scoped to the benchmark run', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets);
+    const otherRunId = await seedRun(handle, targets);
+    const candidate = await insertAgentRun(
+      handle,
+      agentRunInput(runId, { variant: 'candidate', assertions: [assertion] }),
+    );
+    const caseB = await insertAgentRun(handle, agentRunInput(runId, { caseId: 'case-b' }));
+    const baseline2 = await insertAgentRun(handle, agentRunInput(runId, { repetition: 2 }));
+    const baseline1 = await insertAgentRun(handle, agentRunInput(runId));
+    const foreign = await insertAgentRun(handle, agentRunInput(otherRunId));
+
+    const detail = (await getBenchmarkRunDetail(handle.db, runId))!;
+    const summaries = await listAgentRunSummaries(handle.db, runId);
+    // The same rows in the same order as the run page, minus the trace and assertions.
+    expect(summaries.map((r) => r.id)).toEqual([baseline1, candidate, baseline2, caseB]);
+    expect(summaries).toEqual(
+      detail.agentRuns.map(({ trace: _trace, assertions: _assertions, ...rest }) => rest),
+    );
+    for (const summary of summaries) expect(summary).not.toHaveProperty('trace');
+
+    const one = await getAgentRunSummary(handle.db, {
+      benchmarkRunId: runId,
+      agentRunId: candidate,
+    });
+    expect(one).toEqual(summaries[1]);
+    expect(one).not.toHaveProperty('trace');
+    expect(
+      await getAgentRunSummary(handle.db, { benchmarkRunId: runId, agentRunId: foreign }),
+    ).toBeNull();
+    expect(
+      await getAgentRunSummary(handle.db, { benchmarkRunId: runId, agentRunId: 'arun_missing' }),
+    ).toBeNull();
+    expect(await listAgentRunSummaries(handle.db, 'run_missing')).toEqual([]);
   });
 });
 
