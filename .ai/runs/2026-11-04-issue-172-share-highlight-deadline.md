@@ -53,6 +53,11 @@ existing importer and SPEC-123's wording stay valid, and import it in the e2e sp
 Not verified: no red-first run, since this is a refactor with no behaviour change; the value
 stays 2,000 ms. No browser QA: no UI change.
 
+Review: `om-auto-review-pr 180 --autofix` (engine `om-code-review`) approved head `4418244`,
+posted as COMMENT, with two nits kept (the worker test has two imports from the common module;
+the new test guards against diverging values, not against a second definition with the same
+value).
+
 ## Problems and deviations
 
 None.
