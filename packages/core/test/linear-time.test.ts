@@ -109,6 +109,7 @@ describe('expectLinearTime', () => {
     const MiB = 1024 * 1024;
     const FILE_BYTES = 256 * MiB;
     const LARGE = 8 * MiB;
+    const BASELINE_LARGE = 64 * MiB;
     const IOVECS = 256;
     const chunk = Buffer.alloc(MiB);
     let dir: string;
@@ -161,11 +162,15 @@ describe('expectLinearTime', () => {
         // A synchronous `run` that does not grow, against a baseline whose copying grows with the
         // size on the thread pool. Probing only `run` picked the thread clock, which cannot see
         // the baseline's work: the baseline looked constant and the ratio measured about 1.
+        // The reads are large enough for the copying to dwarf the ~45 µs every read costs
+        // whatever its size: at 256 KiB to 8 MiB that cost was 90% of the small read, the
+        // baseline grew only ~8× and a loaded machine pushed the ratio past the bound (0.338
+        // against 0.286, issue 184). At 2 to 64 MiB it grows ~35×.
         const ratio = await linearTimeRatio({
           build: (size: number) => size,
           run: () => countSpaces('word word'),
           baseline: (bytes: number) => read(bytes),
-          size: LARGE,
+          size: BASELINE_LARGE,
         });
         expect(ratio).toBeLessThan(1 / MAX_LINEAR_RATIO);
       },
