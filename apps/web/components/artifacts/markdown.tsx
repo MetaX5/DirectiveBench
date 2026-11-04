@@ -155,7 +155,9 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
                         {renderInlines(cell)}
                       </td>
                     ))}
-                    {row.missing > 0 && <td colSpan={row.missing} />}
+                    {row.missing > 0 && (
+                      <td colSpan={row.missing} className="px-2 py-1 align-top" />
+                    )}
                   </tr>
                 ))}
               </tbody>

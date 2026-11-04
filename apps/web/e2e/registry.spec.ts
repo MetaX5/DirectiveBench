@@ -217,6 +217,17 @@ test.describe.serial('artifact registry', () => {
     await expect(tableRows.nth(1).getByRole('cell')).toHaveText(['lint', 'repo', 'fast']);
     await expect(tableRows.nth(2).getByRole('cell')).toHaveText(['short', '']);
     await expect(tableRows.nth(2).getByRole('cell').nth(1)).toHaveAttribute('colspan', '2');
+    // The filler cell has the same spacing as its siblings (issue 74).
+    const filler = tableRows.nth(2).getByRole('cell').nth(1);
+    const sibling = tableRows.nth(2).getByRole('cell').nth(0);
+    const padding = (cell: typeof filler) =>
+      cell.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft];
+      });
+    expect(await padding(filler)).toEqual(await padding(sibling));
+    expect(await padding(filler)).not.toEqual(['0px', '0px', '0px', '0px']);
+    await expect(filler).toHaveCSS('vertical-align', 'top');
     await rendered.getByText('bad link').click();
     expect(await page.evaluate(() => (window as { __pwned?: unknown }).__pwned)).toBeUndefined();
 
