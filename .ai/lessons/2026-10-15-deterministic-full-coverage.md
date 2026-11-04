@@ -35,3 +35,6 @@ ordering on random IDs into a flaky test.
   under the parallel `pnpm test` load the clone sometimes finished first and runner coverage fell
   below 100%. Cover such branches with a deterministic fake (a fake git that writes past the limit
   and then keeps running, `packages/runner/test/hosted-git.test.ts`).
+- The same holds for a real child process's event order (added 2026-11-04, issue 184): output
+  arriving after SIGTERM covered two guards in `process.ts` on Linux and not always on macOS.
+  See [the OS-pipe lesson](2026-11-04-coverage-must-not-wait-for-the-os-pipe.md).

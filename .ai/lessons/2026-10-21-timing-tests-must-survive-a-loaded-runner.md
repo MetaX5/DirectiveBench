@@ -84,3 +84,17 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   So does a CPU-bound scan of the source tree: the design-token guard that parses every
   `apps/web` source with TypeScript took 0.2 s alone, 1.6 s under `taskset -c 0,1 pnpm test
   --force` and up to 5.2 s on CI, where it timed out (update 2026-10-29, issue #149).
+- A baseline must grow with the input, not with its fixed cost per call (update 2026-11-04,
+  issue 184). The process-clock control read 256 KiB and 8 MiB with one `readv` each; every read
+  costs ~45 µs whatever its size, 90% of the small one, so the baseline grew ~8× instead of 32×
+  and the control's ratio sat at 0.11–0.19 against a bound of 0.286 (it failed once at 0.338).
+  Reads of 2 and 64 MiB grow ~35× and measure 0.031–0.039 under the same load. Measure each
+  series' per-call cost at both sizes before trusting a ratio's margin. A control must also be
+  measured with the bug it guards: with the helper patched to use the thread clock, the control
+  measured 0.293–0.67 (not ~1, the thread clock bills work per wall-clock time), so it now has its
+  own bound of 0.1 between the two distributions instead of the borrowed 0.286.
+- A test whose property is a count (statements, queries, calls) should do only as much real work
+  as the count needs (update 2026-11-04, issue 184). The slug test stored 3,000 artifacts to
+  prove one slug query: 0.85 s locally, but 24.7 s on a green Linux CI job and 31.2 s (timeout)
+  on another, because `pnpm test` runs every package at once there. The statement counts catch a
+  per-candidate query at any size; 500 artifacts take 0.2 s locally and 1.6 s under load.

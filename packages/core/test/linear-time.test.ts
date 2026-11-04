@@ -109,6 +109,9 @@ describe('expectLinearTime', () => {
     const MiB = 1024 * 1024;
     const FILE_BYTES = 256 * MiB;
     const LARGE = 8 * MiB;
+    const BASELINE_LARGE = 64 * MiB;
+    /** Between the process clock's ratio (at most 0.039) and the thread clock's (at least 0.293). */
+    const PROCESS_CLOCK_MAX_RATIO = 0.1;
     const IOVECS = 256;
     const chunk = Buffer.alloc(MiB);
     let dir: string;
@@ -160,14 +163,21 @@ describe('expectLinearTime', () => {
       async () => {
         // A synchronous `run` that does not grow, against a baseline whose copying grows with the
         // size on the thread pool. Probing only `run` picked the thread clock, which cannot see
-        // the baseline's work: the baseline looked constant and the ratio measured about 1.
+        // the baseline's work: the baseline looked almost constant.
+        // The reads are large enough for the copying to dwarf the ~45 µs every read costs
+        // whatever its size: at 256 KiB to 8 MiB that cost was 90% of the small read, the
+        // baseline grew only ~8× and a loaded machine pushed the ratio past 1 / MAX_LINEAR_RATIO
+        // (0.338 against 0.286, issue 184). The thread clock still sees the baseline grow 2–3×
+        // (work billed per wall-clock time), too close to that bound to tell the clocks apart, so
+        // the bound sits between the two clocks. Measured idle and under load, Linux and macOS:
+        // process clock 0.014–0.039, thread clock 0.293–0.67 (64 MiB).
         const ratio = await linearTimeRatio({
           build: (size: number) => size,
           run: () => countSpaces('word word'),
           baseline: (bytes: number) => read(bytes),
-          size: LARGE,
+          size: BASELINE_LARGE,
         });
-        expect(ratio).toBeLessThan(1 / MAX_LINEAR_RATIO);
+        expect(ratio).toBeLessThan(PROCESS_CLOCK_MAX_RATIO);
       },
       LINEAR_TIME_TEST_TIMEOUT_MS,
     );

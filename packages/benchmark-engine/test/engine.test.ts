@@ -195,18 +195,18 @@ describe('runCommand', () => {
   it.skipIf(process.platform === 'win32')(
     'sends SIGTERM first and SIGKILL only after the grace period (FR-110-08)',
     async () => {
+      // sh installs its trap within a millisecond of starting. A Node.js script installed its
+      // handler only after its start-up, which once took longer than the 300 ms timeout under
+      // full parallel load: SIGTERM killed it first (exitCode null, issue #75). The `sleep`
+      // children inherit an ignored SIGTERM; a trapped one they do not, so they die on it.
       const graceful = await runCommand(
-        [
-          process.execPath,
-          '-e',
-          "process.on('SIGTERM', () => process.exit(7)); setInterval(() => {}, 1000)",
-        ],
+        ['sh', '-c', "trap 'exit 7' TERM; while :; do sleep 0.05; done"],
         { ...base(), timeoutMs: 300, killGraceMs: 5000 },
       );
       expect(graceful).toMatchObject({ timedOut: true, exitCode: 7 });
 
       const stubborn = await runCommand(
-        [process.execPath, '-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+        ['sh', '-c', "trap '' TERM; while :; do sleep 0.05; done"],
         { ...base(), timeoutMs: 300, killGraceMs: 300 },
       );
       expect(stubborn).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
