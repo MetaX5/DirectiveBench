@@ -27,6 +27,13 @@ export type HighlightResult =
   | { kind: 'highlighted'; lines: HighlightedLine[] }
   | { kind: 'plain'; reason: 'no-language' | 'too-large' | 'failed' | 'timeout' };
 
+/**
+ * Aggregate deadline of one page render's highlighting, from the moment it is submitted: the
+ * wait for the worker, the worker's start and highlighter creation, and every text of the job
+ * (FR-123-78, NFR-123-07). The only hard bound on time. Defined here, not in the server-only
+ * syntax-highlight.ts, so the e2e tests can import it.
+ */
+export const SYNTAX_HIGHLIGHT_DEADLINE_MS = 2_000;
 /** Largest stored content, in UTF-8 bytes, that is highlighted (FR-123-74, 256 KiB). */
 export const SYNTAX_HIGHLIGHT_MAX_BYTES = 262_144;
 /** Longer lines stay plain inside a highlighted file (FR-123-75, Shiki tokenizeMaxLineLength). */

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { Worker } from 'node:worker_threads';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as common from '../lib/syntax-highlight-common';
 import type { HighlightJob } from '../lib/syntax-highlight-common';
 import {
   createHighlightWorkerPool,
@@ -97,6 +98,10 @@ describe('constants (SPEC-123 §8.2)', () => {
   it('match the spec', () => {
     expect(SYNTAX_HIGHLIGHT_DEADLINE_MS).toBe(2_000);
     expect(SYNTAX_HIGHLIGHT_MAX_QUEUED_JOBS).toBe(8);
+  });
+
+  it('define the deadline once, in the module the e2e tests can import (issue #172)', () => {
+    expect(SYNTAX_HIGHLIGHT_DEADLINE_MS).toBe(common.SYNTAX_HIGHLIGHT_DEADLINE_MS);
   });
 });
 
