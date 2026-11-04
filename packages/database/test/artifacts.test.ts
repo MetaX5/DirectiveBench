@@ -41,7 +41,10 @@ const getHandle = useTestDatabase();
 const signal = new AbortController().signal;
 /** Statements one new artifact costs besides its slug: identity, insert, version and occurrence. */
 const STATEMENTS_PER_NEW_ARTIFACT = 8;
-/** Storing 3,000 artifacts takes ~1 s locally; a loaded CI runner can be several times slower. */
+/**
+ * Storing 500 artifacts takes ~0.2 s locally. A loaded CI runner was up to 30× slower: 3,000 of
+ * them took 24.7 s on a green Linux unit job and hit this timeout at 31.2 s on another (issue 184).
+ */
 const MANY_ARTIFACTS_TIMEOUT_MS = 30_000;
 
 afterEach(() => {
@@ -990,11 +993,13 @@ describe('applyRepositoryScan', () => {
   // `BEGIN IMMEDIATE`. Discovery names a nested AGENTS.md by its path, but a monorepo whose
   // packages each carry a skill with the same frontmatter `name` gives them all one name.
   it(
-    'allocates sequential slugs to thousands of same-named artifacts with one slug query',
+    'allocates sequential slugs to hundreds of same-named artifacts with one slug query',
     async () => {
       const handle = getHandle();
       const { repository, jobId } = await runningScan(handle, '/srv/monorepo');
-      const count = 3000;
+      // The statement counts below catch a per-candidate query at any size (the old loop issued
+      // about count²/2), so the count stays small enough for a loaded runner (issue 184).
+      const count = 500;
       const paths = Array.from({ length: count }, (_, i) => `packages/p${i}/.agents/skills/review`);
       const prepare = vi.spyOn(handle.sqlite, 'prepare');
       const summary = await applyRepositoryScan(handle, {
