@@ -79,9 +79,8 @@ None: nothing non-obvious was learned beyond existing lessons.
      "Assignment on the artifact page".
 - Maintainer (Mateusz) accepted A1 to A22 and UD-1 to UD-9 as written, except:
   - **A5:** names with no Latin letter or digit are accepted with a generated slug
-    `category-N` (first free N above the largest `category-<digits>` slug, inside
-    `createCategory`'s `withTransaction`, slug unique index as backstop, BigInt for long
-    numbers). Edits: G6, A5, FR-124-02, FR-124-04, §8.2, §8.3, §13 (error row removed),
+    `category-N` (inside `createCategory`'s `withTransaction`, slug unique index as
+    backstop; allocation rule revised after Codex round 2, see below). Edits: G6, A5, FR-124-02, FR-124-04, §8.2, §8.3, §13 (error row removed),
     §14 ("Category 7", "日本語 2"), §15, AC-1, §19.
   - **UD-5:** Archive and both bulk actions confirm with the count through the unchanged
     Risky-action inline pattern (`destructive` confirming button); Unarchive, single assign
@@ -90,6 +89,14 @@ None: nothing non-obvious was learned beyond existing lessons.
     work. Edits: FR-124-08, FR-124-13, §11 copy, §11.1, §14, §15, AC-4, AC-8, Phases 2 and 4.
   - Counts use one formatter, `toLocaleString('en-US')` ("1,240"), stated in §13.
   - A9 (no hard delete) kept. Spec status stays `draft`.
+- Codex round 2 on 5af9948: **needs-attention**, 1 medium finding, real: the "first free N above
+  the largest `category-<digits>` slug" rule overflows the 64-character slug limit after a valid
+  derived slug such as "Category " plus 55 nines (Codex reproduced it in Node), breaking every
+  later non-Latin create. Changed to the smallest positive N whose `category-N` no category
+  holds (bounded by the number of categories, still never reused because a slug never leaves
+  its row), plus schema validation before insert and boundary tests (A5, FR-124-04, §8.2, §14,
+  §15). This replaces the generator wording relayed on 2026-11-04; Mateusz's requirement
+  "stable, unique, never reused" still holds.
 - Lessons: none. These are decisions on offered defaults, not corrections of a mistake.
 
 ## Follow-ups

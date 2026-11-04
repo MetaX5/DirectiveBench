@@ -92,7 +92,7 @@ the maintainer approves it.
 | A2 | Split into two specs (category lifecycle vs assignment)? | One spec, four phased PRs (§21) | Two specs: lifecycle, then assignment | The issue is one story with one set of criteria; the phases ship independently |
 | A3 | How is case-insensitive name uniqueness enforced? | New column `name_key` plus a partial unique index on active rows (migration `0005`) | A check inside `withTransaction` only, no schema change | `withTransaction` (`BEGIN IMMEDIATE`) already serialises writers, so the in-transaction check is the main guard; the index is the backstop that also holds for any future write path that skips the check. The column is additive and backfilled |
 | A4 | Can the user choose the slug on create? | No: slug = derived from the name (the issue's AC) | Optional "Slug" field (FR-106-03 allows it) | Smallest surface; a field can be added later without migration |
-| A5 | A name with no Latin letter or digit (for example "日本語", "!!!") | **Changed by the maintainer:** accepted, with a generated slug `category-N`. N is the first free number above the largest existing `category-<digits>` slug, chosen inside `createCategory`'s `withTransaction`; the slug unique index is the backstop. Slugs are never deleted (A9), so a generated slug is never reused | Refuse with a field error (the original default); transliterate | Non-Latin category names must work (G6); `slugify`'s shared fallback `item` is never used for categories |
+| A5 | A name with no Latin letter or digit (for example "日本語", "!!!") | **Changed by the maintainer:** accepted, with a generated slug `category-N`. N is the smallest positive number whose `category-N` no category holds (archived included), chosen inside `createCategory`'s `withTransaction`; the slug unique index is the backstop. A slug never leaves its row (no delete A9, no slug change), so a free number was never used and a generated slug is never reused. Smallest-free instead of max-plus-one (Codex round 2): a derived slug such as `category-999…9` cannot push generated slugs past 64 characters, since N is at most one more than the number of categories | Refuse with a field error (the original default); transliterate | Non-Latin category names must work (G6); `slugify`'s shared fallback `item` is never used for categories |
 | A6 | Slug length | At most 64 characters: the derived slug is cut at 64 and trailing hyphens dropped; the Artifacts filter's `category` limit drops from 256 to 64 (issue #22 comment) | Refuse names whose slug exceeds 64 | A 64-character name can expand past 64 under NFKD (for example ligatures); cutting is predictable |
 | A7 | The derived slug is taken by another category | Refused. Active owner: "choose another name"; archived owner: "unarchive it instead" | Append `-2`, `-3` | Slugs are permanent identifiers; silent suffixes are hard to undo once linked |
 | A8 | What archive does to assignments | Assignments stay; archived categories are hidden from pickers, the filter dropdown and bulk actions, still filter by URL, still show on artifacts as muted "Name (archived)", and can still be removed from an artifact; the example import keeps skipping them (existing behaviour) | Remove assignments on archive | FR-106-08; archive must be reversible without loss |
@@ -125,7 +125,7 @@ the maintainer approves it.
 
 | ID | Requirement |
 | --- | --- |
-| FR-124-04 | **Create.** A name of 1 to 64 characters after normalisation, with no control characters, plus an optional description (empty means none), creates an active, non-predefined category. Its slug is `categorySlug(name)`; when that is `null` (no Latin letter or digit), `createCategory` generates `category-N` inside the same `withTransaction`, with N the first number above the largest existing `category-<digits>` slug (archived rows included) that no category holds; the slug unique index is the backstop (§8.2). It MUST appear on the Categories page, in the Artifacts category filter and in the artifact pickers. |
+| FR-124-04 | **Create.** A name of 1 to 64 characters after normalisation, with no control characters, plus an optional description (empty means none), creates an active, non-predefined category. Its slug is `categorySlug(name)`; when that is `null` (no Latin letter or digit), `createCategory` generates `category-N` inside the same `withTransaction`, with N the smallest positive number whose `category-N` no category holds (archived rows included); the slug unique index is the backstop (§8.2). It MUST appear on the Categories page, in the Artifacts category filter and in the artifact pickers. |
 | FR-124-05 | **Duplicate name.** A name whose key equals an active category's key MUST be refused with a field error naming that category, and nothing is stored. Case and whitespace variants ("testing ", "TESTING") count as duplicates. |
 | FR-124-06 | **Slug taken.** A name whose slug belongs to any other category (active or archived) MUST be refused with a field error naming that category; when it is archived the message says to unarchive it. Nothing is stored. |
 | FR-124-07 | **Rename and describe.** Name and description of any category, predefined included and archived included, are editable. The slug, `predefined` flag and assignments MUST NOT change. Renaming to a case variant of the same name is allowed. Renaming to another active category's key is refused (FR-124-05 message); renaming an archived category to an active category's key is allowed (it only clashes on unarchive). Saving unchanged values reports "nothing changed". |
@@ -240,13 +240,18 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   versions, runs and occurrences while it holds the write lock.
 - `getArtifactDetail` and `listArtifacts` return `archived: boolean` on each category, active
   ones first, then by name.
-- Generated slugs (A5): inside its `withTransaction`, `createCategory` reads the slugs matching
-  `category-<digits>` (all rows, archived included), takes the largest number as a `BigInt` (a
-  64-character slug can hold more digits than a JavaScript number keeps exactly) and uses the
-  next one, `category-<max + 1>`, or `category-1` when none exists. Because `BEGIN IMMEDIATE`
-  serialises writers and rows are never deleted (A9), the number is free and never reused; a
-  `SQLITE_CONSTRAINT_UNIQUE` on the slug index is still mapped to a fresh read and a
-  `slug-taken` outcome, never a raw error. Renames never change a slug, generated or derived.
+- Generated slugs (A5): inside its `withTransaction`, `createCategory` reads the slugs that
+  start with `category-` (all rows, archived included) into a set and tries `category-1`,
+  `category-2`, … until one is not in the set (exact string match, so `category-07` does not
+  hold `category-7`). With K such slugs the loop ends by N = K + 1, so the generated slug is at
+  most `category-` plus the digits of K + 1, far below 64 characters, whatever a user named a
+  category (for example "Category " and 55 nines derives a 64-character `category-999…9`, which
+  does not affect the next generated slug). The result must pass the same slug schema as the
+  `[slug]` route and the `category` filter before insertion. Because `BEGIN IMMEDIATE`
+  serialises writers and a slug never leaves its row (A9, no slug change), the number is free
+  and never reused; a `SQLITE_CONSTRAINT_UNIQUE` on the slug index is still mapped to a fresh
+  read and a `slug-taken` outcome, never a raw error. Renames never change a slug, generated or
+  derived.
 - `assignCategoriesBySlug` (example import) keeps its contract (active slugs only), but each
   assignment becomes one conditional statement,
   `INSERT INTO artifact_categories (artifact_id, category_id, created_at) SELECT ?, id, ? FROM categories WHERE slug = ? AND archived_at IS NULL ON CONFLICT DO NOTHING`,
@@ -446,9 +451,10 @@ output does not depend on the server's locale.
 - "日本語" and "!!!" are accepted with generated slugs, for example `category-1` and
   `category-2` (A5); two different non-Latin names never clash on the slug, only on the name key.
 - A Latin name "Category 7" derives `category-7`. If a generated `category-7` exists, it is
-  refused as slug-taken (A7). If not, it takes that slug, and the next generated slug is
-  `category-8` or higher, because the generator counts every `category-<digits>` slug, derived
-  or generated.
+  refused as slug-taken (A7). If not, it takes that slug, and the generator skips 7 from then on
+  (it only uses numbers no category holds, derived or generated).
+- "Category " followed by 55 nines derives a valid 64-character slug; the next non-Latin name
+  still gets a short generated slug (smallest free number), which passes the slug schema.
 - "日本語 2" contains a digit, so its slug is derived (`2`), not generated; a later "2" is
   refused as slug-taken.
 - Archive or bulk confirmation open, then Cancel: nothing is written and no status line appears.
@@ -462,9 +468,10 @@ only, no paid calls. Database tests use one writable connection per test thread
 
 - Core: `normalizeCategoryName`, `categoryNameKey`, `categorySlug` (NFC, whitespace, cut at 64
   with trailing hyphen, `null` for "日本語" and "!!!", the literal name "Item").
-- Database, generated slugs (A5): first non-Latin name gets `category-1`; numbering continues
-  above the largest `category-<digits>` slug, archived rows and derived slugs ("Category 7")
-  included; a number longer than `Number.MAX_SAFE_INTEGER` is handled (BigInt); a forced
+- Database, generated slugs (A5): first non-Latin name gets `category-1`, the next `category-2`;
+  a number held by an archived row or a derived slug ("Category 7") is skipped; `category-07`
+  does not block `category-7`; after "Category " plus 55 nines, two more non-Latin names get
+  short slugs that pass the slug schema and open their `[slug]` page; a forced
   `SQLITE_CONSTRAINT_UNIQUE` on the slug maps to `slug-taken`.
 - Database, example import (`assignCategoriesBySlug`): a regression test archives the category
   after the lookup and before the insert (deterministic interleaving through the conditional
