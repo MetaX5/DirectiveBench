@@ -50,8 +50,7 @@ assign. Merge, slug change and aliases stay out (FR-106-05, FR-106-09).
 - G5: Names are unique case-insensitively among active categories, enforced by the database, so
   concurrent submits cannot create duplicates.
 - G6: Generic: nothing in the design depends on the predefined list or on any one user's
-  taxonomy (narrowed by A5 for names without a Latin letter or digit, pending the maintainer's
-  decision).
+  taxonomy; names in any script work (A5).
 
 ## 4. Non-goals
 
@@ -79,9 +78,13 @@ assign. Merge, slug change and aliases stay out (FR-106-05, FR-106-09).
 
 ## 5a. Resolved assumptions (autonomous defaults)
 
-Written by `om-spec-writing --autonomous`. Each is the most reversible answer; the maintainer
-can override any of them before approval. None needs a decision before the spec can be read as
-a whole design. UI decisions are listed separately in §11.1.
+Written by `om-spec-writing --autonomous`. UI decisions are listed separately in §11.1.
+
+**Maintainer decision (2026-11-04):** Mateusz accepted every default A1 to A22 and UD-1 to UD-9
+as written, with two changes: **A5** (names with no Latin letter or digit get a generated slug
+instead of being refused) and **UD-5** (Archive and both bulk actions confirm with the count).
+A9 (no hard delete) stays. The rows below show the decided answer. The spec stays `draft` until
+the maintainer approves it.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
@@ -89,7 +92,7 @@ a whole design. UI decisions are listed separately in §11.1.
 | A2 | Split into two specs (category lifecycle vs assignment)? | One spec, four phased PRs (§21) | Two specs: lifecycle, then assignment | The issue is one story with one set of criteria; the phases ship independently |
 | A3 | How is case-insensitive name uniqueness enforced? | New column `name_key` plus a partial unique index on active rows (migration `0005`) | A check inside `withTransaction` only, no schema change | `withTransaction` (`BEGIN IMMEDIATE`) already serialises writers, so the in-transaction check is the main guard; the index is the backstop that also holds for any future write path that skips the check. The column is additive and backfilled |
 | A4 | Can the user choose the slug on create? | No: slug = derived from the name (the issue's AC) | Optional "Slug" field (FR-106-03 allows it) | Smallest surface; a field can be added later without migration |
-| A5 | A name with no Latin letter or digit (for example "日本語", "!!!") | Refused with a field error; `slugify` would give the shared fallback `item` | Generate a slug such as `category-3`, or transliterate | Refusing stores nothing that would need migrating; generating slugs can be added later. This knowingly narrows G6 for users with non-Latin category names, so it is listed in the PR's decisions |
+| A5 | A name with no Latin letter or digit (for example "日本語", "!!!") | **Changed by the maintainer:** accepted, with a generated slug `category-N`. N is the first free number above the largest existing `category-<digits>` slug, chosen inside `createCategory`'s `withTransaction`; the slug unique index is the backstop. Slugs are never deleted (A9), so a generated slug is never reused | Refuse with a field error (the original default); transliterate | Non-Latin category names must work (G6); `slugify`'s shared fallback `item` is never used for categories |
 | A6 | Slug length | At most 64 characters: the derived slug is cut at 64 and trailing hyphens dropped; the Artifacts filter's `category` limit drops from 256 to 64 (issue #22 comment) | Refuse names whose slug exceeds 64 | A 64-character name can expand past 64 under NFKD (for example ligatures); cutting is predictable |
 | A7 | The derived slug is taken by another category | Refused. Active owner: "choose another name"; archived owner: "unarchive it instead" | Append `-2`, `-3` | Slugs are permanent identifiers; silent suffixes are hard to undo once linked |
 | A8 | What archive does to assignments | Assignments stay; archived categories are hidden from pickers, the filter dropdown and bulk actions, still filter by URL, still show on artifacts as muted "Name (archived)", and can still be removed from an artifact; the example import keeps skipping them (existing behaviour) | Remove assignments on archive | FR-106-08; archive must be reversible without loss |
@@ -115,18 +118,18 @@ a whole design. UI decisions are listed separately in §11.1.
 | ID | Requirement |
 | --- | --- |
 | FR-124-01 | `normalizeCategoryName(raw)` MUST return the name in Unicode NFC, trimmed, with every run of whitespace replaced by one space. `categoryNameKey(name)` MUST return `normalizeCategoryName(name).toLowerCase()`. |
-| FR-124-02 | `categorySlug(name)` MUST return `slugify(name)` cut to `CATEGORY_SLUG_MAX_LENGTH` (64) with trailing hyphens removed, or `null` when the name contains no character that `slugify` keeps (no `a-z0-9` after NFKD and accent stripping). It never returns the `slugify` fallback `item` unless the name itself slugifies to `item`. |
+| FR-124-02 | `categorySlug(name)` MUST return `slugify(name)` cut to `CATEGORY_SLUG_MAX_LENGTH` (64) with trailing hyphens removed, or `null` when the name contains no character that `slugify` keeps (no `a-z0-9` after NFKD and accent stripping). It never returns the `slugify` fallback `item` unless the name itself slugifies to `item`. A `null` result means the repository generates the slug (A5, FR-124-04); `categorySlug` itself stays pure. |
 | FR-124-03 | Limits are named constants in core: `CATEGORY_NAME_MAX_LENGTH = 64`, `CATEGORY_DESCRIPTION_MAX_LENGTH = 500`, `CATEGORY_SLUG_MAX_LENGTH = 64`. The web filter's `MAX_SLUG_PARAM_LENGTH` MUST use `CATEGORY_SLUG_MAX_LENGTH`. |
 
 ### 6.2 Lifecycle (database and web)
 
 | ID | Requirement |
 | --- | --- |
-| FR-124-04 | **Create.** A name of 1 to 64 characters after normalisation, with no control characters and a non-null `categorySlug`, plus an optional description (empty means none), creates an active, non-predefined category with that slug. It MUST appear on the Categories page, in the Artifacts category filter and in the artifact pickers. |
+| FR-124-04 | **Create.** A name of 1 to 64 characters after normalisation, with no control characters, plus an optional description (empty means none), creates an active, non-predefined category. Its slug is `categorySlug(name)`; when that is `null` (no Latin letter or digit), `createCategory` generates `category-N` inside the same `withTransaction`, with N the first number above the largest existing `category-<digits>` slug (archived rows included) that no category holds; the slug unique index is the backstop (§8.2). It MUST appear on the Categories page, in the Artifacts category filter and in the artifact pickers. |
 | FR-124-05 | **Duplicate name.** A name whose key equals an active category's key MUST be refused with a field error naming that category, and nothing is stored. Case and whitespace variants ("testing ", "TESTING") count as duplicates. |
 | FR-124-06 | **Slug taken.** A name whose slug belongs to any other category (active or archived) MUST be refused with a field error naming that category; when it is archived the message says to unarchive it. Nothing is stored. |
 | FR-124-07 | **Rename and describe.** Name and description of any category, predefined included and archived included, are editable. The slug, `predefined` flag and assignments MUST NOT change. Renaming to a case variant of the same name is allowed. Renaming to another active category's key is refused (FR-124-05 message); renaming an archived category to an active category's key is allowed (it only clashes on unarchive). Saving unchanged values reports "nothing changed". |
-| FR-124-08 | **Archive.** Sets `archived_at`; idempotent ("already archived"). Assignments stay. The category leaves the Categories page's active table (it moves to the archived section), the Artifacts filter dropdown, the artifact picker and the bulk form. |
+| FR-124-08 | **Archive.** Asks first with an inline Risky-action confirmation that names the category and its artifact count (UD-5, §11); Cancel writes nothing. Confirming sets `archived_at`; idempotent ("already archived"). Assignments stay. The category leaves the Categories page's active table (it moves to the archived section), the Artifacts filter dropdown, the artifact picker and the bulk form. |
 | FR-124-09 | **Unarchive.** Clears `archived_at`; idempotent. Refused when an active category already has the same key: "An active category is already named X. Rename one of them first." |
 | FR-124-10 | **Seeding** keeps FR-106-02 and also fills `name_key`; a predefined category whose name or slug clashes with an existing row is skipped, never an error. |
 
@@ -136,7 +139,7 @@ a whole design. UI decisions are listed separately in §11.1.
 | --- | --- |
 | FR-124-11 | **Assign one.** Assigning an active category to an artifact is idempotent ("already assigned"). Assigning an archived category MUST be refused ("X is archived. Unarchive it on its page before assigning it."). The write is one conditional statement (`INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING`); follow-up reads only explain a no-op insert (already assigned, archived, unknown category or artifact). |
 | FR-124-12 | **Remove one.** Removing a category from an artifact is idempotent ("was not assigned") and allowed for archived categories. No confirmation: assignments carry no history. |
-| FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list. The form posts the filters (`q`, `type`, `category`, `repository`), the count the page showed and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing). The server refuses any invalid filter (the list page ignores invalid parameters; the bulk form does not). In one `withTransaction` it runs `listArtifactIds(db, filter)`, an ids-only query that shares its conditions with `listArtifacts`, refuses when the fingerprint differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), refuses an archived or unknown category, refuses more than `MAX_BULK_CATEGORY_ARTIFACTS`, then inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. |
+| FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list. Each action first shows an inline Risky-action confirmation stating the category and the count the page showed ("Assign Client A to 1,240 artifacts?"); only the confirming button submits, and Cancel writes nothing (UD-5). The form posts the filters (`q`, `type`, `category`, `repository`), the count the page showed and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing). The server refuses any invalid filter (the list page ignores invalid parameters; the bulk form does not). In one `withTransaction` it runs `listArtifactIds(db, filter)`, an ids-only query that shares its conditions with `listArtifacts`, refuses when the fingerprint differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), refuses an archived or unknown category, refuses more than `MAX_BULK_CATEGORY_ARTIFACTS`, then inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. |
 | FR-124-14 | **Display.** Wherever assignments show (Artifacts list column, artifact page), archived categories show as a `muted` Badge reading "Name (archived)", after the active ones. |
 | FR-124-15 | **Filter.** The Artifacts category dropdown lists active categories. When the URL names an archived category, the dropdown also lists it as "Name (archived)", selected, so the form shows the real filter; filtering by an archived slug works (FR-106-08). |
 | FR-124-16 | All mutations are Server Actions in `apps/web/lib/actions.ts` that parse `FormData` with Zod schemas from `apps/web/lib/categories.ts`, call `@directivebench/database` repository functions only, and revalidate `/categories` (layout) and `/artifacts` (layout, once, which covers every `/artifacts/[id]` page, also after a bulk change of thousands of artifacts) (FR-106-12, SPEC-014). |
@@ -237,13 +240,27 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   versions, runs and occurrences while it holds the write lock.
 - `getArtifactDetail` and `listArtifacts` return `archived: boolean` on each category, active
   ones first, then by name.
-- `assignCategoriesBySlug` (example import) keeps its behaviour (active slugs only).
+- Generated slugs (A5): inside its `withTransaction`, `createCategory` reads the slugs matching
+  `category-<digits>` (all rows, archived included), takes the largest number as a `BigInt` (a
+  64-character slug can hold more digits than a JavaScript number keeps exactly) and uses the
+  next one, `category-<max + 1>`, or `category-1` when none exists. Because `BEGIN IMMEDIATE`
+  serialises writers and rows are never deleted (A9), the number is free and never reused; a
+  `SQLITE_CONSTRAINT_UNIQUE` on the slug index is still mapped to a fresh read and a
+  `slug-taken` outcome, never a raw error. Renames never change a slug, generated or derived.
+- `assignCategoriesBySlug` (example import) keeps its contract (active slugs only), but each
+  assignment becomes one conditional statement,
+  `INSERT INTO artifact_categories (artifact_id, category_id, created_at) SELECT ?, id, ? FROM categories WHERE slug = ? AND archived_at IS NULL ON CONFLICT DO NOTHING`,
+  so an archive committed between the importer's lookup and its write cannot leave an assignment
+  to an archived category (SPEC-014 check-then-act, FR-106-06). Today it selects active
+  categories, then inserts in separate statements outside any transaction
+  (`packages/runner/src/import.ts`), and the runner and the web app are separate processes on
+  one SQLite file.
 - `MAX_BULK_CATEGORY_ARTIFACTS` is exported from the package.
 
 ### 8.3 Web validation (`apps/web/lib/categories.ts`)
 
-- `categoryNameSchema`: string → `normalizeCategoryName` → 1..64, no `\p{Cc}`, `categorySlug`
-  not null. Messages in §13.
+- `categoryNameSchema`: string → `normalizeCategoryName` → 1..64, no `\p{Cc}`. A name without a
+  Latin letter or digit is valid (A5). Messages in §13.
 - `categoryDescriptionSchema`: string → trim → ≤ 500, no `\p{Cc}` → empty becomes `null`.
 - `createCategorySchema`, `updateCategorySchema` (`id` + both), `archiveCategorySchema`
   (`id`, `state` from a hidden `intent` of `archive` / `unarchive`),
@@ -305,8 +322,13 @@ category "Archived categories leave pickers and filters. Their assignments stay.
 `outline` "Archive" button; for an archived one "Archived. It stays on N artifacts." and
 "Unarchive". Card "Artifacts": "N artifacts" linking to the filtered Artifacts list, or "No
 artifact has this category yet. Assign it on an artifact's page or to a filtered list on
-Artifacts." No confirmation for archive (reversible, history kept: Risky-action page, "When not
-to use").
+Artifacts." "Archive" does not archive yet: it opens the Risky-action inline panel (unchanged
+pattern: `role="alert"`, `warning` fill, under the Status card's text) with the question
+"Archive Python?", the reason "It leaves pickers, filters and the bulk form. It stays on 1,240
+artifacts, shown as archived." (for zero artifacts: "No artifact has it.") and a `destructive`
+`sm` "Archive Python" button plus a Cancel link. Opening the panel moves focus to its question;
+Cancel closes it, writes nothing and returns focus to "Archive". "Unarchive" needs no
+confirmation.
 
 **`/artifacts/[id]` (changed).** Categories move from the Metadata card into a "Categories"
 card using "Lists edited in place": each assigned category as a `secondary` Badge (archived:
@@ -318,8 +340,21 @@ list: "No categories yet."
 **`/artifacts` (changed).** Category chips follow FR-124-14; the filter follows FR-124-15. Under
 the filter form, when the list is not empty and an active category exists, a bulk form:
 "Category for the 14 listed artifacts" (NativeSelect), then `outline` buttons "Assign to all
-listed" and "Remove from all listed". Result line: "Assigned Client A to 11 artifacts. 3 already
-had it." / "Removed Client A from 11 artifacts. 3 did not have it."
+listed" and "Remove from all listed". Neither button writes: each opens the Risky-action inline
+panel under the form with "Assign Client A to 1,240 artifacts?" or "Remove Client A from 1,240
+artifacts?" (the count the page showed, which the fingerprint then guards), the reason "This
+changes every artifact the current filters list, not only the visible page." and a `destructive`
+`sm` confirming button "Assign to 1,240 artifacts" / "Remove from 1,240 artifacts" plus a Cancel
+link. Changing the category in the select closes an open panel. Focus moves to the question when
+the panel opens and back to the button that opened it on Cancel. Result line: "Assigned Client A
+to 11 artifacts. 3 already had it." / "Removed Client A from 11 artifacts. 3 did not have it."
+
+**Confirmation is a maintainer override (UD-5).** Archive and bulk actions on many items confirm
+with the count even though they are reversible and keep history, which the Risky-action page's
+"When not to use" and `apps/web/design-system.md` ("A reversible removal that keeps history: No
+confirmation") would otherwise rule out. The pattern itself is used unchanged, `destructive`
+confirming button included. Phase 2 adds one line to each of those two documents saying so.
+Single assign, single remove and Unarchive keep no confirmation.
 
 States for every form: pending (controls disabled, status line "Saving…" or "Assigning…"),
 success (status line), field error (`aria-invalid`, `aria-describedby`, `role="alert"`),
@@ -346,7 +381,7 @@ design system).
 | UD-2 | Where a category is edited | Its own page `/categories/[slug]` | Inline row form on `/categories` (expanding row) or a Dialog |
 | UD-3 | Where archived categories show | A separate "Archived categories" card on `/categories` | A `?status=archived` filter or one table with a status column |
 | UD-4 | Bulk assign UI | "Assign to all listed" / "Remove from all listed" for the filtered list, guarded by the shown count | Checkbox per row plus a selection bar (UD-1) |
-| UD-5 | Confirmation before archive or bulk actions | None; the result line says what was kept or changed, and bulk remove undoes bulk assign | Inline Risky-action panel ("Assign Client A to 14 artifacts?") |
+| UD-5 | Confirmation before archive or bulk actions | **Changed by the maintainer:** the inline Risky-action panel, unchanged, with the object and count ("Remove Client A from 1,240 artifacts?") for Archive, "Assign to all listed" and "Remove from all listed"; Unarchive, single assign and single remove need none | No confirmation; the result line says what was kept or changed (the original default) |
 | UD-6 | How an archived assignment looks | `muted` Badge with the text "Name (archived)", after active ones | Hide archived assignments; or a separate "archived" Badge next to the name |
 | UD-7 | Picker for assigning on the artifact page | NativeSelect of active, unassigned categories | Combobox with search (better past about 100 categories) |
 | UD-8 | Category list on the artifact page | Its own "Categories" card (like Tags, Assigned benchmarks) | Keep inside the Metadata card |
@@ -374,7 +409,6 @@ design system).
 | Empty name | "Enter a name." | nothing |
 | Name over 64 | "A name can be at most 64 characters. Shorten it." | nothing |
 | Control character | "A name cannot contain line breaks or other control characters." | nothing |
-| No Latin letter or digit | "Use at least one Latin letter or digit in the name. It becomes the category's link." | nothing |
 | Description over 500 | "A description can be at most 500 characters. Shorten it." | nothing |
 | Duplicate active name | "A category named Testing already exists. Choose another name." | nothing |
 | Slug of an active category | "The name gives the link testing, which Testing already uses. Choose another name." | nothing |
@@ -386,6 +420,10 @@ design system).
 | Forged or missing hidden field | "The form was incomplete. Reload the page and try again." | nothing |
 | Category or artifact gone | "This category no longer exists. Reload the page." / existing `ARTIFACT_GONE_MESSAGE` | nothing |
 | Database not initialised | `NotInitialized` | nothing |
+
+Counts in all copy (confirmation panels, result lines, errors, the bulk form label) are
+formatted with one formatter, `count.toLocaleString('en-US')` ("1,240", "10,000"), so the
+output does not depend on the server's locale.
 
 ## 14. Edge cases
 
@@ -405,6 +443,15 @@ design system).
 - An artifact removed from every repository keeps its categories (sync never touches them).
 - Name "Café" and "Cafe": different keys, same slug `cafe`: the second is refused as
   slug-taken.
+- "日本語" and "!!!" are accepted with generated slugs, for example `category-1` and
+  `category-2` (A5); two different non-Latin names never clash on the slug, only on the name key.
+- A Latin name "Category 7" derives `category-7`. If a generated `category-7` exists, it is
+  refused as slug-taken (A7). If not, it takes that slug, and the next generated slug is
+  `category-8` or higher, because the generator counts every `category-<digits>` slug, derived
+  or generated.
+- "日本語 2" contains a digit, so its slug is derived (`2`), not generated; a later "2" is
+  refused as slug-taken.
+- Archive or bulk confirmation open, then Cancel: nothing is written and no status line appears.
 
 ## 15. Testing strategy
 
@@ -415,6 +462,13 @@ only, no paid calls. Database tests use one writable connection per test thread
 
 - Core: `normalizeCategoryName`, `categoryNameKey`, `categorySlug` (NFC, whitespace, cut at 64
   with trailing hyphen, `null` for "日本語" and "!!!", the literal name "Item").
+- Database, generated slugs (A5): first non-Latin name gets `category-1`; numbering continues
+  above the largest `category-<digits>` slug, archived rows and derived slugs ("Category 7")
+  included; a number longer than `Number.MAX_SAFE_INTEGER` is handled (BigInt); a forced
+  `SQLITE_CONSTRAINT_UNIQUE` on the slug maps to `slug-taken`.
+- Database, example import (`assignCategoriesBySlug`): a regression test archives the category
+  after the lookup and before the insert (deterministic interleaving through the conditional
+  statement) and asserts no assignment to the archived category is written.
 - Database: migration `0005` backfill on a `0004` database; create (slug, key, appears in
   `listCategories`); duplicate key incl. non-ASCII case pair ("Ärger"/"ärger"); slug-taken active
   and archived; rename keeps slug, predefined flag and assignments; case-only rename; rename into
@@ -425,12 +479,14 @@ only, no paid calls. Database tests use one writable connection per test thread
   rejects a raw duplicate insert; seeding skips a name clash; `listArtifacts` / `getArtifactDetail`
   return `archived` and order active first.
 - Web lib: every schema branch and message; action → message mapping for every outcome; forged
-  ids and forged filters leave the database unchanged.
+  ids and forged filters leave the database unchanged; the count formatter ("1,240").
 - Playwright (`apps/web/e2e/categories.spec.ts`): create, then see it in the table and the
   Artifacts filter; duplicate name shows the field error and adds no row; rename keeps
-  `/artifacts?category=<slug>` working; archive hides it from the filter and the picker and shows
-  "(archived)" on the artifact; unarchive; assign and remove on the artifact page with focus
-  checks; bulk assign and remove on a filtered list; keyboard-only run of create and assign; 320px
+  `/artifacts?category=<slug>` working; archive asks first with the count, Cancel keeps it
+  active and returns focus to "Archive", confirming hides it from the filter and the picker and
+  shows "(archived)" on the artifact; unarchive without a panel; assign and remove on the
+  artifact page with focus checks; bulk assign and remove on a filtered list, each through the
+  confirmation with the count, Cancel writing nothing, focus into the panel and back; keyboard-only run of create and assign; 320px
   without horizontal scroll; both themes added to the contrast specs.
 - Storybook: no new components, so no new stories; if UD-1 adds primitives, each gets stories in
   both themes with axe.
@@ -438,12 +494,14 @@ only, no paid calls. Database tests use one writable connection per test thread
 ## 16. Acceptance criteria
 
 - [ ] AC-1: Given a name of 1 to 64 characters, when a category is created, then it gets the slug
-  `categorySlug(name)` and appears on the Categories page and in the Artifacts filter (issue AC 1).
+  `categorySlug(name)`, or a generated `category-N` slug when the name has no Latin letter or
+  digit (A5), and appears on the Categories page and in the Artifacts filter (issue AC 1).
 - [ ] AC-2: Given an existing category, when it is renamed, then its slug and assignments do not
   change and `/artifacts?category=<slug>` still filters to the same artifacts (issue AC 2).
 - [ ] AC-3: Given an artifact, when a category is assigned twice, then it is assigned once; and
   bulk assign on a filtered list assigns it to every listed artifact (issue AC 3).
-- [ ] AC-4: Given a category, when it is archived, then it disappears from the picker, the filter
+- [ ] AC-4: Given a category, when Archive is confirmed in the inline panel that states its
+  artifact count (Cancel writes nothing), then it disappears from the picker, the filter
   dropdown and the bulk form but stays on existing assignments shown as "Name (archived)"
   (issue AC 4).
 - [ ] AC-5: Given a name that duplicates an active category case-insensitively, when it is
@@ -452,8 +510,10 @@ only, no paid calls. Database tests use one writable connection per test thread
   active category has the same name.
 - [ ] AC-7: A name whose slug another category holds is refused with a field error; for an
   archived holder the message says to unarchive it.
-- [ ] AC-8: Bulk remove removes the category from every listed artifact; a list that changed
-  since the page loaded is refused and nothing is written.
+- [ ] AC-8: Bulk assign and bulk remove act only after an inline confirmation that states the
+  category and the listed count (Cancel writes nothing); bulk remove removes the category from
+  every listed artifact; a list that changed since the page loaded is refused and nothing is
+  written.
 - [ ] AC-9: Migration `0005` backfills `name_key` and the partial unique index rejects a second
   active row with the same key.
 - [ ] AC-10: The new and changed pages work by keyboard alone, have no horizontal page scroll at
@@ -470,14 +530,14 @@ only, no paid calls. Database tests use one writable connection per test thread
 
 ## 18. Open questions
 
-None blocking. Every autonomous default is in §5a and every UI decision in §11.1 for the
-maintainer to confirm or override.
+None. The maintainer decided every default in §5a and §11.1 on 2026-11-04 (A5 and UD-5
+changed, the rest accepted as written); only the spec's approval remains.
 
 ## 19. Future extensions
 
 Merge and aliases (FR-106-09), slug change (FR-106-05), multi-category and "Uncategorized"
 filters, suite categories and benchmark-list filter (FR-106-07), Combobox picker past about 100
-categories, a `directivebench category` CLI, generated slugs for non-Latin names (A5).
+categories, a `directivebench category` CLI, transliterated slugs for non-Latin names (A5).
 
 ## 20. Implementation status
 
@@ -499,21 +559,32 @@ Each phase is one PR that leaves the app working and passes the full gate.
 4. `createCategory`, `updateCategory`, `setCategoryArchived`, `getCategoryBySlug`; tests.
 5. `assignArtifactCategory`, `unassignArtifactCategory`, `archived` on list and detail
    categories; tests.
-6. Update SPEC-006 and SPEC-106 FR-106-03.
+6. `assignCategoriesBySlug` as one conditional `INSERT … SELECT … WHERE archived_at IS NULL`
+   per slug (§8.2); regression test that archives between lookup and write.
+7. Update SPEC-006 and SPEC-106 FR-106-03.
 
 ### Phase 2: Categories page and category page
 
 1. `lib/categories.ts` schemas and messages; tests.
 2. `createCategoryAction`, `updateCategoryAction`, `setCategoryArchivedAction`; tests.
-3. `/categories`: New category card, active table, archived card; `/categories/[slug]`.
-4. Playwright: create, duplicate, rename, archive, unarchive, keyboard, 320px, contrast.
+3. `/categories`: New category card, active table, archived card; `/categories/[slug]` with the
+   Archive confirmation panel (UD-5).
+4. Archived display and filter ship with archiving, so no phase shows an archived category as
+   active or a filter the dropdown hides: archived chips (FR-124-14) on `/artifacts` and on the
+   artifact page where categories show today; the archived option selected in the filter
+   (FR-124-15); `MAX_SLUG_PARAM_LENGTH` from core.
+5. One line each in `apps/web/stories/patterns/risky-action.mdx` ("When not to use") and
+   `apps/web/design-system.md` (the "reversible removal" row): archive and bulk actions on many
+   items confirm with the count even though reversible (UD-5 maintainer override).
+6. Playwright: create, duplicate, rename, archive through the confirmation (count shown, Cancel
+   writes nothing, focus into the panel and back), unarchive, archived chips, filter by an
+   archived slug shows it selected, keyboard, 320px, contrast.
 
-### Phase 3: Assignment on the artifact page, archived display and filter
+### Phase 3: Assignment on the artifact page
 
 1. `assignArtifactCategoryAction`, `unassignArtifactCategoryAction`; tests.
-2. Categories card on `/artifacts/[id]`; archived chips on `/artifacts`; archived option in the
-   filter; `MAX_SLUG_PARAM_LENGTH` from core.
-3. Playwright: assign, remove, archived display, focus, filter by archived slug.
+2. Categories card on `/artifacts/[id]` (archived chips as in Phase 2).
+3. Playwright: assign, remove, archived assignment removable, focus.
 
 ### Phase 4: Bulk assign and remove on the Artifacts list
 
@@ -522,8 +593,10 @@ Each phase is one PR that leaves the app working and passes the full gate.
    too-many and atomicity.
 2. `setCategoryForListedArtifactsAction` with filter re-parse and fingerprint guard; tests incl.
    forged filters.
-3. Bulk form on `/artifacts`.
-4. Playwright: bulk assign, bulk remove, list-changed refusal (after the page loads, the test
+3. Bulk form on `/artifacts` with the confirmation panel stating the count (UD-5).
+4. Playwright: bulk assign and bulk remove through the confirmation (count "1,240"-style
+   formatting, Cancel writes nothing, keyboard only, focus into the panel and back to the
+   opening button), list-changed refusal (after the page loads, the test
    adds a file to the registered fixture repository and triggers a scan through the existing
    Scan form in a second page, then submits the first page's bulk form).
 5. Update SPEC-106 §20 and this spec's §20; move this spec to `implemented/` only when AC-1 to

@@ -3,7 +3,7 @@ title: Spec for issue 22 (E03-S01) categories create, rename, archive and assign
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5 (subagent, om-auto-write-spec + om-spec-writing --autonomous)
 trigger: maintainer approved starting issue #22 (spec only)
-status: completed
+status: in-progress
 branch: spec/category-lifecycle-and-assignment
 specs: [SPEC-124, SPEC-106, SPEC-101, SPEC-006, SPEC-014, SPEC-122]
 ---
@@ -62,8 +62,38 @@ approve. No implementation.
 
 None: nothing non-obvious was learned beyond existing lessons.
 
+## Review and maintainer decisions (round 2, 2026-11-04)
+
+- Codex adversarial review (plugin `codex` 1.0.6, `adversarial-review --wait --base origin/main`
+  with a spec-focused brief) on 0da1938: **needs-attention**, 2 medium findings, both triaged
+  as real against the code and applied:
+  1. `assignCategoriesBySlug` (example import) selects active categories, then inserts in
+     separate statements outside a transaction (`packages/database/src/repositories/artifacts.ts`,
+     `packages/runner/src/import.ts`), so an archive from the web process could slip between
+     them. Now one conditional `INSERT … SELECT … WHERE archived_at IS NULL` per slug, a Phase 1
+     step with an interleaving regression test (§8.2, §15, §21).
+  2. Phase 2 shipped Archive while archived chips and the archived filter option waited for
+     Phase 3; `/artifacts` would then show "All" in the dropdown while filtering by an archived
+     slug (`apps/web/app/artifacts/page.tsx` drops archived options). Moved archived display,
+     the archived filter option and `MAX_SLUG_PARAM_LENGTH` to Phase 2; Phase 3 is now
+     "Assignment on the artifact page".
+- Maintainer (Mateusz) accepted A1 to A22 and UD-1 to UD-9 as written, except:
+  - **A5:** names with no Latin letter or digit are accepted with a generated slug
+    `category-N` (first free N above the largest `category-<digits>` slug, inside
+    `createCategory`'s `withTransaction`, slug unique index as backstop, BigInt for long
+    numbers). Edits: G6, A5, FR-124-02, FR-124-04, §8.2, §8.3, §13 (error row removed),
+    §14 ("Category 7", "日本語 2"), §15, AC-1, §19.
+  - **UD-5:** Archive and both bulk actions confirm with the count through the unchanged
+    Risky-action inline pattern (`destructive` confirming button); Unarchive, single assign
+    and remove need none. Recorded as a maintainer override of the pattern's "When not to
+    use"; the one-line additions to `risky-action.mdx` and `design-system.md` are Phase 2
+    work. Edits: FR-124-08, FR-124-13, §11 copy, §11.1, §14, §15, AC-4, AC-8, Phases 2 and 4.
+  - Counts use one formatter, `toLocaleString('en-US')` ("1,240"), stated in §13.
+  - A9 (no hard delete) kept. Spec status stays `draft`.
+- Lessons: none. These are decisions on offered defaults, not corrections of a mistake.
+
 ## Follow-ups
 
-- Maintainer: confirm or override A1 to A22 and UD-1 to UD-9, then set `approved`.
+- Maintainer: approve the spec (set `approved`).
 - After approval: `om-auto-implement-spec` phase by phase (§21).
 - Cleanup done: test env stopped and its `/var/tmp` data removed; worktree removed after the PR.
