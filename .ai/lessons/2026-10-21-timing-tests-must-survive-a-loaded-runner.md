@@ -89,7 +89,10 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   costs ~45 µs whatever its size, 90% of the small one, so the baseline grew ~8× instead of 32×
   and the control's ratio sat at 0.11–0.19 against a bound of 0.286 (it failed once at 0.338).
   Reads of 2 and 64 MiB grow ~35× and measure 0.031–0.039 under the same load. Measure each
-  series' per-call cost at both sizes before trusting a ratio's margin.
+  series' per-call cost at both sizes before trusting a ratio's margin. A control must also be
+  measured with the bug it guards: with the helper patched to use the thread clock, the control
+  measured 0.293–0.67 (not ~1, the thread clock bills work per wall-clock time), so it now has its
+  own bound of 0.1 between the two distributions instead of the borrowed 0.286.
 - A test whose property is a count (statements, queries, calls) should do only as much real work
   as the count needs (update 2026-11-04, issue 184). The slug test stored 3,000 artifacts to
   prove one slug query: 0.85 s locally, but 24.7 s on a green Linux CI job and 31.2 s (timeout)
