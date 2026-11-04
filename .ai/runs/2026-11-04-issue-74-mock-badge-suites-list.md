@@ -3,7 +3,7 @@ title: Mock badge on the suites list, mock-agent doc comment, table filler paddi
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5
 trigger: issue #74, decisions D1 to D7 and Q3 approved by the maintainer on 2026-11-04
-status: in-progress
+status: completed
 branch: feat/issue-74-mock-badge-suites-list
 specs: [SPEC-101, SPEC-107, SPEC-116]
 ---
@@ -63,20 +63,36 @@ Approved by the maintainer on 2026-11-04 (not re-opened):
 
 ## Review and QA
 
-To be filled in after the review and QA rounds.
+- `om-auto-review-pr --autofix` (engine `om-code-review`): approve with no findings, posted as
+  COMMENT ([review](https://github.com/MetaX5/DirectiveBench/pull/183#pullrequestreview-5773967985)).
+  The full gate was re-run on head `02e5afe` and passed. No autofix was needed.
+- Codex adversarial review (plugin `codex` 1.0.6, `adversarial-review --wait --base origin/main`),
+  round 1 on `02e5afe`: approve, no material findings.
+- `om-auto-qa-pr` (agent-browser 0.35.2 on the built CLI after `directivebench demo`): PASS on
+  9 of 9 checkpoints ([evidence](https://github.com/MetaX5/DirectiveBench/pull/183#issuecomment-6639335281),
+  images on `qa-evidence-pr-183`). Covered: `/benchmarks` in both themes at 1280px and 320px
+  (badge contrast 6.87 light, 7.73 dark; at 320px the badge wraps in its cell exactly as on
+  `/results`, with no page scroll); keyboard only (the badge is not a focus stop, and Enter opens
+  the suite); the filler cell of a short Markdown row (computed `4px 8px 4px 8px`, top-aligned,
+  row width equal to header width) in both themes; an invalid repository path; a clean console.
 
 ## Problems and deviations
 
-None so far.
+- QA booted the built CLI by hand, as `apps/web/playwright.config.ts` does (`demo`, then `serve
+  --no-open`), instead of through `om-prepare-test-env`. That skill generates
+  `.ai/scripts/test-env-*.sh`, and this run was told not to touch `.ai/scripts/` (another branch
+  is adding those scripts).
 
 ## Lessons recorded
 
-None so far.
+None. Nothing non-obvious came up.
 
 ## Not verified
 
-To be filled in.
+- Firefox and Safari (only Chromium was used).
+- Hover in the exploratory QA: headless agent-browser reports `(hover: hover)` false. The badge
+  hover contrast is covered by the e2e `text-contrast.spec.ts` scan in Playwright.
 
 ## Follow-ups
 
-None so far.
+None.
