@@ -49,7 +49,7 @@ do not improvise one; ask.
   `text-warning-foreground`, `text-info-foreground`.
 - Fills: `bg-background`, `bg-card`, `bg-muted`, `bg-primary` (main action), status fills
   `bg-success/10`, `bg-warning/10`, `bg-info/10`, `bg-destructive/10`.
-- Borders: `border` (separators), `border-control` (fields), focus `border-ring` with
+- Borders: `border` (separators), `border-control` (fields and outline buttons), focus `border-ring` with
   `ring-1 ring-ring`; buttons a 2px `outline-ring` offset 2px.
 - Type: `text-page-title`, `text-metric` (with `tabular-nums`), `text-body`, `text-ui`,
   `text-caption` (minimum 11px). Never `text-xs` or `text-sm`.

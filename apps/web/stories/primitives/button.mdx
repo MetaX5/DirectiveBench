@@ -81,6 +81,9 @@ SPEC-119 FR-6, "Parameters in force".
   story tests both. Source: WCAG 2.1.1.
 - Focus: a solid 2px outline in `ring`, 2px outside the button, so it is clear on every fill
   (tokeny.md D4); the order follows the DOM.
+- Boundary: the `outline` border is `border-control`, so it reaches 3:1 against the page, a
+  card and a muted row in both themes, at rest, on hover and with focus (tokeny.md D3, U14).
+  Source: WCAG 1.4.11, issue #171.
 - ARIA: the label is the accessible name. An icon-only button needs `aria-label` (Icons page).
   A screen reader announces "Run benchmark, button"; when disabled, "dimmed" or
   "unavailable", followed by the description.

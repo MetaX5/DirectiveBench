@@ -90,8 +90,13 @@ const pairs: Record<string, Pair> = {
     ...ui('muted', ['card']),
     exception: 'ScoreBar is aria-hidden and prints its value as text',
   },
-  U12: { ...ui('border', ['background']), exception: 'decorative separator' },
+  U12: { ...ui('border', ['background']), exception: 'decorative separator or card outline' },
   U13: { ...ui('primary', ['background']), exception: 'the button is identified by its label' },
+  // Issue 171: the outline button's border on the surfaces it sits on. A selected table row is
+  // muted, the worst case (a hovered row is muted/50).
+  'U14.1': ui('border-control', ['background']),
+  'U14.2': ui('border-control', ['card']),
+  'U14.3': ui('border-control', ['card', 'muted']),
 };
 
 // S01 to S10: each syntax colour (SPEC-123 D20) on the code surface of FileView and under the

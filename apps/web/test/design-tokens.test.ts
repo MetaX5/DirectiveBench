@@ -286,6 +286,15 @@ describe('form controls', () => {
       expect(source, control).not.toMatch(/\bborder-input\b/);
     }
   });
+
+  // The outline button is a control, so its boundary reaches 3:1 like a field's (#171,
+  // tokeny.md U14). The separator token `border` and the fill `input` stay off it.
+  it('include the outline button, whose border is border-control in both themes (D3)', () => {
+    const source = readFileSync(join(root, 'components', 'ui', 'button.tsx'), 'utf8');
+    const classes = /\boutline:\s*'([^']*)'/.exec(source)![1]!.split(/\s+/);
+    expect(classes).toContain('border-control');
+    expect(classes.filter((name) => /(?:^|:)border-(?:border|input)$/.test(name))).toEqual([]);
+  });
 });
 
 describe('globals.css token layers', () => {

@@ -3,7 +3,7 @@ id: SPEC-120
 title: Three-layer design tokens
 status: implemented
 created: 2026-10-27
-updated: 2026-10-28
+updated: 2026-11-04
 category: feature
 related: [SPEC-119, SPEC-004, ADR-0001]
 ---
@@ -51,7 +51,8 @@ As a contributor, I find each token's value, origin and intended use in one tabl
 2. FR-120-2: semantic tokens MUST keep the shadcn names and reference the palette, with the
    values in `tokeny.md`.
 3. FR-120-3: Input and NativeSelect MUST draw their boundary with the new `border-control`
-   token (neutral-500 in both themes).
+   token (neutral-500 in both themes). Since 2026-11-04 (#171) the outline Button does too: its
+   border is a control boundary, not a decorative separator (tokeny.md D3, U14).
 4. FR-120-4: focus indicators MUST use a solid `ring` (light neutral-700, dark neutral-400),
    1px in buttons, inputs, selects, badges and navigation; the global outline uses solid `ring`.
 5. FR-120-5: status fills (`success`, `warning`, `info`, `destructive`) MUST NOT colour text or
@@ -88,7 +89,9 @@ props and variants are unchanged.
 
 See `tokeny.md`: token table, colour pairs with measured ratios and non-token decisions D1 to
 D10. Accepted exceptions: ScoreBar track (aria-hidden, value printed), decorative separators
-and button fills identified by their labels.
+and card outlines (U12) and button fills identified by their labels. The outline button border
+was part of U12 until 2026-11-04; that exception was reversed for the button (#171, option A
+approved by the maintainer) and the button now uses `border-control` (U14).
 
 ## 12. Security considerations
 
@@ -148,4 +151,8 @@ the maintainer approved the spec on 2026-10-27 and it moved to `implemented/`.
   review fix), ScoreBar fills 3.44 and 3.07 / 3.26 and 4.62. Before the change
   the same test measured 1.26 / 1.58, 1.54 / 1.87 and 2.48 / 3.79.
 - Text contrast, button and design-system suites pass unchanged; full E2E 52/52.
+- 2026-11-04 (#171): the outline Button border moved from `border` / `input` to
+  `border-control`; measured in Chromium (light / dark) 4.74 / 3.78 on a card at rest, on hover
+  and with focus, was 1.26 / 1.58. Run log
+  [`2026-11-04-issue-171-outline-button-border`](../../runs/2026-11-04-issue-171-outline-button-border.md).
 - Not migrated (§19): existing `text-xs`/`text-sm` and most `gap-*`/`space-y-*` utilities.
