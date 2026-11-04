@@ -73,9 +73,9 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 | `warning` | `--warning` | semantic | amber-68 / amber-80 | FR-4 | background /10, border /40 | text and icons (2.97:1 in light) |
 | `warning-foreground` | `--warning-foreground` | semantic | amber-45 / amber-80 | FR-8, D5 | warning text and icons | fills |
 | `info`, `info-foreground` | `--info`, `--info-foreground` | semantic | blue-55 / blue-72; blue-45 / blue-72 | FR-4, FR-8 | as the success pair | as the success pair |
-| `border` (subtle outline) | `--border` | semantic | neutral-200 / white 10% | P1 | separators, card outline, table rows | form control borders |
+| `border` (subtle outline) | `--border` | semantic | neutral-200 / white 10% | P1 | separators, card outline, table rows | form control and outline button borders |
 | `input` (control fill) | `--input` | semantic | neutral-200 / white 15% | P1 | light: disabled field fill (/50); dark: control fill (/30, hover /50) | borders (D3) |
-| **`border-control`** | `--border-control` | semantic | neutral-500 / neutral-500 | D3, A§7, WCAG 1.4.11 | input, select and future checkbox borders | separators, cards |
+| **`border-control`** | `--border-control` | semantic | neutral-500 / neutral-500 | D3, A§7, WCAG 1.4.11 | input, select, textarea, outline button and future checkbox borders | separators, cards |
 | `ring` (focus indicator) | `--ring` | semantic | **neutral-700 / neutral-400** (was 400 / 500) | D4 | `border-ring` plus solid `ring-1` on focus | decoration |
 | `sidebar`, `sidebar-foreground` | `--sidebar`, `--sidebar-foreground` | semantic | neutral-50 / neutral-900; neutral-950 / neutral-50 | P1 | side panel, app name | page content |
 | `sidebar-accent`, `sidebar-accent-foreground` | `--sidebar-accent`, `--sidebar-accent-foreground` | semantic | neutral-100 / neutral-800; neutral-900 / neutral-50 | P1 | active and hovered nav item | outside navigation |
@@ -112,9 +112,9 @@ Values are given as light / dark. **Bold** names are new tokens or changed value
 Thresholds: text 4.5:1, UI elements 3:1. ✗ marks a ratio below the threshold; `before → after`
 shows values changed by this proposal. Ratios follow the WCAG 2.x formula, with translucent
 colours composited over the real surface in both themes, computed from the token values.
-[`e2e/ui-contrast.spec.ts`](e2e/ui-contrast.spec.ts) measures U01–U05 and U09–U10 in Chromium
-(within 0.05 of these values) and `e2e/text-contrast.spec.ts` measures the text pairs on real
-pages.
+[`e2e/ui-contrast.spec.ts`](e2e/ui-contrast.spec.ts) measures U01–U05, U09–U10 and U14 (on a
+card) in Chromium (within 0.05 of these values) and `e2e/text-contrast.spec.ts` measures the text
+pairs on real pages.
 
 | ID | Pair (text or element / background) | Use | Light | Dark |
 |---|---|---|---|---|
@@ -150,8 +150,9 @@ pages.
 | U08 | muted-foreground / card | supporting icons, select chevron | 6.00 | 6.91 |
 | U09–U10 | success 80% and destructive 70% bar / track | ScoreBar | 3.06 / 3.42 | 4.66 / 3.24 |
 | U11 | muted / card | ScoreBar track | 1.09 ✗ | 1.19 ✗ |
-| U12 | border / background | separators, card outline, outline button | 1.26 ✗ | 1.25 ✗ |
+| U12 | border / background | separators, card outline | 1.26 ✗ | 1.25 ✗ |
 | U13 | primary / background | primary button fill | 1.54 ✗ | 10.12 |
+| U14 | outline button border / page, card, muted | outline button (#171) | 1.26 ✗ / 1.26 ✗ / 1.16 ✗ → 4.74 / 4.74 / 4.35 | 1.48 ✗ / 1.58 ✗ / 1.63 ✗ → 4.18 / 3.78 / 3.19 |
 | S01 | syntax-foreground / code surface, removed, added, neutral row | highlighted code text | 19.13 / 16.04 / 16.83 / 16.88 | 16.15 / 14.13 / 13.69 / 13.72 |
 | S02 | syntax-token-comment / code surface, removed, added, neutral row | comments | 5.81 / 4.87 / 5.11 / 5.12 | 6.52 / 5.71 / 5.53 / 5.54 |
 | S03 | syntax-token-keyword / code surface, removed, added, neutral row | keywords, operators, JSON keys | 6.89 / 5.78 / 6.06 / 6.08 | 7.26 / 6.35 / 6.15 / 6.16 |
@@ -175,7 +176,16 @@ decreased. Accepted exceptions:
 
 - **U11**: ScoreBar is `aria-hidden` and its value is printed as text, so WCAG 1.4.11 does not
   apply. Optional fix: outline the track with `border-control` (at least 3.79:1).
-- **U12**: decorative; the outline button is identified by its label (15.33:1). No change.
+- **U12**: decorative separators and card outlines. No change. Until 2026-11-04 the outline
+  button shared this token and this exception; it was reversed for the button (#171, option A
+  approved by the maintainer): the button's border is a control boundary, so it now uses
+  `border-control` like a field (D3, U14).
+- **U14**, known and accepted: in dark the border against the button's own translucent fill
+  (`input/30`, hover `input/50`) is lower than against the surface: 3.85 / 3.59 on the page,
+  3.40 / 3.11 on a card, 3.11 / 2.82 on a hovered card table row (`muted/50`) and 2.78 / 2.55
+  on a solid `muted` surface (rest / hover). The ratio against the surrounding surface is what
+  identifies the boundary (at least 3.19:1); the fill stays unchanged so the button keeps its
+  shape on every surface.
 - **U13**: the button is identified by its label (9.07:1). No change.
 - Focus on the primary button: since 2026-10-28 a 2px `outline-ring` offset 2px from the
   button, measured against the page (6.91:1 dark, 10.39:1 light); nothing is drawn on the fill.
@@ -187,7 +197,8 @@ decreased. Accepted exceptions:
    Purpose names are documented in the table, not duplicated as CSS variables.
 2. **D2**: `palette-*` and `scale-*` appear only in `app/globals.css`. `app/` and `components/`
    use no raw Tailwind colours (e.g. `zinc-500`), `#hex` values or arbitrary `text-[Npx]`.
-3. **D3**: form controls use `border-control` for their border; `input` is a fill only.
+3. **D3**: form controls, including the outline button (since 2026-11-04, #171), use
+   `border-control` for their border; `input` is a fill only.
 4. **D4**: the focus indicator is `border-ring` plus a solid `ring-1`, without `/50`. Badge
    moves from `ring-[3px]` to 1px. Buttons (changed 2026-10-28, issue #64, maintainer
    request) draw a solid 2px `outline-ring` 2px outside the button instead: on a filled

@@ -17,8 +17,9 @@ DirectiveBench is flat and square, as the Lyra preset is (SPEC-119 AC-1).
    `scale-radius` row.
 3. Surfaces separate by a one-pixel line and by surface colour, not by elevation:
    - cards draw a 1px ring in `foreground` at 10% (generated `Card`);
-   - separators, table rows and outline buttons use `border`;
-   - fields and selects use `border-control`, which reaches 3:1 (tokeny.md D3);
+   - separators and table rows use `border`;
+   - fields, selects and outline buttons use `border-control`, which reaches 3:1 (tokeny.md D3,
+     U14);
    - a card sits on `background` with the `card` fill, a code block on `muted` at 40%.
 4. No surface uses a drop shadow today. The story test checks that no element in the
    composition below has a blurred or offset shadow. Source: inventory of 2026-10-28.

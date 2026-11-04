@@ -11,9 +11,9 @@ import { AGENT_RUN, CODE_RUN, cleanUp, reseed } from './output-files-seed';
 import { withDatabase } from './support';
 
 /**
- * SPEC-120 (tokeny.md U01–U10): control boundaries, focus indicators and ScoreBar fills reach
- * 3:1 against the surface they sit on, in both themes. Colours are measured as rendered pixels
- * because production CSS may serialise OKLCH as Lab.
+ * SPEC-120 (tokeny.md U01–U10, U14): control boundaries, focus indicators and ScoreBar fills
+ * reach 3:1 against the surface they sit on, in both themes. Colours are measured as rendered
+ * pixels because production CSS may serialise OKLCH as Lab.
  */
 
 type Measured = { name: string; ratio: number };
@@ -131,6 +131,24 @@ for (const theme of ['light', 'dark'] as const) {
     await record(results, 'select border', contrast(select, 'border'));
     await keyboardFocus(page, select);
     await record(results, 'select focus ring', contrast(select, 'ring'));
+    // #171 (tokeny.md U14): the outline button's border is a control boundary, so it reaches 3:1
+    // against the surface around it at rest, on hover and with keyboard focus, and against the
+    // button's own fill.
+    const filter = page.getByRole('button', { name: 'Filter', exact: true });
+    await page.mouse.move(0, 0);
+    await record(results, 'outline button border', contrast(filter, 'border'));
+    await record(results, 'outline button border on its fill', contrast(filter, 'border', filter));
+    await filter.hover();
+    await record(results, 'outline button hover border', contrast(filter, 'border'));
+    await record(
+      results,
+      'outline button hover border on its fill',
+      contrast(filter, 'border', filter),
+    );
+    await page.mouse.move(0, 0);
+    await keyboardFocus(page, filter);
+    await record(results, 'outline button focus border', contrast(filter, 'border'));
+    await record(results, 'outline button focus outline', contrast(filter, 'outline'));
     const navItem = page
       .getByRole('navigation', { name: 'Main' })
       .getByRole('link', { name: 'Repositories', exact: true });
@@ -382,7 +400,18 @@ test.describe('blind review controls', () => {
       await keyboardFocus(page, note);
       await record(results, 'note focus ring', contrast(note, 'ring'));
       const verdict = page.getByRole('button', { name: 'A is better, pair 1' });
+      // #171 (tokeny.md U14): the verdict buttons are outline buttons on a card.
+      await record(results, 'verdict button border', contrast(verdict, 'border'));
+      await verdict.hover();
+      await record(results, 'verdict button hover border', contrast(verdict, 'border'));
+      await record(
+        results,
+        'verdict button hover border on its fill',
+        contrast(verdict, 'border', verdict),
+      );
+      await page.mouse.move(0, 0);
       await keyboardFocus(page, verdict);
+      await record(results, 'verdict button focus border', contrast(verdict, 'border'));
       await record(results, 'verdict button focus outline', contrast(verdict, 'outline'));
       const reveal = page
         .getByTestId('reveal-card')

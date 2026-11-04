@@ -61,6 +61,17 @@ export const Variants: Story = {
       </Button>
     </div>
   ),
+  play: async ({ canvas }) => {
+    // Issue 171 (tokeny.md U14): the outline border is the control boundary `border-control`,
+    // which reaches 3:1, not the decorative `border` separator, in both themes.
+    const outline = canvas.getByRole('button', { name: 'Edit definition' });
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--border-control)';
+    document.body.append(probe);
+    const control = getComputedStyle(probe).color;
+    probe.remove();
+    await expect(getComputedStyle(outline).borderTopColor).toBe(control);
+  },
 };
 
 export const Sizes: Story = {
