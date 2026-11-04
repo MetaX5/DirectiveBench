@@ -112,6 +112,23 @@ change, product code only for a real product bug.
   removed (`nextSuffix.set` commented out) the test fails "expected [ …(500) ] to have a length of
   1 but got 500".
 
+### 4. `engine.test.ts` "sends SIGTERM first and SIGKILL only after the grace period" (#75)
+
+- Out of the brief's scope, but it failed in this run's own gate (`pnpm test --force`, load
+  average 10 from parallel work on the machine): `expected { … } to match object { timedOut:
+  true, exitCode: 7 }`, received `exitCode: null`. The children were Node.js scripts that install
+  their SIGTERM handler only after start-up, against a 300 ms timeout: the failure of lesson
+  `2026-10-21-timing-tests-must-survive-a-loaded-runner`, already fixed the same way in
+  `commands.test.ts`. A temporary 400 ms busy-wait before the handler reproduced the identical
+  output every time.
+- Not reproduced by load alone: 24 runs (4 parallel) under `taskset -c 0,1` + six `yes`, 16 with
+  sixteen `yes`, 36 during a full `pnpm test --force`: all passed.
+- Fix: both children are `sh -c` loops whose trap is set within a millisecond of start
+  (`trap 'exit 7' TERM`, and `trap '' TERM`, which the `sleep` children inherit). After: 52 of 52
+  runs passed under `taskset -c 0,1` + six `yes` with four parallel copies (#75 asks for 50).
+  Red: with the grace period forced to 0 in `runCommand` the test fails "expected 317 to be
+  greater than or equal to 550".
+
 ## Verification
 
 - `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test --force`: passed, 7/7 test
@@ -134,5 +151,5 @@ change, product code only for a real product bug.
 
 ## Follow-ups
 
-- #177 (`artifact-ref.test.ts` hook timeout) and #75 (benchmark-engine grace period) stay open in
-  #184.
+- #177 (`artifact-ref.test.ts` hook timeout) stays open in #184. #75 is fixed here but left
+  open (out of the brief's scope); the maintainer may close it with this PR.
