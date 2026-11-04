@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +16,7 @@ import {
   getBenchmarkRunDetail,
   getJob,
   importArtifactVersion,
+  listJobs,
   migrateDatabase,
   openDatabase,
   requestJobCancellation,
@@ -40,7 +41,12 @@ const MOCK_EXAMPLE_KEY = '8212a3ebe5818fbf2413bfd7671874710a362f4f5fde0b20c53f77
 let dataDir: string;
 const handles: DatabaseHandle[] = [];
 
-/** One connection per simulated process, all on the same data directory. */
+/**
+ * A connection to the test's data directory. Two runners that stand for two processes share one
+ * connection: `node:sqlite` waits for a lock synchronously (`busy_timeout`), so a second writable
+ * connection in the same thread blocks the event loop that has to end the first connection's
+ * transaction, and fails with "database is locked" (issue #174). Each real process has one.
+ */
 function connect(): DatabaseHandle {
   const handle = openDatabase(join(dataDir, 'directivebench.db'));
   handles.push(handle);
@@ -54,6 +60,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   for (const handle of handles.splice(0)) handle.close();
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 function createRunner(
@@ -80,6 +87,16 @@ function recordingLogger() {
       error: (_message: string, fields: RunnerLogFields = {}) => events.push(fields),
     },
   };
+}
+
+/** A finished job's status with its error and its benchmark run's error, for failure messages. */
+async function jobOutcome(handle: DatabaseHandle, jobId: string) {
+  const job = await getJob(handle.db, jobId);
+  const item = (await listJobs(handle.db)).find((entry) => entry.job.id === jobId);
+  const run = item?.benchmarkRunId
+    ? await getBenchmarkRunDetail(handle.db, item.benchmarkRunId)
+    : null;
+  return { status: job?.status, error: job?.error ?? null, runError: run?.run.error ?? null };
 }
 
 /** The bundled example as v2, with v1 an earlier revision of the same skill without the directive. */
@@ -242,8 +259,10 @@ describe('A/B baseline in the runner (SPEC-118 FR-118-11…13)', () => {
 
 describe('jobs created already acquired (SPEC-118 FR-118-34, AC-9)', () => {
   it('a serve runner polling the same data directory never acquires the CLI job', async () => {
+    // `benchmark run` and `serve` are two processes, each with its own connection; in one test
+    // thread they share one (see `connect`). What keeps `serve` off the CLI job is the job row.
     const cliHandle = connect();
-    const serveHandle = connect();
+    const serveHandle = cliHandle;
     const example = await importBundledExample(cliHandle, examples, join(dataDir, 'fixtures'));
     const payload = {
       suiteVersionId: example.suite.versionId,
@@ -276,7 +295,13 @@ describe('jobs created already acquired (SPEC-118 FR-118-34, AC-9)', () => {
       });
       await expect
         .poll(async () => (await getJob(serveHandle.db, queued.id))?.status, { timeout: 30_000 })
-        .toBe('completed');
+        .toMatch(/^(completed|failed|cancelled|interrupted)$/);
+      // On failure the job's and its run's errors say why (issue #174).
+      expect(await jobOutcome(serveHandle, queued.id)).toEqual({
+        status: 'completed',
+        error: null,
+        runError: null,
+      });
       expect((await getJob(serveHandle.db, queued.id))?.runnerId).toBe(serve.runnerId);
       const acquiredByServe = serveLog.events
         .filter((e) => e.event === 'acquired')
