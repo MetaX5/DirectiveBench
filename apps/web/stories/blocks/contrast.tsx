@@ -92,8 +92,8 @@ const pairs: Record<string, Pair> = {
   },
   U12: { ...ui('border', ['background']), exception: 'decorative separator or card outline' },
   U13: { ...ui('primary', ['background']), exception: 'the button is identified by its label' },
-  // Issue 171: the outline button's border on the surfaces it sits on (a hovered or selected
-  // row is muted).
+  // Issue 171: the outline button's border on the surfaces it sits on. A selected table row is
+  // muted, the worst case (a hovered row is muted/50).
   'U14.1': ui('border-control', ['background']),
   'U14.2': ui('border-control', ['card']),
   'U14.3': ui('border-control', ['card', 'muted']),
