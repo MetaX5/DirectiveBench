@@ -3,7 +3,7 @@ title: Spec for issue 22 (E03-S01) categories create, rename, archive and assign
 date: 2026-11-04
 agent: Claude Code / claude-opus-5-5 (subagent, om-auto-write-spec + om-spec-writing --autonomous)
 trigger: maintainer approved starting issue #22 (spec only)
-status: in-progress
+status: completed
 branch: spec/category-lifecycle-and-assignment
 specs: [SPEC-124, SPEC-106, SPEC-101, SPEC-006, SPEC-014, SPEC-122]
 ---
@@ -97,6 +97,7 @@ None: nothing non-obvious was learned beyond existing lessons.
   its row), plus schema validation before insert and boundary tests (A5, FR-124-04, §8.2, §14,
   §15). This replaces the generator wording relayed on 2026-11-04; Mateusz's requirement
   "stable, unique, never reused" still holds.
+- Codex round 3 on ef6f370: **approve**, no material findings (design only; Codex ran no gate).
 - Lessons: none. These are decisions on offered defaults, not corrections of a mistake.
 
 ## Follow-ups
