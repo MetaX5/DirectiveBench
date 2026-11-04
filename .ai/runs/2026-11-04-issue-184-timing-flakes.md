@@ -81,9 +81,21 @@ change, product code only for a real product bug.
   full `pnpm test --force --concurrency=4` on the same two cores as well, 30 ratios each:
   256 KiB to 8 MiB (before) 0.135–0.190; 2 to 64 MiB (after) 0.031–0.039. The 0.338 failure was
   not reproduced; the margin went from 1.5× to 7.3× at the worst sample.
-- Fix: the case reads `BASELINE_LARGE = 64 MiB` (small 2 MiB). Its power to catch the bug it
-  guards is unchanged: with the thread clock the baseline's test-thread work stays constant
-  (256 buffers), so the ratio is ~1, far above the bound.
+- Fix: the case reads `BASELINE_LARGE = 64 MiB` (small 2 MiB).
+- Review finding (self-review, fixed): the case also has to fail when the helper picks the thread
+  clock (the bug it guards). With the helper patched to always use the thread clock, the ratio was
+  not ~1 as its comment said: the thread clock bills work per wall-clock time, so the baseline
+  still grows 2–3×. Ratios with the patched helper (temporary probe, 3 per run):
+  - Linux, 4 free cores: 8 MiB 0.43–0.72, 16 MiB 0.39–0.57, 32 MiB 0.35–0.43, 64 MiB 0.34–0.46;
+    under load (`taskset -c 0,1` + loaded loop): 8 MiB 0.79–0.94, 64 MiB 0.55–0.67.
+  - macOS (probe job 126819856877, idle and during a full suite): 8 MiB 0.39–0.84, 64 MiB
+    0.293–0.53; the correct helper there: 8 MiB 0.10–0.22, 64 MiB 0.017–0.033.
+  So against the borrowed bound 1 / MAX_LINEAR_RATIO = 0.286 the 64 MiB case could no longer tell
+  the clocks apart (0.293 on macOS), and the 8 MiB case could not hold the correct clock (0.338
+  locally, 0.22 on macOS). The case now has its own bound `PROCESS_CLOCK_MAX_RATIO = 0.1`, between
+  the two clocks (correct at most 0.039, broken at least 0.293): margins 2.6× and 2.9×. The shared
+  helper and `MAX_LINEAR_RATIO` are unchanged. Red: with the patched helper the case fails
+  "expected 0.3018 to be less than 0.1"; unpatched it passed 2/2 runs of the file.
 
 ### 3. `artifacts.test.ts` "allocates sequential slugs to … same-named artifacts"
 

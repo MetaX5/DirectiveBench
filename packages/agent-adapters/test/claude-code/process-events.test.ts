@@ -10,8 +10,9 @@ import {
 
 // Event orders a real `claude` produces only on some timings, forced here with a stub child:
 // whether stdout delivers another chunk after the one over the limit depends on the writer
-// running again before SIGTERM ends it, so the real flood test reached the guards below only on
-// some runs (macOS coverage of process.ts lines 97 and 229 dropped on PR #183, issue #184).
+// running again before SIGTERM ends it. The real flood test reached the guards for late output
+// (`LineCollector.push` after the limit, `terminate` after SIGTERM) only on some runs, and the
+// macOS unit job's coverage of process.ts fell below 100% on PR #183 (issue #184).
 
 /** A child process stub whose events the test emits in an explicit order. */
 class StubChild extends EventEmitter {

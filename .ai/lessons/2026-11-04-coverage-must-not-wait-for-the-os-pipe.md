@@ -14,10 +14,11 @@ On PR #183 the macOS unit job failed on coverage: `process.ts | 98.34 | 94.44 | 
 184). Line 97 is `LineCollector.push` returning early once the stdout limit was exceeded, and line
 229 is `terminate()` returning when SIGTERM was already sent. Only the `flood` test reached them,
 and only when stdout delivered another chunk after the one that crossed the limit, before SIGTERM
-ended `yes`. On Linux the full pipe always held that chunk: two of them in 28 of 28 runs, and the
-package's coverage was identical in every run under `taskset -c 0,1` with six `yes` processes. On
-macOS, whose pipes are smaller, the writer sometimes did not run again before the signal arrived,
-and no chunk came.
+ended `yes`. On Linux the full pipe always held that chunk: two of them in each of 23 runs of the
+test (3 idle, 20 under `taskset -c 0,1` with six `yes` processes), and the package's coverage was
+identical in each of 5 loaded runs. On macOS the writer sometimes did not run again before the
+signal arrived, and no chunk came (inferred from the job's uncovered lines; macOS pipes start
+smaller than Linux's 64 KiB).
 
 ## Lesson
 
