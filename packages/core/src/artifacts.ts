@@ -1,6 +1,7 @@
 import { posix } from 'node:path';
 import { z } from 'zod';
 import { parseFrontmatter } from './frontmatter';
+import { slugCharacters } from './slug';
 
 export const ARTIFACT_TYPES = ['skill', 'instruction', 'rule'] as const;
 export const artifactTypeSchema = z.enum(ARTIFACT_TYPES);
@@ -204,11 +205,5 @@ export function parseArtifactFile(relPath: string, content: string): ParsedArtif
 
 /** Converts a human readable name into a stable, URL-safe slug. */
 export function slugify(value: string): string {
-  const slug = value
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return slug || 'item';
+  return slugCharacters(value) || 'item';
 }

@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-10-19
+updated: 2026-11-05
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -62,9 +62,10 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 |---|---|---|
 | id | text PK | |
 | slug | text NOT NULL | **U** `categories_slug_unique` |
-| name | text NOT NULL | |
+| name | text NOT NULL | stored normalised (`normalizeCategoryName`) |
+| name_key | text NOT NULL (SQL `DEFAULT ''` for `ALTER TABLE ADD` only; no Drizzle default) | `categoryNameKey(name)`; **U** `categories_active_name_key_unique` partial, `WHERE archived_at IS NULL`: names are unique case-insensitively among active categories ([SPEC-124](2026-11-04-category-lifecycle-and-assignment.md) §8.1, migration `0005_category_name_key`) |
 | description | text | |
-| predefined | int bool NOT NULL default 0 | seeded from `PREDEFINED_CATEGORIES` (idempotent) |
+| predefined | int bool NOT NULL default 0 | seeded from `PREDEFINED_CATEGORIES` (idempotent; a slug or name-key clash is skipped) |
 | archived_at | text | soft archive |
 | created_at, updated_at | text | |
 
@@ -319,5 +320,6 @@ Each lands with its feature spec ([SPEC-105](2026-10-14-repository-synchronizati
 - **Implemented without a migration (issue #16, verified by `packages/database/test/{jobs,artifacts,catalog,client}.test.ts` on 2026-10-19):** job type `repository-scan` (`jobs.type` is unconstrained text, so no DDL changes); `enqueueRepositoryScanJob`, `getRepositoryScan`, `applyRepositoryScan`, `markRepositoryScanFailed`, `getRepository`; `registerLocalRepository` checks FR-104-18 and inserts in one `withTransaction`; `acquireNextJob` optionally limited to job types; `finishJob` guarded against overwriting a terminal status; statements outside a running `withTransaction` on the same connection wait for it.
 - **Implemented (SPEC-123 Phase 5, verified by `packages/database/test/{client,blind-reviews}.test.ts` on 2026-10-30):** `blind_reviews` and `blind_review_pairs` (§3.16, §3.17, migration `0004_blind_reviews`; a test applies it to a database migrated to `0003`, checks the unique indexes, both CHECKs, the foreign keys and the cascades, and rehearses the rollback to the `0003` shape) and the blind-review repository functions of SPEC-123 §8.3.
 - **Implemented (SPEC-123 Phase 1, verified by `packages/database/test/{client,runs}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-29):** `agent_runs.output_files_kept`/`output_files_reason` and `agent_run_files` (§3.15, migration `0003_agent_run_output_files`; a test applies it to a database migrated to `0002` with an existing agent run, which reads as not kept with no reason, and rehearses the rollback back to the `0002` shape); `insertAgentRun` stores the files in the agent run's transaction; `listAgentRunFiles` (metadata only) and `getAgentRunFile` (scoped to the benchmark run); cascade removal with the benchmark run.
+- **Implemented (SPEC-124 Phase 1, verified by `packages/database/test/{client,catalog,category-lifecycle,category-assignment,artifacts}.test.ts` on 2026-11-05):** `categories.name_key` and the partial unique index `categories_active_name_key_unique` (§3.1, migration `0005_category_name_key`; a test applies it to a database migrated to `0004` with predefined rows, one archived, and an assignment, checks the `lower(trim(name))` backfill leaves no `''`, that the index refuses a second active row and an unarchive into a clash but not an archived duplicate, and rehearses the rollback to the `0004` shape); seeding writes `name_key`; the category lifecycle and assignment functions of SPEC-124 §8.2 except the bulk ones.
 - **Partially:** deletion guards in §4 rely on FK constraints only (no explicit repository checks or domain errors; no delete operations are exposed yet).
 - **Not implemented:** pre-migration backups, downgrade detection, `(comparability_key, started_at)` index, orphan fixture cleanup, all planned tables in §7, PostgreSQL backend.
