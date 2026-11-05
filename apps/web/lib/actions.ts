@@ -489,7 +489,8 @@ export async function setCategoryArchivedAction(
   if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
   const handle = requireDatabase();
   const outcome = await setCategoryArchived(handle, input.data);
-  if (outcome.status === 'archived' || outcome.status === 'unarchived') refreshCategories();
+  // "Already archived" or "already active" means another tab changed it: refresh this page too.
+  if ('category' in outcome) refreshCategories();
   const artifactCount =
     outcome.status === 'archived'
       ? ((await getCategoryBySlug(handle.db, outcome.category.slug))?.artifactCount ?? 0)

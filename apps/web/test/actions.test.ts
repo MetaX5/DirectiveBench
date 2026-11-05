@@ -1112,7 +1112,9 @@ describe('category actions (SPEC-124 §10)', () => {
       kind: 'success',
       message: 'Python is already archived.',
     });
-    expect(next.revalidatePath).not.toHaveBeenCalled();
+    // Another tab archived it: this tab's page is refreshed to show the real state.
+    expectRefreshed();
+    vi.clearAllMocks();
     // Assignments stay (FR-124-08).
     expect(await getCategoryBySlug(handle.db, 'python')).toMatchObject({
       archived: true,
@@ -1123,10 +1125,12 @@ describe('category actions (SPEC-124 §10)', () => {
       message: 'Unarchived Python. It is back in pickers and filters.',
     });
     expectRefreshed();
+    vi.clearAllMocks();
     expect(await setCategoryArchivedAction(idle, form({ id, intent: 'unarchive' }))).toEqual({
       kind: 'success',
       message: 'Python is already active.',
     });
+    expectRefreshed();
     const empty = await create('Empty');
     expect(await setCategoryArchivedAction(idle, form({ id: empty, intent: 'archive' }))).toEqual({
       kind: 'success',
