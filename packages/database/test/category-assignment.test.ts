@@ -10,6 +10,7 @@ import {
   seedPredefinedCategories,
   setCategoryArchived,
   unassignArtifactCategory,
+  updateCategory,
   type DatabaseHandle,
 } from '../src/index';
 import { artifactInput } from './support/fixtures';
@@ -33,15 +34,28 @@ async function assignmentCount(handle: DatabaseHandle) {
 }
 
 describe('assignArtifactCategory', () => {
-  it('assigns an active category once', async () => {
+  it('assigns an active category once and names it', async () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const estimation = await category(handle, 'Estimation');
-    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toBe('assigned');
-    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toBe(
-      'already-assigned',
-    );
+    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toEqual({
+      status: 'assigned',
+      category: estimation,
+    });
+    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toEqual({
+      status: 'already-assigned',
+      category: estimation,
+    });
     expect(await assignmentCount(handle)).toBe(1);
+  });
+
+  it('names the category as it is after the write (renamed elsewhere)', async () => {
+    const handle = getHandle();
+    const artifactId = await artifact(handle);
+    const estimation = await category(handle, 'Estimation');
+    await updateCategory(handle, { id: estimation.id, name: 'Sizing', description: null });
+    const outcome = await assignArtifactCategory(handle.db, artifactId, estimation.id);
+    expect(outcome).toEqual({ status: 'assigned', category: { ...estimation, name: 'Sizing' } });
   });
 
   it('refuses an archived category, also when the artifact already has it', async () => {
@@ -50,9 +64,12 @@ describe('assignArtifactCategory', () => {
     const python = await category(handle, 'Python');
     const ruby = await category(handle, 'Ruby');
     await assignArtifactCategory(handle.db, artifactId, ruby.id);
-    for (const { id } of [python, ruby]) {
-      await setCategoryArchived(handle, { id, state: 'archived' });
-      expect(await assignArtifactCategory(handle.db, artifactId, id)).toBe('category-archived');
+    for (const ref of [python, ruby]) {
+      await setCategoryArchived(handle, { id: ref.id, state: 'archived' });
+      expect(await assignArtifactCategory(handle.db, artifactId, ref.id)).toEqual({
+        status: 'category-archived',
+        category: { ...ref, archived: true },
+      });
     }
     expect(await assignmentCount(handle)).toBe(1);
   });
@@ -61,38 +78,60 @@ describe('assignArtifactCategory', () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const estimation = await category(handle, 'Estimation');
-    expect(await assignArtifactCategory(handle.db, artifactId, 'cat_missing')).toBe(
-      'category-not-found',
-    );
-    expect(await assignArtifactCategory(handle.db, 'art_missing', estimation.id)).toBe(
-      'artifact-not-found',
-    );
+    expect(await assignArtifactCategory(handle.db, artifactId, 'cat_missing')).toEqual({
+      status: 'category-not-found',
+    });
+    expect(await assignArtifactCategory(handle.db, 'art_missing', estimation.id)).toEqual({
+      status: 'artifact-not-found',
+    });
+    expect(await assignArtifactCategory(handle.db, 'art_missing', 'cat_missing')).toEqual({
+      status: 'category-not-found',
+    });
     expect(await assignmentCount(handle)).toBe(0);
   });
 });
 
 describe('unassignArtifactCategory', () => {
-  it('removes an assignment once, archived categories included', async () => {
+  it('removes an assignment once, archived categories included, and names it', async () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const python = await category(handle, 'Python');
     await assignArtifactCategory(handle.db, artifactId, python.id);
     await setCategoryArchived(handle, { id: python.id, state: 'archived' });
-    expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toBe('removed');
-    expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toBe('not-assigned');
+    const archived = { ...python, archived: true };
+    expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toEqual({
+      status: 'removed',
+      category: archived,
+    });
+    expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toEqual({
+      status: 'not-assigned',
+      category: archived,
+    });
     expect(await assignmentCount(handle)).toBe(0);
+  });
+
+  it('names the category as it is after the write (renamed elsewhere)', async () => {
+    const handle = getHandle();
+    const artifactId = await artifact(handle);
+    const python = await category(handle, 'Python');
+    await assignArtifactCategory(handle.db, artifactId, python.id);
+    await updateCategory(handle, { id: python.id, name: 'Py', description: null });
+    expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toEqual({
+      status: 'removed',
+      category: { ...python, name: 'Py' },
+    });
   });
 
   it('reports a missing category or artifact', async () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const python = await category(handle, 'Python');
-    expect(await unassignArtifactCategory(handle.db, artifactId, 'cat_missing')).toBe(
-      'category-not-found',
-    );
-    expect(await unassignArtifactCategory(handle.db, 'art_missing', python.id)).toBe(
-      'artifact-not-found',
-    );
+    expect(await unassignArtifactCategory(handle.db, artifactId, 'cat_missing')).toEqual({
+      status: 'category-not-found',
+    });
+    expect(await unassignArtifactCategory(handle.db, 'art_missing', python.id)).toEqual({
+      status: 'artifact-not-found',
+    });
   });
 });
 
@@ -136,18 +175,20 @@ describe('assigned categories on the artifact list and page', () => {
   it('carry archived and list active ones first, each group by name', async () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
+    const ids = new Map<string, string>();
     for (const name of ['Zeta', 'Alpha', 'Beta', 'Gamma']) {
       const { id } = await category(handle, name);
+      ids.set(name, id);
       await assignArtifactCategory(handle.db, artifactId, id);
       if (name === 'Alpha' || name === 'Gamma') {
         await setCategoryArchived(handle, { id, state: 'archived' });
       }
     }
     const expected = [
-      { slug: 'beta', name: 'Beta', archived: false },
-      { slug: 'zeta', name: 'Zeta', archived: false },
-      { slug: 'alpha', name: 'Alpha', archived: true },
-      { slug: 'gamma', name: 'Gamma', archived: true },
+      { id: ids.get('Beta'), slug: 'beta', name: 'Beta', archived: false },
+      { id: ids.get('Zeta'), slug: 'zeta', name: 'Zeta', archived: false },
+      { id: ids.get('Alpha'), slug: 'alpha', name: 'Alpha', archived: true },
+      { id: ids.get('Gamma'), slug: 'gamma', name: 'Gamma', archived: true },
     ];
     expect((await listArtifacts(handle.db))[0]?.categories).toEqual(expected);
     expect((await getArtifactDetail(handle.db, artifactId))?.categories).toEqual(expected);
