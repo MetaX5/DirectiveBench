@@ -1,3 +1,4 @@
+import { CATEGORY_DESCRIPTION_MAX_LENGTH, CATEGORY_NAME_MAX_LENGTH } from '@directivebench/core';
 import { listCategories } from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -106,7 +107,9 @@ export default async function CategoriesPage() {
         description="Group artifacts in your own categories. Merging categories and changing a slug are planned."
       />
       <div className="flex flex-col gap-grid">
-        <NewCategoryCard />
+        <NewCategoryCard
+          limits={{ name: CATEGORY_NAME_MAX_LENGTH, description: CATEGORY_DESCRIPTION_MAX_LENGTH }}
+        />
         {active.length > 0 ? (
           <CategoryTable
             title="Active categories"

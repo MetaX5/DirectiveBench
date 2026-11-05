@@ -340,23 +340,24 @@ test.describe('benchmarks and executions', () => {
 
 test.describe('catalog and configuration', () => {
   test('categories list the predefined categories with artifact counts', async ({ page }) => {
-    const categories = await withDatabase((db) =>
-      count(db, 'select count(*) as n from categories'),
+    const active = await withDatabase((db) =>
+      count(db, 'select count(*) as n from categories where archived_at is null'),
     );
     await page.goto('/categories');
     await expect(page.getByRole('heading', { level: 1, name: 'Categories' })).toBeVisible();
-    await expect(page.getByText(/Read-only in this release/)).toBeVisible();
-    await expect(page.getByRole('row')).toHaveCount(categories + 1); // + header row
+    const table = page.getByRole('region', { name: 'Active categories' });
+    await expect(table.getByRole('row')).toHaveCount(active + 1); // + header row
 
-    const python = page.getByRole('row', { name: /^Python / });
+    const python = table.getByRole('row', { name: /^Python / });
     await expect(python).toContainText('Predefined');
     await expect(python.getByRole('cell').last()).toHaveText('0');
-    await expect(python.getByRole('link')).toHaveCount(0);
+    // The name opens the category's page; a zero count is not a link (SPEC-124 D4).
+    await expect(python.getByRole('link')).toHaveCount(1);
 
-    const security = page.getByRole('row', { name: /^Security / });
+    const security = table.getByRole('row', { name: /^Security / });
     await expect(security).toContainText('security');
     await expect(security.getByRole('cell').last()).toHaveText('1');
-    await security.getByRole('link', { name: 'Security' }).click();
+    await security.getByRole('link', { name: '1 artifact with Security' }).click();
     await expect(page).toHaveURL(/\/artifacts\?category=security$/);
     await expect(page.getByRole('link', { name: DEMO_ARTIFACT })).toBeVisible();
   });

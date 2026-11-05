@@ -5,7 +5,8 @@ import { notFound } from 'next/navigation';
 import { NotInitialized, PageHeader } from '@/components/common';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/primitives';
 import { categorySlugSchema } from '@/lib/artifacts';
-import { artifactsPhrase } from '@/lib/categories';
+import { CATEGORY_DESCRIPTION_MAX_LENGTH, CATEGORY_NAME_MAX_LENGTH } from '@directivebench/core';
+import { archiveReason, archivedStatusText, artifactsPhrase } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { CategoryDetailsCard, CategoryStatusCard } from '../category-forms';
 
@@ -38,7 +39,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
                 <Badge variant="muted">archived</Badge>{' '}
               </>
             ) : null}
-            Slug <code className="font-mono">{category.slug}</code>.{' '}
+            Slug <code className="font-mono wrap-anywhere">{category.slug}</code>.{' '}
             {category.predefined ? 'Predefined.' : 'User-defined.'}
           </>
         }
@@ -49,6 +50,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
           slug={category.slug}
           name={category.name}
           description={category.description}
+          limits={{ name: CATEGORY_NAME_MAX_LENGTH, description: CATEGORY_DESCRIPTION_MAX_LENGTH }}
         />
         <Card>
           <CardHeader>
@@ -77,7 +79,12 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
           id={category.id}
           name={category.name}
           archived={category.archived}
-          artifactCount={count}
+          statusText={
+            category.archived
+              ? archivedStatusText(count)
+              : 'Archived categories leave pickers and filters. Their assignments stay.'
+          }
+          archiveReason={archiveReason(count)}
         />
       </div>
     </>

@@ -15,17 +15,19 @@ import {
   setCategoryArchivedAction,
   updateCategoryAction,
 } from '@/lib/actions';
-import {
-  archiveReason,
-  archivedStatusText,
-  type CategoryField,
-  type CategoryFormState,
-} from '@/lib/categories';
-import { CATEGORY_DESCRIPTION_MAX_LENGTH, CATEGORY_NAME_MAX_LENGTH } from '@directivebench/core';
+import type { CategoryField, CategoryFormState } from '@/lib/categories';
 
 // Forms of the Categories page and a category's page (SPEC-124 §11, §11.2), built on the Form
 // pattern: visible labels, the field error, the general error and a role="status" line under
 // the form row (D13), both entered values kept after an error (D14), and focus kept in the card.
+// Limits and counted copy come from the server page as props: this client module must not import
+// `@directivebench/core` (Node built-ins).
+
+/** The longest name and description, in UTF-16 code units (SPEC-124 FR-124-03). */
+export interface CategoryLimits {
+  name: number;
+  description: number;
+}
 
 const idle: CategoryFormState = { kind: 'idle' };
 
@@ -81,12 +83,14 @@ function NameDescriptionForm({
   submitLabel,
   pendingText,
   saved,
+  limits,
   hidden,
 }: {
   action: (previous: CategoryFormState, formData: FormData) => Promise<CategoryFormState>;
   submitLabel: string;
   pendingText: string;
   saved: { name: string; description: string };
+  limits: CategoryLimits;
   hidden?: ReactNode;
 }) {
   const [state, dispatch, pending] = useActionState(action, idle);
@@ -126,15 +130,11 @@ function NameDescriptionForm({
         {hidden}
         <label className="flex min-w-48 flex-1 flex-col gap-1 text-ui text-muted-foreground">
           Name
-          <Input ref={nameField} {...field('name')} maxLength={CATEGORY_NAME_MAX_LENGTH} />
+          <Input ref={nameField} {...field('name')} maxLength={limits.name} />
         </label>
         <label className="flex min-w-64 flex-1 flex-col gap-1 text-ui text-muted-foreground">
           Description (optional)
-          <Input
-            ref={descriptionField}
-            {...field('description')}
-            maxLength={CATEGORY_DESCRIPTION_MAX_LENGTH}
-          />
+          <Input ref={descriptionField} {...field('description')} maxLength={limits.description} />
         </label>
         <Button type="submit" disabled={pending}>
           {submitLabel}
@@ -152,7 +152,7 @@ function NameDescriptionForm({
 }
 
 /** The "New category" card on `/categories` (§11, D1). */
-export function NewCategoryCard() {
+export function NewCategoryCard({ limits }: { limits: CategoryLimits }) {
   return (
     <Card>
       <CardHeader>
@@ -165,6 +165,7 @@ export function NewCategoryCard() {
           submitLabel="Create"
           pendingText="Creating…"
           saved={{ name: '', description: '' }}
+          limits={limits}
         />
       </CardContent>
     </Card>
@@ -177,19 +178,21 @@ export function CategoryDetailsCard({
   slug,
   name,
   description,
+  limits,
 }: {
   id: string;
   slug: string;
   name: string;
   description: string | null;
+  limits: CategoryLimits;
 }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Details</CardTitle>
         <CardDescription>
-          The slug stays <code className="font-mono">{slug}</code>, so links and benchmark
-          definitions keep working.
+          The slug stays <code className="font-mono wrap-anywhere">{slug}</code>, so links and
+          benchmark definitions keep working.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-stack">
@@ -198,6 +201,7 @@ export function CategoryDetailsCard({
           submitLabel="Save"
           pendingText="Saving…"
           saved={{ name, description: description ?? '' }}
+          limits={limits}
           hidden={<input type="hidden" name="id" value={id} />}
         />
       </CardContent>
@@ -214,12 +218,16 @@ export function CategoryStatusCard({
   id,
   name,
   archived,
-  artifactCount,
+  statusText,
+  archiveReason,
 }: {
   id: string;
   name: string;
   archived: boolean;
-  artifactCount: number;
+  /** The Status card's sentence: what archiving does, or where an archived category stays. */
+  statusText: string;
+  /** The Archive panel's reason, with the artifact count (UD-5). */
+  archiveReason: string;
 }) {
   const [state, dispatch, pending] = useActionState(setCategoryArchivedAction, idle);
   // The panel is open for the result it was opened after, so any new result closes it.
@@ -254,7 +262,7 @@ export function CategoryStatusCard({
       <CardContent className="space-y-stack text-body">
         {archived ? (
           <>
-            <p>{archivedStatusText(artifactCount)}</p>
+            <p>{statusText}</p>
             <form action={dispatch}>
               <input type="hidden" name="id" value={id} />
               <input type="hidden" name="intent" value="unarchive" />
@@ -265,7 +273,7 @@ export function CategoryStatusCard({
           </>
         ) : (
           <>
-            <p>Archived categories leave pickers and filters. Their assignments stay.</p>
+            <p>{statusText}</p>
             <Button
               ref={toggle}
               type="button"
@@ -287,7 +295,7 @@ export function CategoryStatusCard({
                   Archive {name}?
                 </p>
                 <ul className="list-disc space-y-1 pl-4">
-                  <li>{archiveReason(artifactCount)}</li>
+                  <li>{archiveReason}</li>
                 </ul>
                 <form action={dispatch} className="flex flex-wrap items-center gap-inline">
                   <input type="hidden" name="id" value={id} />
