@@ -3,7 +3,7 @@ title: Category names, migration 0005 and repository functions (SPEC-124 Phase 1
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer approved implementing SPEC-124 Phase 1 only (issue #22)
-status: in-progress
+status: completed
 branch: feat/category-names-and-repository
 specs: [SPEC-124, SPEC-106, SPEC-006, SPEC-014]
 ---
@@ -105,6 +105,19 @@ PR: #190
 Not verified: anything in `apps/web` (no page uses the new functions yet); NFR-124-01 timing
 (Phase 4, bulk); `pnpm test:e2e` and `pnpm test:storybook` were not run because no UI changed.
 
+## Review
+
+- Round 1 (`om-auto-review-pr --autofix`, engine `om-code-review`, posted as COMMENT): no
+  blocker or major. Minor: the index-backstop tests passed with their SQL patterns broken (17/17),
+  because the ordinary check returns the same outcome; fixed by `withMissedCheck`, which asserts
+  exactly one hidden statement. Breaking the patterns now fails 4 tests (a6edcd3). Inherited
+  CodeQL alert "polynomial regular expression" on `slug.ts` (`^-+|-+$`, moved from `slugify`):
+  runs are collapsed first, so single-character `^-|-$` / `-$` are equivalent and linear; test
+  with 200,000-hyphen inputs (9ccf918). Nit (no change): a missing artifact makes
+  `assignCategoriesBySlug` report every slug as unknown instead of throwing.
+- Full gate after the fixes: format, lint, typecheck, test (7/7 tasks, 100% coverage; core 293,
+  database 215), build and verify:pack all pass.
+
 ## Problems and deviations
 
 None against the spec. The generated-slug check "opens their `[slug]` page" (§15) is covered
@@ -113,10 +126,14 @@ Phase 2.
 
 ## Lessons recorded
 
-None yet.
+- [A test that forces a backstop must assert that its seam fired](../lessons/2026-11-05-a-backstop-test-must-prove-its-seam-fired.md)
 
 ## Follow-ups
 
 - Phase 2: schemas, actions and pages; `MAX_SLUG_PARAM_LENGTH` from `CATEGORY_SLUG_MAX_LENGTH`;
   archived chips and the archived filter option; SPEC-101 FR-101-10.
 - Phases 3 and 4 as in SPEC-124 §21.
+- Phase 2 must decide the order of normalisation and the control-character check:
+  `normalizeCategoryName` turns line breaks into spaces, so a schema that normalises first never
+  shows the §13 "line breaks or other control characters" error for a line break (check `\p{Cc}`
+  on the raw input first, or settle it in the spec).
