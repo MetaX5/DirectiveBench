@@ -248,6 +248,7 @@ describe('updateCategory', () => {
     ).toEqual({
       status: 'updated',
       category: { id, slug: 'devops', name: 'CI and Ops', archived: false },
+      previousName: 'DevOps',
     });
     expect(await getCategoryBySlug(handle.db, 'devops')).toEqual({
       id,
@@ -281,10 +282,18 @@ describe('updateCategory', () => {
 
     expect(
       await updateCategory(handle, { id: security.id, name: 'security', description: 'Hardening' }),
-    ).toEqual({ status: 'updated', category: { ...security, name: 'security' } });
+    ).toEqual({
+      status: 'updated',
+      category: { ...security, name: 'security' },
+      previousName: 'Security',
+    });
     expect(
       await updateCategory(handle, { id: security.id, name: 'security', description: null }),
-    ).toEqual({ status: 'updated', category: { ...security, name: 'security' } });
+    ).toEqual({
+      status: 'updated',
+      category: { ...security, name: 'security' },
+      previousName: 'security',
+    });
     expect(await row(handle, security.id)).toMatchObject({
       description: null,
       nameKey: 'security',
@@ -303,7 +312,11 @@ describe('updateCategory', () => {
     await setCategoryArchived(handle, { id: python.id, state: 'archived' });
     expect(
       await updateCategory(handle, { id: python.id, name: 'Testing', description: null }),
-    ).toEqual({ status: 'updated', category: { ...python, name: 'Testing', archived: true } });
+    ).toEqual({
+      status: 'updated',
+      category: { ...python, name: 'Testing', archived: true },
+      previousName: 'Python',
+    });
     expect(await setCategoryArchived(handle, { id: python.id, state: 'active' })).toEqual({
       status: 'name-taken',
       existing: testing,

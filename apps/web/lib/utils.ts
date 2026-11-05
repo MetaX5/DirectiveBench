@@ -57,3 +57,8 @@ export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
+
+/** A count as app copy shows it ("1,240"), independent of the server's locale (SPEC-124 §13). */
+export function formatCount(n: number): string {
+  return n.toLocaleString('en-US');
+}

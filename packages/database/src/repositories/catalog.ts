@@ -226,7 +226,9 @@ export async function createCategory(
 }
 
 export type UpdateCategoryOutcome =
-  | { status: 'updated' | 'unchanged'; category: CategoryRef }
+  /** `previousName`: the name before the update, so a caller can tell a rename from a new description. */
+  | { status: 'updated'; category: CategoryRef; previousName: string }
+  | { status: 'unchanged'; category: CategoryRef }
   | { status: 'name-taken'; existing: CategoryRef }
   | { status: 'not-found' };
 
@@ -258,7 +260,11 @@ export async function updateCategory(
           .update(categories)
           .set({ name, nameKey, description: input.description, updatedAt: nowIso() })
           .where(eq(categories.id, current.id));
-        return { status: 'updated', category: toCategoryRef({ ...current, name }) };
+        return {
+          status: 'updated',
+          category: toCategoryRef({ ...current, name }),
+          previousName: current.name,
+        };
       }),
     async () => {
       const named = await activeCategoryWithKey(handle.db, nameKey, input.id);
