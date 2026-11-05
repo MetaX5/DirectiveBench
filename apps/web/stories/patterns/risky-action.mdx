@@ -23,12 +23,21 @@ naming the object, the reasons as a list, then the destructive action and Cancel
 4. Leaving is easy and changes nothing: a Cancel link next to it. Source: SPEC-122 prompt.
 5. The panel is inline, not a modal. A Dialog primitive is on "What is missing" for actions
    that need one.
+6. When the panel opens in place without a page load (Archive on a category's page), the button
+   that opens it carries `aria-expanded`, and Cancel is a `link` Button of the same size as the
+   confirming button that closes the panel and returns the focus to the opening button. Source:
+   SPEC-124 §11.2 D11.
 
 ## When not to use
 
 An action that is easy to undo and keeps the item's history needs no confirmation: removing a
 tag, unassigning a suite (its runs and results stay). Say what was kept in the result line.
 See "Lists edited in place" in the Form pattern.
+
+Exception (maintainer decision, SPEC-124 UD-5): archiving a category and assigning or removing a
+category for every listed artifact confirm with the object and the count ("Archive Python?",
+"It stays on 1,240 artifacts"), even though they are reversible and keep history, because they
+change many items at once.
 
 ## States
 

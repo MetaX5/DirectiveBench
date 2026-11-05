@@ -1,11 +1,13 @@
 import { listCategories } from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { NotInitialized, PageHeader } from '@/components/common';
+import { EmptyState, NotInitialized, PageHeader } from '@/components/common';
 import {
-  Badge,
   Card,
   CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
   TBody,
   TD,
   TH,
@@ -13,9 +15,77 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
+import { artifactsPhrase } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
+import { formatCount } from '@/lib/utils';
+import { NewCategoryCard } from './category-forms';
 
 export const metadata: Metadata = { title: 'Categories' };
+
+type CategoryRow = Awaited<ReturnType<typeof listCategories>>[number];
+
+/** The Active or Archived categories card (SPEC-124 §11, D2 to D5): no row actions. */
+function CategoryTable({
+  title,
+  description,
+  categories,
+}: {
+  title: string;
+  description: string;
+  categories: CategoryRow[];
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table aria-label={title}>
+          <THead>
+            <TR>
+              <TH>Name</TH>
+              <TH>Slug</TH>
+              <TH>Description</TH>
+              <TH>Origin</TH>
+              <TH className="text-right">Artifacts</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {categories.map((c) => {
+              const count = Number(c.artifactCount);
+              return (
+                <TR key={c.id}>
+                  <TD className="min-w-40 font-medium wrap-anywhere">
+                    <Link href={`/categories/${c.slug}`} className="text-primary-text underline">
+                      {c.name}
+                    </Link>
+                  </TD>
+                  <TD className="font-mono text-ui text-muted-foreground">{c.slug}</TD>
+                  <TD className="min-w-48 text-muted-foreground wrap-anywhere">{c.description}</TD>
+                  <TD className="text-ui">{c.predefined ? 'Predefined' : 'User-defined'}</TD>
+                  <TD className="text-right tabular-nums">
+                    {count > 0 ? (
+                      <Link
+                        href={`/artifacts?category=${c.slug}`}
+                        aria-label={`${artifactsPhrase(count)} with ${c.name}`}
+                        className="text-primary-text underline"
+                      >
+                        {formatCount(count)}
+                      </Link>
+                    ) : (
+                      formatCount(count)
+                    )}
+                  </TD>
+                </TR>
+              );
+            })}
+          </TBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default async function CategoriesPage() {
   const handle = getDatabase();
@@ -27,51 +97,37 @@ export default async function CategoriesPage() {
       </>
     );
   const categories = await listCategories(handle.db);
+  const active = categories.filter((c) => c.archivedAt === null);
+  const archived = categories.filter((c) => c.archivedAt !== null);
   return (
     <>
       <PageHeader
         title="Categories"
-        description="Read-only in this release. Creating, renaming, merging and archiving categories is planned (Milestone 1)."
+        description="Group artifacts in your own categories. Merging categories and changing a slug are planned."
       />
-      <Card>
-        <CardContent>
-          <Table>
-            <THead>
-              <TR>
-                <TH>Name</TH>
-                <TH>Slug</TH>
-                <TH>Description</TH>
-                <TH>Origin</TH>
-                <TH className="text-right">Artifacts</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {categories.map((c) => (
-                <TR key={c.id}>
-                  <TD className="font-medium">
-                    {Number(c.artifactCount) > 0 ? (
-                      <Link className="hover:underline" href={`/artifacts?category=${c.slug}`}>
-                        {c.name}
-                      </Link>
-                    ) : (
-                      c.name
-                    )}
-                    {c.archivedAt ? (
-                      <Badge variant="muted" className="ml-2">
-                        archived
-                      </Badge>
-                    ) : null}
-                  </TD>
-                  <TD className="font-mono text-ui text-muted-foreground">{c.slug}</TD>
-                  <TD className="text-muted-foreground">{c.description ?? '—'}</TD>
-                  <TD className="text-ui">{c.predefined ? 'Predefined' : 'User-defined'}</TD>
-                  <TD className="text-right tabular-nums">{Number(c.artifactCount)}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-grid">
+        <NewCategoryCard />
+        {active.length > 0 ? (
+          <CategoryTable
+            title="Active categories"
+            description="Open a category to rename or archive it."
+            categories={active}
+          />
+        ) : (
+          <EmptyState title="No active categories">
+            {archived.length > 0
+              ? 'Create one above, or unarchive one below.'
+              : 'Create one above.'}
+          </EmptyState>
+        )}
+        {archived.length > 0 ? (
+          <CategoryTable
+            title="Archived categories"
+            description="Hidden from pickers and filters. Their assignments stay."
+            categories={archived}
+          />
+        ) : null}
+      </div>
     </>
   );
 }
