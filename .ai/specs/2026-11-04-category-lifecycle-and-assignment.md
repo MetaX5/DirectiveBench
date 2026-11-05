@@ -3,7 +3,7 @@ id: SPEC-124
 title: Create, rename and archive categories and assign them to artifacts (E03-S01)
 status: approved
 created: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-05
 category: feature
 related: [SPEC-106, SPEC-101, SPEC-006, SPEC-007, SPEC-014, SPEC-122, SPEC-108]
 ---
@@ -549,10 +549,26 @@ categories, a `directivebench category` CLI, transliterated slugs for non-Latin 
 
 ## 20. Implementation status
 
-- **Implemented:** nothing from this spec. Existing behaviour it builds on is listed in SPEC-106
-  §20 (seeding, read-only page, single-category filter, example import by slug).
-- **Partially implemented:** none.
-- **Not implemented:** everything in §6.
+- **Implemented (Phase 1, database and core only; verified by
+  `packages/core/test/catalog.test.ts` and
+  `packages/database/test/{client,catalog,category-lifecycle,category-assignment,artifacts}.test.ts`
+  on 2026-11-05):** FR-124-01 to FR-124-03 (`normalizeCategoryName`, `categoryNameKey`,
+  `categorySlug`, the three limits); FR-124-10 (seeding writes `name_key` and skips a name
+  clash); migration `0005` with its backfill, partial unique index and rollback (§8.1, the
+  database half of AC-9); the repository functions `createCategory` (generated `category-N`
+  slugs, A5), `updateCategory`, `setCategoryArchived`, `getCategoryBySlug`,
+  `assignArtifactCategory`, `unassignArtifactCategory`, `archived` on assigned categories with
+  active ones first, and `assignCategoriesBySlug` as one conditional insert per slug with the
+  archive-race regression test (§8.2). Each clash check is backed by the unique indexes; a forced
+  violation maps to `name-taken` / `slug-taken`.
+- **Partially implemented:** FR-124-04 to FR-124-09, FR-124-11, FR-124-12 at the repository
+  level only: no page, form or Server Action uses them yet (Phases 2 and 3). The generated
+  slugs were checked against the web slug pattern in a database test; opening their
+  `/categories/[slug]` page is Phase 2.
+- **Not implemented:** everything in §6 that needs `apps/web` (FR-124-13 to FR-124-16), the web
+  `MAX_SLUG_PARAM_LENGTH` from core (Phase 2), `listArtifactIds`,
+  `setCategoryForListedArtifacts` and `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). No acceptance
+  criterion is fully verified yet.
 
 ## 21. Phasing and implementation plan
 

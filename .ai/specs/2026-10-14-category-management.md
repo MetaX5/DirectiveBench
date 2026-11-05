@@ -3,7 +3,7 @@ id: SPEC-106
 title: Category Management
 status: draft
 created: 2026-10-14
-updated: 2026-10-15
+updated: 2026-11-05
 category: feature
 related: [SPEC-101, SPEC-105, SPEC-108, SPEC-109, SPEC-113, SPEC-116, SPEC-005, SPEC-006]
 ---
@@ -48,7 +48,7 @@ With dozens or hundreds of artifacts from many repositories, users need a way to
 |----|-------------|
 | FR-106-01 | **Predefined categories** SHALL be seeded idempotently on startup (`serve`/`init`/`demo` after migrations) from `PREDEFINED_CATEGORIES` in `@directivebench/core`: Security (`security`), Code Quality (`code-quality`), Testing (`testing`), Documentation (`documentation`), Performance (`performance`), Architecture (`architecture`), Frontend (`frontend`), Backend (`backend`), DevOps (`devops`), WordPress (`wordpress`), PHP (`php`), React (`react`), Next.js (`nextjs`), TypeScript (`typescript`), Python (`python`), Database (`database`), Workflow (`workflow`). Seeded rows have `predefined = true`. |
 | FR-106-02 | Seeding SHALL insert only missing slugs; it SHALL NOT overwrite names/descriptions edited by the user, nor unarchive archived categories, nor re-create categories merged away (tracked by alias, FR-106-09). |
-| FR-106-03 | **Create**: name (1–64 chars, trimmed, unique case-insensitively among non-archived categories), optional description (≤ 500 chars), optional slug (default `slugify(name)`; must match `^[a-z0-9]+(?:-[a-z0-9]+)*$`, ≤ 64 chars, globally unique including archived). |
+| FR-106-03 | **Create**: name (1–64 characters after normalisation: Unicode NFC, trimmed, whitespace runs collapsed; no control characters), unique case-insensitively (`categoryNameKey`, full Unicode lower case) among non-archived categories, enforced by a partial unique index; optional description (≤ 500 chars). The slug is derived from the name once (`categorySlug`: `slugify` cut to 64 characters without a trailing hyphen) and is globally unique including archived; a name whose slug another category holds is refused, never suffixed. A name with no Latin letter or digit gets the smallest free generated slug `category-N`. No user-chosen slug on create. Refined by [SPEC-124](2026-11-04-category-lifecycle-and-assignment.md) A4 to A7 and A18. |
 | FR-106-04 | **Edit/rename**: name and description are editable for all categories, predefined included. Renaming SHALL NOT change the slug. |
 | FR-106-05 | **Slug change** is an explicit advanced action (not part of rename) that records the old slug as an alias so existing references resolve; it SHALL warn that external definitions using the old slug will resolve through the alias. |
 | FR-106-06 | **Assign/unassign**: artifacts ↔ categories many-to-many via `artifact_categories` (`artifact_id`, `category_id`, `created_at`, composite primary key). Assign is idempotent. Bulk assign/unassign for multiple selected artifacts SHALL be supported. Archived categories cannot be newly assigned. |
@@ -185,4 +185,5 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 
 - **Implemented (verified by `packages/database/test/catalog.test.ts` "seeds predefined categories once and keeps user changes" and `packages/runner/test/runner.test.ts` category assignment):** `PREDEFINED_CATEGORIES` (17 entries) in `packages/core/src/categories.ts`; `categories` and `artifact_categories` tables; `seedPredefinedCategories`, `listCategories`, `assignCategoriesBySlug` (existing non-archived slugs only; unknown slugs returned, not created) in `packages/database/src/repositories/`; seeding on `init`/`serve`/`demo`.
 - **Partially implemented:** read-only Categories page (links to `/artifacts?category=<slug>`), category badges on artifacts and the `category` filter on the artifacts list exist in `apps/web`, without a verified automated UI test.
+- **Implemented in the database layer only (SPEC-124 Phase 1, verified by `packages/database/test/{category-lifecycle,category-assignment,catalog,client}.test.ts` and `packages/core/test/catalog.test.ts` on 2026-11-05):** name normalisation, name key and slug derivation (`normalizeCategoryName`, `categoryNameKey`, `categorySlug`, limits) in core; `categories.name_key` with a partial unique index (migration `0005`); `createCategory`, `updateCategory`, `setCategoryArchived`, `getCategoryBySlug`, `assignArtifactCategory`, `unassignArtifactCategory`; `archived` on the categories of `listArtifacts` and `getArtifactDetail`; `assignCategoriesBySlug` as one conditional insert per slug. No page or action uses them yet.
 - **Not implemented:** create/edit/rename/slug change/archive/merge/bulk assign UI and actions, aliases, `merged_into_id`, suite category resolution warnings, AI-assisted categorisation.
