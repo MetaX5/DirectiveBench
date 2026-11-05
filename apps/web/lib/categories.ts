@@ -4,12 +4,19 @@ import {
   normalizeCategoryName,
 } from '@directivebench/core';
 import type {
+  ArtifactCategory,
+  AssignArtifactCategoryOutcome,
   CreateCategoryOutcome,
   SetCategoryArchivedOutcome,
+  UnassignArtifactCategoryOutcome,
   UpdateCategoryOutcome,
 } from '@directivebench/database';
 import { z } from 'zod';
-import { INCOMPLETE_FORM_MESSAGE } from './artifact-metadata';
+import {
+  ARTIFACT_GONE_MESSAGE,
+  INCOMPLETE_FORM_MESSAGE,
+  type MetadataFormState,
+} from './artifact-metadata';
 import { formatCount } from './utils';
 
 // Validation, messages and display rules of the category forms and pages (SPEC-124 §8.3, §11,
@@ -96,6 +103,9 @@ export const archiveCategorySchema = z
     id,
     state: intent === 'archive' ? ('archived' as const) : ('active' as const),
   }));
+
+/** The Categories card's assign and remove forms on the artifact page (§8.3, Phase 3). */
+export const artifactCategorySchema = z.object({ artifactId: idSchema, categoryId: idSchema });
 
 function isCategoryField(value: unknown): value is CategoryField {
   return value === 'name' || value === 'description';
@@ -252,4 +262,73 @@ export function categoryFilterOptions(
   const archived = categories.find((c) => c.slug === selected && c.archivedAt !== null);
   if (archived) options.push({ value: archived.slug, label: `${archived.name} (archived)` });
   return options;
+}
+
+/** The Categories card's state for an `assignArtifactCategory` outcome (FR-124-11, D24). */
+export function assignCategoryState(outcome: AssignArtifactCategoryOutcome): MetadataFormState {
+  switch (outcome.status) {
+    case 'assigned':
+      return { kind: 'success', message: `Assigned ${outcome.category.name}.` };
+    case 'already-assigned':
+      return { kind: 'success', message: `${outcome.category.name} is already assigned.` };
+    case 'category-archived':
+      return {
+        kind: 'error',
+        message: `${outcome.category.name} is archived. Unarchive it on its page before assigning it.`,
+      };
+    case 'category-not-found':
+      return { kind: 'error', message: CATEGORY_GONE_MESSAGE };
+    case 'artifact-not-found':
+      return { kind: 'error', message: ARTIFACT_GONE_MESSAGE };
+  }
+}
+
+/** The Categories card's state for an `unassignArtifactCategory` outcome (FR-124-12, D23, D24). */
+export function unassignCategoryState(outcome: UnassignArtifactCategoryOutcome): MetadataFormState {
+  switch (outcome.status) {
+    case 'removed': {
+      const { name, archived } = outcome.category;
+      return {
+        kind: 'success',
+        message: archived
+          ? `Removed ${name}. To assign it again, unarchive it on its page first.`
+          : `Removed ${name}.`,
+      };
+    }
+    case 'not-assigned':
+      return { kind: 'success', message: `${outcome.category.name} was already removed.` };
+    case 'category-not-found':
+      return { kind: 'error', message: CATEGORY_GONE_MESSAGE };
+    case 'artifact-not-found':
+      return { kind: 'error', message: ARTIFACT_GONE_MESSAGE };
+  }
+}
+
+/**
+ * What the artifact page's Categories card shows (§11, §11.3), computed on the server so the
+ * client card imports no values from core (lesson 2026-11-05): the chips with their labels, the
+ * active categories not yet assigned (the picker's options, by name), and, when there are none,
+ * which sentence replaces the picker (D21: every active category is assigned; D22: no active
+ * category exists).
+ */
+export interface CategoriesCardModel {
+  chips: { id: string; label: string; archived: boolean }[];
+  available: { id: string; name: string }[];
+  noPicker: 'all-assigned' | 'none-active' | null;
+}
+
+export function categoriesCardModel(
+  assigned: readonly ArtifactCategory[],
+  all: readonly { id: string; name: string; archivedAt: string | null }[],
+): CategoriesCardModel {
+  const assignedIds = new Set(assigned.map((c) => c.id));
+  const active = all.filter((c) => c.archivedAt === null);
+  const available = active
+    .filter((c) => !assignedIds.has(c.id))
+    .map((c) => ({ id: c.id, name: c.name }));
+  return {
+    chips: assigned.map((c) => ({ id: c.id, label: categoryChipLabel(c), archived: c.archived })),
+    available,
+    noPicker: available.length > 0 ? null : active.length > 0 ? 'all-assigned' : 'none-active',
+  };
 }
