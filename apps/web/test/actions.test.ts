@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
   acquireNextJob,
+  assignArtifactCategory,
   createBenchmarkRun,
+  getCategoryBySlug,
+  listCategories,
   finishBenchmarkRun,
   getBlindReviewForReviewer,
   insertAgentRun,
@@ -22,6 +25,9 @@ import {
   addArtifactTagAction,
   assignArtifactSuiteAction,
   cancelJobAction,
+  createCategoryAction,
+  setCategoryArchivedAction,
+  updateCategoryAction,
   recordBlindVerdictAction,
   revealBlindReviewAction,
   startBlindReviewAction,
@@ -39,6 +45,7 @@ import {
   metadataLimits,
   type MetadataFormState,
 } from '../lib/artifact-metadata';
+import { CATEGORY_GONE_MESSAGE, type CategoryFormState } from '../lib/categories';
 import { DatabaseNotInitializedError, requireDatabase } from '../lib/db';
 import { createTempDataDir, initialiseDatabase, resetCachedDatabase } from './support/data-dir';
 
@@ -930,5 +937,240 @@ describe('blind review actions (SPEC-123 §10)', () => {
         form({ benchmarkRunId: runId, pairId: 'bpair_missing', verdict: 'a', note: '' }),
       ),
     ).toEqual({ kind: 'error', message: 'This pair no longer exists.' });
+  });
+});
+
+describe('category actions (SPEC-124 §10)', () => {
+  const idle: CategoryFormState = { kind: 'idle' };
+
+  async function categoryRows() {
+    return (await listCategories(handle.db)).map((c) => ({
+      slug: c.slug,
+      name: c.name,
+      description: c.description,
+      archived: c.archivedAt !== null,
+    }));
+  }
+
+  async function create(name: string, description = ''): Promise<string> {
+    expect(await createCategoryAction(idle, form({ name, description }))).toMatchObject({
+      kind: 'success',
+    });
+    const slug = (await categoryRows()).find((c) => c.name === name.trim())?.slug;
+    const category = await getCategoryBySlug(handle.db, slug as string);
+    return (category as { id: string }).id;
+  }
+
+  function expectRefreshed(): void {
+    expect(next.revalidatePath).toHaveBeenCalledWith('/categories', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledWith('/artifacts', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledTimes(2);
+  }
+
+  it('creates a category and refreshes the category and artifact pages', async () => {
+    expect(
+      await createCategoryAction(idle, form({ name: '  Client   A ', description: ' Ours ' })),
+    ).toEqual({ kind: 'success', message: 'Created Client A.' });
+    expectRefreshed();
+    expect(await categoryRows()).toEqual([
+      { slug: 'client-a', name: 'Client A', description: 'Ours', archived: false },
+    ]);
+    // A name without a Latin letter or digit gets a generated slug (A5).
+    expect(await createCategoryAction(idle, form({ name: '日本語', description: '' }))).toEqual({
+      kind: 'success',
+      message: 'Created 日本語.',
+    });
+    expect(await getCategoryBySlug(handle.db, 'category-1')).toMatchObject({
+      name: '日本語',
+      description: null,
+    });
+  });
+
+  it('refuses invalid, duplicate and slug-taken names with both values kept, storing nothing', async () => {
+    await create('Testing');
+    vi.clearAllMocks();
+    const before = await categoryRows();
+    const cases: Array<[Record<string, string>, string]> = [
+      [{ name: '', description: 'd' }, 'Enter a name.'],
+      [
+        { name: 'two\nlines', description: 'd' },
+        'A name cannot contain line breaks or other control characters.',
+      ],
+      [
+        { name: 'x'.repeat(65), description: 'd' },
+        'A name can be at most 64 characters. Shorten it.',
+      ],
+      [
+        { name: ' TESTING ', description: 'd' },
+        'A category named Testing already exists. Choose another name.',
+      ],
+    ];
+    for (const [fields, message] of cases) {
+      expect(await createCategoryAction(idle, form(fields)), message).toEqual({
+        kind: 'fieldError',
+        message,
+        field: 'name',
+        values: fields,
+      });
+    }
+    expect(
+      await createCategoryAction(idle, form({ name: 'Ok', description: 'x'.repeat(501) })),
+    ).toEqual({
+      kind: 'fieldError',
+      message: 'A description can be at most 500 characters. Shorten it.',
+      field: 'description',
+      values: { name: 'Ok', description: 'x'.repeat(501) },
+    });
+    // A missing field is not something the user typed: a general error, with empty values.
+    expect(await createCategoryAction(idle, form({ name: 'Ok' }))).toEqual({
+      kind: 'error',
+      message: INCOMPLETE_FORM_MESSAGE,
+    });
+    expect(await categoryRows()).toEqual(before);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('names the holder of a taken slug, and says to unarchive an archived one', async () => {
+    const pythonId = await create('Python');
+    await create('C');
+    expect(await createCategoryAction(idle, form({ name: 'C#', description: '' }))).toMatchObject({
+      message: 'The name gives the link c, which C already uses. Choose another name.',
+    });
+    await setCategoryArchivedAction(idle, form({ id: pythonId, intent: 'archive' }));
+    expect(
+      await createCategoryAction(idle, form({ name: 'python', description: '' })),
+    ).toMatchObject({
+      kind: 'fieldError',
+      message:
+        'The archived category Python already uses the link python. Unarchive it on its page instead.',
+    });
+  });
+
+  it('renames a category, keeping its slug, and reports a description change or no change', async () => {
+    const id = await create('DevOps', 'Old');
+    vi.clearAllMocks();
+    expect(
+      await updateCategoryAction(idle, form({ id, name: 'CI and Ops', description: 'Old' })),
+    ).toEqual({
+      kind: 'success',
+      message: 'Renamed to CI and Ops. Its slug stays devops, so links keep working.',
+    });
+    expectRefreshed();
+    vi.clearAllMocks();
+    expect(
+      await updateCategoryAction(idle, form({ id, name: 'CI and Ops', description: 'New' })),
+    ).toEqual({ kind: 'success', message: 'Saved.' });
+    vi.clearAllMocks();
+    expect(
+      await updateCategoryAction(idle, form({ id, name: ' CI  and Ops', description: 'New ' })),
+    ).toEqual({ kind: 'success', message: 'Nothing changed.' });
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+    expect(await categoryRows()).toEqual([
+      { slug: 'devops', name: 'CI and Ops', description: 'New', archived: false },
+    ]);
+  });
+
+  it('refuses a rename into another active name, a forged id and invalid input', async () => {
+    const id = await create('Python');
+    await create('Testing');
+    const before = await categoryRows();
+    vi.clearAllMocks();
+    expect(
+      await updateCategoryAction(idle, form({ id, name: 'testing', description: '' })),
+    ).toEqual({
+      kind: 'fieldError',
+      message: 'A category named Testing already exists. Choose another name.',
+      field: 'name',
+      values: { name: 'testing', description: '' },
+    });
+    expect(
+      await updateCategoryAction(idle, form({ id: 'cat_forged', name: 'New', description: '' })),
+    ).toEqual({ kind: 'error', message: CATEGORY_GONE_MESSAGE });
+    expect(await updateCategoryAction(idle, form({ name: 'New', description: '' }))).toEqual({
+      kind: 'error',
+      message: INCOMPLETE_FORM_MESSAGE,
+    });
+    expect(
+      await updateCategoryAction(idle, form({ id, name: 'New', description: 'tab\there' })),
+    ).toMatchObject({ kind: 'fieldError', field: 'description' });
+    expect(await categoryRows()).toEqual(before);
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('archives with the artifact count, unarchives, and is idempotent', async () => {
+    const id = await create('Python');
+    const { artifactId } = await importArtifact();
+    await assignArtifactCategory(handle.db, artifactId, id);
+    vi.clearAllMocks();
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'archive' }))).toEqual({
+      kind: 'success',
+      message: 'Archived Python. It stays on 1 artifact.',
+    });
+    expectRefreshed();
+    vi.clearAllMocks();
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'archive' }))).toEqual({
+      kind: 'success',
+      message: 'Python is already archived.',
+    });
+    // Another tab archived it: this tab's page is refreshed to show the real state.
+    expectRefreshed();
+    vi.clearAllMocks();
+    // Assignments stay (FR-124-08).
+    expect(await getCategoryBySlug(handle.db, 'python')).toMatchObject({
+      archived: true,
+      artifactCount: 1,
+    });
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'unarchive' }))).toEqual({
+      kind: 'success',
+      message: 'Unarchived Python. It is back in pickers and filters.',
+    });
+    expectRefreshed();
+    vi.clearAllMocks();
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'unarchive' }))).toEqual({
+      kind: 'success',
+      message: 'Python is already active.',
+    });
+    expectRefreshed();
+    const empty = await create('Empty');
+    expect(await setCategoryArchivedAction(idle, form({ id: empty, intent: 'archive' }))).toEqual({
+      kind: 'success',
+      message: 'Archived Empty.',
+    });
+  });
+
+  it('refuses an unarchive clash, a forged id and a forged intent', async () => {
+    const id = await create('Python');
+    await setCategoryArchivedAction(idle, form({ id, intent: 'archive' }));
+    // The archived name is free for an active category (A10), under another slug.
+    const snake = await create('Snake');
+    await updateCategoryAction(idle, form({ id: snake, name: 'PYTHON', description: '' }));
+    vi.clearAllMocks();
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'unarchive' }))).toEqual({
+      kind: 'error',
+      message: 'An active category is already named PYTHON. Rename one of them first.',
+    });
+    expect(
+      await setCategoryArchivedAction(idle, form({ id: 'cat_forged', intent: 'archive' })),
+    ).toEqual({ kind: 'error', message: CATEGORY_GONE_MESSAGE });
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'delete' }))).toEqual({
+      kind: 'error',
+      message: INCOMPLETE_FORM_MESSAGE,
+    });
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+    expect(await getCategoryBySlug(handle.db, 'python')).toMatchObject({ archived: true });
+  });
+
+  it('reports no artifact when the archived category is gone before its count is read', async () => {
+    const id = await create('Python');
+    // A category is never deleted by the app (A9); a trigger stands for any outside write.
+    handle.sqlite.exec(
+      `create trigger drop_archived after update of archived_at on categories
+         when new.archived_at is not null
+       begin delete from categories where id = new.id; end`,
+    );
+    expect(await setCategoryArchivedAction(idle, form({ id, intent: 'archive' }))).toEqual({
+      kind: 'success',
+      message: 'Archived Python.',
+    });
   });
 });

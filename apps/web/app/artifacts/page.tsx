@@ -37,6 +37,7 @@ import {
   repositoryOptions,
   type SearchParams,
 } from '@/lib/artifacts';
+import { categoryChipLabel, categoryFilterOptions } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
@@ -61,7 +62,8 @@ export default async function ArtifactsPage({
   const artifacts = await listArtifacts(handle.db, filter);
   const registryEmpty = artifacts.length === 0 && (!filtered || !(await hasArtifacts(handle.db)));
   const repositories = repositoryOptions(await listRepositories(handle.db));
-  const categories = (await listCategories(handle.db)).filter((c) => c.archivedAt === null);
+  // Active categories, plus the filtered one when it is archived (FR-124-15).
+  const categories = categoryFilterOptions(await listCategories(handle.db), filter.category);
   const notice = invalidParamsNotice(invalid);
 
   // The table has eleven columns; the wide layout fits them at 1920px with the sidebar (issue 122).
@@ -111,8 +113,8 @@ export default async function ArtifactsPage({
               <NativeSelect name="category" defaultValue={filter.category ?? ''}>
                 <NativeSelectOption value="">All</NativeSelectOption>
                 {categories.map((c) => (
-                  <NativeSelectOption key={c.slug} value={c.slug}>
-                    {c.name}
+                  <NativeSelectOption key={c.value} value={c.value}>
+                    {c.label}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
@@ -194,9 +196,11 @@ export default async function ArtifactsPage({
                       </TD>
                       <TD>
                         <div className="flex flex-wrap gap-1">
+                          {/* Active categories first, then archived ones, muted (FR-124-14).
+                              Badges break only between words (SPEC-101, issue 122). */}
                           {a.categories.map((c) => (
-                            <Badge key={c.slug} variant="secondary">
-                              {c.name}
+                            <Badge key={c.slug} variant={c.archived ? 'muted' : 'secondary'}>
+                              {categoryChipLabel(c)}
                             </Badge>
                           ))}
                         </div>

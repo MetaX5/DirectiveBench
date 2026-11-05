@@ -54,6 +54,7 @@ import {
   type SearchParams,
 } from '@/lib/artifacts';
 import { metadataLimits } from '@/lib/artifact-metadata';
+import { categoryChipLabel } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { providerLabel } from '@/lib/repositories';
@@ -170,8 +171,15 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
               <p className="text-muted-foreground">Categories</p>
               {categories.length ? (
                 <div className="flex flex-wrap gap-inline-tight">
+                  {/* Active categories first, then archived ones, muted (FR-124-14). */}
                   {categories.map((c) => (
-                    <Badge key={c.slug}>{c.name}</Badge>
+                    <Badge
+                      key={c.slug}
+                      variant={c.archived ? 'muted' : 'secondary'}
+                      className="break-all"
+                    >
+                      {categoryChipLabel(c)}
+                    </Badge>
                   ))}
                 </div>
               ) : (

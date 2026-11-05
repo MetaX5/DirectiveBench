@@ -12,6 +12,7 @@ import {
 import {
   addArtifactTag,
   assignArtifactSuite,
+  createCategory,
   enqueueBenchmarkJob,
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
@@ -20,12 +21,15 @@ import {
   revealBlindReview,
   startBlindReview,
   UnsupportedRepositoryError,
+  getCategoryBySlug,
   getLatestArtifactVersionId,
   getSuiteVersion,
   removeArtifactTag,
   requestJobCancellation,
   setArtifactNotes,
+  setCategoryArchived,
   unassignArtifactSuite,
+  updateCategory,
   type ArtifactSuiteOutcome,
 } from '@directivebench/database';
 import { revalidatePath } from 'next/cache';
@@ -54,6 +58,17 @@ import {
   verdictState,
   type BlindReviewFormState,
 } from './blind-review';
+import {
+  archiveCategorySchema,
+  archiveCategoryState,
+  categoryRefused,
+  createCategorySchema,
+  createCategoryState,
+  updateCategorySchema,
+  updateCategoryState,
+  type CategoryFormState,
+  type CategoryValues,
+} from './categories';
 import { requireDatabase } from './db';
 import { webRunBlockers } from './run-guard';
 import {
@@ -407,4 +422,78 @@ export async function revealBlindReviewAction(
   const outcome = await revealBlindReview(requireDatabase().db, { benchmarkRunId, reviewId });
   refreshRun(benchmarkRunId);
   return revealState(outcome);
+}
+
+/**
+ * Re-renders every page that shows categories: the Categories pages and, once for all of them,
+ * the Artifacts list and every artifact page (SPEC-124 FR-124-16).
+ */
+function refreshCategories(): void {
+  revalidatePath('/categories', 'layout');
+  revalidatePath('/artifacts', 'layout');
+}
+
+/** The text the category form's fields held, given back after an error (D14). */
+function categoryValues(formData: FormData): CategoryValues {
+  return {
+    name: fieldText(formData.get('name')),
+    description: fieldText(formData.get('description')),
+  };
+}
+
+/** Creates a user-defined category from a name and an optional description (FR-124-04). */
+export async function createCategoryAction(
+  _previous: CategoryFormState,
+  formData: FormData,
+): Promise<CategoryFormState> {
+  const values = categoryValues(formData);
+  const input = createCategorySchema.safeParse({
+    name: formData.get('name'),
+    description: formData.get('description'),
+  });
+  if (!input.success) return categoryRefused(input.error, values);
+  const outcome = await createCategory(requireDatabase(), input.data);
+  if (outcome.status === 'created') refreshCategories();
+  return createCategoryState(outcome, values);
+}
+
+/** Renames a category and sets its description; its slug never changes (FR-124-07). */
+export async function updateCategoryAction(
+  _previous: CategoryFormState,
+  formData: FormData,
+): Promise<CategoryFormState> {
+  const values = categoryValues(formData);
+  const input = updateCategorySchema.safeParse({
+    id: formData.get('id'),
+    name: formData.get('name'),
+    description: formData.get('description'),
+  });
+  if (!input.success) return categoryRefused(input.error, values);
+  const outcome = await updateCategory(requireDatabase(), input.data);
+  if (outcome.status === 'updated') refreshCategories();
+  return updateCategoryState(outcome, values);
+}
+
+/**
+ * Archives or unarchives a category (FR-124-08, FR-124-09). The page asks before archiving; the
+ * result line names the number of artifacts the category stays on, read after the write.
+ */
+export async function setCategoryArchivedAction(
+  _previous: CategoryFormState,
+  formData: FormData,
+): Promise<CategoryFormState> {
+  const input = archiveCategorySchema.safeParse({
+    id: formData.get('id'),
+    intent: formData.get('intent'),
+  });
+  if (!input.success) return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const handle = requireDatabase();
+  const outcome = await setCategoryArchived(handle, input.data);
+  // "Already archived" or "already active" means another tab changed it: refresh this page too.
+  if ('category' in outcome) refreshCategories();
+  const artifactCount =
+    outcome.status === 'archived'
+      ? ((await getCategoryBySlug(handle.db, outcome.category.slug))?.artifactCount ?? 0)
+      : 0;
+  return archiveCategoryState(outcome, artifactCount);
 }

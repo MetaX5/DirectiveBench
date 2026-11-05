@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { cn, formatDate, formatDelta, formatDuration, formatScore } from '../lib/utils';
+import {
+  cn,
+  formatCount,
+  formatDate,
+  formatDelta,
+  formatDuration,
+  formatScore,
+} from '../lib/utils';
 
 describe('cn', () => {
   it('joins conditional classes and lets later Tailwind classes win', () => {
@@ -78,5 +85,13 @@ describe('formatDuration', () => {
 
   it.each([null, undefined])('renders a dash for %j', (ms) => {
     expect(formatDuration(ms)).toBe('—');
+  });
+});
+
+describe('formatCount', () => {
+  it('groups thousands with a comma whatever the locale', () => {
+    expect(formatCount(0)).toBe('0');
+    expect(formatCount(1240)).toBe('1,240');
+    expect(formatCount(10000)).toBe('10,000');
   });
 });

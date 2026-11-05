@@ -3,6 +3,16 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Badge } from '../components/ui/badge';
 import { scanTextContrast } from './contrast';
+import { DEMO_ARTIFACT, withDatabase } from './support';
+
+/** Archives or unarchives a demo category for the scan (setup only; the pages are SPEC-124). */
+async function setArchived(slug: string, archived: boolean): Promise<void> {
+  await withDatabase((db) =>
+    db
+      .prepare('update categories set archived_at = ? where slug = ?')
+      .run(archived ? new Date().toISOString() : null, slug),
+  );
+}
 
 for (const theme of ['light', 'dark'] as const) {
   test(`visible text, placeholders and status surfaces have AA contrast in ${theme}`, async ({
@@ -26,6 +36,17 @@ for (const theme of ['light', 'dark'] as const) {
     ]);
     const details = new Set<string>();
     const report = [];
+    async function scan(path: string) {
+      const rows = await scanTextContrast(page);
+      const failures = rows.filter((row) => row.ratio < row.threshold);
+      report.push({
+        path,
+        checked: rows.length,
+        minimum: Math.min(...rows.map((row) => row.ratio)),
+        failures,
+      });
+      expect.soft(failures, `${theme} ${path}`).toEqual([]);
+    }
     for (const path of paths) {
       await page.goto(path);
       await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
@@ -40,15 +61,33 @@ for (const theme of ['light', 'dark'] as const) {
           details.add(group);
         }
       }
-      const rows = await scanTextContrast(page);
-      const failures = rows.filter((row) => row.ratio < row.threshold);
-      report.push({
-        path,
-        checked: rows.length,
-        minimum: Math.min(...rows.map((row) => row.ratio)),
-        failures,
-      });
-      expect.soft(failures, `${theme} ${path}`).toEqual([]);
+      await scan(path);
+    }
+    // A category's page with the Archive panel open, then an archived category: the Archived
+    // card, the header badge, the muted chips and the archived filter option (SPEC-124 §11.2).
+    await page.goto('/categories/security');
+    await page.getByRole('button', { name: 'Archive', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Archive Security' })).toBeVisible();
+    await scan('/categories/security (Archive panel open)');
+    const artifactId = await withDatabase(
+      (db) =>
+        (db.prepare('select id from artifacts where slug = ?').get(DEMO_ARTIFACT) as { id: string })
+          .id,
+    );
+    await setArchived('code-quality', true);
+    try {
+      for (const path of [
+        '/categories',
+        '/categories/code-quality',
+        '/artifacts?category=code-quality',
+        `/artifacts/${artifactId}`,
+      ]) {
+        await page.goto(path);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await scan(`${path} (code-quality archived)`);
+      }
+    } finally {
+      await setArchived('code-quality', false);
     }
     // Exercise every status variant and text role on actual app surface classes,
     // including regression-row and warning surfaces absent from an ordinary demo.

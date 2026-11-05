@@ -56,7 +56,8 @@ describe('parseArtifactListParams', () => {
     for (const category of ['-a', 'a-', 'a--b', 'x'.repeat(MAX_SLUG_PARAM_LENGTH + 1)]) {
       expect(parseArtifactListParams({ category }).invalid, category).toEqual(['category']);
     }
-    // A long custom category slug (issue #22) is still a valid value.
+    // The longest slug a category can have (SPEC-124 A6) is still a valid value.
+    expect(MAX_SLUG_PARAM_LENGTH).toBe(64);
     const long = 'x'.repeat(MAX_SLUG_PARAM_LENGTH);
     expect(parseArtifactListParams({ category: long }).value).toEqual({ category: long });
   });
