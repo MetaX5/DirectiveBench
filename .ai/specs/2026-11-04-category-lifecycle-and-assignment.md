@@ -106,7 +106,7 @@ not started.
 | A15 | Bulk remove | Included, symmetric to bulk assign | Bulk assign only | It is the undo of a mistaken bulk assign (reversibility) |
 | A16 | Bulk size cap | Named limit `MAX_BULK_CATEGORY_ARTIFACTS = 10_000` (SPEC-106 NFR-106-01 sizing); more is refused with "narrow the filters" | No cap | Repository rule: no unbounded writes or unnamed limits |
 | A17 | Multi-category filter and "Uncategorized" | Out of scope; the single `category` filter stays | Repeated `category` params (FR-106-10) | Not in the issue's criteria |
-| A18 | Name normalisation | Unicode NFC, trim, runs of whitespace collapsed to one space; control characters refused; key = normalised name with JavaScript `toLowerCase()` (full Unicode, no accent folding) | Also fold accents or NFKC | Matches how tags and search fold today (`apps/web/lib/artifact-metadata.ts`, `listArtifacts`) |
+| A18 | Name normalisation | control characters in the raw input refused first; then Unicode NFC, trim, runs of whitespace collapsed to one space; key = normalised name with JavaScript `toLowerCase()` (full Unicode, no accent folding) | Also fold accents or NFKC | Matches how tags and search fold today (`apps/web/lib/artifact-metadata.ts`, `listArtifacts`) |
 | A19 | Length unit for 64 / 500 | UTF-16 code units, as Zod's `.max` counts (same as tags and notes) | Code points | Consistency with existing limits |
 | A20 | Benchmark suites and categories | Out of scope. Suite definitions keep their `categories:` slugs verbatim; nothing resolves or counts them yet | Add suite counts and import warnings now (FR-106-07) | Not in the issue; S2 (builder) is the natural home |
 | A21 | CLI surface | None in this story | `directivebench category list/create/archive` | The issue names only the web UI; categories are local metadata the web app owns |
@@ -265,8 +265,12 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
 
 ### 8.3 Web validation (`apps/web/lib/categories.ts`)
 
-- `categoryNameSchema`: string → `normalizeCategoryName` → 1..64, no `\p{Cc}`. A name without a
-  Latin letter or digit is valid (A5). Messages in §13.
+- `categoryNameSchema`: string → no `\p{Cc}` in the raw input → `normalizeCategoryName` → 1..64.
+  The control-character check runs on the raw input, before normalisation, because
+  `normalizeCategoryName` turns line breaks and tabs (which are `\p{Cc}`) into spaces and the
+  §13 "line breaks or other control characters" error could otherwise never fire for them
+  (maintainer decision, 2026-11-05). A name without a Latin letter or digit is valid (A5).
+  Messages in §13.
 - `categoryDescriptionSchema`: string → trim → ≤ 500, no `\p{Cc}` → empty becomes `null`.
 - `createCategorySchema`, `updateCategorySchema` (`id` + both), `archiveCategorySchema`
   (`id`, `state` from a hidden `intent` of `archive` / `unarchive`),
