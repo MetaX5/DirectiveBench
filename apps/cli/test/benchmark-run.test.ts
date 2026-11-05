@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -899,6 +900,41 @@ posix('benchmark run edge paths', () => {
       exitCode: ExitCode.CheckFailed,
       message: 'The benchmark job failed: Suite or artifact version no longer exists',
     });
+  });
+
+  it('keeps the raw error of an unexpected failure only in the runner log (issue #193)', async () => {
+    const s = await setup();
+    const marker = '/home/someone/private/internal-detail';
+    const sqlite = new DatabaseSync(join(s.dataDir, 'directivebench.db'));
+    sqlite.exec(
+      `create trigger injected_failure before insert on agent_runs ` +
+        `begin select raise(abort, 'injected failure at ${marker}'); end`,
+    );
+    sqlite.close();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const code = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    );
+
+    expect(code).toBe(ExitCode.CheckFailed);
+    expect(s.output()).toContain(
+      'Error:      The benchmark run failed unexpectedly. Try again, and report the problem if it persists.',
+    );
+    expect(`${s.output()}\n${s.errors()}`).not.toContain(marker);
+    expect(stderr.mock.calls.map((call) => String(call[0])).join('')).not.toContain('[runner]');
+    const logFile = join(s.dataDir, 'logs', 'runner.log');
+    expect(statSync(logFile).mode & 0o777).toBe(0o600);
+    const entries = readFileSync(logFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const errors = entries.filter((entry) => entry.event === 'job-error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ level: 'error', jobType: 'benchmark-run' });
+    expect(String(errors[0]?.msg)).toContain(`injected failure at ${marker}`);
+    expect(String(errors[0]?.runnerId)).toMatch(/^local-/);
   });
 
   it('keeps the artifact detail consistent: the suite is listed after a completed run', async () => {

@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { demoCommand, initCommand } from '../src/commands';
-import { ExitCode } from '../src/runtime';
+import { CliError, ExitCode } from '../src/runtime';
 
 const tempDirs: string[] = [];
 function tempDir(): string {
@@ -57,5 +58,35 @@ describe('demo', () => {
     const second = await capture(() => demoCommand({ dataDir }));
     expect(second.code).toBe(ExitCode.Ok);
     expect(second.output).not.toContain('(imported)');
+  }, 60_000);
+
+  it('keeps the raw error of an unexpected failure only in the runner log (issue #193)', async () => {
+    const dataDir = tempDir();
+    await capture(() => initCommand({ dataDir }));
+    const marker = '/home/someone/private/internal-detail';
+    const sqlite = new DatabaseSync(join(dataDir, 'directivebench.db'));
+    sqlite.exec(
+      `create trigger injected_failure before insert on agent_runs ` +
+        `begin select raise(abort, 'injected failure at ${marker}'); end`,
+    );
+    sqlite.close();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const error = await capture(() => demoCommand({ dataDir })).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(CliError);
+    expect((error as CliError).message).toBe(
+      'Demo benchmark did not complete: The benchmark run failed unexpectedly. Try again, and report the problem if it persists.',
+    );
+    expect(stderr.mock.calls.map((call) => String(call[0])).join('')).not.toContain('[runner]');
+    const logFile = join(dataDir, 'logs', 'runner.log');
+    if (process.platform !== 'win32') expect(statSync(logFile).mode & 0o777).toBe(0o600);
+    const errors = readFileSync(logFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.event === 'job-error');
+    expect(errors).toHaveLength(1);
+    expect(String(errors[0]?.msg)).toContain(`injected failure at ${marker}`);
   }, 60_000);
 });

@@ -1187,6 +1187,7 @@ changed before merge.
     tracked outside E06 by E07, issue #147, since 2026-10-29), macOS and
     Windows, and whether the remaining listed skills (`design`, `doctor`, `plugin-authoring`) can
     be disabled.
+- **Runner log for `benchmark run` (issue #193, verified on 2026-11-05 by `apps/cli/test/benchmark-run.test.ts` "keeps the raw error of an unexpected failure only in the runner log" and the built CLI with a SQLite trigger):** the command's runner appends its events as redacted JSON lines to `<dataDir>/logs/runner.log` (mode 0600) without printing them (SPEC-114 FR-114-15). A job that fails unexpectedly prints only the fixed message of SPEC-114 FR-114-10; the raw error is the `job-error` line in that file.
 - **Not implemented:** the API Key Mode half of the live check (AC-22, issue #103 under E07
   #147) and every other requirement of §6 not listed above.
 

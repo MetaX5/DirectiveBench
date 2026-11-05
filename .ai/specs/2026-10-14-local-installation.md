@@ -60,7 +60,7 @@ Override with `--data-dir` or `DIRECTIVEBENCH_DATA_DIR`.
 | `config.json` | User configuration (Zod-validated, atomic writes) |
 | `directivebench.db` (+ `-wal`, `-shm`) | SQLite database |
 | `fixtures/<sha256>/` | Content-addressed, immutable fixture snapshots |
-| `logs/` | `web.log` — output of the Next.js child process (appended; not redacted); `runner.log` — runner lifecycle events as redacted JSON lines (mode `0600`; also printed to stderr). Other CLI messages go to the terminal. |
+| `logs/` | `web.log` — output of the Next.js child process (appended; not redacted); `runner.log` — runner lifecycle events as redacted JSON lines (mode `0600`; also printed to stderr by `serve`, written by `benchmark run` and `demo` without printing). Other CLI messages go to the terminal. |
 | `cache/` | Future: git clones |
 | `backups/` | Future: database backups |
 

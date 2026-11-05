@@ -7,6 +7,7 @@ import { baselineArtifactIssue, type ArtifactBundle } from '@directivebench/core
 import {
   BenchmarkCancelledError,
   BenchmarkConfigurationError,
+  BenchmarkStoppedError,
   displayStatus,
   runBenchmark,
   validateDefinition,
@@ -118,6 +119,31 @@ export interface JobExecutionResult {
 /** `runAcquiredJob` was given a job this runner does not own or already runs. */
 export class JobNotAcquiredError extends Error {
   override name = 'JobNotAcquiredError';
+}
+
+/**
+ * The fixed result of a job that fails unexpectedly, per job type (issue #70, SPEC-105 §13): an
+ * error no step turned into an outcome of its own (a database error, a fixture that vanished, …).
+ * The job and, for a benchmark, its benchmark run show this text; the raw error goes only to the
+ * runner log, which is redacted (SPEC-007 §3.1), because its text can name internal details such
+ * as absolute paths or a failed query.
+ */
+export const UNEXPECTED_JOB_FAILURE: Readonly<Record<JobType, string>> = {
+  'benchmark-run':
+    'The benchmark run failed unexpectedly. Try again, and report the problem if it persists.',
+  'repository-registration':
+    'The repository registration failed unexpectedly. Try again, and report the problem if it persists.',
+  'repository-scan':
+    'The repository scan failed unexpectedly. Try again, and report the problem if it persists.',
+};
+
+/**
+ * What the runner log keeps of an unexpected error: its message, or the message of its cause when
+ * it has one (Drizzle wraps a SQLite error in "Failed query: … params: …"; the cause says why).
+ */
+function describeUnexpectedError(error: unknown): string {
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 }
 
 const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefined };
@@ -422,6 +448,17 @@ export class LocalRunner {
       return { jobId: job.id, status, benchmarkRunId, error };
     };
 
+    /** Logs an unexpected error and returns the job type's fixed message (issue #70). */
+    const unexpectedFailure = (error: unknown): string => {
+      logger.error(`Job ${job.id} failed unexpectedly: ${describeUnexpectedError(error)}`, {
+        event: 'job-error',
+        jobId: job.id,
+        jobType: job.type,
+        benchmarkRunId,
+      });
+      return UNEXPECTED_JOB_FAILURE[job.type];
+    };
+
     try {
       if (job.type === 'repository-registration') {
         const payload = repositoryRegistrationPayloadSchema.safeParse(job.payload);
@@ -472,16 +509,22 @@ export class LocalRunner {
           ? await finishAs('completed', null, result)
           : await finishAs('failed', result.message, result);
       }
-      const payload = benchmarkJobPayloadSchema.parse(job.payload);
-      const suiteVersion = await getSuiteVersion(db, payload.suiteVersionId);
-      const artifact = await getArtifactBundle(db, payload.artifactVersionId);
+      const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
+      if (!payload.success) {
+        const reasons = payload.error.issues
+          .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+          .join('; ');
+        return await finishAs('failed', `The stored benchmark request is invalid: ${reasons}`);
+      }
+      const suiteVersion = await getSuiteVersion(db, payload.data.suiteVersionId);
+      const artifact = await getArtifactBundle(db, payload.data.artifactVersionId);
       if (!suiteVersion || !artifact)
         return await finishAs('failed', 'Suite or artifact version no longer exists');
       // The A/B baseline is checked when the job is created and again here (SPEC-118 FR-118-12).
       let baselineArtifact: ArtifactBundle | undefined;
-      if (payload.baselineArtifactVersionId !== undefined) {
+      if (payload.data.baselineArtifactVersionId !== undefined) {
         baselineArtifact =
-          (await getArtifactBundle(db, payload.baselineArtifactVersionId)) ?? undefined;
+          (await getArtifactBundle(db, payload.data.baselineArtifactVersionId)) ?? undefined;
         if (!baselineArtifact) {
           return await finishAs('failed', 'Baseline artifact version no longer exists');
         }
@@ -558,7 +601,12 @@ export class LocalRunner {
           });
           return await finishAs(shutdown ? 'interrupted' : 'cancelled', null);
         }
-        const message = error instanceof Error ? error.message : String(error);
+        // A suite that cannot run here and a systematic agent-run failure (FR-118-15) end the
+        // run with a message written for the user; anything else gets the fixed one (issue #70).
+        const message =
+          error instanceof BenchmarkConfigurationError || error instanceof BenchmarkStoppedError
+            ? error.message
+            : unexpectedFailure(error);
         await finishBenchmarkRun(db, runId, {
           status: 'error',
           verdict: 'error',
@@ -569,7 +617,7 @@ export class LocalRunner {
         });
         return await finishAs(
           'failed',
-          error instanceof BenchmarkConfigurationError ? message : `Benchmark failed: ${message}`,
+          error instanceof BenchmarkStoppedError ? `Benchmark failed: ${message}` : message,
         );
       }
     } catch (error) {
@@ -583,7 +631,7 @@ export class LocalRunner {
           null,
         );
       }
-      return await finishAs('failed', error instanceof Error ? error.message : String(error));
+      return await finishAs('failed', unexpectedFailure(error));
     } finally {
       clearInterval(heartbeat);
     }

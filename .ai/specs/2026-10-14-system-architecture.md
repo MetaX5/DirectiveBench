@@ -175,7 +175,7 @@ Spec: [SPEC-105](2026-10-14-repository-synchronization.md).
 - **Events:** the engine reports progress through a single `onAgentRun(record)` callback per completed agent run and returns the scored outcome at the end; the runner persists both. A richer typed event set (`runStarted`, `agentRunStarted`, `assertionEvaluated`, `warning`, …) is planned. The UI reads persisted state (Executions and run detail pages refresh every 2 s while jobs run; SSE optional later).
 - **Errors:** engine distinguishes `agent-error`, `timeout`, `cancelled`, `infrastructure-error` per agent run; job `failed` is reserved for failures outside a single agent run.
 - **Configuration:** `config.json` (Zod) with CLI flags and env vars taking precedence ([SPEC-115](2026-10-14-settings-and-configuration.md)).
-- **Logging:** the web child's output is appended to `<dataDir>/logs/web.log`; runner lifecycle events are appended as redacted JSON lines to `<dataDir>/logs/runner.log` and printed to stderr ([SPEC-114](2026-10-14-runner-management.md) FR-114-15); other CLI messages go to the terminal. Captured benchmark command output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)).
+- **Logging:** the web child's output is appended to `<dataDir>/logs/web.log`; runner lifecycle events are appended as redacted JSON lines to `<dataDir>/logs/runner.log` and, under `serve`, printed to stderr ([SPEC-114](2026-10-14-runner-management.md) FR-114-15); other CLI messages go to the terminal. Captured benchmark command output passes through redaction ([SPEC-007](2026-10-14-security-and-privacy.md)).
 
 ## 6. Extension points
 

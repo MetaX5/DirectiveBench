@@ -23,6 +23,7 @@ import {
 } from '@directivebench/database';
 import {
   LocalRunner,
+  UNEXPECTED_JOB_FAILURE,
   importBenchmarkSuite,
   importLocalArtifact,
   type LocalRunnerOptions,
@@ -550,7 +551,9 @@ describe('job failures', () => {
       handle.sqlite.exec(`update jobs set payload = '{"suiteVersionId":""}'`);
     });
     expect(result).toMatchObject({ status: 'failed', benchmarkRunId: null });
-    expect(result?.error).toMatch(/artifactVersionId/);
+    expect(result?.error).toMatch(
+      /^The stored benchmark request is invalid: .*artifactVersionId: /,
+    );
     expect(stored).toMatchObject({ status: 'failed', error: result?.error });
   });
 
@@ -598,26 +601,72 @@ describe('job failures', () => {
     });
   });
 
-  it('fails jobs when agent detection throws a non-Error value', async () => {
+  it('fails jobs with the fixed message when agent detection throws a non-Error value', async () => {
+    const logger = recordingLogger();
     const adapter = new DetectHookAdapter(1, () => Promise.reject('detector crashed'));
-    const { result } = await runSingle({ adapters: adapters(adapter) });
+    const { job, result } = await runSingle({ adapters: adapters(adapter), logger });
     expect(result).toMatchObject({
       status: 'failed',
       benchmarkRunId: null,
-      error: 'detector crashed',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
+    // The raw error is kept only in the (redacted) runner log (issue #70).
+    expect(logger.entries).toContainEqual({
+      level: 'error',
+      message: `Job ${job.id} failed unexpectedly: detector crashed`,
+      fields: {
+        event: 'job-error',
+        jobId: job.id,
+        jobType: 'benchmark-run',
+        benchmarkRunId: null,
+      },
     });
   });
 
-  it('records an errored benchmark run when the engine fails', async () => {
+  it('records an errored benchmark run with the fixed message when the engine fails', async () => {
+    const logger = recordingLogger();
     const blocker = join(dataDir, 'not-a-directory');
     writeFileSync(blocker, '');
-    const { result, stored } = await runSingle({ workspaceRoot: blocker });
-    expect(result?.status).toBe('failed');
-    expect(result?.error).toMatch(/^Benchmark failed: .*not-a-directory/);
+    const { result, stored } = await runSingle({ workspaceRoot: blocker, logger });
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
     expect(stored?.error).toBe(result?.error);
     const detail = await getBenchmarkRunDetail(handle.db, result?.benchmarkRunId as string);
-    expect(detail?.run).toMatchObject({ status: 'error', verdict: 'error' });
-    expect(detail?.run.error).toMatch(/not-a-directory/);
+    expect(detail?.run).toMatchObject({
+      status: 'error',
+      verdict: 'error',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
+    const logged = logger.entries.find((e) => e.fields?.event === 'job-error');
+    expect(logged?.message).toMatch(/failed unexpectedly: Error: .*not-a-directory/);
+    expect(logged?.fields).toMatchObject({ benchmarkRunId: result?.benchmarkRunId });
+  });
+
+  it('keeps a database error that ends a benchmark run out of the job and the run', async () => {
+    const logger = recordingLogger();
+    const detail = '/home/someone/private/internal-detail';
+    const { result, stored } = await runSingle({ logger }, () => {
+      handle.sqlite.exec(
+        `create trigger injected_failure before insert on agent_runs ` +
+          `begin select raise(abort, 'injected failure at ${detail}'); end`,
+      );
+    });
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
+    expect(JSON.stringify(stored)).not.toContain(detail);
+    const run = await getBenchmarkRunDetail(handle.db, result?.benchmarkRunId as string);
+    expect(run?.run).toMatchObject({
+      status: 'error',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
+    const logged = logger.entries.filter((e) => e.fields?.event === 'job-error');
+    expect(logged.map((e) => e.message)).toEqual([
+      `Job ${result?.jobId} failed unexpectedly: Error: injected failure at ${detail}`,
+    ]);
   });
 
   it('records an errored benchmark run when the engine throws a non-Error value', async () => {
@@ -626,10 +675,13 @@ describe('job failures', () => {
     const { result } = await runSingle({ adapters: adapters(adapter) });
     expect(result).toMatchObject({
       status: 'failed',
-      error: 'Benchmark failed: engine detection crashed',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
     });
     const detail = await getBenchmarkRunDetail(handle.db, result?.benchmarkRunId as string);
-    expect(detail?.run).toMatchObject({ status: 'error', error: 'engine detection crashed' });
+    expect(detail?.run).toMatchObject({
+      status: 'error',
+      error: UNEXPECTED_JOB_FAILURE['benchmark-run'],
+    });
   });
 
   it('treats any engine error after a cancellation request as a cancellation', async () => {
