@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   CLAUDE_CODE_ADAPTER_ID,
   CLI_AGENTS,
@@ -9,6 +9,7 @@ import {
 import { dataDirLayout, resolveDataDir } from '@directivebench/core';
 import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@directivebench/database';
 import { LocalRunner, importBundledExample } from '@directivebench/runner';
+import { createFileRunnerLogger } from './logger';
 import { checkPortFree } from './serve';
 import { CliError, ExitCode, checkNodeVersion, checkSqlite, resolveAssets } from './runtime';
 import { initialize, migrationStatus, readConfig, resolveServerOptions } from './setup';
@@ -221,12 +222,16 @@ export async function demoCommand(flags: { dataDir?: string }): Promise<number> 
       artifactVersionId: example.artifact.versionId,
     });
     console.log('Running RED (baseline) and GREEN (candidate) variants with the Mock Agent…');
-    const runner = new LocalRunner({
+    const runner: LocalRunner = new LocalRunner({
       handle,
       fixtureStore: layout.fixtures,
       cacheDir: layout.cache,
       adapters: createExecutableAdapters(),
       keepWorkspaces: config.runner.keepWorkspaces,
+      logger: createFileRunnerLogger(
+        join(layout.logs, 'runner.log'),
+        (): string => runner.runnerId,
+      ),
     });
     const results = await runner.runUntilIdle();
     const result = results.at(-1);

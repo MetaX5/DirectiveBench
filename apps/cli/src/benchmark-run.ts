@@ -34,6 +34,7 @@ import {
   type Resolved,
   type RunOptions,
 } from './benchmark-plan';
+import { createFileRunnerLogger } from './logger';
 import { CliError, ExitCode, resolveAssets } from './runtime';
 import { initialize, openInitializedDatabase, readConfig } from './setup';
 
@@ -363,13 +364,17 @@ export async function benchmarkRunCommand(
         ),
       ],
     ]);
-    const runner = new LocalRunner({
+    const runner: LocalRunner = new LocalRunner({
       handle,
       fixtureStore: layout.fixtures,
       cacheDir: layout.cache,
       adapters,
       keepWorkspaces: config.runner.keepWorkspaces,
       hostId: config.installationId,
+      logger: createFileRunnerLogger(
+        join(layout.logs, 'runner.log'),
+        (): string => runner.runnerId,
+      ),
     });
 
     const { definition } = prepared;

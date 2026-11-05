@@ -3,9 +3,9 @@ title: End every job that fails unexpectedly with a fixed message (issue #70)
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer-approved fix of issue #70 via om-auto-fix-issue
-status: completed
+status: in-progress
 branch: fix/issue-70-fixed-unexpected-job-failure
-specs: [SPEC-105, SPEC-114, SPEC-007]
+specs: [SPEC-105, SPEC-114, SPEC-007, SPEC-118, SPEC-009, SPEC-010, SPEC-003]
 ---
 
 # Run: End every job that fails unexpectedly with a fixed message (issue #70)
@@ -88,13 +88,40 @@ Not verified: how the web UI renders these messages (the change is text only, an
 - `om-auto-qa-pr` was not run. The change is text-only, and the maintainer's brief named the chain
   without it. The PR keeps `needs-qa`, and the review lists P0 to P2 manual QA steps.
 
+## Second run: issue #193 inside this PR (maintainer decision, 2026-11-05)
+
+The maintainer decided to fix #193 in this PR, then run UI QA and a Codex adversarial review.
+
+- Merged `origin/main` (SPEC-124 Phase 1, the #81 fix, dependency bumps); one conflict in
+  `.ai/lessons.md` (both sides added a line), resolved by keeping both.
+- `apps/cli/src/logger.ts`: `createFileRunnerLogger` writes the redacted JSON lines to
+  `<dataDir>/logs/runner.log` (mode 0600) and prints nothing; `createRunnerLogger` (`serve`) is
+  now that logger plus the `[runner]` stderr line. `benchmark run` and `demo` pass
+  `createFileRunnerLogger`, so their terminal output is unchanged and the raw error of an
+  unexpected failure is the `job-error` line in the log. No pointer to the log is printed (the
+  issue allows one but does not require it; the fixed message stays as it is).
+- Tests: `logger.test.ts` (file-only logger: lines, redaction, mode 0600, nothing on stderr,
+  unwritable file), `benchmark-run.test.ts` and `commands.test.ts` ("keeps the raw error of an
+  unexpected failure only in the runner log": a SQLite trigger on `agent_runs`, the built-in
+  fake `claude` for `benchmark run`, the mock agent for `demo`).
+- Specs: SPEC-114 FR-114-15 and its status, SPEC-118 §20, SPEC-009 (CLI architecture), SPEC-010
+  (local installation) data-directory table, and the logging line of SPEC-003.
+
+| Command | Result |
+| --- | --- |
+| Red first: the three new tests against the unchanged CLI | 3 of 3 fail (`createFileRunnerLogger is not a function`; `ENOENT … logs/runner.log` for `benchmark run` and `demo`) |
+| `pnpm format:check && pnpm lint && pnpm typecheck` | pass |
+| `pnpm test --force` | pass; all 7 test tasks, 100% coverage (cli: 164 tests) |
+| `pnpm build && pnpm verify:pack` | pass ("Packaging verification passed") |
+| Built CLI `demo` on a fresh data directory | completed, verdict improved; stderr empty; `logs/runner.log` (mode 0600) has the `acquired` and `finished` lines |
+| Built CLI `benchmark run --auth api-key --yes` with a fake `claude` and a trigger on `agent_runs` | exit 6, `Error: The benchmark run failed unexpectedly. Try again, and report the problem if it persists.`; the marker path is in neither stdout nor stderr (stderr holds only Node's SQLite ExperimentalWarning); `runner.log` (0600) has one `job-error` line with the raw SQLite text |
+
 ## Lessons recorded
 
 - [Inject a real database error with a SQLite trigger, not a mock](../lessons/2026-11-05-inject-database-errors-with-a-trigger.md)
 
 ## Follow-ups
 
-- #193: `benchmark run` and `demo` create their `LocalRunner` without a logger, so there the raw
-  error of an unexpected failure is not kept anywhere. Give them a file-only runner log.
+- #193 is fixed in this PR (see the second run above).
 - A scan whose failure record itself fails leaves `sync_status` as it was. Only the job shows the
   failure.
