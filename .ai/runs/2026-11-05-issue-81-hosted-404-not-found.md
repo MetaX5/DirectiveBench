@@ -3,7 +3,7 @@ title: Classify git's "repository not found" (HTTP 404) as not found or not publ
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5 (om-auto-fix-issue chain)
 trigger: maintainer-approved fix of issue #81
-status: in-progress
+status: completed
 branch: fix/issue-81-hosted-git-404-not-found
 specs: [SPEC-104, SPEC-105]
 ---
@@ -59,6 +59,11 @@ no edit of `runner.ts` (issue #70 in parallel) or `packages/core`/`packages/data
 - Not verified: a real proxy or non-GitHub host answering 404 (no network in tests; the built CLI
   only accepts github.com URLs, which answer 401, so the CLI cannot be pointed at a 404 host
   without the test transport). git versions other than 2.53 were not recorded.
+
+- PR #191 opened (labels `review`, `bug`, `skip-qa`, `priority-low`, `risk-low`).
+- Review round 1 (`om-auto-review-pr 191 --autofix`, engine `om-code-review`, submitted as
+  COMMENT on the maintainer's instruction): verdict approve, no blockers or majors, one nit (this
+  run log still `in-progress`), fixed by finalising it. CI was pending at review time.
 
 ## Problems and deviations
 
