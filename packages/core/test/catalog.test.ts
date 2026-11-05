@@ -69,6 +69,15 @@ describe('categorySlug', () => {
     expect(slugify('日本語')).toBe('item');
   });
 
+  it('strips hyphens at both ends after collapsing runs, also on long runs of separators', () => {
+    expect(slugify('--a--b--')).toBe('a-b');
+    expect(slugify(' !a! ')).toBe('a');
+    const separators = '-'.repeat(200_000);
+    expect(slugify(`${separators}a${separators}`)).toBe('a');
+    expect(categorySlug(`${separators}a${separators}b`)).toBe('a-b');
+    expect(categorySlug(separators)).toBeNull();
+  });
+
   it('cuts at 64 characters and drops the trailing hyphen the cut leaves', () => {
     const name = `${'a'.repeat(63)} b`;
     expect(slugify(name)).toHaveLength(65);

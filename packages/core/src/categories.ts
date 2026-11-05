@@ -68,5 +68,6 @@ export function categoryNameKey(name: string): string {
 export function categorySlug(name: string): string | null {
   const slug = slugCharacters(name);
   if (slug === '') return null;
-  return slug.slice(0, CATEGORY_SLUG_MAX_LENGTH).replace(/-+$/, '');
+  // The slug has no two hyphens in a row, so the cut leaves at most one at the end.
+  return slug.slice(0, CATEGORY_SLUG_MAX_LENGTH).replace(/-$/, '');
 }
