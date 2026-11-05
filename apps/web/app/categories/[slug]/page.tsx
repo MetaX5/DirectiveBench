@@ -75,7 +75,10 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
             )}
           </CardContent>
         </Card>
+        {/* A rename can resolve an unarchive clash: the new name starts a fresh Status card, so
+            an earlier refusal does not stay on screen (browser QA of PR 196). */}
         <CategoryStatusCard
+          key={category.name}
           id={category.id}
           name={category.name}
           archived={category.archived}

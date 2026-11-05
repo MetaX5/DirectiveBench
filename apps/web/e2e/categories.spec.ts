@@ -336,6 +336,16 @@ test('unarchive is refused while an active category has the same name', async ({
     'An active category is already named clash e2e. Rename one of them first.',
   );
   await expect(unarchive).toBeFocused();
+
+  // Renaming the archived one resolves the clash: the refusal does not stay on screen.
+  await card(page, 'Details').getByRole('textbox', { name: 'Name' }).fill('Clash E2E old');
+  await card(page, 'Details').getByRole('button', { name: 'Save' }).click();
+  await expect(card(page, 'Details').getByRole('status')).toHaveText(/^Renamed to Clash E2E old\./);
+  await expect(card(page, 'Status').getByRole('alert')).toHaveCount(0);
+  await card(page, 'Status').getByRole('button', { name: 'Unarchive' }).click();
+  await expect(card(page, 'Status').getByRole('status')).toHaveText(
+    'Unarchived Clash E2E old. It is back in pickers and filters.',
+  );
 });
 
 test('an invalid or unknown slug shows the not-found page', async ({ page }) => {
