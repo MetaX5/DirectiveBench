@@ -139,7 +139,7 @@ not started.
 | ID | Requirement |
 | --- | --- |
 | FR-124-11 | **Assign one.** Assigning an active category to an artifact is idempotent ("already assigned"). Assigning an archived category MUST be refused ("X is archived. Unarchive it on its page before assigning it."). The write is one conditional statement (`INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING`); follow-up reads only explain a no-op insert (already assigned, archived, unknown category or artifact). |
-| FR-124-12 | **Remove one.** Removing a category from an artifact is idempotent ("was not assigned") and allowed for archived categories. No confirmation: assignments carry no history. |
+| FR-124-12 | **Remove one.** Removing a category from an artifact is idempotent ("X was already removed.", §11.3 D24) and allowed for archived categories. No confirmation: assignments carry no history. |
 | FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list. Each action first shows an inline Risky-action confirmation stating the category and the count the page showed ("Assign Client A to 1,240 artifacts?"); only the confirming button submits, and Cancel writes nothing (UD-5). The form posts the filters (`q`, `type`, `category`, `repository`), the count the page showed and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing). The server refuses any invalid filter (the list page ignores invalid parameters; the bulk form does not). In one `withTransaction` it runs `listArtifactIds(db, filter)`, an ids-only query that shares its conditions with `listArtifacts`, refuses when the fingerprint differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), refuses an archived or unknown category, refuses more than `MAX_BULK_CATEGORY_ARTIFACTS`, then inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. |
 | FR-124-14 | **Display.** Wherever assignments show (Artifacts list column, artifact page), archived categories show as a `muted` Badge reading "Name (archived)", after the active ones. |
 | FR-124-15 | **Filter.** The Artifacts category dropdown lists active categories. When the URL names an archived category, the dropdown also lists it as "Name (archived)", selected, so the form shows the real filter; filtering by an archived slug works (FR-106-08). |
@@ -220,9 +220,14 @@ getCategoryBySlug(db, slug): (CategoryRef & { description: string | null; predef
 
 listCategories(db)                 // existing, unchanged shape (name_key is not exposed)
 assignArtifactCategory(db, artifactId, categoryId):
-  'assigned' | 'already-assigned' | 'category-archived' | 'category-not-found' | 'artifact-not-found';
+  | { status: 'assigned' | 'already-assigned' | 'category-archived'; category: CategoryRef }
+  | { status: 'category-not-found' | 'artifact-not-found' };
 unassignArtifactCategory(db, artifactId, categoryId):
-  'removed' | 'not-assigned' | 'category-not-found' | 'artifact-not-found';
+  | { status: 'removed' | 'not-assigned'; category: CategoryRef }
+  | { status: 'category-not-found' | 'artifact-not-found' };
+// The category is read after the write, so a rename elsewhere shows the current name
+// (maintainer decision 2026-11-05, Phase 3). The assigned categories that
+// getArtifactDetail returns (ArtifactCategory) also carry the category `id`.
 
 setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   filter: ArtifactListFilter, listFingerprint: string }):
@@ -448,6 +453,30 @@ Implementer notes: at 320px the confirm button "Archive <name>" with a 64-charac
 overflow, so the panel's action form gets `flex-wrap` and the panel `min-w-0`, covered by a
 narrow-screen Playwright case; add `/categories/<slug>` and the open Archive panel to
 `text-contrast.spec.ts`; leave the other dash placeholders on `/artifacts` to issue #123.
+
+### 11.3 Phase 3 UI decisions (maintainer decision, 2026-11-05)
+
+Refinements of §11 and §11.2 for the Categories card on `/artifacts/[id]`, approved by the
+maintainer on 2026-11-05. None needs a new component, variant or token; contrast pairs are the
+existing ones (lowest: archived chip, 5.50 light, 5.83 dark).
+
+| # | Point | Decision |
+| --- | --- | --- |
+| D16 | Card position | Right column, directly after Metadata and before Tags; Metadata keeps only Compatibility |
+| D17 | Chips and Remove | Same layout as Tags: a wrapping list (`aria-label` "Categories"), each item a Badge plus an `outline` `sm` "Remove" whose accessible name is "Remove category " plus the chip text ("Remove category Python (archived)") |
+| D18 | Link from a chip | None; the Badge stays non-clickable |
+| D19 | Card description | "Groups for filtering the Artifacts list. A rescan keeps them." |
+| D20 | Picker | Like the Suites picker: label "Category", first option preselected, no placeholder, `default` "Assign" button (`h-control`, same height as the select) |
+| D21 | Every active category assigned | The decided sentence replaces the picker; "Categories page" is a link to `/categories` styled as the Phase 2 links |
+| D22 | No active category at all | "There are no active categories. Create or unarchive one on the Categories page." replaces the picker |
+| D23 | Removing an archived assignment | Same Remove button, no confirmation; result "Removed Python. To assign it again, unarchive it on its page first." |
+| D24 | Copy | "Assigned X.", "X is already assigned.", "Removed X.", "X was already removed."; pending "Assigning…" or "Removing…" by the pressed button; already-assigned and already-removed are statuses, not errors |
+| D25 | Focus | After assign or remove, the select; when the picker disappears after an assign, the new chip's Remove; when it is absent after a remove, the Remove that took the removed chip's place, else the last chip's Remove, else the "Categories page" link |
+| D26 | Stale page | Every submit revalidates `/artifacts/<id>` and the `/categories` and `/artifacts` layouts (FR-124-16), whatever the outcome; names in messages are the current names |
+
+Implementer notes: the chip labels and the D21/D22 choice are computed on the server and passed
+to the client card as props (a `'use client'` file must not import values from
+`@directivebench/core`, lesson 2026-11-05).
 
 ## 12. Security considerations
 
