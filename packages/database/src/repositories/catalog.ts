@@ -1,8 +1,10 @@
-import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
   PREDEFINED_CATEGORIES,
   categoryNameKey,
+  categorySlug,
   createId,
+  normalizeCategoryName,
   nowIso,
   pathRelation,
 } from '@directivebench/core';
@@ -60,6 +62,295 @@ export async function listCategories(db: Database) {
     .leftJoin(artifactCategories, eq(artifactCategories.categoryId, categories.id))
     .groupBy(categories.id)
     .orderBy(categories.name);
+}
+
+/** A category as the lifecycle and assignment functions report it (SPEC-124 §8.2). */
+export interface CategoryRef {
+  id: string;
+  slug: string;
+  name: string;
+  archived: boolean;
+}
+
+const categoryRefColumns = {
+  id: categories.id,
+  slug: categories.slug,
+  name: categories.name,
+  archivedAt: categories.archivedAt,
+};
+
+function toCategoryRef(row: {
+  id: string;
+  slug: string;
+  name: string;
+  archivedAt: string | null;
+}): CategoryRef {
+  return { id: row.id, slug: row.slug, name: row.name, archived: row.archivedAt !== null };
+}
+
+/** SQLite's extended result code for a violated UNIQUE constraint or index. */
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+/** Whether a rejected statement broke a unique index (Drizzle keeps the SQLite error as `cause`). */
+function isUniqueViolation(error: unknown): boolean {
+  // `Object()` reads a property of any value, so a non-object rejection is simply "not unique".
+  return Object(Object(error).cause).errcode === SQLITE_CONSTRAINT_UNIQUE;
+}
+
+/**
+ * Runs a transactional write whose clash checks the unique indexes back up (SPEC-124 §8.2). When
+ * the write breaks a unique index anyway, the transaction has rolled back; `explain` reads the
+ * clashing row afresh and returns the outcome to report. A violation it cannot explain, and any
+ * other error, is rethrown.
+ */
+async function withUniqueBackstop<T>(
+  write: () => Promise<T>,
+  explain: () => Promise<T | null>,
+): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const outcome = await explain();
+    if (outcome === null) throw error;
+    return outcome;
+  }
+}
+
+/** The active category holding a name key, other than `exceptId` (null: no exception). */
+async function activeCategoryWithKey(db: Database, nameKey: string, exceptId: string | null) {
+  return db
+    .select(categoryRefColumns)
+    .from(categories)
+    .where(
+      and(
+        eq(categories.nameKey, nameKey),
+        isNull(categories.archivedAt),
+        exceptId === null ? undefined : ne(categories.id, exceptId),
+      ),
+    )
+    .get();
+}
+
+/** The category, active or archived, holding a slug. */
+async function categoryWithSlug(db: Database, slug: string) {
+  return db.select(categoryRefColumns).from(categories).where(eq(categories.slug, slug)).get();
+}
+
+/** Prefix of the slugs generated for names without a Latin letter or digit (SPEC-124 A5). */
+const GENERATED_SLUG_PREFIX = 'category-';
+/** The first string above every `category-…` slug in BINARY order ('.' follows '-'). */
+const GENERATED_SLUG_RANGE_END = 'category.';
+
+/**
+ * The smallest `category-N` (N ≥ 1) no category holds, archived ones included (SPEC-124 A5).
+ * Reads the candidates once, as a BINARY range rather than `LIKE`; with K such slugs the loop ends
+ * by N = K + 1, so the slug stays short whatever names users chose. Runs inside the caller's
+ * transaction: `BEGIN IMMEDIATE` serialises writers, and a slug never leaves its row.
+ */
+async function freeGeneratedSlug(db: Database): Promise<string> {
+  const rows = await db
+    .select({ slug: categories.slug })
+    .from(categories)
+    .where(
+      and(
+        gte(categories.slug, GENERATED_SLUG_PREFIX),
+        lt(categories.slug, GENERATED_SLUG_RANGE_END),
+      ),
+    );
+  const taken = new Set(rows.map((row) => row.slug));
+  let n = 1;
+  while (taken.has(`${GENERATED_SLUG_PREFIX}${n}`)) n += 1;
+  return `${GENERATED_SLUG_PREFIX}${n}`;
+}
+
+/** Name and description of a category, as the web app's schemas parsed them. */
+export interface CategoryInput {
+  name: string;
+  /** `null`: no description. */
+  description: string | null;
+}
+
+export type CreateCategoryOutcome =
+  | { status: 'created'; category: CategoryRef }
+  | { status: 'name-taken'; existing: CategoryRef }
+  | { status: 'slug-taken'; existing: CategoryRef };
+
+/**
+ * Creates an active, user-defined category (SPEC-124 FR-124-04 to FR-124-06). The name is stored
+ * normalised; a name whose key an active category holds is `name-taken`; the slug is
+ * `categorySlug(name)`, and one another category (archived included) holds is `slug-taken`. A name
+ * without a Latin letter or digit gets the smallest free `category-N`. Check and insert run in one
+ * transaction, and the unique indexes back them up.
+ */
+export async function createCategory(
+  handle: DatabaseHandle,
+  input: CategoryInput,
+): Promise<CreateCategoryOutcome> {
+  const name = normalizeCategoryName(input.name);
+  const nameKey = categoryNameKey(name);
+  const derivedSlug = categorySlug(name);
+  /** The slug the insert used, for explaining a unique violation. */
+  let slug = derivedSlug ?? '';
+  return withUniqueBackstop<CreateCategoryOutcome>(
+    () =>
+      withTransaction(handle, async (db) => {
+        const named = await activeCategoryWithKey(db, nameKey, null);
+        if (named) return { status: 'name-taken', existing: toCategoryRef(named) };
+        if (derivedSlug !== null) {
+          const holder = await categoryWithSlug(db, derivedSlug);
+          if (holder) return { status: 'slug-taken', existing: toCategoryRef(holder) };
+        }
+        slug = derivedSlug ?? (await freeGeneratedSlug(db));
+        const id = createId('cat');
+        const now = nowIso();
+        await db.insert(categories).values({
+          id,
+          slug,
+          name,
+          nameKey,
+          description: input.description,
+          predefined: false,
+          createdAt: now,
+          updatedAt: now,
+        });
+        return { status: 'created', category: { id, slug, name, archived: false } };
+      }),
+    async () => {
+      const named = await activeCategoryWithKey(handle.db, nameKey, null);
+      if (named) return { status: 'name-taken', existing: toCategoryRef(named) };
+      const holder = await categoryWithSlug(handle.db, slug);
+      return holder ? { status: 'slug-taken', existing: toCategoryRef(holder) } : null;
+    },
+  );
+}
+
+export type UpdateCategoryOutcome =
+  | { status: 'updated' | 'unchanged'; category: CategoryRef }
+  | { status: 'name-taken'; existing: CategoryRef }
+  | { status: 'not-found' };
+
+/**
+ * Renames a category and sets its description (SPEC-124 FR-124-07). Slug, `predefined` flag and
+ * assignments never change. A case variant of its own name is allowed; the key of another active
+ * category is `name-taken` for an active category, and allowed for an archived one (it clashes
+ * only on unarchive). Unchanged values report `unchanged` and write nothing.
+ */
+export async function updateCategory(
+  handle: DatabaseHandle,
+  input: CategoryInput & { id: string },
+): Promise<UpdateCategoryOutcome> {
+  const name = normalizeCategoryName(input.name);
+  const nameKey = categoryNameKey(name);
+  return withUniqueBackstop<UpdateCategoryOutcome>(
+    () =>
+      withTransaction(handle, async (db) => {
+        const current = await db.select().from(categories).where(eq(categories.id, input.id)).get();
+        if (!current) return { status: 'not-found' };
+        if (current.name === name && current.description === input.description) {
+          return { status: 'unchanged', category: toCategoryRef(current) };
+        }
+        if (current.archivedAt === null) {
+          const named = await activeCategoryWithKey(db, nameKey, current.id);
+          if (named) return { status: 'name-taken', existing: toCategoryRef(named) };
+        }
+        await db
+          .update(categories)
+          .set({ name, nameKey, description: input.description, updatedAt: nowIso() })
+          .where(eq(categories.id, current.id));
+        return { status: 'updated', category: toCategoryRef({ ...current, name }) };
+      }),
+    async () => {
+      const named = await activeCategoryWithKey(handle.db, nameKey, input.id);
+      return named ? { status: 'name-taken', existing: toCategoryRef(named) } : null;
+    },
+  );
+}
+
+/** The state `setCategoryArchived` moves a category to (no boolean flag, SPEC-014). */
+export type CategoryState = 'archived' | 'active';
+
+export type SetCategoryArchivedOutcome =
+  | {
+      status: 'archived' | 'unarchived' | 'already-archived' | 'already-active';
+      category: CategoryRef;
+    }
+  | { status: 'name-taken'; existing: CategoryRef }
+  | { status: 'not-found' };
+
+/**
+ * Archives or unarchives a category (SPEC-124 FR-124-08, FR-124-09); idempotent. Assignments stay
+ * either way. Unarchiving is `name-taken` while an active category holds the same name key.
+ */
+export async function setCategoryArchived(
+  handle: DatabaseHandle,
+  input: { id: string; state: CategoryState },
+): Promise<SetCategoryArchivedOutcome> {
+  /** The key of the category being unarchived, for explaining a unique violation. */
+  let nameKey = '';
+  return withUniqueBackstop<SetCategoryArchivedOutcome>(
+    () =>
+      withTransaction(handle, async (db) => {
+        const current = await db.select().from(categories).where(eq(categories.id, input.id)).get();
+        if (!current) return { status: 'not-found' };
+        const ref = toCategoryRef(current);
+        if (input.state === 'archived') {
+          if (ref.archived) return { status: 'already-archived', category: ref };
+          const now = nowIso();
+          await db
+            .update(categories)
+            .set({ archivedAt: now, updatedAt: now })
+            .where(eq(categories.id, current.id));
+          return { status: 'archived', category: { ...ref, archived: true } };
+        }
+        if (!ref.archived) return { status: 'already-active', category: ref };
+        nameKey = current.nameKey;
+        const named = await activeCategoryWithKey(db, nameKey, current.id);
+        if (named) return { status: 'name-taken', existing: toCategoryRef(named) };
+        await db
+          .update(categories)
+          .set({ archivedAt: null, updatedAt: nowIso() })
+          .where(eq(categories.id, current.id));
+        return { status: 'unarchived', category: { ...ref, archived: false } };
+      }),
+    async () => {
+      const named = await activeCategoryWithKey(handle.db, nameKey, input.id);
+      return named ? { status: 'name-taken', existing: toCategoryRef(named) } : null;
+    },
+  );
+}
+
+/** A category with its details and the number of artifacts assigned to it. */
+export type CategoryDetail = CategoryRef & {
+  description: string | null;
+  predefined: boolean;
+  artifactCount: number;
+};
+
+/** The category with this slug, active or archived, or `null` (SPEC-124 §8.2). */
+export async function getCategoryBySlug(
+  db: Database,
+  slug: string,
+): Promise<CategoryDetail | null> {
+  const row = await db
+    .select({
+      ...categoryRefColumns,
+      description: categories.description,
+      predefined: categories.predefined,
+      artifactCount: sql<number>`count(${artifactCategories.artifactId})`,
+    })
+    .from(categories)
+    .leftJoin(artifactCategories, eq(artifactCategories.categoryId, categories.id))
+    .where(eq(categories.slug, slug))
+    .groupBy(categories.id)
+    .get();
+  if (!row) return null;
+  return {
+    ...toCategoryRef(row),
+    description: row.description,
+    predefined: row.predefined,
+    artifactCount: Number(row.artifactCount),
+  };
 }
 
 export type RepositoryRecord = typeof repositories.$inferSelect;
