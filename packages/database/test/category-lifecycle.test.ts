@@ -22,14 +22,27 @@ const getHandle = useTestDatabase();
 /** The slug shape of the `[slug]` route and the Artifacts `category` filter (apps/web). */
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-/** The first statement matching `pattern` sees no rows: the clash check misses once. */
-function hideFirst(pattern: RegExp) {
-  let hidden = false;
-  return (query: string): InterceptAction => {
-    if (hidden || !pattern.test(query)) return 'run';
-    hidden = true;
-    return 'hide';
-  };
+/**
+ * Runs `write` on a handle where the first statement matching `pattern` sees no rows, so the clash
+ * check misses and the write reaches the unique index. Asserts the hide happened: if Drizzle's SQL
+ * text stopped matching, the ordinary check would return the same outcome and the test would pass
+ * without reaching the backstop.
+ */
+async function withMissedCheck<T>(
+  handle: DatabaseHandle,
+  pattern: RegExp,
+  write: (intercepted: DatabaseHandle) => Promise<T>,
+): Promise<T> {
+  let hidden = 0;
+  const result = await write(
+    interceptHandle(handle, (query): InterceptAction => {
+      if (hidden > 0 || !pattern.test(query)) return 'run';
+      hidden += 1;
+      return 'hide';
+    }),
+  );
+  expect(hidden, `no statement matched ${pattern}`).toBe(1);
+  return result;
 }
 const NAME_KEY_LOOKUP = /^select .* where .*"categories"\."name_key" = \?/;
 const SLUG_LOOKUP = /^select .* where "categories"\."slug" = \?/;
@@ -163,10 +176,12 @@ describe('createCategory', () => {
     const handle = getHandle();
     // Names without a Latin letter get different generated slugs, so only the key clashes.
     const first = await created(handle, '日本語');
-    const outcome = await createCategory(interceptHandle(handle, hideFirst(NAME_KEY_LOOKUP)), {
-      name: '日本語 ',
-      description: null,
-    });
+    const outcome = await withMissedCheck(handle, NAME_KEY_LOOKUP, (h) =>
+      createCategory(h, {
+        name: '日本語 ',
+        description: null,
+      }),
+    );
     expect(outcome).toEqual({ status: 'name-taken', existing: first });
     expect(await handle.db.$count(schema.categories)).toBe(1);
   });
@@ -175,18 +190,22 @@ describe('createCategory', () => {
     const handle = getHandle();
     const c = await created(handle, 'C');
     expect(
-      await createCategory(interceptHandle(handle, hideFirst(SLUG_LOOKUP)), {
-        name: 'C#',
-        description: null,
-      }),
+      await withMissedCheck(handle, SLUG_LOOKUP, (h) =>
+        createCategory(h, {
+          name: 'C#',
+          description: null,
+        }),
+      ),
     ).toEqual({ status: 'slug-taken', existing: c });
 
     const generated = await created(handle, '日本語');
     expect(
-      await createCategory(interceptHandle(handle, hideFirst(GENERATED_SLUG_LOOKUP)), {
-        name: '中文',
-        description: null,
-      }),
+      await withMissedCheck(handle, GENERATED_SLUG_LOOKUP, (h) =>
+        createCategory(h, {
+          name: '中文',
+          description: null,
+        }),
+      ),
     ).toEqual({ status: 'slug-taken', existing: generated });
     expect(await handle.db.$count(schema.categories)).toBe(2);
   });
@@ -303,11 +322,13 @@ describe('updateCategory', () => {
     const testing = await created(handle, 'Testing');
     const python = await created(handle, 'Python');
     expect(
-      await updateCategory(interceptHandle(handle, hideFirst(NAME_KEY_LOOKUP)), {
-        id: python.id,
-        name: 'testing',
-        description: null,
-      }),
+      await withMissedCheck(handle, NAME_KEY_LOOKUP, (h) =>
+        updateCategory(h, {
+          id: python.id,
+          name: 'testing',
+          description: null,
+        }),
+      ),
     ).toEqual({ status: 'name-taken', existing: testing });
 
     handle.sqlite.exec(`
@@ -380,10 +401,12 @@ describe('setCategoryArchived', () => {
     await setCategoryArchived(handle, { id: greek.id, state: 'archived' });
     const active = await created(handle, 'ΕΛΛΗΝΙΚΆ');
     expect(
-      await setCategoryArchived(interceptHandle(handle, hideFirst(NAME_KEY_LOOKUP)), {
-        id: greek.id,
-        state: 'active',
-      }),
+      await withMissedCheck(handle, NAME_KEY_LOOKUP, (h) =>
+        setCategoryArchived(h, {
+          id: greek.id,
+          state: 'active',
+        }),
+      ),
     ).toEqual({ status: 'name-taken', existing: active });
 
     const ruby = await created(handle, 'Ruby');
