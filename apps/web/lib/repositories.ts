@@ -175,7 +175,9 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
       return {
         kind: 'fieldError',
         path,
-        message: `The check failed: ${registration.error ?? 'unknown error'}`,
+        // The runner stores a complete sentence: a fixed message for an unexpected failure
+        // (FR-114-10) or the reason the stored request is invalid.
+        message: registration.error ?? 'The check failed.',
       };
     case 'cancelled':
       return { kind: 'fieldError', path, message: 'The registration was cancelled.' };
@@ -265,7 +267,8 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
     case 'failed':
       // A scan that could not run keeps its typed outcome, whose message explains it.
       if (scan.result && !scan.result.ok) return notice('error', scan.result.message);
-      return notice('error', `The scan failed: ${scan.error ?? 'unknown error'}`);
+      // The runner stores a complete sentence (FR-114-10), so it is shown as it is.
+      return notice('error', scan.error ?? 'The scan failed.');
     case 'cancelled':
       // Cancellation is honoured only before the apply transaction commits (FR-105-17).
       return notice('error', 'The scan was cancelled. Nothing was changed.');

@@ -116,6 +116,30 @@ The maintainer decided to fix #193 in this PR, then run UI QA and a Codex advers
 | Built CLI `demo` on a fresh data directory | completed, verdict improved; stderr empty; `logs/runner.log` (mode 0600) has the `acquired` and `finished` lines |
 | Built CLI `benchmark run --auth api-key --yes` with a fake `claude` and a trigger on `agent_runs` | exit 6, `Error: The benchmark run failed unexpectedly. Try again, and report the problem if it persists.`; the marker path is in neither stdout nor stderr (stderr holds only Node's SQLite ExperimentalWarning); `runner.log` (0600) has one `job-error` line with the raw SQLite text |
 
+### UI QA (`om-auto-qa-pr`, agent-browser, built app from `test-env-up.sh`, mock agent only)
+
+SQLite triggers injected the failures on the running `serve` instance: one on `agent_runs` for a
+benchmark run started from the UI, one on `repositories` for a registration, and one on
+`artifacts` for a scan.
+
+- Executions page and run page: the fixed benchmark message renders in the job's Details cell
+  and in the run's error card. Contrast is about 8:1 in light and about 9:1 in dark
+  (`text-destructive-foreground`). At 320px there is no page-level horizontal scroll (the table
+  scrolls in its own focusable region, as before). "View run" opens with Enter.
+- **Finding (fixed):** the Repositories page wrapped the runner's sentence in its own prefix,
+  "The check failed: The repository registration failed unexpectedly. …", and the scan notice
+  did the same ("The scan failed: The repository scan failed unexpectedly. …"). The runner now
+  stores a complete sentence, so `describeRegistration` and `describeScan`
+  (`apps/web/lib/repositories.ts`) show it as it is, with "The check failed." / "The scan
+  failed." when no error is stored. Regression: `apps/web/test/repositories.test.ts` (red
+  first: 2 tests failed on the old prefix). Re-checked in the rebuilt app at 320px in dark mode:
+  the `role=alert` text is the plain sentence, and `runner.log` holds the `job-error` line.
+- A scan whose artifact write fails ends with its existing typed outcome ("The scan failed
+  while storing the results at … (ERR_SQLITE_ERROR)."), not with the catch-all. The scan's
+  catch-all message is covered by unit tests only.
+- No en dash or em dash in the new copy. Older copy on these pages still has dashes (the
+  Repositories help text, "Planned — not implemented", "—" placeholders); issue #123 tracks them.
+
 ## Lessons recorded
 
 - [Inject a real database error with a SQLite trigger, not a mock](../lessons/2026-11-05-inject-database-errors-with-a-trigger.md)

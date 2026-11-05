@@ -177,11 +177,16 @@ describe('describeRegistration', () => {
     });
     const cases: [RepositoryRegistration, string][] = [
       [rejected, 'No directory exists at this path.'],
+      // The runner stores a complete sentence (issue #70), shown without a second "failed".
       [
-        registration({ status: 'failed', error: 'database is locked' }),
-        'The check failed: database is locked',
+        registration({
+          status: 'failed',
+          error:
+            'The repository registration failed unexpectedly. Try again, and report the problem if it persists.',
+        }),
+        'The repository registration failed unexpectedly. Try again, and report the problem if it persists.',
       ],
-      [registration({ status: 'failed' }), 'The check failed: unknown error'],
+      [registration({ status: 'failed' }), 'The check failed.'],
       [registration({ status: 'cancelled' }), 'The registration was cancelled.'],
       [
         registration({ status: 'interrupted' }),
@@ -390,10 +395,14 @@ describe('describeScan', () => {
   it('reports failures, cancellation and missing results', () => {
     const cases: [RepositoryScan, string][] = [
       [
-        scan({ status: 'failed', error: 'database is locked' }),
-        'The scan failed: database is locked',
+        scan({
+          status: 'failed',
+          error:
+            'The repository scan failed unexpectedly. Try again, and report the problem if it persists.',
+        }),
+        'The repository scan failed unexpectedly. Try again, and report the problem if it persists.',
       ],
-      [scan({ status: 'failed' }), 'The scan failed: unknown error'],
+      [scan({ status: 'failed' }), 'The scan failed.'],
       [
         scan({
           status: 'failed',
