@@ -196,13 +196,10 @@ export default async function ArtifactsPage({
                       </TD>
                       <TD>
                         <div className="flex flex-wrap gap-1">
-                          {/* Active categories first, then archived ones, muted (FR-124-14). */}
+                          {/* Active categories first, then archived ones, muted (FR-124-14).
+                              Badges break only between words (SPEC-101, issue 122). */}
                           {a.categories.map((c) => (
-                            <Badge
-                              key={c.slug}
-                              variant={c.archived ? 'muted' : 'secondary'}
-                              className="break-all"
-                            >
+                            <Badge key={c.slug} variant={c.archived ? 'muted' : 'secondary'}>
                               {categoryChipLabel(c)}
                             </Badge>
                           ))}

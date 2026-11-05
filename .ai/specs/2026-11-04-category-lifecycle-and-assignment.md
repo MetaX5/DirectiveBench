@@ -205,7 +205,8 @@ createCategory(handle, { name, description }):
   | { status: 'slug-taken'; existing: CategoryRef };
 
 updateCategory(handle, { id, name, description }):
-  | { status: 'updated' | 'unchanged'; category: CategoryRef }
+  | { status: 'updated'; category: CategoryRef; previousName: string }  // tells a rename from a description change (Phase 2)
+  | { status: 'unchanged'; category: CategoryRef }
   | { status: 'name-taken'; existing: CategoryRef }
   | { status: 'not-found' };
 
@@ -616,14 +617,30 @@ categories, a `directivebench category` CLI, transliterated slugs for non-Latin 
   active ones first, and `assignCategoriesBySlug` as one conditional insert per slug with the
   archive-race regression test (§8.2). Each clash check is backed by the unique indexes; a forced
   violation maps to `name-taken` / `slug-taken`.
-- **Partially implemented:** FR-124-04 to FR-124-09, FR-124-11, FR-124-12 at the repository
-  level only: no page, form or Server Action uses them yet (Phases 2 and 3). The generated
-  slugs were checked against the web slug pattern in a database test; opening their
-  `/categories/[slug]` page is Phase 2.
-- **Not implemented:** everything in §6 that needs `apps/web` (FR-124-13 to FR-124-16), the web
-  `MAX_SLUG_PARAM_LENGTH` from core (Phase 2), `listArtifactIds`,
-  `setCategoryForListedArtifacts` and `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). No acceptance
-  criterion is fully verified yet.
+- **Implemented (Phase 2, categories page and category page; verified on 2026-11-05 by
+  `apps/web/test/categories.test.ts`, `apps/web/test/actions.test.ts` "category actions (SPEC-124
+  §10)", `apps/web/e2e/categories.spec.ts`, `apps/web/e2e/management.spec.ts`,
+  `apps/web/e2e/text-contrast.spec.ts` in both themes and a run of the built app with demo
+  data):** FR-124-04 to FR-124-09 end to end (create with a derived or generated slug, duplicate
+  name and slug-taken refusals with field errors, rename and describe with the slug kept,
+  "nothing changed", Archive after the inline Risky-action confirmation with the artifact count
+  and Cancel writing nothing, Unarchive without confirmation and its clash refusal); FR-124-14
+  (archived chips on `/artifacts` and the artifact page); FR-124-15 (archived option listed last
+  and selected); FR-124-16 for the three lifecycle actions; §8.3 (`categoryNameSchema` checks
+  control characters on the raw input, `CategoryFormState`); `MAX_SLUG_PARAM_LENGTH` from
+  `CATEGORY_SLUG_MAX_LENGTH`; the §11 and §11.2 UI (D1 to D15, focus map, 320px with a
+  64-character name); the UD-5 lines in `risky-action.mdx` and `design-system.md`.
+  `updateCategory`'s `updated` outcome gained `previousName` (§8.2) so the result line can tell
+  "Renamed to …" from "Saved.". The archived half of AC-4 (filter dropdown, chips), AC-1, AC-2
+  (rename keeps `/artifacts?category=<slug>`), AC-5, AC-6 and AC-7 are verified; AC-4's picker and
+  bulk form do not exist yet.
+- **Partially implemented:** FR-124-11 and FR-124-12 at the repository level only: no page, form
+  or Server Action assigns or removes a category yet (Phase 3). The copy "Assign it on an
+  artifact's page or to a filtered list on Artifacts" and "the bulk form" in the Archive reason
+  name surfaces that arrive in Phases 3 and 4.
+- **Not implemented:** FR-124-13 (bulk), the assignment actions (Phase 3), `listArtifactIds`,
+  `setCategoryForListedArtifacts` and `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-3, AC-8 and the
+  picker and bulk parts of AC-4 and AC-10 are not verified.
 
 ## 21. Phasing and implementation plan
 

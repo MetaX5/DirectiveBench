@@ -65,6 +65,28 @@ new layout; a 64-character name in the confirm button at 320px (D11 implementer 
 
 ## Decisions
 
+- `updateCategory`'s `updated` outcome gained `previousName` (additive, SPEC-124 §8.2 updated),
+  because D15 needs "Renamed to …" for a rename and "Saved." for a description-only change and
+  the action had no other trustworthy way to tell them apart.
+- The client forms get the limits and the counted copy (`archiveReason`, the status sentence) as
+  props from the server pages: a client module that imports `@directivebench/core` makes
+  Turbopack fail ("does not support external modules (request: node:fs)"), as the artifact
+  page's `metadata-forms.tsx` already avoids.
+- The Archive panel's open state is "open for the result it was opened after"
+  (`openedAt === state`), so a new result closes it without a `setState` in an effect
+  (`react-hooks/set-state-in-effect`).
+- The confirming button keeps the text "Archive <name>"; at narrow widths its label truncates
+  inside the panel (`max-w-full`, `truncate`), while the question above shows the full name and
+  the accessible name stays complete (§11.2 implementer note: `flex-wrap` on the action form and
+  `min-w-0` on the panel are there too).
+- `PageHeader`'s `h1` and the slug `code` elements wrap anywhere: a 64-character name or slug
+  without spaces scrolled the page sideways at 320px (688 px, then 238 px). This is a styling fix
+  of an existing component, not a new variant.
+- On `/artifacts` the category badges keep breaking only between words (SPEC-101 list-width rule,
+  issue 122); the working document's `break-all` for chips is applied on the artifact page only.
+- The description's control-character message "A description cannot contain line breaks or other
+  control characters." mirrors the name's §13 wording; §13 lists no description-specific string.
+
 ## Work performed
 
 ## Verification
