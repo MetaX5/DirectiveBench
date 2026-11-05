@@ -106,7 +106,7 @@ not started.
 | A15 | Bulk remove | Included, symmetric to bulk assign | Bulk assign only | It is the undo of a mistaken bulk assign (reversibility) |
 | A16 | Bulk size cap | Named limit `MAX_BULK_CATEGORY_ARTIFACTS = 10_000` (SPEC-106 NFR-106-01 sizing); more is refused with "narrow the filters" | No cap | Repository rule: no unbounded writes or unnamed limits |
 | A17 | Multi-category filter and "Uncategorized" | Out of scope; the single `category` filter stays | Repeated `category` params (FR-106-10) | Not in the issue's criteria |
-| A18 | Name normalisation | Unicode NFC, trim, runs of whitespace collapsed to one space; control characters refused; key = normalised name with JavaScript `toLowerCase()` (full Unicode, no accent folding) | Also fold accents or NFKC | Matches how tags and search fold today (`apps/web/lib/artifact-metadata.ts`, `listArtifacts`) |
+| A18 | Name normalisation | control characters in the raw input refused first; then Unicode NFC, trim, runs of whitespace collapsed to one space; key = normalised name with JavaScript `toLowerCase()` (full Unicode, no accent folding) | Also fold accents or NFKC | Matches how tags and search fold today (`apps/web/lib/artifact-metadata.ts`, `listArtifacts`) |
 | A19 | Length unit for 64 / 500 | UTF-16 code units, as Zod's `.max` counts (same as tags and notes) | Code points | Consistency with existing limits |
 | A20 | Benchmark suites and categories | Out of scope. Suite definitions keep their `categories:` slugs verbatim; nothing resolves or counts them yet | Add suite counts and import warnings now (FR-106-07) | Not in the issue; S2 (builder) is the natural home |
 | A21 | CLI surface | None in this story | `directivebench category list/create/archive` | The issue names only the web UI; categories are local metadata the web app owns |
@@ -265,8 +265,12 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
 
 ### 8.3 Web validation (`apps/web/lib/categories.ts`)
 
-- `categoryNameSchema`: string → `normalizeCategoryName` → 1..64, no `\p{Cc}`. A name without a
-  Latin letter or digit is valid (A5). Messages in §13.
+- `categoryNameSchema`: string → no `\p{Cc}` in the raw input → `normalizeCategoryName` → 1..64.
+  The control-character check runs on the raw input, before normalisation, because
+  `normalizeCategoryName` turns line breaks and tabs (which are `\p{Cc}`) into spaces and the
+  §13 "line breaks or other control characters" error could otherwise never fire for them
+  (maintainer decision, 2026-11-05). A name without a Latin letter or digit is valid (A5).
+  Messages in §13.
 - `categoryDescriptionSchema`: string → trim → ≤ 500, no `\p{Cc}` → empty becomes `null`.
 - `createCategorySchema`, `updateCategorySchema` (`id` + both), `archiveCategorySchema`
   (`id`, `state` from a hidden `intent` of `archive` / `unarchive`),
@@ -274,8 +278,12 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   `bulkCategorySchema` (`categoryId`, `mode`, `listFingerprint` as 64 hex characters, and the
   list filters parsed by `parseArtifactListParams`; the form is refused when its `invalid` list
   is not empty).
-- Form state reuses `MetadataFormState` (`idle | success | fieldError | error`) and keeps the
-  entered value after an error ([lesson](../lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)).
+- Form state is `CategoryFormState`: the kinds of `MetadataFormState`
+  (`idle | success | fieldError | error`) plus, on `fieldError`, `field: 'name' | 'description'`
+  and `values: { name, description }`, so after an error both fields keep the entered text and
+  the right field gets `aria-invalid` (D14, maintainer decision 2026-11-05;
+  [lesson](../lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)).
+  `MetadataFormState` keeps one value and no field name, which is not enough for two fields.
 
 ## 9. Data flow
 
@@ -392,6 +400,53 @@ design system).
 | UD-7 | Picker for assigning on the artifact page | NativeSelect of active, unassigned categories | Combobox with search (better past about 100 categories) |
 | UD-8 | Category list on the artifact page | Its own "Categories" card (like Tags, Assigned benchmarks) | Keep inside the Metadata card |
 | UD-9 | Copy | The strings in §11 and §13 | Maintainer's wording |
+
+### 11.2 Phase 2 UI decisions (maintainer decision, 2026-11-05)
+
+Refinements of §11 for Phase 2, prepared with mockups and contrast figures and approved by the
+maintainer on 2026-11-05. None needs a new component, variant or token.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| D1 | New category form | One wrapping row: Name, "Description (optional)", Create (`h-control`, same height as the inputs) |
+| D2 | Row actions in the Active table | None; the name links to `/categories/<slug>`; CardDescription "Open a category to rename or archive it." |
+| D3 | Empty Description cell | Empty cell (no dash placeholder) |
+| D4 | Artifacts count cell | A link only when the count is above 0, `aria-label` "3 artifacts with CI and Ops" |
+| D5 | Archived categories card | Same columns as the Active table, no row actions, no per-row badge; Unarchive lives on the category page |
+| D6 | Empty Active table | `EmptyState` replaces the Active card (no card in a card); "Create one above." when nothing is archived, "Create one above, or unarchive one below." otherwise |
+| D7 | `/categories/[slug]` card order | Details, Artifacts, Status (risky action last) |
+| D8 | "archived" marker | `muted` Badge as the first item of the PageHeader `description` line ("[archived] Slug python. Predefined."); PageHeader is unchanged |
+| D9 | Details form | Same one-row layout as D1, button "Save" |
+| D10 | Unarchive button | `outline`, like Archive; Save stays the page's only `default` button |
+| D11 | Archive panel | Client state: Archive toggles the panel (`aria-expanded`, `aria-controls`); Cancel is `Button variant="link" size="sm" type="button"`, same height as the confirm button; `risky-action.mdx` gets one sentence on this |
+| D12 | Archived option in the category filter | Listed last, after the active categories |
+| D13 | Messages | Under the form row (field error, general error, `role="status"` line) as in `metadata-forms.tsx`, with a local `Messages` copy in the categories forms file |
+| D14 | Form state | `CategoryFormState` (§8.3) |
+| D15 | New copy | The strings below; every "N artifacts" uses the singular for 1 and the shared `toLocaleString('en-US')` formatter |
+
+New strings (D15), in addition to §11 and §13: "The link (slug) comes from the name and never
+changes." (New category description); labels "Name", "Description (optional)"; buttons "Create",
+"Save"; card titles "Active categories", "Archived categories", "Details", "Status",
+"Artifacts"; Archived card description "Hidden from pickers and filters. Their assignments
+stay."; page title "Category"; header description "Slug python. Predefined." / "Slug client-a.
+User-defined."; "3 artifacts have this category." / "1 artifact has this category."; panel
+reason for one artifact "It leaves pickers, filters and the bulk form. It stays on 1 artifact,
+shown as archived."; status "Archived. It stays on 1 artifact." / "Archived. No artifact has
+it."; pending "Creating…", "Saving…", "Archiving…", "Unarchiving…"; results "Created
+Estimation.", "Renamed to CI and Ops. Its slug stays devops, so links keep working.", "Saved.",
+"Nothing changed.", "Archived Python. It stays on 2 artifacts." (1: "on 1 artifact"; 0:
+"Archived Python."), "Python is already archived.", "Unarchived Python. It is back in pickers
+and filters.", "Python is already active.". None contains U+2013 or U+2014.
+
+Focus: Create success returns focus to the cleared Name field; a field error focuses that field
+with its value kept; Archive moves focus to the panel question (`tabIndex=-1`); Cancel returns
+it to Archive; a confirmed archive focuses Unarchive and a successful unarchive focuses Archive.
+Focus moves only when it is still inside the card or on `body`.
+
+Implementer notes: at 320px the confirm button "Archive <name>" with a 64-character name can
+overflow, so the panel's action form gets `flex-wrap` and the panel `min-w-0`, covered by a
+narrow-screen Playwright case; add `/categories/<slug>` and the open Archive panel to
+`text-contrast.spec.ts`; leave the other dash placeholders on `/artifacts` to issue #123.
 
 ## 12. Security considerations
 
