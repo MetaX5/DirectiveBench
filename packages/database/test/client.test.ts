@@ -20,6 +20,7 @@ function categoryRow(slug: string) {
     id: `cat_${slug}`,
     slug,
     name: slug,
+    nameKey: slug,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
@@ -60,7 +61,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(5);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(6);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -634,7 +635,7 @@ describe('additive migrations', () => {
       `);
 
       // Up: the two tables appear; existing tables and rows are untouched.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 5))).applied).toBe(1);
       expect(tableNames(handle)).toEqual(
         [...tableNames(before), 'blind_review_pairs', 'blind_reviews'].sort(),
       );
@@ -697,10 +698,86 @@ describe('additive migrations', () => {
         'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
       );
       expect(tableNames(handle)).toEqual(tableNames(before));
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 5))).applied).toBe(1);
       expect(tableNames(handle)).toContain('blind_review_pairs');
     } finally {
       before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds categories.name_key backfilled on a 0004 database with a partial unique index, and can be rolled back (SPEC-124 §8.1)', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 5));
+      // What a 0004 database holds: predefined categories (one archived) and an assignment.
+      handle.sqlite.exec(`
+        insert into categories (id, slug, name, description, predefined, archived_at, created_at, updated_at) values
+          ('cat_sec', 'security', 'Security', 'S', 1, null, 't', 't'),
+          ('cat_ops', 'devops', ' DevOps ', null, 1, null, 't', 't'),
+          ('cat_py', 'python', 'Python', null, 1, 't', 't', 't');
+        insert into artifacts (id, slug, name, type, created_at, updated_at)
+          values ('art_1', 'a', 'A', 'skill', 't', 't');
+        insert into artifact_categories (artifact_id, category_id, created_at)
+          values ('art_1', 'cat_sec', 't');
+      `);
+
+      // Up: every row gets its key, nothing keeps the column default, rows and links survive.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(
+        handle.sqlite
+          .prepare('select id, name, name_key, archived_at from categories order by id')
+          .all(),
+      ).toEqual([
+        { id: 'cat_ops', name: ' DevOps ', name_key: 'devops', archived_at: null },
+        { id: 'cat_py', name: 'Python', name_key: 'python', archived_at: 't' },
+        { id: 'cat_sec', name: 'Security', name_key: 'security', archived_at: null },
+      ]);
+      expect(
+        handle.sqlite.prepare("select count(*) as n from categories where name_key = ''").get(),
+      ).toEqual({ n: 0 });
+      expect(handle.sqlite.prepare('select count(*) as n from artifact_categories').get()).toEqual({
+        n: 1,
+      });
+
+      // The partial index: a second active row with the same key is refused, an archived one
+      // is not, and unarchiving into a clash is refused too (AC-9).
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into categories (id, slug, name, name_key, created_at, updated_at) values ('cat_x', 'security-2', 'SECURITY', 'security', 't', 't')",
+        ),
+      ).toThrow(/UNIQUE constraint failed: categories.name_key/);
+      handle.sqlite.exec(
+        "insert into categories (id, slug, name, name_key, archived_at, created_at, updated_at) values ('cat_y', 'python-2', 'python', 'python', 't', 't', 't')",
+      );
+      handle.sqlite.exec(
+        "insert into categories (id, slug, name, name_key, created_at, updated_at) values ('cat_z', 'python-3', 'Python', 'python', 't', 't')",
+      );
+      expect(() =>
+        handle.sqlite.exec("update categories set archived_at = null where id = 'cat_py'"),
+      ).toThrow(/UNIQUE constraint failed: categories.name_key/);
+
+      // Down (the rollback plan in the PR): drop the index and the column and forget the
+      // migration; the table returns to the 0004 shape and the migration re-applies.
+      handle.sqlite.exec("delete from categories where id in ('cat_y', 'cat_z')");
+      handle.sqlite.exec('drop index categories_active_name_key_unique');
+      handle.sqlite.exec('alter table categories drop column name_key');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(
+        handle.sqlite
+          .prepare('pragma table_info(categories)')
+          .all()
+          .map((row) => String(row.name)),
+      ).not.toContain('name_key');
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(
+        handle.sqlite.prepare("select name_key from categories where id = 'cat_sec'").get(),
+      ).toEqual({ name_key: 'security' });
+    } finally {
       handle.close();
       temp.dispose();
     }

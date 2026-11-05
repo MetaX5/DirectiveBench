@@ -234,6 +234,19 @@ describe('classifyRemoteFailure', () => {
       'auth-required',
       NOT_FOUND_OR_NOT_PUBLIC,
     ],
+    // Recorded from git 2.53 (libcurl 8.18) with the hardened invocation against a loopback HTTPS
+    // server answering 404, as a proxy or another host may (issue #81): `ls-remote`, then `clone`
+    // (its cache path shortened).
+    [
+      "fatal: repository 'https://127.0.0.1:46189/acme/skills.git/' not found\n",
+      'auth-required',
+      NOT_FOUND_OR_NOT_PUBLIC,
+    ],
+    [
+      "Cloning into bare repository '/data/cache/repos/1.git'...\nfatal: repository 'https://127.0.0.1:46189/acme/skills.git/' not found\n",
+      'auth-required',
+      NOT_FOUND_OR_NOT_PUBLIC,
+    ],
     [
       "fatal: unable to access 'https://github.com/a/b/': The requested URL returned error: 404\n",
       'auth-required',
