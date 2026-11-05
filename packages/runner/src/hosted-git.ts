@@ -248,6 +248,8 @@ export const NOT_FOUND_OR_NOT_PUBLIC =
  * git's messages (with `LC_ALL=C`) for a repository that needs authentication or does not exist.
  * GitHub answers 401 for both. With `credential.interactive=false` git reports "unable to get
  * password from user" instead of "could not read Username … terminal prompts disabled".
+ * A host or proxy that answers 404 gets git's own "repository '<url>/' not found" with no
+ * `remote:` line (issue #81).
  */
 const NOT_FOUND_PATTERNS = [
   /unable to get password from user/i,
@@ -255,6 +257,7 @@ const NOT_FOUND_PATTERNS = [
   /terminal prompts disabled/i,
   /Authentication failed/i,
   /Repository not found/i,
+  /^fatal: repository '.*' not found$/m,
   /The requested URL returned error: (?:401|404)/i,
   /does not appear to be a git repository/i,
 ];

@@ -6,14 +6,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { migrateDatabase, openDatabase, type DatabaseHandle } from '@directivebench/database';
+import {
+  migrateDatabase,
+  openDatabase,
+  schema,
+  type DatabaseHandle,
+} from '@directivebench/database';
 import { NOT_FOUND_OR_NOT_PUBLIC, registerHostedUrl } from '../src/index';
 
 /**
  * Hosted git over real TLS, on loopback only (issue #61): an HTTPS server with a self-signed
  * certificate stands in for a TLS-intercepting proxy's CA. It answers every request with 401, as
  * github.com does for a missing or private repository, so git reaching it at all proves the
- * handshake — and therefore the certificate check — passed.
+ * handshake — and therefore the certificate check — passed. A test can switch it to 404, as a
+ * proxy or another host may answer for a missing repository (issue #81).
  */
 const hasOpenssl = spawnSync('openssl', ['version']).status === 0;
 const describeTls = describe.skipIf(!hasOpenssl || process.platform === 'win32');
@@ -25,6 +31,7 @@ let dir: string;
 let handle: DatabaseHandle;
 let server: Server;
 let requests: number;
+let status: number;
 
 /** A self-signed certificate for 127.0.0.1 (its own CA) and its key, as PEM files. */
 function selfSigned(name: string): { cert: string; key: string } {
@@ -64,11 +71,16 @@ beforeEach(async () => {
   await migrateDatabase(handle, migrations);
   proxyCa = selfSigned('proxy-ca');
   requests = 0;
+  status = 401;
   server = createServer(
     { cert: readFileSync(proxyCa.cert), key: readFileSync(proxyCa.key) },
     (_request, response) => {
       requests += 1;
-      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="GitHub"' }).end();
+      if (status === 401) {
+        response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="GitHub"' }).end();
+      } else {
+        response.writeHead(status).end();
+      }
     },
   );
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -125,6 +137,17 @@ describeTls('hosted git and custom CA certificates', () => {
       code: 'unreachable',
     });
     expect(requests).toBe(before);
+  });
+
+  it('maps a remote answering 404 to "not found or not public" and stores nothing (issue #81)', async () => {
+    status = 404;
+    expect(await register({ GIT_SSL_CAINFO: proxyCa.cert })).toEqual({
+      ok: false,
+      code: 'auth-required',
+      message: NOT_FOUND_OR_NOT_PUBLIC,
+    });
+    expect(requests).toBeGreaterThan(0);
+    expect(await handle.db.$count(schema.repositories)).toBe(0);
   });
 
   it('refuses a CA bundle setting it cannot use instead of falling back to the default bundle', async () => {
