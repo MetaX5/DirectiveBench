@@ -39,6 +39,38 @@ describe('seedPredefinedCategories', () => {
   });
 });
 
+describe('seedPredefinedCategories and name keys (SPEC-124 FR-124-10)', () => {
+  it('writes each name key and skips a predefined category whose name an active one holds', async () => {
+    const { db } = getHandle();
+    // A user category named like a predefined one, under another slug (A13).
+    await db.insert(schema.categories).values({
+      id: 'cat_user',
+      slug: 'my-tests',
+      name: 'TESTING',
+      nameKey: 'testing',
+      createdAt: 't',
+      updatedAt: 't',
+    });
+    expect(await seedPredefinedCategories(db)).toBe(PREDEFINED_CATEGORIES.length - 1);
+
+    const rows = await db
+      .select({
+        slug: schema.categories.slug,
+        name: schema.categories.name,
+        nameKey: schema.categories.nameKey,
+      })
+      .from(schema.categories);
+    expect(rows.find((r) => r.slug === 'testing')).toBeUndefined();
+    expect(rows.find((r) => r.slug === 'my-tests')).toMatchObject({ name: 'TESTING' });
+    expect(rows.find((r) => r.slug === 'nextjs')).toEqual({
+      slug: 'nextjs',
+      name: 'Next.js',
+      nameKey: 'next.js',
+    });
+    for (const row of rows) expect(row.nameKey).toBe(row.name.toLowerCase());
+  });
+});
+
 describe('listCategories', () => {
   it('orders by name and counts assigned artifacts', async () => {
     const handle = getHandle();

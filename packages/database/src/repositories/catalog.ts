@@ -1,5 +1,11 @@
 import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm';
-import { PREDEFINED_CATEGORIES, createId, nowIso, pathRelation } from '@directivebench/core';
+import {
+  PREDEFINED_CATEGORIES,
+  categoryNameKey,
+  createId,
+  nowIso,
+  pathRelation,
+} from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import {
   artifactCategories,
@@ -11,7 +17,11 @@ import {
 import { LOCAL_PROVIDERS, type RepositoryOverlap } from './jobs';
 import { countRunsByVerdict, listBenchmarkRuns } from './runs';
 
-/** Inserts predefined categories that do not exist yet. Renamed or archived ones are kept as-is. */
+/**
+ * Inserts predefined categories that do not exist yet. Renamed or archived ones are kept as-is,
+ * and one whose slug or name key clashes with an existing category is skipped, never an error
+ * (SPEC-106 FR-106-02, SPEC-124 FR-124-10).
+ */
 export async function seedPredefinedCategories(db: Database): Promise<number> {
   const now = nowIso();
   let inserted = 0;
@@ -22,6 +32,7 @@ export async function seedPredefinedCategories(db: Database): Promise<number> {
         id: createId('cat'),
         slug: category.slug,
         name: category.name,
+        nameKey: categoryNameKey(category.name),
         description: category.description,
         predefined: true,
         createdAt: now,

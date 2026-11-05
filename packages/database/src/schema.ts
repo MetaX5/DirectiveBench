@@ -28,12 +28,22 @@ export const categories = sqliteTable(
     id: text('id').primaryKey(),
     slug: text('slug').notNull(),
     name: text('name').notNull(),
+    /**
+     * `categoryNameKey(name)`: unique among active categories (SPEC-124 A3). No default, so every
+     * typed insert sets it; the migration's SQL `DEFAULT ''` only lets `ALTER TABLE ADD` run.
+     */
+    nameKey: text('name_key').notNull(),
     description: text('description'),
     predefined: integer('predefined', { mode: 'boolean' }).notNull().default(false),
     archivedAt: text('archived_at'),
     ...timestamps,
   },
-  (t) => [uniqueIndex('categories_slug_unique').on(t.slug)],
+  (t) => [
+    uniqueIndex('categories_slug_unique').on(t.slug),
+    uniqueIndex('categories_active_name_key_unique')
+      .on(t.nameKey)
+      .where(sql`archived_at is null`),
+  ],
 );
 
 /** A source of artifacts: hosted Git repository, local Git repository or plain local directory. */
