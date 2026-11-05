@@ -1,4 +1,17 @@
-import { and, desc, eq, exists, gte, inArray, lt, max, or, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  max,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
 import { createId, hashManifest, nowIso, sha256, slugify } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
@@ -489,26 +502,151 @@ export async function markRepositoryScanFailed(
     .where(eq(repositories.id, repositoryId));
 }
 
-/** Assigns existing, non-archived categories by slug. Unknown slugs are returned, not created. */
+/**
+ * Assigns the active category `which` selects to an artifact in one conditional statement
+ * (`INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING`), so an archive committed
+ * by another process cannot slip between a check and the write (SPEC-014, SPEC-124 FR-124-11).
+ * Returns whether a row was inserted; nothing is inserted for an archived or unknown category, a
+ * missing artifact, or an existing assignment.
+ */
+async function insertActiveAssignment(
+  db: Database,
+  artifactId: string,
+  which: SQL,
+): Promise<boolean> {
+  const inserted = await db
+    .insert(artifactCategories)
+    .select(
+      db
+        .select({
+          artifactId: sql<string>`${artifactId}`.as('artifact_id'),
+          categoryId: categories.id,
+          createdAt: sql<string>`${nowIso()}`.as('created_at'),
+        })
+        .from(categories)
+        .where(
+          and(
+            which,
+            isNull(categories.archivedAt),
+            exists(
+              db
+                .select({ one: sql`1` })
+                .from(artifacts)
+                .where(eq(artifacts.id, artifactId)),
+            ),
+          ),
+        ),
+    )
+    .onConflictDoNothing()
+    .returning({ artifactId: artifactCategories.artifactId });
+  return inserted.length > 0;
+}
+
+/**
+ * Assigns existing, non-archived categories by slug (the example import, FR-106-06). Unknown and
+ * archived slugs are returned as `unknown`, never created; `assigned` lists the slugs whose active
+ * category the artifact now has, newly or already. Each slug is one conditional statement, so a
+ * category archived concurrently is never newly assigned (SPEC-124 §8.2).
+ */
 export async function assignCategoriesBySlug(
   db: Database,
   artifactId: string,
   slugs: readonly string[],
 ): Promise<{ assigned: string[]; unknown: string[] }> {
-  if (slugs.length === 0) return { assigned: [], unknown: [] };
-  const found = await db
-    .select({ id: categories.id, slug: categories.slug })
-    .from(categories)
-    .where(and(inArray(categories.slug, [...slugs]), sql`${categories.archivedAt} is null`));
-  const now = nowIso();
-  for (const category of found) {
-    await db
-      .insert(artifactCategories)
-      .values({ artifactId, categoryId: category.id, createdAt: now })
-      .onConflictDoNothing();
+  const assigned: string[] = [];
+  for (const slug of new Set(slugs)) {
+    const inserted = await insertActiveAssignment(db, artifactId, eq(categories.slug, slug));
+    // A no-op insert is still "assigned" when the artifact already has the active category.
+    if (inserted || (await hasActiveCategory(db, artifactId, slug))) assigned.push(slug);
   }
-  const assigned = found.map((c) => c.slug);
-  return { assigned, unknown: slugs.filter((s) => !assigned.includes(s)) };
+  return { assigned, unknown: slugs.filter((slug) => !assigned.includes(slug)) };
+}
+
+async function hasActiveCategory(db: Database, artifactId: string, slug: string) {
+  const row = await db
+    .select({ one: sql`1` })
+    .from(artifactCategories)
+    .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
+    .where(
+      and(
+        eq(artifactCategories.artifactId, artifactId),
+        eq(categories.slug, slug),
+        isNull(categories.archivedAt),
+      ),
+    )
+    .get();
+  return row !== undefined;
+}
+
+/** Why an assignment of `categoryId` to `artifactId` cannot change: one of them is missing. */
+async function missingAssignee(
+  db: Database,
+  artifactId: string,
+  categoryId: string,
+): Promise<'category-not-found' | 'artifact-not-found' | { archived: boolean }> {
+  const category = await db
+    .select({ archivedAt: categories.archivedAt })
+    .from(categories)
+    .where(eq(categories.id, categoryId))
+    .get();
+  if (!category) return 'category-not-found';
+  const artifact = await db
+    .select({ id: artifacts.id })
+    .from(artifacts)
+    .where(eq(artifacts.id, artifactId))
+    .get();
+  if (!artifact) return 'artifact-not-found';
+  return { archived: category.archivedAt !== null };
+}
+
+export type AssignArtifactCategoryOutcome =
+  | 'assigned'
+  | 'already-assigned'
+  | 'category-archived'
+  | 'category-not-found'
+  | 'artifact-not-found';
+
+/**
+ * Assigns an active category to an artifact; idempotent (SPEC-124 FR-124-11). The write is one
+ * conditional statement; the follow-up reads only explain a no-op insert. An archived category is
+ * refused, also when the artifact already has it.
+ */
+export async function assignArtifactCategory(
+  db: Database,
+  artifactId: string,
+  categoryId: string,
+): Promise<AssignArtifactCategoryOutcome> {
+  if (await insertActiveAssignment(db, artifactId, eq(categories.id, categoryId)))
+    return 'assigned';
+  const found = await missingAssignee(db, artifactId, categoryId);
+  if (typeof found === 'string') return found;
+  return found.archived ? 'category-archived' : 'already-assigned';
+}
+
+export type UnassignArtifactCategoryOutcome =
+  'removed' | 'not-assigned' | 'category-not-found' | 'artifact-not-found';
+
+/**
+ * Removes a category from an artifact; idempotent and allowed for archived categories
+ * (SPEC-124 FR-124-12). One `DELETE … RETURNING`; the follow-up reads only explain a no-op.
+ */
+export async function unassignArtifactCategory(
+  db: Database,
+  artifactId: string,
+  categoryId: string,
+): Promise<UnassignArtifactCategoryOutcome> {
+  const removed = await db
+    .delete(artifactCategories)
+    .where(
+      and(
+        eq(artifactCategories.artifactId, artifactId),
+        eq(artifactCategories.categoryId, categoryId),
+      ),
+    )
+    .returning({ artifactId: artifactCategories.artifactId });
+  if (removed.length > 0) return 'removed';
+  const found = await missingAssignee(db, artifactId, categoryId);
+  return typeof found === 'string' ? found : 'not-assigned';
 }
 
 export async function assignBenchmarkSuite(
@@ -675,6 +813,24 @@ export interface LatestEvaluation {
   startedAt: string;
 }
 
+/** A category assigned to an artifact; archived ones stay assigned (SPEC-124 A8). */
+export interface ArtifactCategory {
+  slug: string;
+  name: string;
+  archived: boolean;
+}
+
+function toArtifactCategory(row: {
+  slug: string;
+  name: string;
+  archivedAt: string | null;
+}): ArtifactCategory {
+  return { slug: row.slug, name: row.name, archived: row.archivedAt !== null };
+}
+
+/** Orders assigned categories: active first, then by name. */
+const assignedCategoryOrder = [sql`${categories.archivedAt} is not null`, categories.name];
+
 export interface ArtifactListItem {
   id: string;
   slug: string;
@@ -683,7 +839,8 @@ export interface ArtifactListItem {
   description: string | null;
   format: string | null;
   latestVersion: number | null;
-  categories: { slug: string; name: string }[];
+  /** Active categories first, then archived ones, each by name (SPEC-124 §8.2). */
+  categories: ArtifactCategory[];
   /** Repositories with at least one active occurrence, ordered by name (FR-101-10). */
   repositories: { id: string; name: string }[];
   /** Active occurrences across all repositories (a path found in several places counts each). */
@@ -818,11 +975,12 @@ export async function listArtifacts(
       artifactId: artifactCategories.artifactId,
       slug: categories.slug,
       name: categories.name,
+      archivedAt: categories.archivedAt,
     })
     .from(artifactCategories)
     .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
     .where(inArray(artifactCategories.artifactId, ids))
-    .orderBy(categories.name);
+    .orderBy(...assignedCategoryOrder);
   const occurrences = await db
     .select({
       artifactId: artifactOccurrences.artifactId,
@@ -867,7 +1025,7 @@ export async function listArtifacts(
       description: row.description,
       format: latestVersion?.format ?? null,
       latestVersion: latestVersion?.version ?? null,
-      categories: categoriesOf(row.id).map(({ slug, name }) => ({ slug, name })),
+      categories: categoriesOf(row.id).map(toArtifactCategory),
       repositories: [
         ...new Map(
           found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.name }]),
@@ -900,11 +1058,11 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
     .where(eq(artifactOccurrences.artifactId, artifactId))
     .orderBy(repositories.name, repositories.id, artifactOccurrences.path);
   const cats = await db
-    .select({ slug: categories.slug, name: categories.name })
+    .select({ slug: categories.slug, name: categories.name, archivedAt: categories.archivedAt })
     .from(artifactCategories)
     .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
     .where(eq(artifactCategories.artifactId, artifactId))
-    .orderBy(categories.name);
+    .orderBy(...assignedCategoryOrder);
   const suites = await db
     .select({ id: benchmarkSuites.id, slug: benchmarkSuites.slug, name: benchmarkSuites.name })
     .from(artifactBenchmarkAssignments)
@@ -927,7 +1085,7 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
     artifact,
     versions,
     occurrences,
-    categories: cats,
+    categories: cats.map(toArtifactCategory),
     suites,
     evaluations: runs.map((r) => ({
       ...toLatestEvaluation(r.run),
