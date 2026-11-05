@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { INCOMPLETE_FORM_MESSAGE } from '../lib/artifact-metadata';
+import { ARTIFACT_GONE_MESSAGE, INCOMPLETE_FORM_MESSAGE } from '../lib/artifact-metadata';
 import {
   CATEGORY_GONE_MESSAGE,
   archiveCategorySchema,
   archiveCategoryState,
   archiveReason,
   archivedStatusText,
+  artifactCategorySchema,
   artifactsPhrase,
+  assignCategoryState,
+  categoriesCardModel,
   categoryChipLabel,
   categoryDescriptionSchema,
   categoryFilterOptions,
@@ -14,6 +17,7 @@ import {
   categoryRefused,
   createCategorySchema,
   createCategoryState,
+  unassignCategoryState,
   updateCategorySchema,
   updateCategoryState,
 } from '../lib/categories';
@@ -303,5 +307,117 @@ describe('categoryFilterOptions (FR-124-15, D12)', () => {
       ...active,
       { value: 'python', label: 'Python (archived)' },
     ]);
+  });
+});
+
+describe('artifactCategorySchema (§8.3, Phase 3)', () => {
+  it('needs both ids', () => {
+    expect(artifactCategorySchema.parse({ artifactId: 'art_1', categoryId: 'cat_1' })).toEqual({
+      artifactId: 'art_1',
+      categoryId: 'cat_1',
+    });
+    for (const input of [
+      { artifactId: 'art_1', categoryId: '' },
+      { artifactId: '', categoryId: 'cat_1' },
+      { artifactId: 'art_1', categoryId: null },
+      { categoryId: 'cat_1' },
+    ]) {
+      expect(artifactCategorySchema.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    }
+  });
+});
+
+describe('assignCategoryState (FR-124-11, §13, D24)', () => {
+  it('maps every outcome; already assigned is a status, not an error', () => {
+    expect(assignCategoryState({ status: 'assigned', category: python })).toEqual({
+      kind: 'success',
+      message: 'Assigned Python.',
+    });
+    expect(assignCategoryState({ status: 'already-assigned', category: python })).toEqual({
+      kind: 'success',
+      message: 'Python is already assigned.',
+    });
+    expect(
+      assignCategoryState({ status: 'category-archived', category: { ...python, archived: true } }),
+    ).toEqual({
+      kind: 'error',
+      message: 'Python is archived. Unarchive it on its page before assigning it.',
+    });
+    expect(assignCategoryState({ status: 'category-not-found' })).toEqual({
+      kind: 'error',
+      message: CATEGORY_GONE_MESSAGE,
+    });
+    expect(assignCategoryState({ status: 'artifact-not-found' })).toEqual({
+      kind: 'error',
+      message: ARTIFACT_GONE_MESSAGE,
+    });
+  });
+});
+
+describe('unassignCategoryState (FR-124-12, D23, D24)', () => {
+  it('maps every outcome; an archived removal says how to assign it again', () => {
+    expect(unassignCategoryState({ status: 'removed', category: python })).toEqual({
+      kind: 'success',
+      message: 'Removed Python.',
+    });
+    expect(
+      unassignCategoryState({ status: 'removed', category: { ...python, archived: true } }),
+    ).toEqual({
+      kind: 'success',
+      message: 'Removed Python. To assign it again, unarchive it on its page first.',
+    });
+    expect(unassignCategoryState({ status: 'not-assigned', category: python })).toEqual({
+      kind: 'success',
+      message: 'Python was already removed.',
+    });
+    expect(unassignCategoryState({ status: 'category-not-found' })).toEqual({
+      kind: 'error',
+      message: CATEGORY_GONE_MESSAGE,
+    });
+    expect(unassignCategoryState({ status: 'artifact-not-found' })).toEqual({
+      kind: 'error',
+      message: ARTIFACT_GONE_MESSAGE,
+    });
+  });
+});
+
+describe('categoriesCardModel (§11, D20 to D22)', () => {
+  const all = [
+    { id: 'cat_doc', name: 'Documentation', archivedAt: null },
+    { id: 'cat_py', name: 'Python', archivedAt: '2026-11-05T00:00:00.000Z' },
+    { id: 'cat_test', name: 'Testing', archivedAt: null },
+  ];
+  const testing = { id: 'cat_test', slug: 'testing', name: 'Testing', archived: false };
+  const archivedPython = { ...python, archived: true };
+
+  it('labels the chips and offers the active, unassigned categories in the given order', () => {
+    expect(categoriesCardModel([testing, archivedPython], all)).toEqual({
+      chips: [
+        { id: 'cat_test', label: 'Testing', archived: false },
+        { id: 'cat_py', label: 'Python (archived)', archived: true },
+      ],
+      available: [{ id: 'cat_doc', name: 'Documentation' }],
+      noPicker: null,
+    });
+  });
+
+  it('replaces the picker when every active category is assigned (D21)', () => {
+    const documentation = { id: 'cat_doc', slug: 'documentation', name: 'Documentation' };
+    const model = categoriesCardModel([{ ...documentation, archived: false }, testing], all);
+    expect(model.available).toEqual([]);
+    expect(model.noPicker).toBe('all-assigned');
+  });
+
+  it('replaces the picker when no active category exists (D22)', () => {
+    const archivedOnly = all.map((c) => ({ ...c, archivedAt: 't' }));
+    expect(categoriesCardModel([archivedPython], archivedOnly)).toMatchObject({
+      available: [],
+      noPicker: 'none-active',
+    });
+    expect(categoriesCardModel([], [])).toEqual({
+      chips: [],
+      available: [],
+      noPicker: 'none-active',
+    });
   });
 });

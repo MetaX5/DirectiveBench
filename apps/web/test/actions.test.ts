@@ -6,6 +6,7 @@ import {
   acquireNextJob,
   assignArtifactCategory,
   createBenchmarkRun,
+  getArtifactDetail,
   getCategoryBySlug,
   listCategories,
   finishBenchmarkRun,
@@ -23,6 +24,7 @@ import {
 } from '@directivebench/database';
 import {
   addArtifactTagAction,
+  assignArtifactCategoryAction,
   assignArtifactSuiteAction,
   cancelJobAction,
   createCategoryAction,
@@ -36,6 +38,7 @@ import {
   removeArtifactTagAction,
   saveArtifactNotesAction,
   scanRepositoryAction,
+  unassignArtifactCategoryAction,
   unassignArtifactSuiteAction,
 } from '../lib/actions';
 import {
@@ -1172,5 +1175,132 @@ describe('category actions (SPEC-124 §10)', () => {
       kind: 'success',
       message: 'Archived Python.',
     });
+  });
+});
+
+describe('artifact category actions (SPEC-124 Phase 3, §11.3)', () => {
+  const idle: MetadataFormState = { kind: 'idle' };
+  const categoryIdle: CategoryFormState = { kind: 'idle' };
+
+  async function create(name: string): Promise<string> {
+    await createCategoryAction(categoryIdle, form({ name, description: '' }));
+    const created = (await listCategories(handle.db)).find((c) => c.name === name);
+    return (created as { id: string }).id;
+  }
+
+  async function chips(artifactId: string) {
+    return (await getArtifactDetail(handle.db, artifactId))?.categories.map((c) =>
+      c.archived ? `${c.name} (archived)` : c.name,
+    );
+  }
+
+  /** Every submit refreshes the artifact page and both layouts, whatever its outcome (D26). */
+  function expectRefreshed(artifactId: string): void {
+    expect(next.revalidatePath).toHaveBeenCalledWith(`/artifacts/${artifactId}`);
+    expect(next.revalidatePath).toHaveBeenCalledWith('/categories', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledWith('/artifacts', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledTimes(3);
+    vi.clearAllMocks();
+  }
+
+  it('assigns once and removes once, each a status, never an error (D24)', async () => {
+    const { artifactId } = await importArtifact();
+    const categoryId = await create('Documentation');
+    vi.clearAllMocks();
+    const fields = form({ artifactId, categoryId });
+    expect(await assignArtifactCategoryAction(idle, fields)).toEqual({
+      kind: 'success',
+      message: 'Assigned Documentation.',
+    });
+    expectRefreshed(artifactId);
+    expect(await assignArtifactCategoryAction(idle, fields)).toEqual({
+      kind: 'success',
+      message: 'Documentation is already assigned.',
+    });
+    expectRefreshed(artifactId);
+    expect(await chips(artifactId)).toEqual(['Documentation']);
+    expect(await unassignArtifactCategoryAction(idle, fields)).toEqual({
+      kind: 'success',
+      message: 'Removed Documentation.',
+    });
+    expectRefreshed(artifactId);
+    expect(await unassignArtifactCategoryAction(idle, fields)).toEqual({
+      kind: 'success',
+      message: 'Documentation was already removed.',
+    });
+    expectRefreshed(artifactId);
+    expect(await chips(artifactId)).toEqual([]);
+  });
+
+  it('names the category as it is now when another tab renamed it', async () => {
+    const { artifactId } = await importArtifact();
+    const categoryId = await create('Documentation');
+    await updateCategoryAction(
+      categoryIdle,
+      form({ id: categoryId, name: 'Docs', description: '' }),
+    );
+    expect(await assignArtifactCategoryAction(idle, form({ artifactId, categoryId }))).toEqual({
+      kind: 'success',
+      message: 'Assigned Docs.',
+    });
+  });
+
+  it('refuses to assign an archived category but removes it with the way back (D23)', async () => {
+    const { artifactId } = await importArtifact();
+    const python = await create('Python');
+    const ruby = await create('Ruby');
+    await assignArtifactCategory(handle.db, artifactId, python);
+    for (const id of [python, ruby]) {
+      await setCategoryArchivedAction(categoryIdle, form({ id, intent: 'archive' }));
+    }
+    vi.clearAllMocks();
+    expect(
+      await assignArtifactCategoryAction(idle, form({ artifactId, categoryId: ruby })),
+    ).toEqual({
+      kind: 'error',
+      message: 'Ruby is archived. Unarchive it on its page before assigning it.',
+    });
+    // The refused option leaves this stale page's picker on the refresh (D26).
+    expectRefreshed(artifactId);
+    expect(await chips(artifactId)).toEqual(['Python (archived)']);
+    expect(
+      await unassignArtifactCategoryAction(idle, form({ artifactId, categoryId: python })),
+    ).toEqual({
+      kind: 'success',
+      message: 'Removed Python. To assign it again, unarchive it on its page first.',
+    });
+    expectRefreshed(artifactId);
+    expect(await chips(artifactId)).toEqual([]);
+  });
+
+  it('refuses forged or missing ids and writes nothing', async () => {
+    const { artifactId } = await importArtifact();
+    const categoryId = await create('Documentation');
+    vi.clearAllMocks();
+    for (const action of [assignArtifactCategoryAction, unassignArtifactCategoryAction]) {
+      for (const fields of [{ artifactId }, { categoryId }, { artifactId, categoryId: '' }]) {
+        expect(await action(idle, form(fields)), JSON.stringify(fields)).toEqual({
+          kind: 'error',
+          message: INCOMPLETE_FORM_MESSAGE,
+        });
+        // Without a valid artifact id only the layouts are refreshed; they cover its page.
+        expect(next.revalidatePath).toHaveBeenCalledWith('/categories', 'layout');
+        expect(next.revalidatePath).toHaveBeenCalledWith('/artifacts', 'layout');
+        expect(next.revalidatePath).toHaveBeenCalledTimes(2);
+        vi.clearAllMocks();
+      }
+      expect(await action(idle, form({ artifactId, categoryId: 'cat_forged' }))).toEqual({
+        kind: 'error',
+        message: CATEGORY_GONE_MESSAGE,
+      });
+      expectRefreshed(artifactId);
+      expect(await action(idle, form({ artifactId: 'art_forged', categoryId }))).toEqual({
+        kind: 'error',
+        message: ARTIFACT_GONE_MESSAGE,
+      });
+      expectRefreshed('art_forged');
+    }
+    expect(await chips(artifactId)).toEqual([]);
+    expect((await listCategories(handle.db)).map((c) => c.artifactCount)).toEqual([0]);
   });
 });
