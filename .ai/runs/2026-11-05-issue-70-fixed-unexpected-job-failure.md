@@ -3,7 +3,7 @@ title: End every job that fails unexpectedly with a fixed message (issue #70)
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer-approved fix of issue #70 via om-auto-fix-issue
-status: in-progress
+status: completed
 branch: fix/issue-70-fixed-unexpected-job-failure
 specs: [SPEC-105, SPEC-114, SPEC-007, SPEC-118, SPEC-009, SPEC-010, SPEC-003]
 ---
@@ -139,6 +139,31 @@ benchmark run started from the UI, one on `repositories` for a registration, and
   catch-all message is covered by unit tests only.
 - No en dash or em dash in the new copy. Older copy on these pages still has dashes (the
   Repositories help text, "Planned — not implemented", "—" placeholders); issue #123 tracks them.
+
+### Gate on the final head (`93a60a9`)
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test --force` | pass; 100% coverage in every package (web 479, cli 164, runner 244 tests) |
+| `pnpm build && pnpm verify:pack` | pass |
+| `TMPDIR=/var/tmp/… pnpm test:e2e` | 109 passed |
+| `TMPDIR=/var/tmp/… pnpm test:storybook` | 68 files, 304 tests passed |
+
+### Review rounds of the second run
+
+- `om-auto-review-pr 192 --autofix` round 2 (engine `om-code-review`) at `71abf17`: approve,
+  submitted as COMMENT at the maintainer's instruction. No blockers, no majors; two optional
+  nits (no known-secret redaction of the API key in the log, no pointer to `runner.log` on the
+  terminal).
+- `om-auto-qa-pr 192`: PASS after one fix (`93a60a9`, the doubled "failed" prefix above).
+- Codex adversarial review (`codex-companion.mjs adversarial-review --base origin/main`):
+  round 1 at `93a60a9` found no material defects, but returned `needs-attention` because its
+  read-only sandbox could not run typecheck, test, build or verify:pack. Round 2 was given the
+  local gate results and returned **approve** with no material findings.
+
+Not verified in the second run: the scan's catch-all message in the browser (a failing artifact
+write ends with the existing typed outcome; the catch-all is covered by unit tests); macOS and
+Windows locally (CI runs macOS unit tests).
 
 ## Lessons recorded
 
