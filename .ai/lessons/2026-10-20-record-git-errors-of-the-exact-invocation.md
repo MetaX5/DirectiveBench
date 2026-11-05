@@ -47,3 +47,13 @@ The CI image update `ubuntu24/20261025` brought a git that reports a broken `.gi
 The code kept failing closed (it only special-cases the discovery message), but a test that
 pinned the old wording went red on every branch. Classify only the messages the code acts on,
 and let tests of fail-closed paths accept each known wording of the same git error.
+
+## Follow-up (2026-11-05): a host's `remote:` line can hide that git's own message is unmatched
+
+Issue #81: `/Repository not found/i` was written from github.com's stderr, where it matched the
+server's `remote: Repository not found.` line, not git's own `fatal: repository '<url>/' not
+found` (the URL sits between the words). A proxy or another host answering a bare 404 sends no
+`remote:` line, so the same failure became a generic `git-failed`. Key a pattern on git's own
+line (anchored, e.g. `/^fatal: repository '.*' not found$/m`), and record the failure against a
+loopback server that sends only the status code, not only against the real service whose extra
+text may make a loose pattern pass.
