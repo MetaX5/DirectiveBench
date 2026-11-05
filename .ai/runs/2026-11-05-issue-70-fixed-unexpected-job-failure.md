@@ -3,7 +3,7 @@ title: End every job that fails unexpectedly with a fixed message (issue #70)
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer-approved fix of issue #70 via om-auto-fix-issue
-status: in-progress
+status: completed
 branch: fix/issue-70-fixed-unexpected-job-failure
 specs: [SPEC-105, SPEC-114, SPEC-007]
 ---
@@ -79,13 +79,22 @@ Not verified: how the web UI renders these messages (the change is text only, an
 - `pnpm test` first replayed cached results for the packages that depend on the runner, so the
   gate was run again with `--force`.
 
+## Review
+
+- `om-auto-review-pr 192 --autofix` round 1 (engine `om-code-review`) at `a574b60`: no blockers and
+  no majors. The review was submitted as COMMENT at the maintainer's instruction; its own verdict
+  would be approve. One minor (`benchmark run`/`demo` keep no raw error) was filed as #193; one
+  nit (no stack in the log) was left as optional. The autofix loop had nothing to fix.
+- `om-auto-qa-pr` was not run. The change is text-only, and the maintainer's brief named the chain
+  without it. The PR keeps `needs-qa`, and the review lists P0 to P2 manual QA steps.
+
 ## Lessons recorded
 
 - [Inject a real database error with a SQLite trigger, not a mock](../lessons/2026-11-05-inject-database-errors-with-a-trigger.md)
 
 ## Follow-ups
 
-- `benchmark run` and `demo` create their `LocalRunner` without a logger, so there the raw error
-  of an unexpected failure is not kept anywhere. Give them a file-only runner log.
+- #193: `benchmark run` and `demo` create their `LocalRunner` without a logger, so there the raw
+  error of an unexpected failure is not kept anywhere. Give them a file-only runner log.
 - A scan whose failure record itself fails leaves `sync_status` as it was. Only the job shows the
   failure.
