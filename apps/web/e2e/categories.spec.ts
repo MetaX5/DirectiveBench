@@ -410,3 +410,31 @@ test('the pages fit a 320px screen with a 64-character name', async ({ page }) =
     (panel?.x ?? 0) + (panel?.width ?? 0),
   );
 });
+
+test('with every category archived, the Active table gives way to an empty state', async ({
+  page,
+}) => {
+  // Setup only: archive every active category for this test, then restore exactly those.
+  const archivedHere = await withDatabase((db) => {
+    const ids = (
+      db.prepare('select id from categories where archived_at is null').all() as { id: string }[]
+    ).map((row) => row.id);
+    const archive = db.prepare('update categories set archived_at = ? where id = ?');
+    for (const id of ids) archive.run(new Date().toISOString(), id);
+    return ids;
+  });
+  try {
+    await page.goto('/categories');
+    await expect(page.getByText('No active categories', { exact: true })).toBeVisible();
+    await expect(page.getByText('Create one above, or unarchive one below.')).toBeVisible();
+    await expect(table(page, 'Active categories')).toHaveCount(0);
+    await expect(
+      table(page, 'Archived categories').getByRole('row', { name: /^Security / }),
+    ).toBeVisible();
+  } finally {
+    await withDatabase((db) => {
+      const restore = db.prepare('update categories set archived_at = null where id = ?');
+      for (const id of archivedHere) restore.run(id);
+    });
+  }
+});
