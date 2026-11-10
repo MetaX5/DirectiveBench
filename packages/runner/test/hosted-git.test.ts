@@ -278,6 +278,37 @@ describe('classifyRemoteFailure', () => {
       'git failed: the remote end hung up unexpectedly',
     ],
     ['warning: only a warning\n\n', 'git-failed', 'git failed: no message'],
+    // Recorded from git 2.53 with the hardened clone (cache path shortened, issue #195): the
+    // message names git's error line, never the "Cloning into" progress line before it. Over
+    // file:// from a remote whose objects are gone, over https to a closed loopback port, and
+    // into a cache directory git cannot create (no prefix on git's line).
+    [
+      "Cloning into bare repository '/data/cache/repos/1.git'...\nfatal: git upload-pack: not our ref c3faa3ef6e4a51958f6f55d35222412eca1deb11\nfatal: remote error: upload-pack: not our ref c3faa3ef6e4a51958f6f55d35222412eca1deb11\n",
+      'git-failed',
+      'git failed: git upload-pack: not our ref c3faa3ef6e4a51958f6f55d35222412eca1deb11',
+    ],
+    [
+      "Cloning into bare repository '/data/cache/repos/2.git'...\nfatal: unable to access 'https://127.0.0.1:1/acme/skills.git/': Failed to connect to 127.0.0.1 port 1 after 0 ms: Could not connect to server\n",
+      'unreachable',
+      "Could not reach github.com: unable to access 'https://127.0.0.1:1/acme/skills.git/': Failed to connect to 127.0.0.1 port 1 after 0 ms: Could not connect to server. Check the network connection or proxy.",
+    ],
+    [
+      "Cloning into bare repository '<cache>/ro/4.git'...\n<cache>/ro/4.git: Permission denied\n",
+      'git-failed',
+      'git failed: <cache>/ro/4.git: Permission denied',
+    ],
+    // From a remote missing its root tree: git's own `error:` line, not the remote's line before it.
+    [
+      "Cloning into bare repository '/data/cache/repos/6.git'...\nremote: fatal: bad tree object bd925dfe4a912c27e4beb218958cf1b0aa58d15f        \nerror: git upload-pack: git-pack-objects died with error.\nfatal: git upload-pack: aborting due to possible repository corruption on the remote side.\nremote: aborting due to possible repository corruption on the remote side.\nfatal: early EOF\nfatal: fetch-pack: invalid index-pack output\n",
+      'git-failed',
+      'git failed: git upload-pack: git-pack-objects died with error.',
+    ],
+    // A progress line alone is no error message.
+    [
+      "Cloning into bare repository '/data/cache/repos/1.git'...\n",
+      'git-failed',
+      'git failed: no message',
+    ],
   ])('maps %j', (stderr, code, message) => {
     expect(classifyRemoteFailure(stderr, 'github.com')).toEqual({ ok: false, code, message });
   });
