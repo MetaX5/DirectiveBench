@@ -295,7 +295,12 @@ export const BulkAction: Story = {
       {[false, true].map((open) => (
         <Card key={String(open)}>
           <CardContent>
-            <form role="search" className="mb-4 flex flex-wrap items-end gap-inline">
+            {/* Two examples on one page: each search landmark needs its own name (axe). */}
+            <form
+              role="search"
+              aria-label={open ? 'Filters, panel open' : 'Filters'}
+              className="mb-4 flex flex-wrap items-end gap-inline"
+            >
               <label className="flex flex-col gap-1 text-ui text-muted-foreground">
                 Search
                 <Input name="q" defaultValue="client" className="w-56" />

@@ -918,8 +918,14 @@ function bulkSelect(page: Page) {
 
 test.describe.serial('bulk category changes on the filtered Artifacts list', () => {
   let listUrl = '';
+  /** Jobs that existed before the fixture repository was registered and scanned. */
+  let jobsBefore = new Set<string>();
 
   test.beforeAll(async ({ browser }) => {
+    jobsBefore = await withDatabase(
+      (db) =>
+        new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+    );
     for (const name of ['bulk-alpha', 'bulk-beta', 'bulk-gamma']) writeSkill(name);
     const page = await browser.newPage();
     await page.goto('/repositories');
@@ -934,7 +940,27 @@ test.describe.serial('bulk category changes on the filtered Artifacts list', () 
     listUrl = `/artifacts?repository=${await bulkRepositoryId()}`;
   });
 
-  test.afterAll(() => rmSync(bulkSources, { recursive: true, force: true }));
+  // Other spec files count artifacts and jobs (home, management): remove the fixture repository,
+  // its artifacts and the register and scan jobs again.
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const repository = db
+        .prepare('select id from repositories where name = ?')
+        .get(BULK_REPOSITORY) as { id: string } | undefined;
+      if (repository) {
+        db.prepare(
+          `delete from artifacts where id in (
+             select artifact_id from artifact_occurrences where repository_id = ?)`,
+        ).run(repository.id);
+        db.prepare('delete from repositories where id = ?').run(repository.id);
+      }
+      const remove = db.prepare('delete from jobs where id = ?');
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) remove.run(id);
+      }
+    });
+    rmSync(bulkSources, { recursive: true, force: true });
+  });
 
   test('assign and remove ask first with the count; Cancel writes nothing; focus moves into the panel and back', async ({
     page,
