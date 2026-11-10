@@ -66,8 +66,8 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
    above).
 6. Guard tests: six cases, including leaks at the top level, inside `directivebench/workspaces`,
    a file named `directivebench` and the real `globalSetup` entry.
-7. SPEC-012 §9 implementation-status note and a new lesson. Commit f057693; PR #203 opened (labels `review`,
-   `bug`, `needs-qa`, `priority-low`, `risk-low`).
+7. SPEC-012 §9 implementation-status note and a new lesson. Commit f057693; PR #203 opened
+   (labels `review`, `bug`, `needs-qa`, `priority-low`, `risk-low`).
 8. Review round 1 (`om-auto-review-pr 203 --autofix`, engine `om-code-review`, submitted as
    COMMENT): request changes, 0 blockers, 1 major, 1 nit. Major: the guard sat at the root,
    outside turbo's `test`/`typecheck` inputs (`test-support/**`, `vitest.shared.ts`), so a
