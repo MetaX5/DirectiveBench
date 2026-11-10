@@ -3,7 +3,7 @@ title: doctor reports git and GIT_SSL_CAINFO for hosted repositories (issue #60)
 date: 2026-11-10
 agent: Claude Code / claude-opus-5-5 (om-auto-fix-issue chain)
 trigger: issue #60 and its comment (from PR #73, issue #61)
-status: in-progress
+status: completed
 branch: feat/issue-60-doctor-git-hosted-check
 specs: [SPEC-009, SPEC-104, SPEC-105]
 ---
@@ -62,8 +62,9 @@ without a new spec, as for issue #74. Scope: `apps/cli` only. No edit of
 | Seam check: `major >` branch removed | 1 fails (`accepts git version 3.0.0`) |
 | Seam check: `resolveCaBundle` replaced by "always ok" | 3 fail (relative path, directory, missing file) |
 | `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass |
-| `pnpm test --concurrency=1 --continue` | 6 of 7 packages pass at 100%; apps/cli 175/176 at 100% coverage, the failing test is pre-existing and environment-dependent (see Problems) |
+| `pnpm test --concurrency=1 --continue` (d573832) | 6 of 7 packages pass at 100%; apps/cli 175/176, the failing test is pre-existing and depends on the machine (see Problems) |
 | `pnpm build`, `pnpm verify:pack` | pass ("Packaging verification passed") |
+| Review round 1 gate (d573832 + `origin/main` 6a647f6 + the `cli.test.ts` fix) | format, lint, typecheck, build, verify:pack pass; apps/cli 176/176 at 100%; 7 real-git runner tests hit the 5 s timeout under load average 28 to 34, and `packages/runner` alone then passed 250/250 at 100% |
 | Manual: built `node apps/cli/dist/cli.js doctor` | git 2.48.1 ok with `hosted repositories: yes`; a fake git 2.43.0 first on PATH warns with the hint, exit 0; `GIT_SSL_CAINFO` unset, a readable file, `relative.pem` and a directory give the expected lines, no path or contents printed |
 
 Not verified:
@@ -77,13 +78,24 @@ Not verified:
   machine, with and without this change (checked on `origin/main` code): `claude` is installed
   here but not logged in under Vitest, and the `agent:claude-code:subscription` and
   `agent:claude-code:api-key` checks warn without a `hint`, which SPEC-009 §3 requires for every
-  non-`ok` check. CI has no `claude`, so it does not see this. Not changed here (out of scope).
+  non-`ok` check. CI has no `claude`, so it does not see this. Review round 1 flagged it as a gate
+  blocker; a786102 stubs `PATH` to an empty directory in that `doctor` block. The missing hints
+  themselves are a follow-up.
+- `origin/main` moved during the run (PR #200 merged, `hosted-git.ts`); merged in as efb3c0e, no
+  conflicts.
 - The machine was under heavy load from parallel agents (load average 28): the first `pnpm test`
   had several unrelated timeouts; the rerun with `--concurrency=1` had none.
 
+## Review
+
+- Round 1 (`om-auto-review-pr --autofix` / `om-code-review`, d573832, submitted as COMMENT):
+  request changes, 1 blocker (local `pnpm test` failure in `cli.test.ts`), 1 nit (this run log
+  still `in-progress`). Both fixed (a786102 and this commit).
+
 ## Lessons recorded
 
-None. No non-obvious bug or new constraint.
+- [A doctor test pins PATH, or it tests the machine it runs on](../lessons/2026-11-10-doctor-tests-pin-path.md)
+  (index entry added).
 
 ## Follow-ups
 
