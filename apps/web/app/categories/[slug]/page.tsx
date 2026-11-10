@@ -67,6 +67,9 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
                 </Link>{' '}
                 {count === 1 ? 'has' : 'have'} this category.
               </p>
+            ) : category.archived ? (
+              // An archived category cannot be assigned anywhere (SPEC-124 §11.4 D38).
+              <p className="text-muted-foreground">No artifact has this category.</p>
             ) : (
               <p className="text-muted-foreground">
                 No artifact has this category yet. Assign it on an artifact&apos;s page or to a

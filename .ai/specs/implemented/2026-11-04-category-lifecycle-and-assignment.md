@@ -1,7 +1,7 @@
 ---
 id: SPEC-124
 title: Create, rename and archive categories and assign them to artifacts (E03-S01)
-status: approved
+status: implemented
 created: 2026-11-04
 updated: 2026-11-10
 category: feature
@@ -12,9 +12,9 @@ related: [SPEC-106, SPEC-101, SPEC-006, SPEC-007, SPEC-014, SPEC-122, SPEC-108]
 
 ## 1. Summary
 
-**Proposed, not implemented.** Today DirectiveBench seeds 17 predefined categories, shows them
-on a read-only Categories page and filters the Artifacts list by one category; nobody can create,
-rename, archive or assign a category from the app ([SPEC-106 §20](2026-10-14-category-management.md)).
+**Implemented and verified (Phases 1 to 4, 2026-11-05 to 2026-11-10; see §20).** Before it, DirectiveBench seeded 17 predefined categories, showed them
+on a read-only Categories page and filtered the Artifacts list by one category; nobody could create,
+rename, archive or assign a category from the app ([SPEC-106 §20](../2026-10-14-category-management.md)).
 This spec makes categories a user-owned taxonomy: a skill author creates their own categories,
 renames and archives them (predefined ones included), assigns them to one artifact on its page
 or to every artifact in a filtered list at once, and filters by them. It is the story slice of
@@ -320,7 +320,7 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   (`idle | success | fieldError | error`) plus, on `fieldError`, `field: 'name' | 'description'`
   and `values: { name, description }`, so after an error both fields keep the entered text and
   the right field gets `aria-invalid` (D14, maintainer decision 2026-11-05;
-  [lesson](../lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)).
+  [lesson](../../lessons/2026-10-28-action-forms-reset-to-the-new-default-value.md)).
   `MetadataFormState` keeps one value and no field name, which is not enough for two fields.
 
 ## 9. Data flow
@@ -426,9 +426,9 @@ design system).
 
 | Today | Proposed |
 | --- | --- |
-| ![Categories today](assets/category-lifecycle-and-assignment/current-01-categories.png) | ![Categories proposed](assets/category-lifecycle-and-assignment/mockup-01-categories.png) |
-| ![Artifacts today](assets/category-lifecycle-and-assignment/current-02-artifacts.png) | ![Bulk form and artifact Categories card](assets/category-lifecycle-and-assignment/mockup-03-assignment.png) |
-| ![Artifact page today](assets/category-lifecycle-and-assignment/current-03-artifact-detail.png) | ![Category page](assets/category-lifecycle-and-assignment/mockup-02-category-page.png) |
+| ![Categories today](../assets/category-lifecycle-and-assignment/current-01-categories.png) | ![Categories proposed](../assets/category-lifecycle-and-assignment/mockup-01-categories.png) |
+| ![Artifacts today](../assets/category-lifecycle-and-assignment/current-02-artifacts.png) | ![Bulk form and artifact Categories card](../assets/category-lifecycle-and-assignment/mockup-03-assignment.png) |
+| ![Artifact page today](../assets/category-lifecycle-and-assignment/current-03-artifact-detail.png) | ![Category page](../assets/category-lifecycle-and-assignment/mockup-02-category-page.png) |
 
 ### 11.1 UI decisions for the maintainer to approve
 
@@ -574,7 +574,7 @@ D28 state and the labels are computed on the server and passed as props (lesson 
 - Every id from a form is re-checked in the repository; a forged `categoryId` or `artifactId`
   yields `not-found`, never a write to another row. The bulk action scopes its write by the
   posted category and the server-recomputed list, never by client-sent artifact ids
-  ([lesson](../lessons/2026-10-30-scope-child-writes-by-the-posted-parent.md)).
+  ([lesson](../../lessons/2026-10-30-scope-child-writes-by-the-posted-parent.md)).
 - The `[slug]` route parameter and the `category` filter are regex-checked and length-capped
   before any query; all queries are parameterised (Drizzle).
 - Fail closed: a changed list, an invalid or forged filter field or an over-limit bulk refuses
@@ -656,7 +656,7 @@ output does not depend on the server's locale.
 Per SPEC-012 and AGENTS.md §2.7: 100% unit coverage of `packages/core/src`,
 `packages/database/src` and `apps/web/lib`; Playwright for every new page and UI path; mock agent
 only, no paid calls. Database tests use one writable connection per test thread
-([lesson](../lessons/2026-11-04-one-writable-connection-per-test-thread.md)).
+([lesson](../../lessons/2026-11-04-one-writable-connection-per-test-thread.md)).
 
 - Core: `normalizeCategoryName`, `categoryNameKey`, `categorySlug` (NFC, whitespace, cut at 64
   with trailing hyphen, `null` for "日本語" and "!!!", the literal name "Item").
@@ -708,33 +708,33 @@ only, no paid calls. Database tests use one writable connection per test thread
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: Given a name of 1 to 64 characters, when a category is created, then it gets the slug
+- [x] AC-1: Given a name of 1 to 64 characters, when a category is created, then it gets the slug
   `categorySlug(name)`, or a generated `category-N` slug when the name has no Latin letter or
   digit (A5), and appears on the Categories page and in the Artifacts filter (issue AC 1).
-- [ ] AC-2: Given an existing category, when it is renamed, then its slug and assignments do not
+- [x] AC-2: Given an existing category, when it is renamed, then its slug and assignments do not
   change and `/artifacts?category=<slug>` still filters to the same artifacts (issue AC 2).
-- [ ] AC-3: Given an artifact, when a category is assigned twice, then it is assigned once; and
+- [x] AC-3: Given an artifact, when a category is assigned twice, then it is assigned once; and
   bulk assign on a filtered list assigns it to every listed artifact (issue AC 3).
-- [ ] AC-4: Given a category, when Archive is confirmed in the inline panel that states its
+- [x] AC-4: Given a category, when Archive is confirmed in the inline panel that states its
   artifact count (Cancel writes nothing), then it disappears from the picker, the filter
   dropdown and the bulk form but stays on existing assignments shown as "Name (archived)"
   (issue AC 4).
-- [ ] AC-5: Given a name that duplicates an active category case-insensitively, when it is
+- [x] AC-5: Given a name that duplicates an active category case-insensitively, when it is
   created, then a field-level error is shown and nothing is stored (issue AC 5).
-- [ ] AC-6: Unarchive restores the category to pickers and filters, and is refused while an
+- [x] AC-6: Unarchive restores the category to pickers and filters, and is refused while an
   active category has the same name.
-- [ ] AC-7: A name whose slug another category holds is refused with a field error; for an
+- [x] AC-7: A name whose slug another category holds is refused with a field error; for an
   archived holder the message says to unarchive it.
-- [ ] AC-8: Bulk assign and bulk remove act only after an inline confirmation that states the
+- [x] AC-8: Bulk assign and bulk remove act only after an inline confirmation that states the
   category and the listed count (Cancel writes nothing); bulk remove removes the category from
   every listed artifact; a list that changed since the page loaded is refused and nothing is
   written; a URL value the list page ignored hides the bulk actions; an archived category is
   refused in both modes.
-- [ ] AC-9: Migration `0005` backfills `name_key` and the partial unique index rejects a second
+- [x] AC-9: Migration `0005` backfills `name_key` and the partial unique index rejects a second
   active row with the same key.
-- [ ] AC-10: The new and changed pages work by keyboard alone, have no horizontal page scroll at
+- [x] AC-10: The new and changed pages work by keyboard alone, have no horizontal page scroll at
   320px and meet the contrast targets in both themes (Playwright).
-- [ ] AC-11: `pnpm lint && pnpm typecheck && pnpm test` pass with 100% coverage; `pnpm test:e2e`
+- [x] AC-11: `pnpm lint && pnpm typecheck && pnpm test` pass with 100% coverage; `pnpm test:e2e`
   passes.
 
 ## 17. Dependencies
@@ -816,12 +816,40 @@ parsed filter and is posted by the bulk form automatically (§11.4 implementer n
   both themes). Verified acceptance criteria: AC-3's single-artifact half (assigned once), AC-4's
   picker half (an archived category leaves the picker, and a stale page that assigns it is
   refused), AC-10 for the artifact page.
-- **Partially implemented:** the copy "or to a filtered list on Artifacts" and "the bulk form" in
-  the Archive reason name a surface that arrives in Phase 4; the Artifacts card of an archived
-  category with no artifacts still shows the active text until Phase 4 (§11.4 D38).
-- **Not implemented:** FR-124-13 (bulk), `listArtifactIds`, `setCategoryForListedArtifacts` and
-  `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-8 and the bulk parts of AC-3, AC-4 and AC-10 are
-  not verified.
+- **Implemented (Phase 4, bulk assign and bulk remove on the filtered Artifacts list; verified on
+  2026-11-10 by `packages/core/test/hash.test.ts` (`idListFingerprint`),
+  `packages/database/test/category-bulk.test.ts`, `apps/web/test/categories.test.ts` (bulk form),
+  `apps/web/test/artifacts.test.ts` (`parseArtifactListForm`, `artifactListFields`),
+  `apps/web/test/actions.test.ts` "bulk category action", `apps/web/e2e/categories.spec.ts` "bulk
+  category changes on the filtered Artifacts list" (both themes) and the archived category page
+  case, and the static `BulkAction` story in `pnpm test:storybook`):** FR-124-13 end to end
+  (`listArtifactIds` sharing the list conditions with `listArtifacts` and reading ids in keyset
+  batches; `setCategoryForListedArtifacts` in one `withTransaction` with the refusal order
+  fingerprint, category, limit and nothing written on any refusal or error;
+  `MAX_BULK_CATEGORY_ARTIFACTS`; `setCategoryForListedArtifactsAction` re-parsing every posted
+  filter and refusing invalid, repeated or forged fields; no posted count or ids); FR-124-16 for
+  the bulk action (every outcome refreshes both layouts); §8.3 `bulkCategorySchema`; the §11 and
+  §11.4 UI (D27 to D37: the row under the filters in the list Card, the D28 sentences, the select
+  of active categories keeping the submitted one, the two outline buttons and the one Risky-action
+  panel with the count, the reasons and the no-filter reason, the D34 copy, the D35 focus map,
+  the result line surviving an emptied list); D38 ("No artifact has this category." for an
+  archived category without artifacts); D39 (the Filtered list rule and `BulkAction` story, the
+  Checkbox rows). NFR-124-01: bulk assign of 10,000 artifacts took 57 ms and bulk remove with `q`
+  145 ms in the database test on the development machine (measured once, not enforced). Verified
+  acceptance criteria: AC-8; the bulk halves of AC-3 and AC-4 (an archived category leaves the
+  bulk select and is refused when a stale page posts it); AC-10 for `/artifacts`.
+- **All acceptance criteria verified (2026-11-10):** AC-1 to AC-7 and AC-9 in Phases 1 to 3 as
+  above, AC-8 and the bulk halves of AC-3, AC-4 and AC-10 in Phase 4, AC-11 by the full gate
+  (`pnpm format:check`, `lint`, `typecheck`, `test` with 100% coverage, `build`, `verify:pack`,
+  `test:e2e` 144 passed, `test:storybook` 306 passed) and green CI on PR 206. Moved to
+  `implemented/`.
+- **Interpretations recorded in the Phase 4 PR:** `setCategoryForListedArtifacts` keeps at most
+  `limit + 1` ids and looks one match further without keeping it, so a list of exactly
+  `limit + 1` whose fingerprint matches is `too-many` (the §15 lowered-limit test) and a longer
+  list is `list-changed` with its count read after the transaction; an empty recomputed list is
+  `list-changed` ("now no artifacts"), since the page never offers the action on an empty list.
+  The bulk form's state is `BulkCategoryFormState` (the `MetadataFormState` kinds plus
+  `categoryId`, D30) rather than `MetadataFormState` (§10).
 
 ## 21. Phasing and implementation plan
 

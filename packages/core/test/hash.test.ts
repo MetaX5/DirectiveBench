@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { canonicalJson, createId, hashManifest, nowIso, sha256 } from '../src/hash';
+import {
+  canonicalJson,
+  createId,
+  hashManifest,
+  idListFingerprint,
+  nowIso,
+  sha256,
+} from '../src/hash';
 
 describe('sha256', () => {
   it('hashes strings and bytes identically', () => {
@@ -29,6 +36,18 @@ describe('hashManifest', () => {
     const first = { path: 'a', sha256: '1' };
     const duplicate = { path: 'a', sha256: '2' };
     expect(hashManifest([first, duplicate])).not.toBe(hashManifest([first]));
+  });
+});
+
+describe('idListFingerprint', () => {
+  it('hashes the sorted ids one per line, whatever their order', () => {
+    expect(idListFingerprint(['art_b', 'art_a'])).toBe(sha256('art_a\nart_b'));
+    expect(idListFingerprint(['art_a', 'art_b'])).toBe(idListFingerprint(['art_b', 'art_a']));
+    expect(idListFingerprint([])).toBe(sha256(''));
+  });
+
+  it('tells a different set of the same size apart', () => {
+    expect(idListFingerprint(['art_a', 'art_b'])).not.toBe(idListFingerprint(['art_a', 'art_c']));
   });
 });
 

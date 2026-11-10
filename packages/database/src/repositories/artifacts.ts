@@ -3,6 +3,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   gte,
   inArray,
   isNull,
@@ -13,7 +14,14 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
-import { createId, hashManifest, nowIso, sha256, slugify } from '@directivebench/core';
+import {
+  createId,
+  hashManifest,
+  idListFingerprint,
+  nowIso,
+  sha256,
+  slugify,
+} from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import type { CategoryRef } from './catalog';
 import { JobNoLongerRunningError, NotFoundError } from './jobs';
@@ -924,11 +932,13 @@ function matchesText(row: { name: string; description: string | null }, q: strin
   return row.name.toLowerCase().includes(q) || (row.description ?? '').toLowerCase().includes(q);
 }
 
-export async function listArtifacts(
-  db: Database,
-  filter: ArtifactListFilter = {},
-): Promise<ArtifactListItem[]> {
-  const conditions = [];
+/**
+ * The SQL conditions of the artifacts list (every filter but `q`), shared by `listArtifacts` and
+ * `listArtifactIds` so the bulk category action recomputes exactly the list the page showed
+ * (SPEC-124 §8.2).
+ */
+function listConditions(db: Database, filter: ArtifactListFilter): SQL[] {
+  const conditions: SQL[] = [];
   if (filter.type) conditions.push(eq(artifacts.type, filter.type));
   if (filter.category) {
     conditions.push(
@@ -962,13 +972,27 @@ export async function listArtifacts(
       ),
     );
   }
-  const q = filter.q?.trim().toLowerCase() ?? '';
-  // Text search runs in JavaScript: SQLite's lower() folds ASCII only, `toLowerCase` folds all.
+  return conditions;
+}
+
+/**
+ * The list's text search, folded as `matchesText` compares it; empty means no search. Text search
+ * runs in JavaScript: SQLite's lower() folds ASCII only, `toLowerCase` folds all.
+ */
+function listTextQuery(filter: ArtifactListFilter): string {
+  return filter.q?.trim().toLowerCase() ?? '';
+}
+
+export async function listArtifacts(
+  db: Database,
+  filter: ArtifactListFilter = {},
+): Promise<ArtifactListItem[]> {
+  const q = listTextQuery(filter);
   const rows = (
     await db
       .select()
       .from(artifacts)
-      .where(and(...conditions))
+      .where(and(...listConditions(db, filter)))
       .orderBy(artifacts.name, artifacts.id)
   ).filter((row) => !q || matchesText(row, q));
   const ids = rows.map((r) => r.id);
@@ -1050,6 +1074,189 @@ export async function listArtifacts(
       latestEvaluation: latest.get(row.id) ?? null,
     };
   });
+}
+
+/** Rows read per query while collecting listed ids, so the bulk path's memory stays bounded. */
+const LISTED_ID_BATCH_SIZE = 1_000;
+
+/**
+ * The first `keep` ids the list shows for `filter`, in the list's order (name, then id), and
+ * whether it lists more. Reads `id`, `name` and `description` in batches ordered as the list
+ * (keyset on name and id) and matches `q` in JavaScript, so at most `keep` ids and one batch of
+ * rows are held at a time; with `q` every row the SQL conditions leave can still be read
+ * (SPEC-124 §8.2).
+ */
+async function collectListedIds(
+  db: Database,
+  filter: ArtifactListFilter,
+  keep: number,
+): Promise<{ ids: string[]; more: boolean }> {
+  const conditions = listConditions(db, filter);
+  const q = listTextQuery(filter);
+  const ids: string[] = [];
+  /** Where the next batch starts: after the last row read, in the list's order. */
+  let after: SQL | undefined;
+  for (;;) {
+    const rows: { id: string; name: string; description: string | null }[] = await db
+      .select({ id: artifacts.id, name: artifacts.name, description: artifacts.description })
+      .from(artifacts)
+      .where(and(...conditions, after))
+      .orderBy(artifacts.name, artifacts.id)
+      .limit(LISTED_ID_BATCH_SIZE);
+    for (const row of rows) {
+      if (q && !matchesText(row, q)) continue;
+      if (ids.length === keep) return { ids, more: true };
+      ids.push(row.id);
+    }
+    const last = rows[LISTED_ID_BATCH_SIZE - 1];
+    if (!last) return { ids, more: false };
+    after = or(
+      gt(artifacts.name, last.name),
+      and(eq(artifacts.name, last.name), gt(artifacts.id, last.id)),
+    );
+  }
+}
+
+/**
+ * The ids `listArtifacts(db, filter)` lists, in the same order, without loading versions, runs
+ * and occurrences (SPEC-124 §8.2): the bulk category action recomputes the list with it.
+ */
+export async function listArtifactIds(
+  db: Database,
+  filter: ArtifactListFilter = {},
+): Promise<string[]> {
+  return (await collectListedIds(db, filter, Number.POSITIVE_INFINITY)).ids;
+}
+
+/** The most artifacts one bulk category change acts on (SPEC-124 A16, NFR-106-01 sizing). */
+export const MAX_BULK_CATEGORY_ARTIFACTS = 10_000;
+/** Ids per `IN (…)` list of a bulk write, far below SQLite's bound-variable limit (32,766). */
+const BULK_WRITE_BATCH_SIZE = 500;
+
+export type BulkCategoryMode = 'assign' | 'remove';
+
+export interface SetCategoryForListedArtifactsInput {
+  categoryId: string;
+  mode: BulkCategoryMode;
+  /** The filters the page listed with, re-parsed on the server. */
+  filter: ArtifactListFilter;
+  /** `idListFingerprint` of the ids the page listed. */
+  listFingerprint: string;
+  /** Defaults to `MAX_BULK_CATEGORY_ARTIFACTS`; injectable for tests (SPEC-124 §15). */
+  limit?: number;
+}
+
+export type SetCategoryForListedArtifactsOutcome =
+  | { status: 'done'; changed: number; unchanged: number; category: CategoryRef }
+  | { status: 'list-changed'; actualCount: number }
+  | { status: 'category-archived'; category: CategoryRef }
+  | { status: 'category-not-found' }
+  | { status: 'too-many'; actualCount: number; limit: number };
+
+function batches(ids: readonly string[]): string[][] {
+  const result: string[][] = [];
+  for (let start = 0; start < ids.length; start += BULK_WRITE_BATCH_SIZE) {
+    result.push(ids.slice(start, start + BULK_WRITE_BATCH_SIZE));
+  }
+  return result;
+}
+
+/** Assigns an active category to the listed artifacts; returns how many were newly assigned. */
+async function insertListedAssignments(
+  db: Database,
+  categoryId: string,
+  ids: readonly string[],
+): Promise<number> {
+  const createdAt = nowIso();
+  let changed = 0;
+  for (const batch of batches(ids)) {
+    const inserted = await db
+      .insert(artifactCategories)
+      .select(
+        db
+          .select({
+            artifactId: sql<string>`${artifacts.id}`.as('artifact_id'),
+            categoryId: sql<string>`${categories.id}`.as('category_id'),
+            createdAt: sql<string>`${createdAt}`.as('created_at'),
+          })
+          .from(artifacts)
+          .innerJoin(categories, eq(categories.id, categoryId))
+          .where(and(inArray(artifacts.id, batch), isNull(categories.archivedAt))),
+      )
+      .onConflictDoNothing()
+      .returning({ artifactId: artifactCategories.artifactId });
+    changed += inserted.length;
+  }
+  return changed;
+}
+
+/** Removes a category from the listed artifacts; returns how many had it. */
+async function deleteListedAssignments(
+  db: Database,
+  categoryId: string,
+  ids: readonly string[],
+): Promise<number> {
+  let changed = 0;
+  for (const batch of batches(ids)) {
+    const removed = await db
+      .delete(artifactCategories)
+      .where(
+        and(
+          eq(artifactCategories.categoryId, categoryId),
+          inArray(artifactCategories.artifactId, batch),
+        ),
+      )
+      .returning({ artifactId: artifactCategories.artifactId });
+    changed += removed.length;
+  }
+  return changed;
+}
+
+/**
+ * Assigns or removes one active category for every artifact `filter` lists (SPEC-124 FR-124-13,
+ * §8.2, D33). One `withTransaction` (`BEGIN IMMEDIATE`) recomputes the list with the shared list
+ * conditions, then refuses, in this order: a list whose fingerprint differs from the one the page
+ * posted, an unknown or archived category (both modes), more than `limit` artifacts. Otherwise it
+ * inserts (`ON CONFLICT DO NOTHING`) or deletes in batches and counts the rows changed. Any
+ * refusal, and any error, writes nothing. No artifact id comes from the browser.
+ *
+ * At most `limit + 1` ids are kept under the write lock: a list with even more cannot match a
+ * page that offered the action (the page hides it above the limit, D28), so it is `list-changed`,
+ * and its count is read after the transaction, outside the lock.
+ */
+export async function setCategoryForListedArtifacts(
+  handle: DatabaseHandle,
+  input: SetCategoryForListedArtifactsInput,
+): Promise<SetCategoryForListedArtifactsOutcome> {
+  const { categoryId, mode, filter, listFingerprint, limit = MAX_BULK_CATEGORY_ARTIFACTS } = input;
+  const outcome = await withTransaction(
+    handle,
+    async (db): Promise<SetCategoryForListedArtifactsOutcome | null> => {
+      const listed = await collectListedIds(db, filter, limit + 1);
+      if (listed.more) return null;
+      const { ids } = listed;
+      // The page never offers the action on an empty list (D28), so an empty one has changed.
+      if (ids.length === 0 || idListFingerprint(ids) !== listFingerprint) {
+        return { status: 'list-changed', actualCount: ids.length };
+      }
+      const category = await readCategoryRef(db, categoryId);
+      if (!category) return { status: 'category-not-found' };
+      if (category.archived) return { status: 'category-archived', category };
+      if (ids.length > limit) return { status: 'too-many', actualCount: ids.length, limit };
+      const changed =
+        mode === 'assign'
+          ? await insertListedAssignments(db, categoryId, ids)
+          : await deleteListedAssignments(db, categoryId, ids);
+      // Read inside the write transaction, the category is the same after the write as before.
+      return { status: 'done', changed, unchanged: ids.length - changed, category };
+    },
+  );
+  return (
+    outcome ?? {
+      status: 'list-changed',
+      actualCount: (await listArtifactIds(handle.db, filter)).length,
+    }
+  );
 }
 
 /** Whether the registry holds any artifact (the list's empty state). */

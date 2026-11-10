@@ -1,13 +1,18 @@
 import {
   CATEGORY_DESCRIPTION_MAX_LENGTH,
   CATEGORY_NAME_MAX_LENGTH,
+  idListFingerprint,
   normalizeCategoryName,
 } from '@directivebench/core';
+import { MAX_BULK_CATEGORY_ARTIFACTS } from '@directivebench/database';
 import type {
   ArtifactCategory,
+  ArtifactListFilter,
   AssignArtifactCategoryOutcome,
+  BulkCategoryMode,
   CreateCategoryOutcome,
   SetCategoryArchivedOutcome,
+  SetCategoryForListedArtifactsOutcome,
   UnassignArtifactCategoryOutcome,
   UpdateCategoryOutcome,
 } from '@directivebench/database';
@@ -17,6 +22,7 @@ import {
   INCOMPLETE_FORM_MESSAGE,
   type MetadataFormState,
 } from './artifact-metadata';
+import { artifactListFields, parseArtifactListForm } from './artifacts';
 import { formatCount } from './utils';
 
 // Validation, messages and display rules of the category forms and pages (SPEC-124 §8.3, §11,
@@ -329,5 +335,165 @@ export function categoriesCardModel(
     chips: assigned.map((c) => ({ id: c.id, label: categoryChipLabel(c), archived: c.archived })),
     available,
     noPicker: available.length > 0 ? null : active.length > 0 ? 'all-assigned' : 'none-active',
+  };
+}
+
+/** The bulk form's own fields (§8.3); the list filters are parsed with `parseArtifactListForm`. */
+export const bulkCategorySchema = z.object({
+  categoryId: idSchema,
+  mode: z.enum(['assign', 'remove']),
+  listFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+export interface BulkCategoryInput {
+  categoryId: string;
+  mode: BulkCategoryMode;
+  listFingerprint: string;
+  filter: ArtifactListFilter;
+}
+
+/**
+ * The bulk form's input (SPEC-124 §8.3, FR-124-13), or `null` when any field is missing, forged or
+ * invalid, a list filter included: the server refuses what the list page would have ignored.
+ */
+export function parseBulkCategoryForm(formData: FormData): BulkCategoryInput | null {
+  const fields = bulkCategorySchema.safeParse({
+    categoryId: formData.get('categoryId'),
+    mode: formData.get('mode'),
+    listFingerprint: formData.get('listFingerprint'),
+  });
+  const filter = parseArtifactListForm(formData);
+  if (!fields.success || filter.invalid.length > 0) return null;
+  return { ...fields.data, filter: filter.value };
+}
+
+/**
+ * What the bulk form shows after a submit: the kinds of `MetadataFormState` without field errors,
+ * plus the submitted category, so the select keeps it while it is still active (§11.4 D30).
+ */
+export type BulkCategoryFormState =
+  { kind: 'idle' } | { kind: 'success' | 'error'; message: string; categoryId: string };
+
+/** "now 13 artifacts", "now 1 artifact", "now no artifacts" (§13). */
+function nowListed(count: number): string {
+  return `now ${count === 0 ? 'no artifacts' : artifactsPhrase(count)}`;
+}
+
+/** The bulk form's result line for a `setCategoryForListedArtifacts` outcome (§11.4 D34, §13). */
+export function bulkCategoryState(
+  outcome: SetCategoryForListedArtifactsOutcome,
+  mode: BulkCategoryMode,
+): { kind: 'success' | 'error'; message: string } {
+  switch (outcome.status) {
+    case 'done': {
+      const { changed, unchanged } = outcome;
+      const { name } = outcome.category;
+      const listed = changed + unchanged;
+      if (changed === 0) {
+        const message =
+          mode === 'assign'
+            ? listed === 1
+              ? `The listed artifact already had ${name}.`
+              : `All ${formatCount(listed)} listed artifacts already had ${name}.`
+            : listed === 1
+              ? `The listed artifact did not have ${name}.`
+              : `None of the ${formatCount(listed)} listed artifacts had ${name}.`;
+        return { kind: 'success', message };
+      }
+      const done =
+        mode === 'assign'
+          ? `Assigned ${name} to ${artifactsPhrase(changed)}.`
+          : `Removed ${name} from ${artifactsPhrase(changed)}.`;
+      const kept =
+        unchanged === 0
+          ? ''
+          : ` ${formatCount(unchanged)} ${mode === 'assign' ? 'already had it.' : 'did not have it.'}`;
+      return { kind: 'success', message: `${done}${kept}` };
+    }
+    case 'list-changed':
+      return {
+        kind: 'error',
+        message: `The list changed since the page loaded (${nowListed(outcome.actualCount)}). Check it and try again.`,
+      };
+    case 'category-archived':
+      return {
+        kind: 'error',
+        message: `${outcome.category.name} is archived. Unarchive it on its page before ${
+          mode === 'assign' ? 'assigning it' : 'removing it from a list'
+        }.`,
+      };
+    case 'category-not-found':
+      return { kind: 'error', message: CATEGORY_GONE_MESSAGE };
+    case 'too-many':
+      return {
+        kind: 'error',
+        message: `This list has ${formatCount(outcome.actualCount)} artifacts. Narrow the filters to at most ${formatCount(outcome.limit)}.`,
+      };
+  }
+}
+
+/**
+ * Whether the bulk row shows on `/artifacts`, checked in this order (§11.4 D28, D37): an empty
+ * list shows nothing, an ignored URL value or a list above the limit shows a sentence instead, as
+ * does having no active category; otherwise the row is `ready`.
+ */
+export type BulkRowState = 'empty' | 'invalid-url' | 'too-many' | 'none-active' | 'ready';
+
+/**
+ * Everything the client bulk component needs, computed on the server from the one list result
+ * the table renders (FR-124-13: count and fingerprint come from the rows the user sees), so the
+ * client imports no values from core (lesson 2026-11-05).
+ */
+export interface BulkCategoryModel {
+  state: BulkRowState;
+  /** Active categories by name, the select's options (D30). */
+  categories: { id: string; name: string }[];
+  /** "Category for the 14 listed artifacts" (§11, D15). */
+  label: string;
+  /** "14 artifacts" / "1 artifact", for the question and the confirming button. */
+  phrase: string;
+  /** The D28 sentence for a list above the limit; empty otherwise. */
+  tooManyText: string;
+  /** The hidden filter fields: every key of the parsed filter (§11.4 implementer notes). */
+  fields: { name: string; value: string }[];
+  listFingerprint: string;
+  /** No filter is set: the panel adds the whole-registry reason (D32). */
+  noFilter: boolean;
+}
+
+export function bulkCategoryModel({
+  listedIds,
+  filter,
+  invalid,
+  active,
+}: {
+  listedIds: readonly string[];
+  filter: ArtifactListFilter;
+  invalid: readonly string[];
+  active: readonly { id: string; name: string }[];
+}): BulkCategoryModel {
+  const count = listedIds.length;
+  const state: BulkRowState =
+    count === 0
+      ? 'empty'
+      : invalid.length > 0
+        ? 'invalid-url'
+        : count > MAX_BULK_CATEGORY_ARTIFACTS
+          ? 'too-many'
+          : active.length === 0
+            ? 'none-active'
+            : 'ready';
+  return {
+    state,
+    categories: active.map((c) => ({ id: c.id, name: c.name })),
+    label: `Category for the ${formatCount(count)} listed ${count === 1 ? 'artifact' : 'artifacts'}`,
+    phrase: artifactsPhrase(count),
+    tooManyText:
+      state === 'too-many'
+        ? `This list has ${formatCount(count)} artifacts. To change a category for all of them, narrow the filters to at most ${formatCount(MAX_BULK_CATEGORY_ARTIFACTS)}.`
+        : '',
+    fields: artifactListFields(filter),
+    listFingerprint: idListFingerprint(listedIds),
+    noFilter: Object.keys(filter).length === 0,
   };
 }

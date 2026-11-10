@@ -1,6 +1,7 @@
 import { ARTIFACT_TYPES } from '@directivebench/core';
 import {
   hasArtifacts,
+  listActiveCategoryNames,
   listArtifacts,
   listCategories,
   listRepositories,
@@ -37,10 +38,11 @@ import {
   repositoryOptions,
   type SearchParams,
 } from '@/lib/artifacts';
-import { categoryChipLabel, categoryFilterOptions } from '@/lib/categories';
+import { bulkCategoryModel, categoryChipLabel, categoryFilterOptions } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
+import { BulkCategoryForm } from './bulk-category-form';
 
 export const metadata: Metadata = { title: 'Artifacts' };
 
@@ -65,6 +67,15 @@ export default async function ArtifactsPage({
   // Active categories, plus the filtered one when it is archived (FR-124-15).
   const categories = categoryFilterOptions(await listCategories(handle.db), filter.category);
   const notice = invalidParamsNotice(invalid);
+  // The bulk row's count and fingerprint come from the one list result the table renders, so
+  // they never describe artifacts the user did not see (SPEC-124 FR-124-13). Once the list
+  // paginates (issue 53) they must cover every match, not one page (§19).
+  const bulk = bulkCategoryModel({
+    listedIds: artifacts.map((a) => a.id),
+    filter,
+    invalid,
+    active: await listActiveCategoryNames(handle.db),
+  });
 
   // The table has eleven columns; the wide layout fits them at 1920px with the sidebar (issue 122).
   return (
@@ -137,6 +148,7 @@ export default async function ArtifactsPage({
               {notice}
             </p>
           ) : null}
+          <BulkCategoryForm model={bulk} />
 
           {artifacts.length === 0 ? (
             <EmptyState
