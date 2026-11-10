@@ -312,6 +312,18 @@ test.describe('Versions tab: latest, copy and first seen (issue #65)', () => {
           document.documentElement.clientWidth,
         ]),
       ).toEqual([320, 320]);
+      // Browser QA D1: First seen keeps a readable width (min-w-48) instead of one letter per
+      // line; the table scrolls inside its region instead.
+      for (const cell of await page.getByTestId('version-first-seen').all()) {
+        expect((await cell.boundingBox())?.width).toBeGreaterThanOrEqual(192);
+      }
+      // Browser QA D2: only the hash breaks anywhere; words in the refusal line stay whole.
+      expect(
+        await rows
+          .nth(1)
+          .getByRole('status')
+          .evaluate((el) => [getComputedStyle(el).wordBreak, getComputedStyle(el).overflowWrap]),
+      ).toEqual(['normal', 'anywhere']);
 
       const failures = async (state: string) => {
         const scanned = await scanTextContrast(page);

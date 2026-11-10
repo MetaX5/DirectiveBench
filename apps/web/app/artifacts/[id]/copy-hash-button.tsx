@@ -26,7 +26,7 @@ export function CopyHashButton({ hash, version }: { hash: string; version: numbe
         role="status"
         className={
           result === 'failed'
-            ? 'break-all text-caption text-destructive-foreground'
+            ? 'text-caption wrap-anywhere text-destructive-foreground'
             : 'text-caption text-muted-foreground'
         }
       >

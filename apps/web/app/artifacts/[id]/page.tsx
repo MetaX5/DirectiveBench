@@ -286,7 +286,7 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
                 </TD>
                 <TD>{v.files.length}</TD>
                 <TD
-                  className="font-mono text-ui break-all"
+                  className="min-w-48 font-mono text-ui wrap-anywhere"
                   data-testid="version-first-seen"
                   title={v.sourceCommitSha === null ? undefined : `Commit ${v.sourceCommitSha}`}
                 >
