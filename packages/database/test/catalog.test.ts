@@ -7,6 +7,7 @@ import {
   getDashboardStats,
   getRepository,
   importArtifactVersion,
+  listActiveCategoryNames,
   listCategories,
   listRepositories,
   registerHostedRepository,
@@ -86,6 +87,23 @@ describe('listCategories', () => {
     const counts = Object.fromEntries(list.map((c) => [c.slug, Number(c.artifactCount)]));
     expect(counts).toMatchObject({ security: 2, testing: 1 });
     expect(Object.values(counts).reduce((sum, n) => sum + n, 0)).toBe(3);
+  });
+});
+
+describe('listActiveCategoryNames', () => {
+  it('lists the active categories by name, with ids and names only', async () => {
+    const handle = getHandle();
+    await seedPredefinedCategories(handle.db);
+    await handle.db
+      .update(schema.categories)
+      .set({ archivedAt: '2026-11-10T00:00:00.000Z' })
+      .where(eq(schema.categories.slug, 'security'));
+    const active = await listActiveCategoryNames(handle.db);
+    const names = active.map((c) => c.name);
+    expect(names).toEqual([...names].sort());
+    expect(active).toHaveLength(PREDEFINED_CATEGORIES.length - 1);
+    expect(names).not.toContain('Security');
+    for (const category of active) expect(Object.keys(category).sort()).toEqual(['id', 'name']);
   });
 });
 

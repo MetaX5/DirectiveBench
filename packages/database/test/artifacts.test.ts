@@ -332,7 +332,7 @@ describe('assignCategoriesBySlug', () => {
       unknown: [],
     });
     expect((await listArtifacts(handle.db))[0]?.categories).toEqual([
-      { slug: 'security', name: 'Security', archived: false },
+      { id: expect.any(String), slug: 'security', name: 'Security', archived: false },
     ]);
   });
 });

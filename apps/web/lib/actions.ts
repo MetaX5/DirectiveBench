@@ -11,6 +11,7 @@ import {
 } from '@directivebench/core';
 import {
   addArtifactTag,
+  assignArtifactCategory,
   assignArtifactSuite,
   createCategory,
   enqueueBenchmarkJob,
@@ -28,6 +29,7 @@ import {
   requestJobCancellation,
   setArtifactNotes,
   setCategoryArchived,
+  unassignArtifactCategory,
   unassignArtifactSuite,
   updateCategory,
   type ArtifactSuiteOutcome,
@@ -61,9 +63,12 @@ import {
 import {
   archiveCategorySchema,
   archiveCategoryState,
+  artifactCategorySchema,
+  assignCategoryState,
   categoryRefused,
   createCategorySchema,
   createCategoryState,
+  unassignCategoryState,
   updateCategorySchema,
   updateCategoryState,
   type CategoryFormState,
@@ -496,4 +501,50 @@ export async function setCategoryArchivedAction(
       ? ((await getCategoryBySlug(handle.db, outcome.category.slug))?.artifactCount ?? 0)
       : 0;
   return archiveCategoryState(outcome, artifactCount);
+}
+
+/**
+ * Runs one Categories-card submit on the artifact page (SPEC-124 §11.3). Every submit, whatever
+ * its outcome, re-renders the artifact page and the Categories and Artifacts pages (D26,
+ * FR-124-16), so a stale page shows the current chips and picker after a refusal too.
+ */
+async function onArtifactCategory(
+  formData: FormData,
+  write: (artifactId: string, categoryId: string) => Promise<MetadataFormState>,
+): Promise<MetadataFormState> {
+  const input = artifactCategorySchema.safeParse({
+    artifactId: formData.get('artifactId'),
+    categoryId: formData.get('categoryId'),
+  });
+  if (!input.success) {
+    refreshCategories();
+    return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  }
+  const { artifactId, categoryId } = input.data;
+  const state = await write(artifactId, categoryId);
+  refreshArtifact(artifactId);
+  refreshCategories();
+  return state;
+}
+
+/** Assigns one active category to an artifact; idempotent (SPEC-124 FR-124-11). */
+export async function assignArtifactCategoryAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  return onArtifactCategory(formData, async (artifactId, categoryId) =>
+    assignCategoryState(await assignArtifactCategory(requireDatabase(), artifactId, categoryId)),
+  );
+}
+
+/** Removes one category from an artifact, archived ones included; idempotent (FR-124-12). */
+export async function unassignArtifactCategoryAction(
+  _previous: MetadataFormState,
+  formData: FormData,
+): Promise<MetadataFormState> {
+  return onArtifactCategory(formData, async (artifactId, categoryId) =>
+    unassignCategoryState(
+      await unassignArtifactCategory(requireDatabase().db, artifactId, categoryId),
+    ),
+  );
 }
