@@ -3,7 +3,7 @@ id: SPEC-124
 title: Create, rename and archive categories and assign them to artifacts (E03-S01)
 status: approved
 created: 2026-11-04
-updated: 2026-11-05
+updated: 2026-11-10
 category: feature
 related: [SPEC-106, SPEC-101, SPEC-006, SPEC-007, SPEC-014, SPEC-122, SPEC-108]
 ---
@@ -140,7 +140,7 @@ not started.
 | --- | --- |
 | FR-124-11 | **Assign one.** Assigning an active category to an artifact is idempotent ("already assigned"). Assigning an archived category MUST be refused ("X is archived. Unarchive it on its page before assigning it."). The write is one conditional statement (`INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING`); follow-up reads only explain a no-op insert (already assigned, archived, unknown category or artifact). |
 | FR-124-12 | **Remove one.** Removing a category from an artifact is idempotent ("X was already removed.", §11.3 D24) and allowed for archived categories. No confirmation: assignments carry no history. |
-| FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list. Each action first shows an inline Risky-action confirmation stating the category and the count the page showed ("Assign Client A to 1,240 artifacts?"); only the confirming button submits, and Cancel writes nothing (UD-5). The form posts the filters (`q`, `type`, `category`, `repository`), the count the page showed and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing). The server refuses any invalid filter (the list page ignores invalid parameters; the bulk form does not). In one `withTransaction` it runs `listArtifactIds(db, filter)`, an ids-only query that shares its conditions with `listArtifacts`, refuses when the fingerprint differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), refuses an archived or unknown category, refuses more than `MAX_BULK_CATEGORY_ARTIFACTS`, then inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. |
+| FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list (the filtered list is the selection, A14; no per-row checkboxes). Each action first shows an inline Risky-action confirmation stating the category and the count the page showed ("Assign Client A to 1,240 artifacts?"); only the confirming button submits, and Cancel writes nothing (UD-5). The form posts the server-parsed filters (`q`, `type`, `category`, `repository`; every key of the parsed filter) and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing), computed from the same database snapshot as the rows and the count the page renders (today the ids of the one `listArtifacts` result the table shows; never a separate, later read), so the fingerprint cannot describe artifacts the user did not see; it does not post the count, which the fingerprint covers (messages use the server's count). The list page ignores invalid URL parameters, so when it ignored one it hides the bulk row and says why (§11.4 D28) instead of offering an action on a wider list; the server refuses any invalid or forged filter field it receives. In one `withTransaction` it runs `listArtifactIds(db, filter)`, which shares its conditions with `listArtifacts`, and refuses, in this order: a fingerprint that differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), an unknown or archived category (in both modes, so bulk remove of an archived category is refused; single remove on the artifact page stays allowed, FR-124-12), more than `MAX_BULK_CATEGORY_ARTIFACTS`; then it inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. Any refusal writes nothing. |
 | FR-124-14 | **Display.** Wherever assignments show (Artifacts list column, artifact page), archived categories show as a `muted` Badge reading "Name (archived)", after the active ones. |
 | FR-124-15 | **Filter.** The Artifacts category dropdown lists active categories. When the URL names an archived category, the dropdown also lists it as "Name (archived)", selected, so the form shows the real filter; filtering by an archived slug works (FR-106-08). |
 | FR-124-16 | All mutations are Server Actions in `apps/web/lib/actions.ts` that parse `FormData` with Zod schemas from `apps/web/lib/categories.ts`, call `@directivebench/database` repository functions only, and revalidate `/categories` (layout) and `/artifacts` (layout, once, which covers every `/artifacts/[id]` page, also after a bulk change of thousands of artifacts) (FR-106-12, SPEC-014). |
@@ -234,11 +234,16 @@ unassignArtifactCategory(db, artifactId, categoryId):
 // PR 198).
 
 setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
-  filter: ArtifactListFilter, listFingerprint: string }):
+  filter: ArtifactListFilter, listFingerprint: string,
+  limit = MAX_BULK_CATEGORY_ARTIFACTS }):        // injectable for tests (§15)
   | { status: 'done'; changed: number; unchanged: number; category: CategoryRef }
   | { status: 'list-changed'; actualCount: number }   // fingerprint differs
-  | { status: 'too-many'; actualCount: number; limit: number }
-  | { status: 'category-archived' | 'category-not-found' };
+  | { status: 'category-archived'; category: CategoryRef }   // the message names it
+  | { status: 'category-not-found' }
+  | { status: 'too-many'; actualCount: number; limit: number };
+// Refusals are checked in this order: fingerprint, then category (unknown, then archived, in
+// both modes), then limit. Any refusal writes nothing (maintainer decision 2026-11-10, §11.4
+// D33). The category in `done` is read after the write, as in Phase 3.
 ```
 
 - `createCategory`, `updateCategory`, `setCategoryArchived` and `setCategoryForListedArtifacts`
@@ -246,9 +251,30 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   are the backstop: when `withTransaction` rejects with `SQLITE_CONSTRAINT_UNIQUE` (it has rolled
   back), the function runs a fresh read of the clashing row and returns the matching
   `name-taken` / `slug-taken` outcome; the raw error never reaches the UI.
-- `listArtifactIds(db, filter)` (new, Phase 4) returns ids only for the same conditions as
-  `listArtifacts`, which reuses the shared condition builder, so the bulk write does not load
-  versions, runs and occurrences while it holds the write lock.
+- `listArtifactIds(db, filter)` (new, Phase 4) returns the ids for the same conditions as
+  `listArtifacts`, so the bulk write does not load versions, runs and occurrences while it
+  holds the write lock. It shares the SQL condition builder with `listArtifacts` and selects
+  `id`, `name` and `description`, because `q` is matched in JavaScript (`matchesText`,
+  full-Unicode `toLowerCase`); it filters `q` with the same helper and returns ids only. A test
+  asserts it equals `listArtifacts(…).map(id)` for every filter, incl. a non-ASCII `q`.
+- `setCategoryForListedArtifacts` writes inside its one `withTransaction` (`BEGIN IMMEDIATE`, so
+  a scan's apply transaction in the runner process cannot interleave): assign as
+  `INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING RETURNING`, remove as
+  `DELETE … WHERE category_id = ? AND artifact_id IN (…) RETURNING`, with `IN` lists batched
+  under SQLite's variable limit; `changed` is the returned rows, `unchanged` the listed count
+  minus `changed`. No artifact ids come from the browser, so there is no id limit and no
+  per-id "not found" count: an artifact that vanished changes the fingerprint.
+- Bounded memory under the write lock (Codex review of the Phase 4 decisions): the bulk path
+  keeps at most `limit + 1` ids. The page never offers bulk on a list above the limit (§11.4
+  D28), so a recomputed list above it cannot match the posted fingerprint and is refused as
+  `list-changed` as soon as the `limit + 1`th match is found; its `actualCount` is counted after
+  the transaction has ended (outside the write lock, like the fresh read after a unique
+  violation), so the message still states the current count. This bounds the ids kept, not
+  the rows read: with `q`, the scan still reads every artifact the SQL conditions leave (as one
+  render of the list page does) before it can stop, and holds the write lock while it does. That
+  cost is accepted with the approved one-transaction recompute (§11.4 D33) and sized by
+  NFR-124-01; the Phase 4 database test times it once on 10,000 artifacts. The refusal order
+  (fingerprint, category, limit) stays as decided.
 - `getArtifactDetail` and `listArtifacts` return `archived: boolean` on each category, active
   ones first, then by name.
 - Generated slugs (A5): inside its `withTransaction`, `createCategory` reads the slugs that
@@ -285,9 +311,11 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
 - `createCategorySchema`, `updateCategorySchema` (`id` + both), `archiveCategorySchema`
   (`id`, `state` from a hidden `intent` of `archive` / `unarchive`),
   `artifactCategorySchema` (`artifactId`, `categoryId`),
-  `bulkCategorySchema` (`categoryId`, `mode`, `listFingerprint` as 64 hex characters, and the
-  list filters parsed by `parseArtifactListParams`; the form is refused when its `invalid` list
-  is not empty).
+  `bulkCategorySchema` (`categoryId` non-empty, `mode` of `assign` / `remove` (a hidden field;
+  kept as `mode`, not the app's `intent`), `listFingerprint` as 64 hex characters, and the list
+  filters parsed by `parseArtifactListParams` from `formData.get(name)` for every list key; the
+  form is refused with `INCOMPLETE_FORM_MESSAGE` when its `invalid` list is not empty). No count
+  field: the form does not post the count (FR-124-13).
 - Form state is `CategoryFormState`: the kinds of `MetadataFormState`
   (`idle | success | fieldError | error`) plus, on `fieldError`, `field: 'name' | 'description'`
   and `values: { name, description }`, so after an error both fields keep the entered text and
@@ -344,9 +372,10 @@ when archived. Card "Details": Name, Description, Save, and the line "The slug s
 <code>devops</code>, so links and benchmark definitions keep working." Card "Status": for an active
 category "Archived categories leave pickers and filters. Their assignments stay." and an
 `outline` "Archive" button; for an archived one "Archived. It stays on N artifacts." and
-"Unarchive". Card "Artifacts": "N artifacts" linking to the filtered Artifacts list, or "No
-artifact has this category yet. Assign it on an artifact's page or to a filtered list on
-Artifacts." "Archive" does not archive yet: it opens the Risky-action inline panel (unchanged
+"Unarchive". Card "Artifacts": "N artifacts" linking to the filtered Artifacts list, or, with no
+artifact, "No artifact has this category yet. Assign it on an artifact's page or to a filtered
+list on Artifacts." for an active category and "No artifact has this category." for an archived
+one, which cannot be assigned anywhere (§11.4 D38). "Archive" does not archive yet: it opens the Risky-action inline panel (unchanged
 pattern: `role="alert"`, `warning` fill, under the Status card's text) with the question
 "Archive Python?", the reason "It leaves pickers, filters and the bulk form. It stays on 1,240
 artifacts, shown as archived." (for zero artifacts: "No artifact has it.") and a `destructive`
@@ -362,12 +391,16 @@ left: "Every active category is assigned. Create more on the Categories page." (
 list: "No categories yet."
 
 **`/artifacts` (changed).** Category chips follow FR-124-14; the filter follows FR-124-15. Under
-the filter form, when the list is not empty and an active category exists, a bulk form:
+the filter form, when the list is not empty, no URL value was ignored, the list has at most
+10,000 artifacts and an active category exists (otherwise a sentence says why, §11.4 D28), a
+bulk form:
 "Category for the 14 listed artifacts" (NativeSelect), then `outline` buttons "Assign to all
 listed" and "Remove from all listed". Neither button writes: each opens the Risky-action inline
 panel under the form with "Assign Client A to 1,240 artifacts?" or "Remove Client A from 1,240
 artifacts?" (the count the page showed, which the fingerprint then guards), the reason "This
-changes every artifact the current filters list, not only the visible page." and a `destructive`
+changes every artifact that matches the current filters, not only the rows on screen." (plus
+"No filter is set, so this is every artifact in the registry." when no filter is set, §11.4
+D32) and a `destructive`
 `sm` confirming button "Assign to 1,240 artifacts" / "Remove from 1,240 artifacts" plus a Cancel
 link. Changing the category in the select closes an open panel. Focus moves to the question when
 the panel opens and back to the button that opened it on Cancel. Result line: "Assigned Client A
@@ -482,6 +515,58 @@ Implementer notes: the chip labels and the D21/D22 choice are computed on the se
 to the client card as props (a `'use client'` file must not import values from
 `@directivebench/core`, lesson 2026-11-05).
 
+### 11.4 Phase 4 UI decisions (maintainer decision, 2026-11-10)
+
+Refinements of §11, §11.2 and §11.3 for bulk assign and bulk remove on `/artifacts`, approved by
+the maintainer on 2026-11-10 together with the open questions of the decision pass (folded into
+FR-124-13, §8, §13 to §16, §19 and §21). None needs a new component, variant or token; A14, A15,
+A16, UD-1, UD-5 and the §11 copy stay as decided. The bulk action on the filtered list satisfies
+issue #22's "several selected artifacts", so the Phase 4 PR closes issue #22.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| D27 | How rows are selected | The filtered list is the selection (A14): no per-row checkboxes. "Listed" means the applied filters (the URL), not filter controls edited but not yet submitted. Count and fingerprint cover every matching artifact, never one page, also once issue 53 paginates (§19) |
+| D28 | When the bulk row shows | Checked on the server page in this order: list empty: nothing (the EmptyState explains); a URL value was ignored: "Fix or clear the filters in the URL before changing categories for the whole list."; more than 10,000 listed: "This list has 12,400 artifacts. To change a category for all of them, narrow the filters to at most 10,000." (the server keeps its own check); no active category: the D22 sentence with the "Categories page" link; otherwise the bulk row. Sentences are `text-ui text-muted-foreground`, in the bulk row's place |
+| D29 | Where the bulk row lives | Inside the list Card, after the filter form and the filter notice, above the table: a `div` with `border-t pt-4 mb-4` holding a separate POST form (`flex flex-wrap items-end gap-inline`), after the GET `role="search"` form in DOM and tab order |
+| D30 | Picking the category | NativeSelect `name="categoryId"` of active categories by name (`listActiveCategoryNames`), first option preselected, no placeholder; archived categories are never listed, also when the URL filters by one; after any submit the select keeps the submitted category while it is still active (the form state carries `categoryId`) |
+| D31 | Assign and remove | One select, two `type="button"` `outline` buttons of size `default` (`h-control`, the select's height), each with `aria-expanded` and `aria-controls`; neither writes; no `default` button in the row. One panel: the other button switches it to that mode, the same button again closes it |
+| D32 | Confirmation panel | Always, any count including 1 (UD-5). Classes as the Archive panel (`min-w-0 space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui`, `role="alert"`); question `font-medium wrap-anywhere`, `tabIndex=-1`; reasons in a list; confirm `destructive` `sm` `type="submit"` without the category name; Cancel `link` `sm` `type="button"`. Reason "This changes every artifact that matches the current filters, not only the rows on screen."; when no filter is set also "No filter is set, so this is every artifact in the registry." Hidden fields: the `categoryId` captured when the panel opened, `mode`, the filter fields, `listFingerprint`. Changing the select closes the panel |
+| D33 | Server contract | One `withTransaction`, all or nothing, no client-sent ids; refusals in the order fingerprint, category, limit (§8.2, FR-124-13) |
+| D34 | Result and error copy | The strings below; counts with the shared `formatCount`, "artifact" singular for 1, names read after the write. Success lines `text-muted-foreground` `role="status"`, errors `text-destructive-foreground` `role="alert"`, under the form row (D13) |
+| D35 | Focus and keyboard | Opening the panel focuses its question; the other button while open focuses the new question; Cancel or the same button again returns focus to the opening button; changing the select keeps focus on it; any result focuses the opening button, or the filter form's Search field when the bulk row is gone; pending disables the select and every button and moves nothing. Focus moves only when it is still inside the bulk area or on `body`. No Escape handling (the Archive panel has none) |
+| D36 | Stale page, concurrent changes | Every outcome refreshes `/categories` and `/artifacts` (D26); any result closes the panel; the chosen category stays selected. A changed list, an archived or renamed category, a list grown past 10,000 and two tabs confirming at once are handled by the D33 order and `BEGIN IMMEDIATE`, never a mixed write |
+| D37 | Empty and error states | The client bulk component always renders (after the filter notice) with a server-computed state `ready \| invalid-url \| too-many \| none-active \| empty` and shows the row only for `ready`, so the result line of the last submit survives a list that became empty. It is not keyed by count or fingerprint |
+| D38 | Phase 2 copy that announces bulk | Shipped strings stay ("It leaves pickers, filters and the bulk form. …", "Unarchived Python. It is back in pickers and filters.", the Status card lines), except the Artifacts card of an archived category with no artifacts on `/categories/[slug]`, which reads "No artifact has this category." (fixed in Phase 4 with an e2e case) |
+| D39 | Design-system docs | Phase 4 adds to the Filtered list pattern (`filtered-list.mdx`) the rule "An action on every listed item sits under the filters, in the same Card, separated by a border; it names the count ('for the 14 listed artifacts') and asks first (Risky-action pattern)." with a static `BulkAction` story (row, and the panel open) in `filtered-list.stories.tsx`, checked by `pnpm test:storybook` in both themes; the Checkbox row on "What is missing" (`what-is-missing.mdx`) becomes "Selecting table rows (bulk category changes act on the filtered list, SPEC-124 A14), approval" and the example on "How to choose" (`how-to-choose.mdx`) becomes "Select table rows". The bulk form file keeps a local `Messages` copy; extracting it is a follow-up |
+
+New strings (D28, D32, D34), in addition to §11 and §13: label "Category for the 1 listed
+artifact"; question "Assign Client A to 1 artifact?" / "Remove Client A from 1 artifact?";
+confirm "Assign to 1 artifact" / "Remove from 1 artifact"; "Cancel"; pending "Assigning…" /
+"Removing…" by the confirmed mode; results "Assigned Client A to 14 artifacts.", "Assigned
+Client A to 11 artifacts. 3 already had it." (1: "1 already had it."), "All 14 listed artifacts
+already had Client A." (1: "The listed artifact already had Client A."), "Removed Client A from
+14 artifacts.", "Removed Client A from 11 artifacts. 3 did not have it." (1: "1 did not have
+it."), "None of the 14 listed artifacts had Client A." (1: "The listed artifact did not have
+Client A."); list changed with "now 1 artifact" and "now no artifacts"; archived refusal for
+remove "Client A is archived. Unarchive it on its page before removing it from a list."; the
+category page line "No artifact has this category.". The assign refusal, `CATEGORY_GONE_MESSAGE`
+and `INCOMPLETE_FORM_MESSAGE` are the §13 strings. None contains U+2013 or U+2014.
+
+Contrast (computed from the tokens in both themes; no pair beyond Phase 2 and 3): muted text on
+card 6.00 / 6.91; foreground on the select and the outline buttons at rest 19.79 / 15.33, on
+hover or `aria-expanded` 18.15 / 14.03; foreground on the warning panel 17.92 / 14.27;
+destructive-foreground on the confirm button at rest 6.38 / 5.73 and on hover 5.34 / 4.83 (the
+lowest pair); Cancel (primary-text) on the panel 7.90 / 9.70; errors on card 8.37 / 9.33; the
+"Categories page" link on card 8.72 / 11.67; UI boundaries: control border on card 4.73 / 3.79,
+focus ring on card 10.39 / 6.91 and on the panel 9.41 / 5.75, select chevron 6.00 / 6.91
+(light / dark, all pass). The `border-t` separator is decorative.
+
+Implementer notes: the bulk form posts every key of the parsed filter (a unit test asserts the
+hidden fields cover every key of `listParamSchemas`), so a filter added later is posted
+automatically and a forgotten one fails closed on the fingerprint; tests address the bulk select
+and the filter select by `name`, since both labels contain "Category" (lesson 2026-10-20); the
+D28 state and the labels are computed on the server and passed as props (lesson 2026-11-05).
+
 ## 12. Security considerations
 
 - Names and descriptions are untrusted text: rendered only as React text, never as HTML or
@@ -492,8 +577,9 @@ to the client card as props (a `'use client'` file must not import values from
   ([lesson](../lessons/2026-10-30-scope-child-writes-by-the-posted-parent.md)).
 - The `[slug]` route parameter and the `category` filter are regex-checked and length-capped
   before any query; all queries are parameterised (Drizzle).
-- Fail closed: a changed list, an invalid filter or an over-limit bulk refuses and writes
-  nothing.
+- Fail closed: a changed list, an invalid or forged filter field or an over-limit bulk refuses
+  and writes nothing. A URL value the list page ignored hides the bulk row (§11.4 D28), so an
+  ignored filter can never widen the list a bulk action acts on.
 - Server Actions keep Next.js's same-origin check; DirectiveBench binds to localhost by default
   (SPEC-007). No secrets are involved.
 
@@ -509,10 +595,12 @@ to the client card as props (a `'use client'` file must not import values from
 | Slug of an active category | "The name gives the link testing, which Testing already uses. Choose another name." | nothing |
 | Slug of an archived category | "The archived category Python already uses the link python. Unarchive it on its page instead." | nothing |
 | Unarchive clash | "An active category is already named Python. Rename one of them first." | nothing |
-| Assign archived | "Python is archived. Unarchive it on its page before assigning it." | nothing |
-| Bulk list changed | "The list changed since the page loaded (now 13 artifacts). Check it and try again." | nothing |
-| Bulk over limit | "This list has 12,400 artifacts. Narrow the filters to at most 10,000." | nothing |
-| Forged or missing hidden field | "The form was incomplete. Reload the page and try again." | nothing |
+| Assign archived | "Python is archived. Unarchive it on its page before assigning it." (also bulk assign) | nothing |
+| Bulk remove of an archived category | "Python is archived. Unarchive it on its page before removing it from a list." | nothing |
+| Bulk list changed | "The list changed since the page loaded (now 13 artifacts). Check it and try again." (1: "now 1 artifact"; 0: "now no artifacts") | nothing |
+| Bulk over limit | "This list has 12,400 artifacts. Narrow the filters to at most 10,000." (the page shows the §11.4 D28 sentence instead of the row; this is the server's own check) | nothing |
+| Bulk with an ignored URL value | No bulk row; "Fix or clear the filters in the URL before changing categories for the whole list." (§11.4 D28) | nothing |
+| Forged or missing hidden field, invalid posted filter | "The form was incomplete. Reload the page and try again." | nothing |
 | Category or artifact gone | "This category no longer exists. Reload the page." / existing `ARTIFACT_GONE_MESSAGE` | nothing |
 | Database not initialised | `NotInitialized` | nothing |
 
@@ -530,9 +618,23 @@ output does not depend on the server's locale.
 - A bookmark `/artifacts?category=python` after archive still filters; the dropdown shows
   "Python (archived)".
 - A filter that matches nothing: no bulk form (nothing to act on).
+- A URL value the list page ignored (`/artifacts?category=pyhton` lists every artifact with the
+  "Ignored invalid value in the URL" notice): no bulk row, the §11.4 D28 sentence instead.
+- No filter set: bulk is allowed on the whole registry; the panel adds "No filter is set, so this
+  is every artifact in the registry.".
+- The URL filters by an archived category: the bulk select lists active categories only, so the
+  archived one can be neither bulk assigned nor bulk removed (refused on the server too); single
+  remove on the artifact page stays allowed (FR-124-12).
+- Filter controls edited but not applied with Filter: the bulk form acts on the applied (URL)
+  filters, which the label's count and the panel's question state.
 - Bulk assign with the category filter set to the same category: every row is unchanged; the
   result line says so. Bulk remove of the filtered category empties the list on reload; the
-  result line still reports the count.
+  result line still reports the count and stays visible (§11.4 D37); focus goes to Search.
+- The chosen category is archived or renamed in another tab before confirming: archived is
+  refused and the refresh drops it from the select; renamed succeeds and the message uses the new
+  name. Another tab already applied the same change: `done` with nothing changed.
+- Two tabs confirm at once: `BEGIN IMMEDIATE` serialises them; the second sees the first's
+  writes (nothing changed, or the list changed), never a mixed write.
 - A scan adds or removes artifacts between render and submit, even when the count stays the
   same: "the list changed" (fingerprint, FR-124-13).
 - An artifact removed from every repository keeps its categories (sync never touches them).
@@ -571,22 +673,38 @@ only, no paid calls. Database tests use one writable connection per test thread
   and archived; rename keeps slug, predefined flag and assignments; case-only rename; rename into
   an active key refused; archived rename into an active key allowed, then unarchive refused;
   archive/unarchive idempotent; assign idempotent; assign archived refused; remove archived
-  allowed; bulk assign and remove (changed/unchanged counts, list-changed, too-many with a lowered
-  limit injected through the parameter, archived, not-found, atomic on failure); the partial index
+  allowed; bulk assign and remove (changed/unchanged counts, list-changed incl. the same count
+  with a different id, too-many with a lowered limit injected through the `limit` parameter,
+  archived and not-found in both modes, the refusal order, atomic on failure through an injected
+  trigger error mid-write, an archive committed before the transaction refused, 10,000 artifacts
+  timed once for NFR-124-01); `listArtifactIds` equals `listArtifacts(…).map(id)` for each filter
+  and combinations incl. a non-ASCII `q`; the partial index
   rejects a raw duplicate insert; seeding skips a name clash; `listArtifacts` / `getArtifactDetail`
   return `archived` and order active first.
-- Web lib: every schema branch and message; action → message mapping for every outcome; forged
-  ids and forged filters leave the database unchanged; the count formatter ("1,240").
+- Web lib: every schema branch and message; action → message mapping for every outcome incl. the
+  §11.4 singular and zero forms; forged ids, forged filters, a forged fingerprint and a forged
+  `mode` leave the database unchanged; the §11.4 D28 state function; the bulk form's hidden fields
+  cover every key of `listParamSchemas`; the page's count and fingerprint are derived from the
+  same list result as the rendered rows; refresh on every outcome; the count formatter ("1,240").
 - Playwright (`apps/web/e2e/categories.spec.ts`): create, then see it in the table and the
   Artifacts filter; duplicate name shows the field error and adds no row; rename keeps
   `/artifacts?category=<slug>` working; archive asks first with the count, Cancel keeps it
   active and returns focus to "Archive", confirming hides it from the filter and the picker and
   shows "(archived)" on the artifact; unarchive without a panel; assign and remove on the
   artifact page with focus checks; bulk assign and remove on a filtered list, each through the
-  confirmation with the count, Cancel writing nothing, focus into the panel and back; keyboard-only run of create and assign; 320px
-  without horizontal scroll; both themes added to the contrast specs.
-- Storybook: no new components, so no new stories; if UD-1 adds primitives, each gets stories in
-  both themes with axe.
+  confirmation with the count, Cancel writing nothing, focus into the panel and back; the §11.4
+  Phase 4 cases (list changed after a scan in a second page, then a successful retry; category
+  archived in a second page; bulk remove of the filtered category empties the list and keeps the
+  result line; the D28 sentences for an ignored URL value and no active category, no row on an
+  empty result; switching Assign and Remove while the panel is open; the select keeps the
+  submitted category; the archived category page without artifacts reads "No artifact has this
+  category."); keyboard-only run of create, assign and bulk; 320px without horizontal scroll,
+  incl. the bulk panel with a 64-character name; both themes added to the contrast specs, incl.
+  the bulk row, the open panel in both modes, a result line, the list-changed error and a D28
+  sentence.
+- Storybook: no new components, so no component stories; Phase 4 adds the static `BulkAction`
+  story to the Filtered list pattern (§11.4 D39), checked in both themes with axe. If UD-1 adds
+  primitives, each gets stories in both themes with axe.
 
 ## 16. Acceptance criteria
 
@@ -610,7 +728,8 @@ only, no paid calls. Database tests use one writable connection per test thread
 - [ ] AC-8: Bulk assign and bulk remove act only after an inline confirmation that states the
   category and the listed count (Cancel writes nothing); bulk remove removes the category from
   every listed artifact; a list that changed since the page loaded is refused and nothing is
-  written.
+  written; a URL value the list page ignored hides the bulk actions; an archived category is
+  refused in both modes.
 - [ ] AC-9: Migration `0005` backfills `name_key` and the partial unique index rejects a second
   active row with the same key.
 - [ ] AC-10: The new and changed pages work by keyboard alone, have no horizontal page scroll at
@@ -622,7 +741,9 @@ only, no paid calls. Database tests use one writable connection per test thread
 
 - Issues: #17 and #30 (closed), epic #12; D08 (S1 shipped, epic #93 closed), D07 answered.
 - Specs changed by the implementation PRs: SPEC-106 (FR-106-03 narrowed to A4 to A7 and
-  A18; §20 status), SPEC-006 (`name_key`, partial index), SPEC-101 FR-101-10 (archived chips).
+  A18; §20 status), SPEC-006 (`name_key`, partial index), SPEC-101 FR-101-10 (archived chips) and
+  §20 (bulk on the list, Phase 4). SPEC-106 FR-106-06 and §11, SPEC-101 §20 and SPEC-122's
+  Checkbox row were reworded to the filtered-list model with the §11.4 decisions (2026-11-10).
 - Packages: `@directivebench/core`, `@directivebench/database`, `apps/web`. No new dependency.
 
 ## 18. Open questions
@@ -634,7 +755,17 @@ changed, the rest accepted as written); only the spec's approval remains.
 
 Merge and aliases (FR-106-09), slug change (FR-106-05), multi-category and "Uncategorized"
 filters, suite categories and benchmark-list filter (FR-106-07), Combobox picker past about 100
-categories, a `directivebench category` CLI, transliterated slugs for non-Latin names (A5).
+categories, a `directivebench category` CLI, transliterated slugs for non-Latin names (A5),
+per-row selection for a hand-picked subset (needs a Checkbox primitive, UD-1; it would be a
+second action posting ids, not a change to the filtered-list action).
+
+Constraint for issue 53 (pagination, sorting, more filters): the bulk count and
+`listFingerprint` must stay over every artifact that matches the filters, never one page. Once
+the list paginates, the page computes them from `listArtifactIds(filter)` (or a count plus
+fingerprint query), not from the rendered rows, and reads that query and the rendered page in
+one read transaction (one SQLite snapshot), so a scan committed between the two reads cannot
+put unseen artifacts into the fingerprint (Codex review of the Phase 4 decisions); a filter that issue 53 adds becomes a key of the
+parsed filter and is posted by the bulk form automatically (§11.4 implementer notes).
 
 ## 20. Implementation status
 
@@ -686,7 +817,8 @@ categories, a `directivebench category` CLI, transliterated slugs for non-Latin 
   picker half (an archived category leaves the picker, and a stale page that assigns it is
   refused), AC-10 for the artifact page.
 - **Partially implemented:** the copy "or to a filtered list on Artifacts" and "the bulk form" in
-  the Archive reason name a surface that arrives in Phase 4.
+  the Archive reason name a surface that arrives in Phase 4; the Artifacts card of an archived
+  category with no artifacts still shows the active text until Phase 4 (§11.4 D38).
 - **Not implemented:** FR-124-13 (bulk), `listArtifactIds`, `setCategoryForListedArtifacts` and
   `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-8 and the bulk parts of AC-3, AC-4 and AC-10 are
   not verified.
@@ -733,16 +865,23 @@ Each phase is one PR that leaves the app working and passes the full gate.
 
 ### Phase 4: Bulk assign and remove on the Artifacts list
 
-1. `listArtifactIds` (shared conditions with `listArtifacts`) and
-   `setCategoryForListedArtifacts` in the database package; tests incl. fingerprint mismatch,
-   too-many and atomicity.
-2. `setCategoryForListedArtifactsAction` with filter re-parse and fingerprint guard; tests incl.
-   forged filters.
-3. Bulk form on `/artifacts` with the confirmation panel stating the count (UD-5).
-4. Playwright: bulk assign and bulk remove through the confirmation (count "1,240"-style
+1. `listArtifactIds` (shared conditions with `listArtifacts`, `q` matched in JavaScript) and
+   `setCategoryForListedArtifacts` (injectable `limit`, `category` on `category-archived`, the
+   refusal order) in the database package; tests incl. fingerprint mismatch, too-many and
+   atomicity (§15).
+2. `setCategoryForListedArtifactsAction` with filter re-parse and fingerprint guard, no posted
+   count; tests incl. forged filters, fingerprint and `mode`, every outcome's message.
+3. Bulk form on `/artifacts` per §11.4 (D28 states, D29 place, D30 select keeping the submitted
+   category, D31 buttons, D32 panel with the reworded reason and the no-filter reason, D34 copy,
+   D35 focus, D36 refresh, D37 always-mounted component).
+4. The archived category page without artifacts reads "No artifact has this category." (D38).
+5. Design-system docs (D39): the Filtered list rule and `BulkAction` story; the Checkbox rows
+   on `what-is-missing.mdx` and `how-to-choose.mdx`.
+6. Playwright: bulk assign and bulk remove through the confirmation (count "1,240"-style
    formatting, Cancel writes nothing, keyboard only, focus into the panel and back to the
    opening button), list-changed refusal (after the page loads, the test
    adds a file to the registered fixture repository and triggers a scan through the existing
-   Scan form in a second page, then submits the first page's bulk form).
-5. Update SPEC-106 §20 and this spec's §20; move this spec to `implemented/` only when AC-1 to
-   AC-11 are verified.
+   Scan form in a second page, then submits the first page's bulk form), and the other §15
+   Phase 4 cases; contrast in both themes.
+7. Update SPEC-106 §20, SPEC-101 §20 and this spec's §20; the PR closes issue #22 (§11.4); move
+   this spec to `implemented/` only when AC-1 to AC-11 are verified.
