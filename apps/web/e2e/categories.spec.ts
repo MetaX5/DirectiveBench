@@ -1,9 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
+import { scanTextContrast } from './contrast';
 import { DEMO_ARTIFACT, count, withDatabase } from './support';
 
 // SPEC-124 Phase 2: create, rename, archive (after a confirmation) and unarchive categories on
-// `/categories` and `/categories/[slug]`, archived chips and the archived filter option. Other
-// spec files share the database, so every category made here is deleted again afterwards.
+// `/categories` and `/categories/[slug]`, archived chips and the archived filter option. Phase 3:
+// assign and remove categories in the artifact page's Categories card (§11.3). Other spec files
+// share the database, so every category made here is deleted again afterwards, and a test that
+// changes the demo artifact's own categories restores them.
 
 const created: string[] = [];
 
@@ -50,7 +53,7 @@ async function createCategory(page: Page, name: string, description = ''): Promi
   return slug;
 }
 
-/** Assigns a category to the demo artifact (setup only: assignment in the UI is Phase 3). */
+/** Assigns a category to the demo artifact (setup only, or a change from another tab). */
 async function assignToDemoArtifact(slug: string): Promise<void> {
   await withDatabase((db) =>
     db
@@ -448,3 +451,360 @@ test('with every category archived, the Active table gives way to an empty state
     });
   }
 });
+
+// Phase 3: the Categories card on the artifact page (SPEC-124 §11.3, D16 to D26).
+
+async function demoArtifactId(): Promise<string> {
+  return withDatabase(
+    (db) =>
+      (db.prepare('select id from artifacts where slug = ?').get(DEMO_ARTIFACT) as { id: string })
+        .id,
+  );
+}
+
+/** Archives or unarchives a category behind the page's back (another tab, or setup). */
+async function setArchived(slug: string, archived: boolean): Promise<void> {
+  await withDatabase((db) =>
+    db
+      .prepare('update categories set archived_at = ? where slug = ?')
+      .run(archived ? new Date().toISOString() : null, slug),
+  );
+}
+
+async function unassignFromDemoArtifact(slug: string): Promise<void> {
+  await withDatabase((db) =>
+    db
+      .prepare(
+        `delete from artifact_categories where artifact_id = (select id from artifacts where slug = ?)
+         and category_id = (select id from categories where slug = ?)`,
+      )
+      .run(DEMO_ARTIFACT, slug),
+  );
+}
+
+/**
+ * Runs `body` and then restores the demo artifact's assignments and every category's archived
+ * state as they were, for tests that change the demo data other spec files rely on.
+ */
+async function keepingDemoCategories(body: () => Promise<void>): Promise<void> {
+  const saved = await withDatabase((db) => ({
+    assigned: db
+      .prepare(
+        `select category_id as categoryId, created_at as createdAt from artifact_categories
+         where artifact_id = (select id from artifacts where slug = ?)`,
+      )
+      .all(DEMO_ARTIFACT) as { categoryId: string; createdAt: string }[],
+    archived: db.prepare('select id, archived_at as archivedAt from categories').all() as {
+      id: string;
+      archivedAt: string | null;
+    }[],
+  }));
+  try {
+    await body();
+  } finally {
+    await withDatabase((db) => {
+      const artifactId = (
+        db.prepare('select id from artifacts where slug = ?').get(DEMO_ARTIFACT) as { id: string }
+      ).id;
+      db.prepare('delete from artifact_categories where artifact_id = ?').run(artifactId);
+      const insert = db.prepare(
+        'insert into artifact_categories (artifact_id, category_id, created_at) values (?, ?, ?)',
+      );
+      for (const row of saved.assigned) insert.run(artifactId, row.categoryId, row.createdAt);
+      const restore = db.prepare('update categories set archived_at = ? where id = ?');
+      for (const row of saved.archived) restore.run(row.archivedAt, row.id);
+    });
+  }
+}
+
+function categoriesCard(page: Page) {
+  return card(page, 'Categories');
+}
+
+test('the Categories card sits after Metadata and before Tags, and Metadata keeps Compatibility', async ({
+  page,
+}) => {
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const titles = await page
+    .locator('[data-slot="card"] h2')
+    .evaluateAll((elements) => elements.map((element) => element.textContent));
+  const at = titles.indexOf('Categories');
+  expect(at).toBeGreaterThan(0);
+  expect(titles.slice(at - 1, at + 2)).toEqual(['Metadata', 'Categories', 'Tags']);
+  await expect(categoriesCard(page)).toContainText(
+    'Groups for filtering the Artifacts list. A rescan keeps them.',
+  );
+  const metadata = card(page, 'Metadata');
+  await expect(metadata).toContainText('Compatibility');
+  await expect(metadata).not.toContainText('Categories');
+  // The chips are not links (D18).
+  await expect(
+    categoriesCard(page).getByRole('list', { name: 'Categories' }).getByRole('link'),
+  ).toHaveCount(0);
+});
+
+test('assign and remove on the artifact page, with the focus in the picker', async ({ page }) => {
+  const slug = await createCategory(page, 'Assign E2E');
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  const picker = box.getByRole('combobox', { name: 'Category' });
+  // The first option is preselected, no placeholder (D20); the Assign button matches its height.
+  const firstOption = await picker.locator('option').first().getAttribute('value');
+  await expect(picker).toHaveValue(firstOption ?? '');
+  const assign = box.getByRole('button', { name: 'Assign', exact: true });
+  expect((await assign.boundingBox())?.height).toBe((await picker.boundingBox())?.height);
+
+  await picker.selectOption({ label: 'Assign E2E' });
+  await assign.click();
+  await expect(box.getByRole('status')).toHaveText('Assigned Assign E2E.');
+  await expect(picker).toBeFocused();
+  const chips = box.getByRole('list', { name: 'Categories' });
+  await expect(chips.getByText('Assign E2E', { exact: true })).toHaveAttribute(
+    'data-variant',
+    'secondary',
+  );
+  await expect(picker.locator('option', { hasText: 'Assign E2E' })).toHaveCount(0);
+  expect(
+    await withDatabase((db) =>
+      count(
+        db,
+        `select count(*) as n from artifact_categories ac join categories c on c.id = ac.category_id
+         where c.slug = ?`,
+        slug,
+      ),
+    ),
+  ).toBe(1);
+
+  await box.getByRole('button', { name: 'Remove category Assign E2E' }).click();
+  await expect(box.getByRole('status')).toHaveText('Removed Assign E2E.');
+  await expect(picker).toBeFocused();
+  await expect(chips.getByText('Assign E2E', { exact: true })).toHaveCount(0);
+  await expect(picker.locator('option', { hasText: 'Assign E2E' })).toHaveCount(1);
+});
+
+test('a stale page reports already assigned, already removed and archived, then shows the current state', async ({
+  page,
+}) => {
+  const slug = await createCategory(page, 'Stale E2E');
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  const picker = box.getByRole('combobox', { name: 'Category' });
+
+  // Assigned in another tab: a status, not an error (D24); assigned once (AC-3).
+  await assignToDemoArtifact(slug);
+  await picker.selectOption({ label: 'Stale E2E' });
+  await box.getByRole('button', { name: 'Assign', exact: true }).click();
+  await expect(box.getByRole('status')).toHaveText('Stale E2E is already assigned.');
+  await expect(box.getByRole('alert')).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  const chip = box
+    .getByRole('list', { name: 'Categories' })
+    .getByText('Stale E2E', { exact: true });
+  await expect(chip).toHaveCount(1);
+  expect(
+    await withDatabase((db) =>
+      count(
+        db,
+        `select count(*) as n from artifact_categories ac join categories c on c.id = ac.category_id
+         where c.slug = ?`,
+        slug,
+      ),
+    ),
+  ).toBe(1);
+
+  // Removed and renamed in another tab: the message uses the current name (D26, §8.2).
+  await unassignFromDemoArtifact(slug);
+  await withDatabase((db) =>
+    db
+      .prepare('update categories set name = ?, name_key = ? where slug = ?')
+      .run('Stale Renamed E2E', 'stale renamed e2e', slug),
+  );
+  await box.getByRole('button', { name: 'Remove category Stale E2E' }).click();
+  await expect(box.getByRole('status')).toHaveText('Stale Renamed E2E was already removed.');
+  await expect(chip).toHaveCount(0);
+
+  // Archived in another tab: refused with the archived message, and gone from the picker.
+  await expect(picker.locator('option', { hasText: 'Stale Renamed E2E' })).toHaveCount(1);
+  await picker.selectOption({ label: 'Stale Renamed E2E' });
+  await setArchived(slug, true);
+  await box.getByRole('button', { name: 'Assign', exact: true }).click();
+  await expect(box.getByRole('alert')).toHaveText(
+    'Stale Renamed E2E is archived. Unarchive it on its page before assigning it.',
+  );
+  await expect(picker.locator('option', { hasText: 'Stale Renamed E2E' })).toHaveCount(0);
+  await expect(picker).toBeFocused();
+  expect(
+    await withDatabase((db) =>
+      count(
+        db,
+        `select count(*) as n from artifact_categories ac join categories c on c.id = ac.category_id
+         where c.slug = ?`,
+        slug,
+      ),
+    ),
+  ).toBe(0);
+});
+
+test('an archived assignment shows muted and is removed without confirmation', async ({ page }) => {
+  const slug = await createCategory(page, 'Archived Chip E2E');
+  await assignToDemoArtifact(slug);
+  await setArchived(slug, true);
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  const chips = box.getByRole('list', { name: 'Categories' });
+  await expect(chips.getByText('Archived Chip E2E (archived)')).toHaveAttribute(
+    'data-variant',
+    'muted',
+  );
+  // Archived chips come after the active ones (FR-124-14).
+  await expect(chips.locator('[data-slot="badge"]').last()).toHaveText(
+    'Archived Chip E2E (archived)',
+  );
+  await expect(
+    box.getByRole('combobox', { name: 'Category' }).locator('option', {
+      hasText: 'Archived Chip E2E',
+    }),
+  ).toHaveCount(0);
+  await box.getByRole('button', { name: 'Remove category Archived Chip E2E (archived)' }).click();
+  await expect(box.getByRole('status')).toHaveText(
+    'Removed Archived Chip E2E. To assign it again, unarchive it on its page first.',
+  );
+  await expect(chips.getByText('Archived Chip E2E (archived)')).toHaveCount(0);
+  await expect(box.getByRole('combobox', { name: 'Category' })).toBeFocused();
+});
+
+test('without a picker the focus goes to the chips and then to the Categories page link', async ({
+  page,
+}) => {
+  await keepingDemoCategories(async () => {
+    const slug = await createCategory(page, 'Last One E2E');
+    // Every other active category is assigned already, so assigning this one removes the picker.
+    await withDatabase((db) =>
+      db
+        .prepare(
+          `insert into artifact_categories (artifact_id, category_id, created_at)
+           select a.id, c.id, ? from artifacts a, categories c
+           where a.slug = ? and c.archived_at is null and c.slug <> ?
+           on conflict do nothing`,
+        )
+        .run(new Date().toISOString(), DEMO_ARTIFACT, slug),
+    );
+    await page.goto(`/artifacts/${await demoArtifactId()}`);
+    const box = categoriesCard(page);
+    const picker = box.getByRole('combobox', { name: 'Category' });
+    await expect(picker.locator('option')).toHaveCount(1);
+    await box.getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(box.getByRole('status')).toHaveText('Assigned Last One E2E.');
+    await expect(picker).toHaveCount(0);
+    // D21: the sentence replaces the picker; D25: focus on the new chip's Remove.
+    await expect(box.getByText('Every active category is assigned.')).toHaveText(
+      'Every active category is assigned. Create more on the Categories page.',
+    );
+    await expect(box.getByRole('link', { name: 'Categories page' })).toHaveAttribute(
+      'href',
+      '/categories',
+    );
+    await expect(box.getByRole('button', { name: 'Remove category Last One E2E' })).toBeFocused();
+
+    // Archive every category: D22's sentence, and removes keep the focus on the chips.
+    await withDatabase((db) =>
+      db
+        .prepare('update categories set archived_at = ? where archived_at is null')
+        .run(new Date().toISOString()),
+    );
+    await page.reload();
+    await expect(box.getByRole('combobox', { name: 'Category' })).toHaveCount(0);
+    await expect(box.getByText('There are no active categories.')).toHaveText(
+      'There are no active categories. Create or unarchive one on the Categories page.',
+    );
+    const removes = box.getByRole('list', { name: 'Categories' }).getByRole('button');
+    const total = await removes.count();
+    expect(total).toBeGreaterThan(2);
+    // The second chip's Remove: the chip after it takes its place and gets the focus.
+    const third = await removes.nth(2).getAttribute('aria-label');
+    await removes.nth(1).click();
+    await expect(box.getByRole('status')).toHaveText(/^Removed .+\. To assign it again/);
+    await expect(removes).toHaveCount(total - 1);
+    await expect(box.getByRole('button', { name: third ?? '' })).toBeFocused();
+    // The last chip's Remove: the focus goes to the new last chip.
+    await removes.last().click();
+    await expect(removes).toHaveCount(total - 2);
+    await expect(removes.last()).toBeFocused();
+    // Remove all: the focus ends on the Categories page link.
+    while ((await removes.count()) > 0) {
+      const left = await removes.count();
+      await removes.first().click();
+      await expect(removes).toHaveCount(left - 1);
+    }
+    await expect(box.getByText('No categories yet.')).toBeVisible();
+    await expect(box.getByRole('link', { name: 'Categories page' })).toBeFocused();
+  });
+});
+
+test('assign and remove work by keyboard alone', async ({ page }) => {
+  await createCategory(page, 'Keyboard Assign E2E');
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  const picker = box.getByRole('combobox', { name: 'Category' });
+  await picker.focus();
+  // Choose by typing, as a keyboard user does in a native select.
+  await page.keyboard.type('Keyboard Assign');
+  await expect(picker.locator('option:checked')).toHaveText('Keyboard Assign E2E');
+  await page.keyboard.press('Tab');
+  await expect(box.getByRole('button', { name: 'Assign', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(box.getByRole('status')).toHaveText('Assigned Keyboard Assign E2E.');
+  await expect(picker).toBeFocused();
+  const remove = box.getByRole('button', { name: 'Remove category Keyboard Assign E2E' });
+  await remove.focus();
+  await page.keyboard.press('Enter');
+  await expect(box.getByRole('status')).toHaveText('Removed Keyboard Assign E2E.');
+  await expect(picker).toBeFocused();
+});
+
+test('the Categories card fits a 320px screen with a 64-character name', async ({ page }) => {
+  const long = 'W'.repeat(64);
+  const slug = await createCategory(page, long);
+  await assignToDemoArtifact(slug);
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  await expect(box.getByRole('button', { name: `Remove category ${long}` })).toBeVisible();
+  expect(await horizontalOverflow(page)).toBe(0);
+  await setArchived(slug, true);
+  await page.reload();
+  await expect(
+    box.getByRole('button', { name: `Remove category ${long} (archived)` }),
+  ).toBeVisible();
+  expect(await horizontalOverflow(page)).toBe(0);
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`the Categories card's chips, status line and error have AA contrast in ${theme}`, async ({
+    page,
+  }) => {
+    const slug = await createCategory(page, `Contrast ${theme} E2E`);
+    const archivedSlug = await createCategory(page, `Contrast archived ${theme} E2E`);
+    await assignToDemoArtifact(archivedSlug);
+    await setArchived(archivedSlug, true);
+    await page.emulateMedia({ colorScheme: theme });
+    await page.goto(`/artifacts/${await demoArtifactId()}`);
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+    const box = categoriesCard(page);
+    const picker = box.getByRole('combobox', { name: 'Category' });
+    await picker.selectOption({ label: `Contrast ${theme} E2E` });
+    await box.getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(box.getByRole('status')).toHaveText(`Assigned Contrast ${theme} E2E.`);
+    const failures = (await scanTextContrast(page)).filter((row) => row.ratio < row.threshold);
+    expect(failures).toEqual([]);
+    // The error line: assign a category archived behind the page's back.
+    await box.getByRole('button', { name: `Remove category Contrast ${theme} E2E` }).click();
+    await expect(box.getByRole('status')).toHaveText(`Removed Contrast ${theme} E2E.`);
+    await picker.selectOption({ label: `Contrast ${theme} E2E` });
+    await setArchived(slug, true);
+    await box.getByRole('button', { name: 'Assign', exact: true }).click();
+    await expect(box.getByRole('alert')).toContainText('is archived');
+    const errorFailures = (await scanTextContrast(page)).filter((row) => row.ratio < row.threshold);
+    expect(errorFailures).toEqual([]);
+  });
+}
