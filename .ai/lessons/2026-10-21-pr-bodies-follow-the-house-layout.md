@@ -31,6 +31,10 @@ The house layout of existing PRs wins over a skill's generic template. It is:
 
 New PRs start with `review` and `needs-qa`; use `skip-qa` only if the maintainer does.
 
+Update 2026-11-10 (maintainer correction, issue #199): an agent's PR carries the issue's type,
+`priority-*` and `risk-*` labels plus `review` and `needs-qa`, also for a backend or test-only
+change. Never `skip-qa`, and never move it to `merge-queue` yourself; a human does that.
+
 ## How to apply
 
 Before opening a PR, read the body and labels of the two or three most recent merged PRs by the

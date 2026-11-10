@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
-import { fullCoverage } from '../../vitest.shared';
+import { fullCoverage, tempDirGuard } from '../../vitest.shared';
 
 // Unit tests cover the web app's logic (server actions, database access, proxy, helpers). Pages
 // and components are covered by the Playwright tests in e2e/ (SPEC-012 §3).
@@ -11,6 +11,7 @@ export default defineConfig({
   },
   test: {
     include: ['test/**/*.test.ts'],
+    globalSetup: [tempDirGuard],
     coverage: fullCoverage(['lib/**/*.ts', 'proxy.ts']),
   },
 });

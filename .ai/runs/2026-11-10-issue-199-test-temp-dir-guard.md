@@ -1,0 +1,112 @@
+---
+title: Stop tests leaving directories in the OS temp dir, and guard every package against it (issue #199)
+date: 2026-11-10
+agent: Claude Code / claude-opus-5-5 (om-auto-fix-issue chain)
+trigger: issue #199, run through om-auto-fix-issue 199
+status: in-progress
+branch: fix/issue-199-runner-tests-leave-tmp-dirs
+specs: [SPEC-012]
+---
+
+# Run: Stop tests leaving directories in the OS temp dir, and guard every package against it
+
+## Objective
+
+Issue #199: every `pnpm test` left 10 `directivebench-*` directories in the OS temp directory,
+against AGENTS.md §3 and SPEC-012 §1 principle 4. Done when `pnpm test --force` with an empty
+dedicated `TMPDIR` leaves it empty, a guard wired into every package's Vitest config fails the
+run on a leftover, the guard has a test that proves it catches a leak, and coverage stays at
+100%.
+
+## Plan
+
+om-verify-in-repo → om-root-cause → om-fix → om-open-pr --handoff → om-auto-review-pr --autofix
+(review submitted as COMMENT). Scope: test files, Vitest configs and the new guard. No
+production code. Not touched: `packages/runner/src/hosted-git.ts` (PR #200), the
+`packages/database` tests (#177), `apps/cli` doctor (#60) and the `apps/web` Versions tab (#65).
+Only the one-line `globalSetup` entry touches the configs of those packages.
+
+## Decisions
+
+- **A private temp directory per run, not a before/after diff.** `vitest.tmp-guard.ts` is a
+  Vitest `globalSetup`. It points `TMPDIR`, `TMP` and `TEMP` at a fresh
+  `directivebench-vitest-*` directory, and its teardown fails the run when anything is left in
+  it, then removes it either way. turbo runs the seven packages in parallel in one `TMPDIR`, so
+  the issue's diff of `directivebench-*` entries would count another package's in-flight
+  directories as leaks. The private directory isolates the runs and also catches leaks with
+  other prefixes (it found `db-cli-export-out-*`). Recorded in a lesson.
+- **One allowed entry: the runner's empty default workspace root.** The CLI commands never pass
+  `workspaceRoot`, so `LocalRunner` uses `<tmp>/directivebench/workspaces`, which production
+  keeps on purpose (moving it is a non-goal of the issue). The guard accepts that directory only
+  when it is empty; any run workspace inside it, and any other entry under `directivebench`, is
+  reported.
+- **The guard lives at the root, next to `vitest.shared.ts`**, which exports its path as
+  `tempDirGuard`. Its tests are in `packages/core/test/vitest-tmp-guard.test.ts`, because
+  `core` is the leaf package and there is no root test project. The root file is outside every
+  coverage `include`; its coverage was measured separately (100%).
+
+## Work performed
+
+1. Triage: issue open and unclaimed. No open or closed PR and no commit on `origin/main`
+   references #199.
+2. Red: `TMPDIR=<empty dir> vitest run` in `packages/runner` on `origin/main` (8b137bb): 244
+   tests pass and 10 entries remain (6 `directivebench-runner-*`, 2 `directivebench-runner-docs-*`,
+   2 `directivebench-doc-suite-*`), plus Node's `node-compile-cache`.
+3. Guard added and wired into `packages/runner` first. Against the unfixed tests it failed the
+   run: `Tests left 10 entries in the temp directory: directivebench-doc-suite-…, …`.
+4. Runner tests fixed: `runner.test.ts` and `document-assertions.test.ts` remove the data
+   directory in `afterEach` after `handle.close()`; `writeSuite()` roots are tracked and
+   removed in `afterEach`.
+5. Guard wired into all seven `vitest.config.ts`. The first full run found 4
+   `db-cli-export-out-*` and `directivebench` in `apps/cli`. `benchmark-export.test.ts` stored
+   only the last `newScratch()` directory of a test in one variable; it now tracks every scratch
+   directory in a list. `directivebench` was the runner's default workspace root (decision
+   above).
+6. Guard tests: six cases, including leaks at the top level, inside `directivebench/workspaces`,
+   a file named `directivebench` and the real `globalSetup` entry.
+7. SPEC-012 §9 implementation-status note, a new lesson, and an update to the house-layout
+   lesson (maintainer correction on labels).
+
+## Verification
+
+- Red, as above: 10 leftovers in the runner run on `origin/main`; the guard fails the run on
+  them.
+- Green: `TMPDIR=<empty dir> pnpm test --force --continue --concurrency=2`. The guard reports
+  nothing in any package. Afterwards the dedicated `TMPDIR` holds only `node-compile-cache`.
+  Coverage is 100% in every package. core 297 passed + 2 skipped, database 215,
+  agent-adapters 364 + 2 skipped, benchmark-engine 518, runner 244, web 503, cli 163 of 164
+  (see below).
+- Seam checks: guard throw disabled → 3 of 6 guard tests fail. Directory check made
+  unconditional (`||` for `&&`) → 3 of 6 fail. Without the runner test fix → the guard fails
+  with 10 entries. Without the export test fix and without the workspace-root allowance → the
+  guard fails in `apps/cli` with `db-cli-export-out-*` (4) and `directivebench`.
+- Guard coverage, measured with `--coverage.include=../../vitest.tmp-guard.ts
+  --coverage.allowExternal`: 100% statements, branches, functions and lines.
+- `pnpm format:check` pass, `pnpm lint` pass, `pnpm typecheck` pass (7/7), `pnpm build` pass,
+  `pnpm verify:pack` pass ("Packaging verification passed").
+- Not verified: Windows (the guard sets `TMP`/`TEMP` for `os.tmpdir()` there, but no Windows
+  run). Child processes whose environment allowlist drops `TMPDIR` would still write to the
+  system temp directory. The guard does not see that.
+
+## Problems and deviations
+
+- `apps/cli` `test/cli.test.ts > doctor > warns with a hint when the data directory does not
+  exist yet` fails on this machine. It also fails with the unchanged `origin/main` Vitest config
+  and the real `TMPDIR`, so it predates this change. The assertion
+  `every non-ok check has a hint` is false here. It belongs to the doctor work (#60) and was
+  left alone. The first full run also had 5 s timeouts in several packages at load average 31
+  (other agents running); with `--concurrency=2` they passed.
+- turbo needs `pnpm` on `PATH`; corepack shims were installed into
+  `.ai/tmp/om-auto-fix-issue/bin` for the run and removed afterwards.
+
+## Lessons recorded
+
+- [Find test temp-directory leaks with a private TMPDIR per Vitest run](../lessons/2026-11-10-guard-temp-leaks-with-a-private-tmpdir.md) (new).
+- [PR descriptions follow the house layout](../lessons/2026-10-21-pr-bodies-follow-the-house-layout.md):
+  update for the maintainer's correction (an agent's PR carries `review` and `needs-qa`, never
+  `skip-qa` or `merge-queue`).
+
+## Follow-ups
+
+- `node-compile-cache` stays in the real `TMPDIR` after a run. It is Node's module compile cache,
+  created by the Vitest main process before `globalSetup`, and is reused across runs.
