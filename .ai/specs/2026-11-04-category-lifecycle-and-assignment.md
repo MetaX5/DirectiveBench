@@ -219,7 +219,8 @@ getCategoryBySlug(db, slug): (CategoryRef & { description: string | null; predef
   artifactCount: number }) | null;
 
 listCategories(db)                 // existing, unchanged shape (name_key is not exposed)
-assignArtifactCategory(db, artifactId, categoryId):
+listActiveCategoryNames(db)        // Phase 3: { id, name } of active categories by name, no counts
+assignArtifactCategory(handle, artifactId, categoryId):
   | { status: 'assigned' | 'already-assigned' | 'category-archived'; category: CategoryRef }
   | { status: 'category-not-found' | 'artifact-not-found' };
 unassignArtifactCategory(db, artifactId, categoryId):
@@ -228,9 +229,9 @@ unassignArtifactCategory(db, artifactId, categoryId):
 // The category is read after the write, so a rename elsewhere shows the current name
 // (maintainer decision 2026-11-05, Phase 3). The assigned categories that
 // getArtifactDetail returns (ArtifactCategory) also carry the category `id`.
-// A no-op assign is "already-assigned" only when the same read finds the assignment; a
-// category archived at the insert and active at the read (an unarchive raced it) gets the
-// insert again, up to ASSIGN_CATEGORY_ATTEMPTS (2), then "category-archived".
+// assignArtifactCategory takes the handle and runs the insert and the reads that explain a
+// no-op in one withTransaction, so no archive or unarchive lands between them (Codex review,
+// PR 198).
 
 setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   filter: ArtifactListFilter, listFingerprint: string }):

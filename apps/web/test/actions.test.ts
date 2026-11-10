@@ -1103,7 +1103,7 @@ describe('category actions (SPEC-124 §10)', () => {
   it('archives with the artifact count, unarchives, and is idempotent', async () => {
     const id = await create('Python');
     const { artifactId } = await importArtifact();
-    await assignArtifactCategory(handle.db, artifactId, id);
+    await assignArtifactCategory(handle, artifactId, id);
     vi.clearAllMocks();
     expect(await setCategoryArchivedAction(idle, form({ id, intent: 'archive' }))).toEqual({
       kind: 'success',
@@ -1249,7 +1249,7 @@ describe('artifact category actions (SPEC-124 Phase 3, §11.3)', () => {
     const { artifactId } = await importArtifact();
     const python = await create('Python');
     const ruby = await create('Ruby');
-    await assignArtifactCategory(handle.db, artifactId, python);
+    await assignArtifactCategory(handle, artifactId, python);
     for (const id of [python, ruby]) {
       await setCategoryArchivedAction(categoryIdle, form({ id, intent: 'archive' }));
     }

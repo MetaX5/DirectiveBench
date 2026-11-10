@@ -608,61 +608,26 @@ export type AssignArtifactCategoryOutcome =
   | { status: 'category-not-found' | 'artifact-not-found' };
 
 /**
- * How many times `assignArtifactCategory` runs its conditional insert when the category was
- * archived at the insert and is active again at the follow-up read (an unarchive raced it).
- */
-export const ASSIGN_CATEGORY_ATTEMPTS = 2;
-
-/** The category as it is now and whether the artifact has it, read in one statement. */
-async function readAssignee(
-  db: Database,
-  artifactId: string,
-  categoryId: string,
-): Promise<{ category: CategoryRef; assigned: boolean } | undefined> {
-  const row = await db
-    .select({
-      id: categories.id,
-      slug: categories.slug,
-      name: categories.name,
-      archivedAt: categories.archivedAt,
-      assigned: sql<number>`exists (select 1 from ${artifactCategories} where ${artifactCategories.artifactId} = ${artifactId} and ${artifactCategories.categoryId} = ${categories.id})`,
-    })
-    .from(categories)
-    .where(eq(categories.id, categoryId))
-    .get();
-  return (
-    row && {
-      category: { id: row.id, slug: row.slug, name: row.name, archived: row.archivedAt !== null },
-      assigned: Boolean(row.assigned),
-    }
-  );
-}
-
-/**
  * Assigns an active category to an artifact; idempotent (SPEC-124 FR-124-11). The write is one
  * conditional statement; the follow-up reads only explain a no-op insert. An archived category is
  * refused, also when the artifact already has it. The category is read after the write, so the
- * outcome names it as it is now (a rename in another tab shows the new name). A no-op insert is
- * "already assigned" only when the read in the same statement finds the assignment: a category
- * archived at the insert and unarchived before the read gets the insert again, up to
- * `ASSIGN_CATEGORY_ATTEMPTS` times, and is then reported archived, as the last insert saw it.
+ * outcome names it as it is now (a rename in another tab shows the new name). The insert and the
+ * reads run in one `withTransaction`, so no archive or unarchive lands between them and a no-op
+ * is explained by the state the insert saw (Codex review on PR 198).
  */
 export async function assignArtifactCategory(
-  db: Database,
+  handle: DatabaseHandle,
   artifactId: string,
   categoryId: string,
 ): Promise<AssignArtifactCategoryOutcome> {
-  for (let attempt = 1; ; attempt++) {
+  return withTransaction(handle, async (db) => {
     const inserted = await insertActiveAssignment(db, artifactId, eq(categories.id, categoryId));
-    const found = await readAssignee(db, artifactId, categoryId);
-    if (!found) return { status: 'category-not-found' };
-    const { category, assigned } = found;
+    const category = await readCategoryRef(db, categoryId);
+    if (!category) return { status: 'category-not-found' };
     if (inserted) return { status: 'assigned', category };
     if (!(await artifactExists(db, artifactId))) return { status: 'artifact-not-found' };
-    if (category.archived) return { status: 'category-archived', category };
-    if (assigned) return { status: 'already-assigned', category };
-    if (attempt === ASSIGN_CATEGORY_ATTEMPTS) return { status: 'category-archived', category };
-  }
+    return { status: category.archived ? 'category-archived' : 'already-assigned', category };
+  });
 }
 
 export type UnassignArtifactCategoryOutcome =

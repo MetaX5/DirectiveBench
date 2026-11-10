@@ -533,7 +533,7 @@ export async function assignArtifactCategoryAction(
   formData: FormData,
 ): Promise<MetadataFormState> {
   return onArtifactCategory(formData, async (artifactId, categoryId) =>
-    assignCategoryState(await assignArtifactCategory(requireDatabase().db, artifactId, categoryId)),
+    assignCategoryState(await assignArtifactCategory(requireDatabase(), artifactId, categoryId)),
   );
 }
 

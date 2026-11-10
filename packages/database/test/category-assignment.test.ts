@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ASSIGN_CATEGORY_ATTEMPTS,
   assignArtifactCategory,
   assignCategoriesBySlug,
   createCategory,
@@ -39,11 +38,11 @@ describe('assignArtifactCategory', () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const estimation = await category(handle, 'Estimation');
-    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toEqual({
+    expect(await assignArtifactCategory(handle, artifactId, estimation.id)).toEqual({
       status: 'assigned',
       category: estimation,
     });
-    expect(await assignArtifactCategory(handle.db, artifactId, estimation.id)).toEqual({
+    expect(await assignArtifactCategory(handle, artifactId, estimation.id)).toEqual({
       status: 'already-assigned',
       category: estimation,
     });
@@ -55,7 +54,7 @@ describe('assignArtifactCategory', () => {
     const artifactId = await artifact(handle);
     const estimation = await category(handle, 'Estimation');
     await updateCategory(handle, { id: estimation.id, name: 'Sizing', description: null });
-    const outcome = await assignArtifactCategory(handle.db, artifactId, estimation.id);
+    const outcome = await assignArtifactCategory(handle, artifactId, estimation.id);
     expect(outcome).toEqual({ status: 'assigned', category: { ...estimation, name: 'Sizing' } });
   });
 
@@ -64,10 +63,10 @@ describe('assignArtifactCategory', () => {
     const artifactId = await artifact(handle);
     const python = await category(handle, 'Python');
     const ruby = await category(handle, 'Ruby');
-    await assignArtifactCategory(handle.db, artifactId, ruby.id);
+    await assignArtifactCategory(handle, artifactId, ruby.id);
     for (const ref of [python, ruby]) {
       await setCategoryArchived(handle, { id: ref.id, state: 'archived' });
-      expect(await assignArtifactCategory(handle.db, artifactId, ref.id)).toEqual({
+      expect(await assignArtifactCategory(handle, artifactId, ref.id)).toEqual({
         status: 'category-archived',
         category: { ...ref, archived: true },
       });
@@ -75,62 +74,26 @@ describe('assignArtifactCategory', () => {
     expect(await assignmentCount(handle)).toBe(1);
   });
 
-  /**
-   * A handle on which another process archives the category right before each of the first
-   * `races` assignment inserts and unarchives it right before the follow-up read, so the insert
-   * is a no-op although the read sees an active category (Codex review on PR 198).
-   */
-  function racingArchive(handle: DatabaseHandle, categoryId: string, races: number) {
-    const seen = { inserts: 0, unarchives: 0 };
-    let raced = false;
-    const racing = interceptHandle(handle, (query) => {
-      if (query.startsWith('insert into "artifact_categories"')) {
-        seen.inserts += 1;
-        if (seen.inserts <= races) {
-          handle.sqlite
-            .prepare('update categories set archived_at = ? where id = ?')
-            .run('t', categoryId);
-          raced = true;
-        }
-      } else if (raced && query.startsWith('select') && query.includes('from "categories"')) {
-        handle.sqlite
-          .prepare('update categories set archived_at = null where id = ?')
-          .run(categoryId);
-        seen.unarchives += 1;
-        raced = false;
-      }
+  it('inserts and explains a no-op in one transaction, so no archive or unarchive lands between', async () => {
+    // Codex review on PR 198: an unarchive between the no-op insert and the read made the
+    // outcome "already-assigned" without an assignment. BEGIN IMMEDIATE keeps every other writer
+    // out until the function returns; here every statement must run inside that transaction.
+    const handle = getHandle();
+    const artifactId = await artifact(handle);
+    const python = await category(handle, 'Python');
+    await setCategoryArchived(handle, { id: python.id, state: 'archived' });
+    const statements: boolean[] = [];
+    const watched = interceptHandle(handle, () => {
+      statements.push(handle.sqlite.isTransaction);
       return 'run';
     });
-    return { racing, seen };
-  }
-
-  it('assigns after all when an unarchive lands between its no-op insert and the read', async () => {
-    const handle = getHandle();
-    const artifactId = await artifact(handle);
-    const python = await category(handle, 'Python');
-    const { racing, seen } = racingArchive(handle, python.id, 1);
-    expect(await assignArtifactCategory(racing.db, artifactId, python.id)).toEqual({
-      status: 'assigned',
-      category: python,
-    });
-    // The race happened once and the insert ran again.
-    expect(seen).toEqual({ inserts: 2, unarchives: 1 });
-    expect(await assignmentCount(handle)).toBe(1);
-  });
-
-  it('never reports "already assigned" without the assignment, however often the race repeats', async () => {
-    const handle = getHandle();
-    const artifactId = await artifact(handle);
-    const python = await category(handle, 'Python');
-    const { racing, seen } = racingArchive(handle, python.id, Infinity);
-    expect(await assignArtifactCategory(racing.db, artifactId, python.id)).toEqual({
+    expect(await assignArtifactCategory(watched, artifactId, python.id)).toEqual({
       status: 'category-archived',
-      category: python,
+      category: { ...python, archived: true },
     });
-    expect(seen).toEqual({
-      inserts: ASSIGN_CATEGORY_ATTEMPTS,
-      unarchives: ASSIGN_CATEGORY_ATTEMPTS,
-    });
+    // The insert, the category read and the artifact check.
+    expect(statements).toEqual([true, true, true]);
+    expect(handle.sqlite.isTransaction).toBe(false);
     expect(await assignmentCount(handle)).toBe(0);
   });
 
@@ -138,13 +101,13 @@ describe('assignArtifactCategory', () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const estimation = await category(handle, 'Estimation');
-    expect(await assignArtifactCategory(handle.db, artifactId, 'cat_missing')).toEqual({
+    expect(await assignArtifactCategory(handle, artifactId, 'cat_missing')).toEqual({
       status: 'category-not-found',
     });
-    expect(await assignArtifactCategory(handle.db, 'art_missing', estimation.id)).toEqual({
+    expect(await assignArtifactCategory(handle, 'art_missing', estimation.id)).toEqual({
       status: 'artifact-not-found',
     });
-    expect(await assignArtifactCategory(handle.db, 'art_missing', 'cat_missing')).toEqual({
+    expect(await assignArtifactCategory(handle, 'art_missing', 'cat_missing')).toEqual({
       status: 'category-not-found',
     });
     expect(await assignmentCount(handle)).toBe(0);
@@ -156,7 +119,7 @@ describe('unassignArtifactCategory', () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const python = await category(handle, 'Python');
-    await assignArtifactCategory(handle.db, artifactId, python.id);
+    await assignArtifactCategory(handle, artifactId, python.id);
     await setCategoryArchived(handle, { id: python.id, state: 'archived' });
     const archived = { ...python, archived: true };
     expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toEqual({
@@ -174,7 +137,7 @@ describe('unassignArtifactCategory', () => {
     const handle = getHandle();
     const artifactId = await artifact(handle);
     const python = await category(handle, 'Python');
-    await assignArtifactCategory(handle.db, artifactId, python.id);
+    await assignArtifactCategory(handle, artifactId, python.id);
     await updateCategory(handle, { id: python.id, name: 'Py', description: null });
     expect(await unassignArtifactCategory(handle.db, artifactId, python.id)).toEqual({
       status: 'removed',
@@ -239,7 +202,7 @@ describe('assigned categories on the artifact list and page', () => {
     for (const name of ['Zeta', 'Alpha', 'Beta', 'Gamma']) {
       const { id } = await category(handle, name);
       ids.set(name, id);
-      await assignArtifactCategory(handle.db, artifactId, id);
+      await assignArtifactCategory(handle, artifactId, id);
       if (name === 'Alpha' || name === 'Gamma') {
         await setCategoryArchived(handle, { id, state: 'archived' });
       }
