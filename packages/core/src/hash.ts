@@ -21,6 +21,16 @@ export function hashManifest(entries: readonly ManifestEntry[]): string {
   return sha256(lines.join('\n'));
 }
 
+/**
+ * Fingerprint of a set of ids, independent of their order: SHA-256 of the ids sorted by UTF-16
+ * code units, one per line. The Artifacts list's bulk category action posts it to prove the
+ * server recomputed the very list the page showed (SPEC-124 FR-124-13). Ids never contain a line
+ * break, so the joined text identifies the set.
+ */
+export function idListFingerprint(ids: readonly string[]): string {
+  return sha256([...ids].sort().join('\n'));
+}
+
 /** Stable JSON serialisation (sorted object keys) used for content hashes of structured data. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));
