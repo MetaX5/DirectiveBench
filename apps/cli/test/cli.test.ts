@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configSchema } from '@directivebench/core';
 import { doctorCommand } from '../src/commands';
 import { CliError, ExitCode, checkNodeVersion, resolveAssets } from '../src/runtime';
@@ -64,6 +64,15 @@ describe('runtime checks', () => {
 });
 
 describe('doctor', () => {
+  // An empty PATH keeps the result independent of the machine: an installed agent CLI that is not
+  // logged in, or the local git, would otherwise add checks of its own.
+  beforeEach(() => {
+    vi.stubEnv('PATH', tempDir('db-doctor-path-'));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   async function runDoctor(dataDir: string) {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {

@@ -3,7 +3,7 @@ id: SPEC-122
 title: Design-system documentation in Storybook
 status: draft
 created: 2026-10-28
-updated: 2026-10-28
+updated: 2026-11-10
 category: feature
 related: [SPEC-119, SPEC-120, SPEC-121, SPEC-116, SPEC-118]
 ---
@@ -181,7 +181,8 @@ On "What is missing", with reasons:
   Field or Label, Tooltip, Meter.
 - **Primitives that planned screens need:**
   - Dialog and AlertDialog: categories (#22), Builder (SPEC-109), UI approval (SPEC-118 §19).
-  - Checkbox: bulk assign (#22), approval.
+  - Checkbox: selecting table rows (bulk category changes act on the filtered list, SPEC-124
+    A14), approval.
   - Textarea (added for issue #64 on 2026-10-28, with the maintainer's approval) and
     Combobox: categories (#22), Builder (SPEC-109).
   - Toast: categories (#22), settings (SPEC-115).

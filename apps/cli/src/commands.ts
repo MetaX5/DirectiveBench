@@ -5,10 +5,19 @@ import {
   CLI_AGENTS,
   createExecutableAdapters,
   detectCliAgent,
+  readVersionLine,
 } from '@directivebench/agent-adapters';
 import { dataDirLayout, resolveDataDir } from '@directivebench/core';
 import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@directivebench/database';
-import { LocalRunner, importBundledExample } from '@directivebench/runner';
+import {
+  CA_BUNDLE_VARIABLE,
+  LocalRunner,
+  MIN_HOSTED_GIT_VERSION,
+  buildGitEnv,
+  findGitExecutable,
+  importBundledExample,
+  resolveCaBundle,
+} from '@directivebench/runner';
 import { createFileRunnerLogger } from './logger';
 import { checkPortFree } from './serve';
 import { CliError, ExitCode, checkNodeVersion, checkSqlite, resolveAssets } from './runtime';
@@ -52,6 +61,63 @@ function nearestExistingDir(path: string): string {
   let current = path;
   while (!existsSync(current) && dirname(current) !== current) current = dirname(current);
   return current;
+}
+
+/**
+ * The git hosted repositories would run, and whether they would accept it (NFR-104-03): the same
+ * lookup (`findGitExecutable`) and version rule (`MIN_HOSTED_GIT_VERSION`) as the hosted steps.
+ */
+async function gitCheck(env: NodeJS.ProcessEnv): Promise<Check> {
+  const { major, minor } = MIN_HOSTED_GIT_VERSION;
+  const required = `${major}.${minor}`;
+  const git = await findGitExecutable(env);
+  if (!git) {
+    return {
+      name: 'git',
+      status: 'warn',
+      detail: 'git not found on PATH; hosted repositories: no',
+      hint: `Install git ${required} or newer to register repositories.`,
+    };
+  }
+  const version = await readVersionLine(git, ['version'], buildGitEnv(env));
+  const match = version ? /^git version (\d+)\.(\d+)/.exec(version) : null;
+  const supported =
+    match !== null &&
+    (Number(match[1]) > major || (Number(match[1]) === major && Number(match[2]) >= minor));
+  if (supported) {
+    return { name: 'git', status: 'ok', detail: `${version} (${git}); hosted repositories: yes` };
+  }
+  return {
+    name: 'git',
+    status: 'warn',
+    detail: `${version ?? 'version unknown'} (${git}); hosted repositories: no (git ${required} or newer required)`,
+    hint: `Update git to ${required} or newer to register GitHub repositories; local repositories are not affected.`,
+  };
+}
+
+/**
+ * The CA bundle check every hosted git step applies (`resolveCaBundle`, issue #60). Names the
+ * variable only, never its path or the file's contents.
+ */
+async function caBundleCheck(env: NodeJS.ProcessEnv): Promise<Check> {
+  const name = 'git:ca-bundle';
+  const result = await resolveCaBundle(env);
+  if (!result.ok) {
+    return {
+      name,
+      status: 'warn',
+      detail: `hosted repositories: no. ${result.message}`,
+      hint: `Every hosted git step is refused while ${CA_BUNDLE_VARIABLE} is invalid; unset it to use git's default CA bundle.`,
+    };
+  }
+  return {
+    name,
+    status: 'ok',
+    detail:
+      result.caBundle === null
+        ? `${CA_BUNDLE_VARIABLE} not set (git's default CA bundle)`
+        : `${CA_BUNDLE_VARIABLE} is set and resolves to a readable regular file`,
+  };
 }
 
 /** Read-only diagnostics; never creates or migrates anything. */
@@ -168,6 +234,8 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
       );
     }
   }
+
+  checks.push(await gitCheck(process.env), await caBundleCheck(process.env));
 
   for (const descriptor of CLI_AGENTS) {
     const detection = await detectCliAgent(descriptor);
