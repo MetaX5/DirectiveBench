@@ -227,3 +227,97 @@ export const ManyResults: Story = {
     total: 24,
   },
 };
+
+/**
+ * The bulk category row of `/artifacts` (SPEC-124 §11.4), static: an action on every listed item
+ * sits under the filters in the same Card, separated by a border, names the count and asks
+ * first (Risky-action pattern). The second row shows the panel open for "Assign to all listed".
+ */
+function BulkActionRow({ open }: { open: boolean }) {
+  return (
+    <div className="mb-4 space-y-stack border-t pt-4">
+      <form className="flex flex-wrap items-end gap-inline" onSubmit={(e) => e.preventDefault()}>
+        <label className="flex max-w-full min-w-0 flex-col gap-1 text-ui text-muted-foreground">
+          Category for the 14 listed artifacts
+          <NativeSelect name="categoryId" defaultValue="client-a" className="max-w-full">
+            <NativeSelectOption value="client-a">Client A</NativeSelectOption>
+            <NativeSelectOption value="estimation">Estimation</NativeSelectOption>
+          </NativeSelect>
+        </label>
+        <Button
+          type="button"
+          variant="outline"
+          aria-expanded={open}
+          aria-controls={open ? 'bulk-panel' : undefined}
+        >
+          Assign to all listed
+        </Button>
+        <Button type="button" variant="outline" aria-expanded={false}>
+          Remove from all listed
+        </Button>
+      </form>
+      {open ? (
+        <div
+          id="bulk-panel"
+          role="alert"
+          className="min-w-0 space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
+        >
+          <p tabIndex={-1} className="font-medium wrap-anywhere outline-none">
+            Assign Client A to 14 artifacts?
+          </p>
+          <ul className="list-disc space-y-1 pl-4">
+            <li>
+              This changes every artifact that matches the current filters, not only the rows on
+              screen.
+            </li>
+          </ul>
+          <form
+            className="flex flex-wrap items-center gap-inline"
+            onSubmit={(e) => e.preventDefault()}
+          >
+            <Button type="submit" size="sm" variant="destructive">
+              Assign to 14 artifacts
+            </Button>
+            <Button type="button" size="sm" variant="link" className="underline">
+              Cancel
+            </Button>
+          </form>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** An action on every listed item: the row, then the row with its confirmation panel open. */
+export const BulkAction: Story = {
+  render: () => (
+    <div className="max-w-content space-y-section">
+      {[false, true].map((open) => (
+        <Card key={String(open)}>
+          <CardContent>
+            <form role="search" className="mb-4 flex flex-wrap items-end gap-inline">
+              <label className="flex flex-col gap-1 text-ui text-muted-foreground">
+                Search
+                <Input name="q" defaultValue="client" className="w-56" />
+              </label>
+              <Button type="submit" variant="outline">
+                Filter
+              </Button>
+            </form>
+            <BulkActionRow open={open} />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    const [, assign] = canvas.getAllByRole('button', { name: 'Assign to all listed' });
+    await expect(assign).toHaveAttribute('aria-expanded', 'true');
+    await expect(canvas.getByRole('alert')).toHaveTextContent('Assign Client A to 14 artifacts?');
+    // The outline buttons match the select's height (AGENTS.md §7).
+    const [select] = canvas.getAllByRole('combobox');
+    await expect(assign!.getBoundingClientRect().height).toBe(
+      select!.getBoundingClientRect().height,
+    );
+  },
+};

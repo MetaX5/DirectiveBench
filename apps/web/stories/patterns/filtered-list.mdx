@@ -26,6 +26,9 @@ first, an outline Filter button) > the result count and active filters > the `Ta
    for mock results (AGENTS.md §7).
 5. Invalid filter values in the URL are dropped with a `role="status"` notice
    (`invalidParamsNotice`, `lib/artifacts.ts`).
+6. An action on every listed item sits under the filters, in the same Card, separated by a
+   border; it names the count ("for the 14 listed artifacts") and asks first (Risky-action
+   pattern). Source: SPEC-124 §11.4 D29, D39, the bulk category row on `/artifacts`.
 
 ## States
 
@@ -34,3 +37,7 @@ first, an outline Filter button) > the result count and active filters > the `Ta
 <Canvas of={Stories.NoResultsForFilters} />
 <Canvas of={Stories.NothingYet} />
 <Canvas of={Stories.ManyResults} />
+
+## Action on every listed item
+
+<Canvas of={Stories.BulkAction} />
