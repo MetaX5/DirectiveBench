@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { doctorCommand } from '../src/commands';
 import type * as RuntimeModule from '../src/runtime';
@@ -54,9 +54,19 @@ function fakeClaudeScript(version: string, auth: string): string {
   return `#!/bin/sh\nif [ "$1" = --setting-sources ]; then shift 2; fi\ncase "$1" in\n  --version) echo "${version}" ;;\n  auth) ${auth} ;;\nesac\n`;
 }
 
-/** A PATH containing a logged-in `claude`, a broken `codex` and no `cursor-agent`. */
+/** A fake `git` whose `version` prints `output` and exits with `exitCode`. */
+function writeFakeGit(bin: string, output: string, exitCode = 0): void {
+  actualFs.writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh\nif [ "$1" = version ]; then echo "${output}"; exit ${exitCode}; fi\nexit 1\n`,
+    { mode: 0o755 },
+  );
+}
+
+/** A PATH containing git 2.44.0, a logged-in `claude`, a broken `codex` and no `cursor-agent`. */
 function fakeAgentPath(): string {
   const bin = tempDir();
+  writeFakeGit(bin, 'git version 2.44.0');
   actualFs.writeFileSync(
     join(bin, 'claude'),
     fakeClaudeScript('2.1.302 (Claude Code)', `echo '{"loggedIn":true,"authMethod":"claude.ai"}'`),
@@ -112,6 +122,7 @@ beforeEach(() => {
   vi.stubEnv('PATH', fakeAgentPath());
   vi.stubEnv('ANTHROPIC_API_KEY', '');
   vi.stubEnv('DIRECTIVEBENCH_HOST', '127.0.0.1');
+  vi.stubEnv('GIT_SSL_CAINFO', undefined);
 });
 
 afterEach(async () => {
@@ -155,6 +166,106 @@ describe('doctor', () => {
     expect(lines).toContain(
       'ok    agent:cursor       Cursor Agent CLI not found on PATH (optional)',
     );
+    const bin = (process.env.PATH ?? '').split(delimiter)[0] ?? '';
+    expect(lines).toContain(
+      `ok    git                git version 2.44.0 (${join(bin, 'git')}); hosted repositories: yes`,
+    );
+    expect(lines).toContain(
+      "ok    git:ca-bundle      GIT_SSL_CAINFO not set (git's default CA bundle)",
+    );
+  });
+
+  describe('git for hosted repositories (issue 60)', () => {
+    async function gitCheck(output: string, exitCode = 0): Promise<{ check?: Check; git: string }> {
+      const bin = tempDir();
+      writeFakeGit(bin, output, exitCode);
+      vi.stubEnv('PATH', bin);
+      const { code, checks } = await runDoctor(await initialisedDataDir());
+      expect(code).toBe(ExitCode.Ok);
+      return { check: find(checks, 'git'), git: join(bin, 'git') };
+    }
+
+    it.each([
+      'git version 2.44.0',
+      'git version 2.53.0 (Apple Git-154)',
+      'git version 2.45.1.windows.1',
+      'git version 3.0.0',
+    ])('accepts %s', async (output) => {
+      const { check, git } = await gitCheck(output);
+      expect(check).toEqual({
+        name: 'git',
+        status: 'ok',
+        detail: `${output} (${git}); hosted repositories: yes`,
+      });
+    });
+
+    it.each(['git version 2.43.7', 'git version 1.99.0'])('warns about %s', async (output) => {
+      const { check, git } = await gitCheck(output);
+      expect(check).toEqual({
+        name: 'git',
+        status: 'warn',
+        detail: `${output} (${git}); hosted repositories: no (git 2.44 or newer required)`,
+        hint: 'Update git to 2.44 or newer to register GitHub repositories; local repositories are not affected.',
+      });
+    });
+
+    it('warns when the version cannot be read or parsed', async () => {
+      const failed = await gitCheck('git version 2.53.0', 1);
+      expect(failed.check).toMatchObject({
+        status: 'warn',
+        detail: `version unknown (${failed.git}); hosted repositories: no (git 2.44 or newer required)`,
+      });
+      const odd = await gitCheck('something else 2.53.0');
+      expect(odd.check).toMatchObject({
+        status: 'warn',
+        detail: `something else 2.53.0 (${odd.git}); hosted repositories: no (git 2.44 or newer required)`,
+      });
+    });
+
+    it('warns when git is not on PATH', async () => {
+      vi.stubEnv('PATH', tempDir());
+      const { code, checks } = await runDoctor(await initialisedDataDir());
+      expect(code).toBe(ExitCode.Ok);
+      expect(find(checks, 'git')).toEqual({
+        name: 'git',
+        status: 'warn',
+        detail: 'git not found on PATH; hosted repositories: no',
+        hint: 'Install git 2.44 or newer to register repositories.',
+      });
+    });
+
+    it('reports a readable CA bundle without printing its path or contents', async () => {
+      const bundle = join(tempDir(), 'planted-ca-bundle.pem');
+      actualFs.writeFileSync(bundle, 'PLANTED-CA-CONTENTS');
+      vi.stubEnv('GIT_SSL_CAINFO', bundle);
+      const { code, checks, lines } = await runDoctor(await initialisedDataDir());
+      expect(code).toBe(ExitCode.Ok);
+      expect(find(checks, 'git:ca-bundle')).toEqual({
+        name: 'git:ca-bundle',
+        status: 'ok',
+        detail: 'GIT_SSL_CAINFO is set and resolves to a readable regular file',
+      });
+      expect(lines.join('\n')).not.toMatch(/planted-ca-bundle|PLANTED-CA-CONTENTS/);
+    });
+
+    it.each([
+      ['a relative path', () => 'ca.pem', 'not an absolute path'],
+      ['a directory', () => tempDir(), 'not a regular file'],
+      ['a missing file', () => join(tempDir(), 'missing.pem'), 'ENOENT'],
+    ])('warns when GIT_SSL_CAINFO is %s, naming only the variable', async (_, value, reason) => {
+      const path = value();
+      vi.stubEnv('GIT_SSL_CAINFO', path);
+      const { code, lines } = await runDoctor(await initialisedDataDir(), false);
+      expect(code).toBe(ExitCode.Ok);
+      const index = lines.findIndex((l) => l.startsWith('warn  git:ca-bundle'));
+      expect(lines[index]).toBe(
+        `warn  git:ca-bundle      hosted repositories: no. GIT_SSL_CAINFO must be the absolute path of a readable CA bundle file (${reason}). Fix or unset it to reach GitHub repositories.`,
+      );
+      expect(lines[index + 1]).toBe(
+        "      → Every hosted git step is refused while GIT_SSL_CAINFO is invalid; unset it to use git's default CA bundle.",
+      );
+      expect(lines.join('\n')).not.toContain(path);
+    });
   });
 
   it('warns when Claude Code is installed but no auth mode is ready', async () => {
