@@ -307,7 +307,7 @@ export function unassignCategoryState(outcome: UnassignArtifactCategoryOutcome):
 /**
  * What the artifact page's Categories card shows (§11, §11.3), computed on the server so the
  * client card imports no values from core (lesson 2026-11-05): the chips with their labels, the
- * active categories not yet assigned (the picker's options, by name), and, when there are none,
+ * active categories (`listActiveCategoryNames`) not yet assigned (the picker's options, by name), and, when there are none,
  * which sentence replaces the picker (D21: every active category is assigned; D22: no active
  * category exists).
  */
@@ -319,10 +319,9 @@ export interface CategoriesCardModel {
 
 export function categoriesCardModel(
   assigned: readonly ArtifactCategory[],
-  all: readonly { id: string; name: string; archivedAt: string | null }[],
+  active: readonly { id: string; name: string }[],
 ): CategoriesCardModel {
   const assignedIds = new Set(assigned.map((c) => c.id));
-  const active = all.filter((c) => c.archivedAt === null);
   const available = active
     .filter((c) => !assignedIds.has(c.id))
     .map((c) => ({ id: c.id, name: c.name }));

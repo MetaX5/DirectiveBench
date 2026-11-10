@@ -1,8 +1,8 @@
 import {
   countArtifactRuns,
   getArtifactDetail,
+  listActiveCategoryNames,
   listArtifactRuns,
-  listCategories,
   listSuiteNames,
   listVersionComparisonRuns,
   type ArtifactDetail,
@@ -554,7 +554,10 @@ export default async function ArtifactPage({
       {query.tab === 'overview' ? (
         <OverviewTab
           detail={detail}
-          categories={categoriesCardModel(detail.categories, await listCategories(handle.db))}
+          categories={categoriesCardModel(
+            detail.categories,
+            await listActiveCategoryNames(handle.db),
+          )}
         />
       ) : null}
       {query.tab === 'content' ? (

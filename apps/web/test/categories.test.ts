@@ -383,9 +383,8 @@ describe('unassignCategoryState (FR-124-12, D23, D24)', () => {
 
 describe('categoriesCardModel (§11, D20 to D22)', () => {
   const all = [
-    { id: 'cat_doc', name: 'Documentation', archivedAt: null },
-    { id: 'cat_py', name: 'Python', archivedAt: '2026-11-05T00:00:00.000Z' },
-    { id: 'cat_test', name: 'Testing', archivedAt: null },
+    { id: 'cat_doc', name: 'Documentation' },
+    { id: 'cat_test', name: 'Testing' },
   ];
   const testing = { id: 'cat_test', slug: 'testing', name: 'Testing', archived: false };
   const archivedPython = { ...python, archived: true };
@@ -409,8 +408,7 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
   });
 
   it('replaces the picker when no active category exists (D22)', () => {
-    const archivedOnly = all.map((c) => ({ ...c, archivedAt: 't' }));
-    expect(categoriesCardModel([archivedPython], archivedOnly)).toMatchObject({
+    expect(categoriesCardModel([archivedPython], [])).toMatchObject({
       available: [],
       noPicker: 'none-active',
     });
