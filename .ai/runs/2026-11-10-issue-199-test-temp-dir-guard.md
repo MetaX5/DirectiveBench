@@ -66,8 +66,7 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
    above).
 6. Guard tests: six cases, including leaks at the top level, inside `directivebench/workspaces`,
    a file named `directivebench` and the real `globalSetup` entry.
-7. SPEC-012 §9 implementation-status note, a new lesson, and an update to the house-layout
-   lesson (maintainer correction on labels). Commit f057693; PR #203 opened (labels `review`,
+7. SPEC-012 §9 implementation-status note and a new lesson. Commit f057693; PR #203 opened (labels `review`,
    `bug`, `needs-qa`, `priority-low`, `risk-low`).
 8. Review round 1 (`om-auto-review-pr 203 --autofix`, engine `om-code-review`, submitted as
    COMMENT): request changes, 0 blockers, 1 major, 1 nit. Major: the guard sat at the root,
@@ -113,9 +112,6 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
 ## Lessons recorded
 
 - [Find test temp-directory leaks with a private TMPDIR per Vitest run](../lessons/2026-11-10-guard-temp-leaks-with-a-private-tmpdir.md) (new).
-- [PR descriptions follow the house layout](../lessons/2026-10-21-pr-bodies-follow-the-house-layout.md):
-  update for the maintainer's correction (an agent's PR carries `review` and `needs-qa`, never
-  `skip-qa` or `merge-queue`).
 
 ## Follow-ups
 
