@@ -43,6 +43,8 @@ import {
   type VersionComparison,
   type VersionResults,
 } from '@/lib/artifact-runs';
+import { HASH_EXPLANATION, firstSeenLabel, shortHash } from '@/lib/artifact-versions';
+import { CopyHashButton } from './copy-hash-button';
 import {
   ARTIFACT_TABS,
   artifactHref,
@@ -227,44 +229,69 @@ function MetadataTab({ detail }: { detail: ArtifactDetail }) {
 }
 
 function VersionsTab({ detail }: { detail: ArtifactDetail }) {
+  // Versions come newest first, so the first row is the highest number (SPEC-103 §11).
+  const latestId = detail.versions[0]?.id;
   return (
     <Card>
       <CardHeader>
         <CardTitle>Version history</CardTitle>
         <CardDescription>
-          Versions are immutable; a new version is created only when content changes.
+          Versions are immutable; a new version is created only when content changes. The content
+          hash is the {HASH_EXPLANATION}.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Table data-testid="versions">
+        <Table data-testid="versions" aria-label="Version history">
           <THead>
             <TR>
               <TH>Version</TH>
               <TH>Content hash</TH>
               <TH>Files</TH>
-              <TH>Source path</TH>
+              <TH>First seen</TH>
               <TH>Created</TH>
             </TR>
           </THead>
           <TBody>
             {detail.versions.map((v) => (
-              <TR key={v.id}>
+              <TR key={v.id} data-testid="version-row">
                 <TD>
-                  <Link
-                    className="underline"
-                    href={artifactHref(detail.artifact.id, { tab: 'content', version: v.version })}
-                  >
-                    v{v.version}
-                  </Link>
+                  <span className="inline-flex flex-wrap items-center gap-inline-tight">
+                    <Link
+                      className="underline"
+                      href={artifactHref(detail.artifact.id, {
+                        tab: 'content',
+                        version: v.version,
+                      })}
+                    >
+                      v{v.version}
+                    </Link>
+                    {v.id === latestId ? (
+                      <Badge variant="info" data-testid="latest-version">
+                        latest
+                      </Badge>
+                    ) : null}
+                  </span>
                 </TD>
-                <TD
-                  className="font-mono text-ui"
-                  title={`${v.contentHash} — SHA-256 over the sorted file manifest`}
-                >
-                  {v.contentHash.slice(0, 16)}…
+                <TD>
+                  <span className="inline-flex flex-wrap items-center gap-inline">
+                    <span
+                      className="font-mono text-ui"
+                      data-testid="version-hash"
+                      title={`${HASH_EXPLANATION}: ${v.contentHash}`}
+                    >
+                      {shortHash(v.contentHash)}
+                    </span>
+                    <CopyHashButton hash={v.contentHash} version={v.version} />
+                  </span>
                 </TD>
                 <TD>{v.files.length}</TD>
-                <TD className="font-mono text-ui">{v.sourcePath ?? '—'}</TD>
+                <TD
+                  className="font-mono text-ui break-all"
+                  data-testid="version-first-seen"
+                  title={v.sourceCommitSha === null ? undefined : `Commit ${v.sourceCommitSha}`}
+                >
+                  {firstSeenLabel(v, detail.sourceRepositories)}
+                </TD>
                 <TD className="text-ui text-muted-foreground">{formatDate(v.createdAt)}</TD>
               </TR>
             ))}
