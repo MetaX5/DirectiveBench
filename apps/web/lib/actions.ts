@@ -29,6 +29,7 @@ import {
   requestJobCancellation,
   setArtifactNotes,
   setCategoryArchived,
+  setCategoryForListedArtifacts,
   unassignArtifactCategory,
   unassignArtifactSuite,
   updateCategory,
@@ -65,12 +66,15 @@ import {
   archiveCategoryState,
   artifactCategorySchema,
   assignCategoryState,
+  bulkCategoryState,
   categoryRefused,
   createCategorySchema,
   createCategoryState,
+  parseBulkCategoryForm,
   unassignCategoryState,
   updateCategorySchema,
   updateCategoryState,
+  type BulkCategoryFormState,
   type CategoryFormState,
   type CategoryValues,
 } from './categories';
@@ -547,4 +551,26 @@ export async function unassignArtifactCategoryAction(
       await unassignArtifactCategory(requireDatabase().db, artifactId, categoryId),
     ),
   );
+}
+
+/**
+ * Assigns or removes one active category for every artifact the posted filters list
+ * (SPEC-124 FR-124-13, §11.4). The server re-parses the filters, recomputes the list and checks
+ * it against the posted fingerprint in one transaction; no count and no artifact id is posted.
+ * Every outcome refreshes the category and artifact pages (D36), and the state carries the
+ * submitted category so the select keeps it (D30).
+ */
+export async function setCategoryForListedArtifactsAction(
+  _previous: BulkCategoryFormState,
+  formData: FormData,
+): Promise<BulkCategoryFormState> {
+  const categoryId = fieldText(formData.get('categoryId'));
+  const input = parseBulkCategoryForm(formData);
+  if (!input) {
+    refreshCategories();
+    return { kind: 'error', message: INCOMPLETE_FORM_MESSAGE, categoryId };
+  }
+  const outcome = await setCategoryForListedArtifacts(requireDatabase(), input);
+  refreshCategories();
+  return { ...bulkCategoryState(outcome, input.mode), categoryId };
 }

@@ -30,6 +30,9 @@ const listParamSchemas = {
 
 type ListParam = keyof typeof listParamSchemas;
 
+/** Every filter of the artifacts list, in a fixed order: the URL parameters and the form fields. */
+export const ARTIFACT_LIST_PARAMS = Object.keys(listParamSchemas) as ListParam[];
+
 export interface ParsedParams<T> {
   value: T;
   /** Parameters that were present but invalid, in a fixed order; they are ignored (SPEC-101 §13). */
@@ -63,11 +66,38 @@ function parseField<S extends z.ZodType>(
 export function parseArtifactListParams(params: SearchParams): ParsedParams<ArtifactListFilter> {
   const invalid: string[] = [];
   const value: ArtifactListFilter = {};
-  for (const name of Object.keys(listParamSchemas) as ListParam[]) {
+  for (const name of ARTIFACT_LIST_PARAMS) {
     const parsed = parseField(params, name, listParamSchemas[name], invalid);
     if (parsed !== undefined) Object.assign(value, { [name]: parsed });
   }
   return { value, invalid };
+}
+
+/**
+ * The list filters a form posted, parsed as the URL is: every key of the list, read with
+ * `getAll`, so a repeated field or a file is invalid (SPEC-124 §8.3, the bulk category form).
+ */
+export function parseArtifactListForm(formData: FormData): ParsedParams<ArtifactListFilter> {
+  const params: SearchParams = {};
+  for (const name of ARTIFACT_LIST_PARAMS) {
+    const values = formData.getAll(name);
+    const [first] = values;
+    params[name] =
+      values.length === 1 && typeof first === 'string'
+        ? first
+        : values.length === 0
+          ? undefined
+          : values.map(String);
+  }
+  return parseArtifactListParams(params);
+}
+
+/**
+ * The hidden fields that post a parsed filter back: every key of the list, empty when unset, so
+ * a filter added to the list later is posted too (SPEC-124 §11.4 implementer notes).
+ */
+export function artifactListFields(filter: ArtifactListFilter): { name: string; value: string }[] {
+  return ARTIFACT_LIST_PARAMS.map((name) => ({ name, value: filter[name] ?? '' }));
 }
 
 export function invalidParamsNotice(invalid: readonly string[]): string | null {

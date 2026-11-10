@@ -1,3 +1,4 @@
+import { idListFingerprint } from '@directivebench/core';
 import { describe, expect, it } from 'vitest';
 import { ARTIFACT_GONE_MESSAGE, INCOMPLETE_FORM_MESSAGE } from '../lib/artifact-metadata';
 import {
@@ -9,6 +10,8 @@ import {
   artifactCategorySchema,
   artifactsPhrase,
   assignCategoryState,
+  bulkCategoryModel,
+  bulkCategoryState,
   categoriesCardModel,
   categoryChipLabel,
   categoryDescriptionSchema,
@@ -17,6 +20,7 @@ import {
   categoryRefused,
   createCategorySchema,
   createCategoryState,
+  parseBulkCategoryForm,
   unassignCategoryState,
   updateCategorySchema,
   updateCategoryState,
@@ -416,6 +420,181 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
       chips: [],
       available: [],
       noPicker: 'none-active',
+    });
+  });
+});
+
+describe('bulk category form (SPEC-124 Phase 4, §8.3, §11.4)', () => {
+  const fingerprint = 'a'.repeat(64);
+  function bulkForm(fields: Record<string, string | string[]>): FormData {
+    const data = new FormData();
+    for (const [name, value] of Object.entries(fields)) {
+      for (const one of [value].flat()) data.append(name, one);
+    }
+    return data;
+  }
+  const valid = {
+    categoryId: 'cat_a',
+    mode: 'assign',
+    listFingerprint: fingerprint,
+    q: 'client',
+    type: '',
+    category: '',
+    repository: 'repo_x',
+  };
+
+  it('parses the fields and the posted filters', () => {
+    expect(parseBulkCategoryForm(bulkForm(valid))).toEqual({
+      categoryId: 'cat_a',
+      mode: 'assign',
+      listFingerprint: fingerprint,
+      filter: { q: 'client', repository: 'repo_x' },
+    });
+    expect(parseBulkCategoryForm(bulkForm({ ...valid, mode: 'remove' }))?.mode).toBe('remove');
+  });
+
+  it('refuses a missing or forged field and an invalid or repeated filter', () => {
+    const forged: Record<string, string | string[]>[] = [
+      { ...valid, categoryId: '' },
+      { ...valid, mode: 'toggle' },
+      { ...valid, listFingerprint: 'A'.repeat(64) },
+      { ...valid, listFingerprint: 'a'.repeat(63) },
+      { ...valid, type: 'script' },
+      { ...valid, category: 'Not A Slug' },
+      { ...valid, repository: 'elsewhere' },
+      { ...valid, q: 'x'.repeat(201) },
+      { ...valid, q: ['a', 'b'] },
+    ];
+    for (const fields of forged) expect(parseBulkCategoryForm(bulkForm(fields))).toBeNull();
+    const { mode: _mode, ...noMode } = valid;
+    expect(parseBulkCategoryForm(bulkForm(noMode))).toBeNull();
+  });
+
+  const clientA = { id: 'cat_a', slug: 'client-a', name: 'Client A', archived: false };
+  const done = (changed: number, unchanged: number) =>
+    ({ status: 'done', changed, unchanged, category: clientA }) as const;
+
+  it('words every assign result, with singular and thousands forms (D34)', () => {
+    const cases: Array<[number, number, string]> = [
+      [14, 0, 'Assigned Client A to 14 artifacts.'],
+      [1, 0, 'Assigned Client A to 1 artifact.'],
+      [11, 3, 'Assigned Client A to 11 artifacts. 3 already had it.'],
+      [1_239, 1, 'Assigned Client A to 1,239 artifacts. 1 already had it.'],
+      [0, 14, 'All 14 listed artifacts already had Client A.'],
+      [0, 1_240, 'All 1,240 listed artifacts already had Client A.'],
+      [0, 1, 'The listed artifact already had Client A.'],
+    ];
+    for (const [changed, unchanged, message] of cases) {
+      expect(bulkCategoryState(done(changed, unchanged), 'assign')).toEqual({
+        kind: 'success',
+        message,
+      });
+    }
+  });
+
+  it('words every remove result (D34)', () => {
+    const cases: Array<[number, number, string]> = [
+      [14, 0, 'Removed Client A from 14 artifacts.'],
+      [1, 0, 'Removed Client A from 1 artifact.'],
+      [11, 3, 'Removed Client A from 11 artifacts. 3 did not have it.'],
+      [11, 1, 'Removed Client A from 11 artifacts. 1 did not have it.'],
+      [0, 14, 'None of the 14 listed artifacts had Client A.'],
+      [0, 1, 'The listed artifact did not have Client A.'],
+    ];
+    for (const [changed, unchanged, message] of cases) {
+      expect(bulkCategoryState(done(changed, unchanged), 'remove')).toEqual({
+        kind: 'success',
+        message,
+      });
+    }
+  });
+
+  it('words every refusal (§13)', () => {
+    const changed = (actualCount: number) =>
+      bulkCategoryState({ status: 'list-changed', actualCount }, 'assign').message;
+    expect(changed(13)).toBe(
+      'The list changed since the page loaded (now 13 artifacts). Check it and try again.',
+    );
+    expect(changed(1)).toBe(
+      'The list changed since the page loaded (now 1 artifact). Check it and try again.',
+    );
+    expect(changed(0)).toBe(
+      'The list changed since the page loaded (now no artifacts). Check it and try again.',
+    );
+    expect(changed(12_400)).toContain('(now 12,400 artifacts)');
+    const archived = {
+      status: 'category-archived',
+      category: { ...python, archived: true },
+    } as const;
+    expect(bulkCategoryState(archived, 'assign')).toEqual({
+      kind: 'error',
+      message: 'Python is archived. Unarchive it on its page before assigning it.',
+    });
+    expect(bulkCategoryState(archived, 'remove')).toEqual({
+      kind: 'error',
+      message: 'Python is archived. Unarchive it on its page before removing it from a list.',
+    });
+    expect(bulkCategoryState({ status: 'category-not-found' }, 'remove')).toEqual({
+      kind: 'error',
+      message: CATEGORY_GONE_MESSAGE,
+    });
+    expect(
+      bulkCategoryState({ status: 'too-many', actualCount: 12_400, limit: 10_000 }, 'assign'),
+    ).toEqual({
+      kind: 'error',
+      message: 'This list has 12,400 artifacts. Narrow the filters to at most 10,000.',
+    });
+  });
+
+  const active = [{ id: 'cat_a', name: 'Client A' }];
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `art_${i}`);
+
+  it('decides the D28 state in order: empty, ignored URL value, over the limit, no active category', () => {
+    const state = (n: number, invalid: string[], categories = active) =>
+      bulkCategoryModel({ listedIds: ids(n), filter: {}, invalid, active: categories }).state;
+    expect(state(0, ['category'], [])).toBe('empty');
+    expect(state(10_001, ['category'], [])).toBe('invalid-url');
+    expect(state(10_001, [], [])).toBe('too-many');
+    expect(state(10_000, [], [])).toBe('none-active');
+    expect(state(10_000, [], active)).toBe('ready');
+    expect(state(1, [], active)).toBe('ready');
+  });
+
+  it('derives the count, the fingerprint and the hidden fields from the listed ids it is given', () => {
+    const listedIds = ['art_b', 'art_a'];
+    const model = bulkCategoryModel({
+      listedIds,
+      filter: { type: 'skill' },
+      invalid: [],
+      active: [{ id: 'cat_a', name: 'Client A', extra: 1 } as { id: string; name: string }],
+    });
+    expect(model).toEqual({
+      state: 'ready',
+      categories: [{ id: 'cat_a', name: 'Client A' }],
+      label: 'Category for the 2 listed artifacts',
+      phrase: '2 artifacts',
+      tooManyText: '',
+      fields: [
+        { name: 'q', value: '' },
+        { name: 'type', value: 'skill' },
+        { name: 'category', value: '' },
+        { name: 'repository', value: '' },
+      ],
+      listFingerprint: idListFingerprint(listedIds),
+      noFilter: false,
+    });
+    const one = bulkCategoryModel({ listedIds: ['art_a'], filter: {}, invalid: [], active });
+    expect(one).toMatchObject({
+      label: 'Category for the 1 listed artifact',
+      phrase: '1 artifact',
+      noFilter: true,
+    });
+    expect(
+      bulkCategoryModel({ listedIds: ids(12_400), filter: {}, invalid: [], active }),
+    ).toMatchObject({
+      label: 'Category for the 12,400 listed artifacts',
+      tooManyText:
+        'This list has 12,400 artifacts. To change a category for all of them, narrow the filters to at most 10,000.',
     });
   });
 });

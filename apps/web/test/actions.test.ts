@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { MAX_REPOSITORY_PATH_LENGTH } from '@directivebench/core';
+import { MAX_REPOSITORY_PATH_LENGTH, idListFingerprint } from '@directivebench/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
@@ -8,6 +8,7 @@ import {
   createBenchmarkRun,
   getArtifactDetail,
   getCategoryBySlug,
+  listArtifacts,
   listCategories,
   finishBenchmarkRun,
   getBlindReviewForReviewer,
@@ -38,6 +39,7 @@ import {
   removeArtifactTagAction,
   saveArtifactNotesAction,
   scanRepositoryAction,
+  setCategoryForListedArtifactsAction,
   unassignArtifactCategoryAction,
   unassignArtifactSuiteAction,
 } from '../lib/actions';
@@ -48,7 +50,11 @@ import {
   metadataLimits,
   type MetadataFormState,
 } from '../lib/artifact-metadata';
-import { CATEGORY_GONE_MESSAGE, type CategoryFormState } from '../lib/categories';
+import {
+  CATEGORY_GONE_MESSAGE,
+  type BulkCategoryFormState,
+  type CategoryFormState,
+} from '../lib/categories';
 import { DatabaseNotInitializedError, requireDatabase } from '../lib/db';
 import { createTempDataDir, initialiseDatabase, resetCachedDatabase } from './support/data-dir';
 
@@ -1307,5 +1313,159 @@ describe('artifact category actions (SPEC-124 Phase 3, §11.3)', () => {
     }
     expect(await chips(artifactId)).toEqual([]);
     expect((await listCategories(handle.db)).map((c) => c.artifactCount)).toEqual([0]);
+  });
+});
+
+describe('bulk category action (SPEC-124 Phase 4, FR-124-13)', () => {
+  const idle: BulkCategoryFormState = { kind: 'idle' };
+  const categoryIdle: CategoryFormState = { kind: 'idle' };
+
+  async function create(name: string): Promise<string> {
+    await createCategoryAction(categoryIdle, form({ name, description: '' }));
+    const created = (await listCategories(handle.db)).find((c) => c.name === name);
+    return (created as { id: string }).id;
+  }
+
+  async function addArtifact(slug: string, type: 'skill' | 'rule' = 'skill'): Promise<string> {
+    const { artifactId } = await importArtifactVersion(handle, {
+      repository: { provider: 'local-directory', name: 'tests', location: dataDir.root },
+      path: `skills/${slug}`,
+      slug,
+      name: slug,
+      type,
+      description: null,
+      format: 'skill-md',
+      primaryFile: 'SKILL.md',
+      files: [{ path: 'SKILL.md', sha256: 'abc', size: 5, content: 'hello' }],
+      parsedMetadata: {},
+    });
+    return artifactId;
+  }
+
+  /** The form as the page posts it: every list key, the mode, the category and the fingerprint. */
+  async function bulk(
+    categoryId: string,
+    mode: string,
+    filter: { q?: string; type?: 'skill' | 'rule' } = {},
+    overrides: Record<string, string> = {},
+  ): Promise<FormData> {
+    const ids = (await listArtifacts(handle.db, filter)).map((a) => a.id);
+    return form({
+      categoryId,
+      mode,
+      listFingerprint: idListFingerprint(ids),
+      q: filter.q ?? '',
+      type: filter.type ?? '',
+      category: '',
+      repository: '',
+      ...overrides,
+    });
+  }
+
+  async function assigned(categoryId: string): Promise<number> {
+    return (await listCategories(handle.db)).find((c) => c.id === categoryId)
+      ?.artifactCount as number;
+  }
+
+  function expectRefreshed(): void {
+    expect(next.revalidatePath).toHaveBeenCalledWith('/categories', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledWith('/artifacts', 'layout');
+    expect(next.revalidatePath).toHaveBeenCalledTimes(2);
+    vi.clearAllMocks();
+  }
+
+  it('assigns to and removes from the filtered list, carrying the category and refreshing', async () => {
+    const alpha = await addArtifact('alpha');
+    await addArtifact('beta');
+    await addArtifact('gamma', 'rule');
+    const clientA = await create('Client A');
+    await assignArtifactCategory(handle, alpha, clientA);
+    vi.clearAllMocks();
+    expect(
+      await setCategoryForListedArtifactsAction(
+        idle,
+        await bulk(clientA, 'assign', { type: 'skill' }),
+      ),
+    ).toEqual({
+      kind: 'success',
+      message: 'Assigned Client A to 1 artifact. 1 already had it.',
+      categoryId: clientA,
+    });
+    expectRefreshed();
+    expect(await assigned(clientA)).toBe(2);
+    expect(
+      await setCategoryForListedArtifactsAction(idle, await bulk(clientA, 'remove', { q: 'A' })),
+    ).toEqual({
+      kind: 'success',
+      message: 'Removed Client A from 2 artifacts. 1 did not have it.',
+      categoryId: clientA,
+    });
+    expectRefreshed();
+    expect(await assigned(clientA)).toBe(0);
+  });
+
+  it('refuses forged fields, filters, fingerprint and mode, writing nothing and refreshing', async () => {
+    await addArtifact('alpha');
+    const clientA = await create('Client A');
+    vi.clearAllMocks();
+    const forged: Array<Record<string, string>> = [
+      { mode: 'toggle' },
+      { listFingerprint: 'not-a-fingerprint' },
+      { type: 'script' },
+      { category: '../etc' },
+      { repository: 'repo with spaces' },
+      { categoryId: '' },
+    ];
+    for (const overrides of forged) {
+      expect(
+        await setCategoryForListedArtifactsAction(
+          idle,
+          await bulk(clientA, 'assign', {}, overrides),
+        ),
+      ).toEqual({
+        kind: 'error',
+        message: INCOMPLETE_FORM_MESSAGE,
+        categoryId: overrides.categoryId ?? clientA,
+      });
+      expectRefreshed();
+    }
+    // A well-formed fingerprint of another list: the list changed.
+    expect(
+      await setCategoryForListedArtifactsAction(
+        idle,
+        await bulk(clientA, 'assign', {}, { listFingerprint: idListFingerprint(['art_forged']) }),
+      ),
+    ).toEqual({
+      kind: 'error',
+      message: 'The list changed since the page loaded (now 1 artifact). Check it and try again.',
+      categoryId: clientA,
+    });
+    expectRefreshed();
+    // A forged category id names no category.
+    expect(
+      await setCategoryForListedArtifactsAction(idle, await bulk('cat_forged', 'remove')),
+    ).toEqual({ kind: 'error', message: CATEGORY_GONE_MESSAGE, categoryId: 'cat_forged' });
+    expectRefreshed();
+    expect(await assigned(clientA)).toBe(0);
+  });
+
+  it('refuses an archived category in both modes', async () => {
+    const alpha = await addArtifact('alpha');
+    const python = await create('Python');
+    await assignArtifactCategory(handle, alpha, python);
+    await setCategoryArchivedAction(categoryIdle, form({ id: python, intent: 'archive' }));
+    vi.clearAllMocks();
+    expect(await setCategoryForListedArtifactsAction(idle, await bulk(python, 'remove'))).toEqual({
+      kind: 'error',
+      message: 'Python is archived. Unarchive it on its page before removing it from a list.',
+      categoryId: python,
+    });
+    expectRefreshed();
+    expect(await setCategoryForListedArtifactsAction(idle, await bulk(python, 'assign'))).toEqual({
+      kind: 'error',
+      message: 'Python is archived. Unarchive it on its page before assigning it.',
+      categoryId: python,
+    });
+    expect(await assigned(python)).toBe(1);
   });
 });

@@ -4,12 +4,15 @@ import {
   MAX_FILE_PARAM_LENGTH,
   MAX_SEARCH_LENGTH,
   MAX_SLUG_PARAM_LENGTH,
+  ARTIFACT_LIST_PARAMS,
   artifactHref,
+  artifactListFields,
   buildFileTree,
   formatBytes,
   invalidParamsNotice,
   parseArtifactDetailParams,
   parseArtifactId,
+  parseArtifactListForm,
   parseArtifactListParams,
   rawViewNotice,
   repositoriesLabel,
@@ -20,6 +23,48 @@ import {
 function file(path: string): StoredArtifactFile {
   return { path, sha256: 'h', size: 1, content: path };
 }
+
+describe('artifactListFields and parseArtifactListForm (SPEC-124 bulk form)', () => {
+  const full = {
+    q: '  Ärger ',
+    type: 'rule',
+    category: 'client-a',
+    repository: 'repo_abc',
+  } as const;
+
+  function formOf(fields: { name: string; value: string }[]): FormData {
+    const data = new FormData();
+    for (const { name, value } of fields) data.append(name, value);
+    return data;
+  }
+
+  it('posts every key of the list, empty when unset, and parses back to the same filter', () => {
+    // A filter added to the list later is posted too (§11.4 implementer notes).
+    expect(Object.keys(full).sort()).toEqual([...ARTIFACT_LIST_PARAMS].sort());
+    expect(artifactListFields(full).map((f) => f.name)).toEqual(ARTIFACT_LIST_PARAMS);
+    expect(artifactListFields({}).map((f) => f.value)).toEqual(['', '', '', '']);
+    for (const filter of [full, {}, { type: 'skill' as const }]) {
+      expect(parseArtifactListForm(formOf(artifactListFields(filter)))).toEqual({
+        value: filter,
+        invalid: [],
+      });
+    }
+    expect(parseArtifactListForm(new FormData())).toEqual({ value: {}, invalid: [] });
+  });
+
+  it('marks invalid, repeated and file fields invalid instead of dropping them silently', () => {
+    const data = formOf([
+      { name: 'type', value: 'nope' },
+      { name: 'category', value: 'a' },
+      { name: 'category', value: 'b' },
+    ]);
+    data.append('repository', new Blob(['x']), 'x.txt');
+    expect(parseArtifactListForm(data)).toEqual({
+      value: {},
+      invalid: ['type', 'category', 'repository'],
+    });
+  });
+});
 
 describe('parseArtifactListParams', () => {
   it('keeps valid filters and treats empty values as absent', () => {
