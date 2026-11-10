@@ -521,6 +521,17 @@ function categoriesCard(page: Page) {
   return card(page, 'Categories');
 }
 
+/** The page's text, the Categories card included, has AA contrast in both themes (NFR-124-03). */
+async function expectCardContrast(page: Page): Promise<void> {
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+    const failures = (await scanTextContrast(page)).filter((row) => row.ratio < row.threshold);
+    expect(failures, theme).toEqual([]);
+  }
+  await page.emulateMedia({ colorScheme: null });
+}
+
 test('the Categories card sits after Metadata and before Tags, and Metadata keeps Compatibility', async ({
   page,
 }) => {
@@ -705,6 +716,7 @@ test('without a picker the focus goes to the chips and then to the Categories pa
       '/categories',
     );
     await expect(box.getByRole('button', { name: 'Remove category Last One E2E' })).toBeFocused();
+    await expectCardContrast(page);
 
     // Archive every category: D22's sentence, and removes keep the focus on the chips.
     await withDatabase((db) =>
@@ -717,6 +729,7 @@ test('without a picker the focus goes to the chips and then to the Categories pa
     await expect(box.getByText('There are no active categories.')).toHaveText(
       'There are no active categories. Create or unarchive one on the Categories page.',
     );
+    await expectCardContrast(page);
     const removes = box.getByRole('list', { name: 'Categories' }).getByRole('button');
     const total = await removes.count();
     expect(total).toBeGreaterThan(2);
@@ -739,6 +752,43 @@ test('without a picker the focus goes to the chips and then to the Categories pa
     await expect(box.getByText('No categories yet.')).toBeVisible();
     await expect(box.getByRole('link', { name: 'Categories page' })).toBeFocused();
   });
+});
+
+test('a slow assign or remove says what is happening and keeps focus the user moved away', async ({
+  page,
+}) => {
+  await createCategory(page, 'Slow E2E');
+  const artifactId = await demoArtifactId();
+  await page.goto(`/artifacts/${artifactId}`);
+  await page.route(`**/artifacts/${artifactId}`, async (route) => {
+    if (route.request().method() === 'POST') await new Promise((r) => setTimeout(r, 1000));
+    await route.continue();
+  });
+  const box = categoriesCard(page);
+  const picker = box.getByRole('combobox', { name: 'Category' });
+  const notes = card(page, 'Notes').getByRole('textbox', { name: 'Notes' });
+  try {
+    await picker.selectOption({ label: 'Slow E2E' });
+    await box.getByRole('button', { name: 'Assign', exact: true }).click();
+    // D24: the pending line names the pressed button; the controls wait for the save.
+    await expect(box.getByRole('status')).toHaveText('Assigning…');
+    await expect(picker).toBeDisabled();
+    await expect(box.getByRole('button', { name: 'Assign', exact: true })).toBeDisabled();
+    await expect(box.getByRole('status')).toHaveText('Assigned Slow E2E.');
+    await expect(picker).toBeFocused();
+
+    await box.getByRole('button', { name: 'Remove category Slow E2E' }).click();
+    await expect(box.getByRole('status')).toHaveText('Removing…');
+    await expect(
+      box.getByRole('list', { name: 'Categories' }).getByRole('button').first(),
+    ).toBeDisabled();
+    // Focus the user moved out of the card while saving stays there (Form pattern).
+    await notes.click();
+    await expect(box.getByRole('status')).toHaveText('Removed Slow E2E.');
+    await expect(notes).toBeFocused();
+  } finally {
+    await page.unrouteAll();
+  }
 });
 
 test('assign and remove work by keyboard alone', async ({ page }) => {
