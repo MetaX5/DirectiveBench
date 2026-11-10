@@ -52,7 +52,7 @@ uncontrolled forms after an action (lesson 2026-10-28), so the select is control
 - [x] 4.4 Archived category page without artifacts reads "No artifact has this category." (D38) — 2f8b941
 - [x] 4.5 Design-system docs: Filtered list rule, BulkAction story, Checkbox rows (D39) — 379d970
 - [x] 4.6 Playwright: bulk flows, list-changed after a scan, D28 sentences, keyboard, 320px, contrast — 8166148
-- [ ] 4.7 Spec status updates (SPEC-124 §20, SPEC-106 §20, SPEC-101 §20)
+- [x] 4.7 Spec status updates (SPEC-124 §20, SPEC-106 §20, SPEC-101 §20) — d9fa120
 
 ## Decisions
 
