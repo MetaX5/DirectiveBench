@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,10 @@ beforeEach(async () => {
   await seedPredefinedCategories(handle.db);
 });
 
-afterEach(() => handle.close());
+afterEach(() => {
+  handle.close();
+  rmSync(dataDir, { recursive: true, force: true });
+});
 
 function createRunner() {
   return new LocalRunner({

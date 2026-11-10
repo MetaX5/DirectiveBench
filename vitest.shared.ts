@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import type { ViteUserConfig } from 'vitest/config';
 
 type CoverageOptions = NonNullable<NonNullable<ViteUserConfig['test']>['coverage']>;
@@ -17,3 +18,11 @@ export function fullCoverage(include: string[], exclude: string[] = []): Coverag
     thresholds: { 100: true },
   };
 }
+
+/**
+ * Vitest `globalSetup` that gives every package run a private temp directory and fails the run
+ * when tests leave anything in it (AGENTS.md §3, issue #199).
+ */
+export const tempDirGuard = fileURLToPath(
+  new URL('./test-support/temp-dir-guard.ts', import.meta.url),
+);
