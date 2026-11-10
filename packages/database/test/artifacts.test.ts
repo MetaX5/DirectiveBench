@@ -210,6 +210,45 @@ describe('importArtifactVersion', () => {
     expect(detail?.occurrences[0]?.occurrence.commitSha).toBeNull();
   });
 
+  it('returns the repositories its versions were first seen in, once each (FR-103-15)', async () => {
+    const handle = getHandle();
+    // Same provider as the fixtures: identity matches by name and type within a provider.
+    const upstream = {
+      provider: 'local-directory',
+      name: 'upstream',
+      location: '/srv/upstream',
+    } as const;
+    const mirror = {
+      provider: 'local-directory',
+      name: 'mirror',
+      location: '/srv/mirror',
+    } as const;
+    const first = await importArtifactVersion(handle, artifactInput('v1'));
+    const second = await importArtifactVersion(
+      handle,
+      artifactInput('v2', { repository: upstream, commitSha: 'c'.repeat(40) }),
+    );
+    await importArtifactVersion(handle, artifactInput('v3'));
+    // Seen again in another repository: an occurrence, not a first observation.
+    await importArtifactVersion(handle, artifactInput('v3', { repository: mirror }));
+
+    const detail = await getArtifactDetail(handle.db, first.artifactId);
+    expect(detail?.occurrences).toHaveLength(3);
+    expect(detail?.sourceRepositories).toEqual([
+      { id: expect.any(String), name: 'fixtures', provider: 'local-directory' },
+      { id: expect.any(String), name: 'upstream', provider: 'local-directory' },
+    ]);
+    const [fixtures, upstreamRow] = detail?.sourceRepositories ?? [];
+    expect(
+      detail?.versions.map((v) => [v.version, v.sourceRepositoryId, v.sourceCommitSha]),
+    ).toEqual([
+      [3, fixtures?.id, null],
+      [2, upstreamRow?.id, 'c'.repeat(40)],
+      [1, fixtures?.id, null],
+    ]);
+    expect(second.version).toBe(2);
+  });
+
   it('tracks an artifact found in several repositories and reactivates removed occurrences', async () => {
     const handle = getHandle();
     const first = await importArtifactVersion(handle, artifactInput('v1'));
@@ -332,7 +371,7 @@ describe('assignCategoriesBySlug', () => {
       unknown: [],
     });
     expect((await listArtifacts(handle.db))[0]?.categories).toEqual([
-      { slug: 'security', name: 'Security', archived: false },
+      { id: expect.any(String), slug: 'security', name: 'Security', archived: false },
     ]);
   });
 });

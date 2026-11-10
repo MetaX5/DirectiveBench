@@ -22,6 +22,10 @@ when the text next to it wraps, even with `size-3`.
 - An icon inside a flex badge or button that can wrap needs `shrink-0`.
 - To keep a cell's content on one line in an auto-layout table, give the cell content
   `min-w-max`; the column's floor then includes it, so measure the table again.
+- `break-all` or `wrap-anywhere` on a table cell drops its minimum width to one character, so
+  auto layout squeezes that column to a letter per line at 320px (issue 65, browser QA D1:
+  First seen was 68px wide). Pair them with a `min-w-*` floor, as `/artifacts` does, and use
+  `wrap-anywhere` rather than `break-all` on sentences so only long tokens break.
 
 ## How to apply
 

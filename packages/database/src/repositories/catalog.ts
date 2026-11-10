@@ -64,6 +64,18 @@ export async function listCategories(db: Database) {
     .orderBy(categories.name);
 }
 
+/**
+ * The active categories by name, ids and names only: the artifact page's category picker
+ * (SPEC-124 §11.3) needs no assignment counts, so it does not aggregate `artifact_categories`.
+ */
+export async function listActiveCategoryNames(db: Database) {
+  return db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(isNull(categories.archivedAt))
+    .orderBy(categories.name);
+}
+
 /** A category as the lifecycle and assignment functions report it (SPEC-124 §8.2). */
 export interface CategoryRef {
   id: string;

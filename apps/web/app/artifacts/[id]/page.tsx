@@ -1,6 +1,7 @@
 import {
   countArtifactRuns,
   getArtifactDetail,
+  listActiveCategoryNames,
   listArtifactRuns,
   listSuiteNames,
   listVersionComparisonRuns,
@@ -11,7 +12,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ContentTab } from '@/components/artifacts/content-tab';
-import { NotesCard, SuitesCard, TagsCard } from './metadata-forms';
+import { CategoriesCard, NotesCard, SuitesCard, TagsCard } from './metadata-forms';
 import {
   MockBadge,
   NotInitialized,
@@ -43,6 +44,8 @@ import {
   type VersionComparison,
   type VersionResults,
 } from '@/lib/artifact-runs';
+import { HASH_EXPLANATION, firstSeenLabel, shortHash } from '@/lib/artifact-versions';
+import { CopyHashButton } from './copy-hash-button';
 import {
   ARTIFACT_TABS,
   artifactHref,
@@ -54,7 +57,7 @@ import {
   type SearchParams,
 } from '@/lib/artifacts';
 import { metadataLimits } from '@/lib/artifact-metadata';
-import { categoryChipLabel } from '@/lib/categories';
+import { categoriesCardModel, type CategoriesCardModel } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { providerLabel } from '@/lib/repositories';
@@ -86,8 +89,14 @@ function Tabs({ artifactId, current }: { artifactId: string; current: ArtifactTa
   );
 }
 
-function OverviewTab({ detail }: { detail: ArtifactDetail }) {
-  const { artifact, occurrences, categories, evaluations } = detail;
+function OverviewTab({
+  detail,
+  categories,
+}: {
+  detail: ArtifactDetail;
+  categories: CategoriesCardModel;
+}) {
+  const { artifact, occurrences, evaluations } = detail;
   const latestEval = evaluations[0];
   return (
     <div className="grid gap-grid lg:grid-cols-3">
@@ -168,30 +177,12 @@ function OverviewTab({ detail }: { detail: ArtifactDetail }) {
           </CardHeader>
           <CardContent className="space-y-stack text-ui">
             <div>
-              <p className="text-muted-foreground">Categories</p>
-              {categories.length ? (
-                <div className="flex flex-wrap gap-inline-tight">
-                  {/* Active categories first, then archived ones, muted (FR-124-14). */}
-                  {categories.map((c) => (
-                    <Badge
-                      key={c.slug}
-                      variant={c.archived ? 'muted' : 'secondary'}
-                      className="break-all"
-                    >
-                      {categoryChipLabel(c)}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p>No categories</p>
-              )}
-            </div>
-            <div>
               <p className="text-muted-foreground">Compatibility</p>
               <p title="Agent compatibility validation is planned">Not validated</p>
             </div>
           </CardContent>
         </Card>
+        <CategoriesCard artifactId={artifact.id} model={categories} />
         <TagsCard
           artifactId={artifact.id}
           // Sorted on the server only, so the browser renders the same order (no hydration drift).
@@ -227,44 +218,69 @@ function MetadataTab({ detail }: { detail: ArtifactDetail }) {
 }
 
 function VersionsTab({ detail }: { detail: ArtifactDetail }) {
+  // Versions come newest first, so the first row is the highest number (SPEC-103 §11).
+  const latestId = detail.versions[0]?.id;
   return (
     <Card>
       <CardHeader>
         <CardTitle>Version history</CardTitle>
         <CardDescription>
-          Versions are immutable; a new version is created only when content changes.
+          Versions are immutable; a new version is created only when content changes. The content
+          hash is the {HASH_EXPLANATION}.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Table data-testid="versions">
+        <Table data-testid="versions" aria-label="Version history">
           <THead>
             <TR>
               <TH>Version</TH>
               <TH>Content hash</TH>
               <TH>Files</TH>
-              <TH>Source path</TH>
+              <TH>First seen</TH>
               <TH>Created</TH>
             </TR>
           </THead>
           <TBody>
             {detail.versions.map((v) => (
-              <TR key={v.id}>
+              <TR key={v.id} data-testid="version-row">
                 <TD>
-                  <Link
-                    className="underline"
-                    href={artifactHref(detail.artifact.id, { tab: 'content', version: v.version })}
-                  >
-                    v{v.version}
-                  </Link>
+                  <span className="inline-flex flex-wrap items-center gap-inline-tight">
+                    <Link
+                      className="underline"
+                      href={artifactHref(detail.artifact.id, {
+                        tab: 'content',
+                        version: v.version,
+                      })}
+                    >
+                      v{v.version}
+                    </Link>
+                    {v.id === latestId ? (
+                      <Badge variant="info" data-testid="latest-version">
+                        latest
+                      </Badge>
+                    ) : null}
+                  </span>
                 </TD>
-                <TD
-                  className="font-mono text-ui"
-                  title={`${v.contentHash} — SHA-256 over the sorted file manifest`}
-                >
-                  {v.contentHash.slice(0, 16)}…
+                <TD>
+                  <span className="inline-flex flex-wrap items-center gap-inline">
+                    <span
+                      className="font-mono text-ui"
+                      data-testid="version-hash"
+                      title={`${HASH_EXPLANATION}: ${v.contentHash}`}
+                    >
+                      {shortHash(v.contentHash)}
+                    </span>
+                    <CopyHashButton hash={v.contentHash} version={v.version} />
+                  </span>
                 </TD>
                 <TD>{v.files.length}</TD>
-                <TD className="font-mono text-ui">{v.sourcePath ?? '—'}</TD>
+                <TD
+                  className="min-w-48 font-mono text-ui wrap-anywhere"
+                  data-testid="version-first-seen"
+                  title={v.sourceCommitSha === null ? undefined : `Commit ${v.sourceCommitSha}`}
+                >
+                  {firstSeenLabel(v, detail.sourceRepositories)}
+                </TD>
                 <TD className="text-ui text-muted-foreground">{formatDate(v.createdAt)}</TD>
               </TR>
             ))}
@@ -562,7 +578,15 @@ export default async function ArtifactPage({
           ))}
         </div>
       ) : null}
-      {query.tab === 'overview' ? <OverviewTab detail={detail} /> : null}
+      {query.tab === 'overview' ? (
+        <OverviewTab
+          detail={detail}
+          categories={categoriesCardModel(
+            detail.categories,
+            await listActiveCategoryNames(handle.db),
+          )}
+        />
+      ) : null}
       {query.tab === 'content' ? (
         <ContentTab artifactId={artifact.id} versions={versions} selection={selection} />
       ) : null}
