@@ -87,7 +87,7 @@ directivebench                 # start the UI and runner, open the browser
 directivebench serve           # same, with --host, --port, --no-open, --allow-network-access
 directivebench init            # create data directory, config.json and database
 directivebench demo            # import the bundled example and run it with the mock agent
-directivebench doctor          # diagnose Node, SQLite, data dir, database, port, agent CLIs
+directivebench doctor          # diagnose Node, SQLite, data dir, database, port, git, agent CLIs
 directivebench benchmark export <run-id> --out <dir>
                                # write the output files a run kept, and a manifest, to a new
                                # or empty directory (--json for a machine-readable summary)
