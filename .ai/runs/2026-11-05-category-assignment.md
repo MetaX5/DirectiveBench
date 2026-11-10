@@ -47,25 +47,44 @@ a client card importing `lib/categories.ts` values would break `next build` (les
 
 ### Phase 1: Repository contract
 
-- [ ] 1.1 Assign and unassign outcomes carry the category read after the write; `ArtifactCategory.id`; tests
+- [x] 1.1 Assign and unassign outcomes carry the category read after the write; `ArtifactCategory.id`; tests — a86cadb
 
 ### Phase 2: Library and actions
 
-- [ ] 2.1 `artifactCategorySchema`, outcome-to-state mapping and card view model; tests
-- [ ] 2.2 `assignArtifactCategoryAction`, `unassignArtifactCategoryAction`; tests
+- [x] 2.1 `artifactCategorySchema`, outcome-to-state mapping and card view model; tests — b4b57f3
+- [x] 2.2 `assignArtifactCategoryAction`, `unassignArtifactCategoryAction`; tests — b4b57f3, 02eacbc
 
 ### Phase 3: Artifact page
 
-- [ ] 3.1 Categories card on `/artifacts/[id]` (D16 to D26)
+- [x] 3.1 Categories card on `/artifacts/[id]` (D16 to D26) — a437bd2
 
 ### Phase 4: Browser tests and docs
 
-- [ ] 4.1 Playwright: assign, remove, archived removable, focus, keyboard, 320px, contrast
+- [x] 4.1 Playwright: assign, remove, archived removable, focus, keyboard, 320px, contrast — a437bd2
 - [ ] 4.2 SPEC-124 §8.2 and §20, run log
 
 ## Decisions
 
+- The D25 focus map is one fallback chain: the select; else, after an assign, the assigned
+  chip's Remove; after a remove, the Remove now at the removed chip's place; else the last
+  chip's Remove; else the "Categories page" link. A refused assign without a picker (a stale
+  page) therefore lands on the last chip or the link, which D25 does not name explicitly.
+- The pending line follows the pressed button through an `onSubmit` state, since the action
+  runs after the pending render.
+
 ## Work performed
+
+- Session 1 (2026-11-05): a86cadb (repository outcomes carry the category read after the
+  write, `ArtifactCategory.id`), b4b57f3 (`artifactCategorySchema`, `assignCategoryState`,
+  `unassignCategoryState`, `categoriesCardModel`, the two Server Actions, unit tests). The
+  Progress checkboxes were not ticked in that session; they were checked against the code on
+  2026-11-10.
+- Session 2 (2026-11-10, resumed with `om-auto-continue-pr 198`): 02eacbc fixes a `pnpm
+  typecheck` failure the b4b57f3 test introduced (an array of forged forms inferred as a union
+  not assignable to `Record<string, string>`); a437bd2 adds `CategoriesCard` in
+  `metadata-forms.tsx` (types only from `lib/categories.ts`, model computed on the server), moves
+  categories out of the Metadata card and adds nine Playwright tests to `categories.spec.ts`;
+  SPEC-124 §20 and SPEC-101 §20 updated.
 
 ## Verification
 
