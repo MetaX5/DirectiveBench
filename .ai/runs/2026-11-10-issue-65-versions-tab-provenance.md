@@ -40,21 +40,23 @@ not), so the failure path must say so and show the hash; PR #198 touches the sam
 
 ## Progress
 
+PR: #201
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Data and library
 
-- [ ] 1.1 `getArtifactDetail` returns the first-seen repositories; tests
-- [ ] 1.2 `lib/artifact-versions.ts`: first-seen label, short commit, copy helper; tests
+- [x] 1.1 `getArtifactDetail` returns the first-seen repositories; tests — c5c3e7e
+- [x] 1.2 `lib/artifact-versions.ts`: first-seen label, short commit, copy helper; tests — c5c3e7e
 
 ### Phase 2: Versions tab
 
-- [ ] 2.1 Latest badge, copy button and First seen column
-- [ ] 2.2 Design-system backlog row for issue 65
+- [x] 2.1 Latest badge, copy button and First seen column — 3a68130
+- [x] 2.2 Design-system backlog row for issue 65 — 3a68130
 
 ### Phase 3: Browser tests and docs
 
-- [ ] 3.1 Playwright: latest badge, copy, first seen, keyboard, 320px, contrast in both themes
+- [x] 3.1 Playwright: latest badge, copy, first seen, keyboard, 320px, contrast in both themes — 3a68130
 - [ ] 3.2 SPEC-103 §20 status, run log
 
 ## Decisions
