@@ -272,13 +272,19 @@ const UNREACHABLE_PATTERNS = [
   /unable to access/i,
 ];
 
-/** The first line of git's error output without its `fatal: ` prefix. */
+/**
+ * The line of git's error output that names the error, without its `fatal: `/`error: ` prefix:
+ * the first `fatal:` or `error:` line, otherwise the first line that is neither a warning nor
+ * the progress line a clone always prints first ("Cloning into bare repository '…'...").
+ */
 function firstLine(stderr: string): string {
+  const lines = stderr.split('\n').map((text) => text.trim());
   const line =
-    stderr
-      .split('\n')
-      .map((text) => text.trim())
-      .find((text) => text !== '' && !text.startsWith('warning:')) ?? '';
+    lines.find((text) => /^(?:fatal|error): /.test(text)) ??
+    lines.find(
+      (text) => text !== '' && !text.startsWith('warning:') && !text.startsWith('Cloning into '),
+    ) ??
+    '';
   return line.replace(/^(?:fatal|error): /, '') || 'no message';
 }
 
