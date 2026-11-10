@@ -46,17 +46,46 @@ uncontrolled forms after an action (lesson 2026-10-28), so the select is control
 
 ### Phase 4: Bulk assign and remove on the Artifacts list
 
-- [ ] 4.1 listArtifactIds and setCategoryForListedArtifacts in the database package, with tests
-- [ ] 4.2 setCategoryForListedArtifactsAction with filter re-parse and fingerprint guard, with tests
-- [ ] 4.3 Bulk form on /artifacts per §11.4 (D28 to D37)
-- [ ] 4.4 Archived category page without artifacts reads "No artifact has this category." (D38)
-- [ ] 4.5 Design-system docs: Filtered list rule, BulkAction story, Checkbox rows (D39)
-- [ ] 4.6 Playwright: bulk flows, list-changed after a scan, D28 sentences, keyboard, 320px, contrast
+- [x] 4.1 listArtifactIds and setCategoryForListedArtifacts in the database package, with tests — 224b40e
+- [x] 4.2 setCategoryForListedArtifactsAction with filter re-parse and fingerprint guard, with tests — 792a9fe
+- [x] 4.3 Bulk form on /artifacts per §11.4 (D28 to D37) — 2ab1930
+- [x] 4.4 Archived category page without artifacts reads "No artifact has this category." (D38) — 2f8b941
+- [x] 4.5 Design-system docs: Filtered list rule, BulkAction story, Checkbox rows (D39) — 379d970
+- [x] 4.6 Playwright: bulk flows, list-changed after a scan, D28 sentences, keyboard, 320px, contrast — 8166148
 - [ ] 4.7 Spec status updates (SPEC-124 §20, SPEC-106 §20, SPEC-101 §20)
 
 ## Decisions
 
+- **Bounded id scan and `too-many` reachability.** §8.2 asks to keep at most `limit + 1` ids and
+  refuse a longer list as `list-changed`, while §15 asks for a `too-many` test with a lowered
+  limit. `collectListedIds` keeps `limit + 1` ids and looks one match further without keeping it:
+  exactly `limit + 1` with a matching fingerprint is `too-many`; more is `list-changed`, counted
+  after the transaction. Both requirements hold; recorded in SPEC-124 §20.
+- **Empty recomputed list is `list-changed`** ("now no artifacts"): the page never offers the
+  action on an empty list (D28), so a post against one is stale or forged.
+- **Ids are read in keyset batches** of `LISTED_ID_BATCH_SIZE = 1_000` rows ordered by name and id,
+  so the bulk path's memory is bounded by the batch plus `limit + 1` ids; writes go in
+  `IN` batches of `BULK_WRITE_BATCH_SIZE = 500`.
+- **`idListFingerprint` lives in core** (`hash.ts`, "core hashing" in FR-124-13): SHA-256 of the
+  ids sorted by UTF-16 code units, one per line.
+- **The bulk form's state carries `categoryId`** (`BulkCategoryFormState`), as D30 requires; §10
+  lists `MetadataFormState` for every action. The select is controlled, so React's form reset
+  after an action cannot move it (lesson 2026-10-28).
+- **Panel is its own form under the row**, holding the captured `categoryId`, `mode`, every list
+  key and `listFingerprint` as hidden fields (D32); the row form has no submit control.
+
 ## Work performed
+
+1. `docs(runs)` plan, draft PR #206 (6369913).
+2. Step 4.1 `feat(database)` `listArtifactIds`, `setCategoryForListedArtifacts`,
+   `MAX_BULK_CATEGORY_ARTIFACTS`, core `idListFingerprint`, `category-bulk.test.ts` (224b40e).
+3. Step 4.2 `feat(web)` `bulkCategorySchema`/`parseBulkCategoryForm`, `parseArtifactListForm`,
+   `artifactListFields`, `bulkCategoryState`, `bulkCategoryModel`,
+   `setCategoryForListedArtifactsAction`, unit tests (792a9fe).
+4. Step 4.3 `feat(web)` `app/artifacts/bulk-category-form.tsx` and the page wiring (2ab1930).
+5. Step 4.4 `fix(web)` D38 copy (2f8b941).
+6. Step 4.5 `docs(design-system)` D39 rule, `BulkAction` story, Checkbox rows (379d970).
+7. Step 4.6 `test(web)` Playwright cases in `categories.spec.ts`.
 
 ## Verification
 

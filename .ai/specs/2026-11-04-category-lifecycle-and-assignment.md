@@ -816,12 +816,35 @@ parsed filter and is posted by the bulk form automatically (§11.4 implementer n
   both themes). Verified acceptance criteria: AC-3's single-artifact half (assigned once), AC-4's
   picker half (an archived category leaves the picker, and a stale page that assigns it is
   refused), AC-10 for the artifact page.
-- **Partially implemented:** the copy "or to a filtered list on Artifacts" and "the bulk form" in
-  the Archive reason name a surface that arrives in Phase 4; the Artifacts card of an archived
-  category with no artifacts still shows the active text until Phase 4 (§11.4 D38).
-- **Not implemented:** FR-124-13 (bulk), `listArtifactIds`, `setCategoryForListedArtifacts` and
-  `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-8 and the bulk parts of AC-3, AC-4 and AC-10 are
-  not verified.
+- **Implemented (Phase 4, bulk assign and bulk remove on the filtered Artifacts list; verified on
+  2026-11-10 by `packages/core/test/hash.test.ts` (`idListFingerprint`),
+  `packages/database/test/category-bulk.test.ts`, `apps/web/test/categories.test.ts` (bulk form),
+  `apps/web/test/artifacts.test.ts` (`parseArtifactListForm`, `artifactListFields`),
+  `apps/web/test/actions.test.ts` "bulk category action", `apps/web/e2e/categories.spec.ts` "bulk
+  category changes on the filtered Artifacts list" (both themes) and the archived category page
+  case, and the static `BulkAction` story in `pnpm test:storybook`):** FR-124-13 end to end
+  (`listArtifactIds` sharing the list conditions with `listArtifacts` and reading ids in keyset
+  batches; `setCategoryForListedArtifacts` in one `withTransaction` with the refusal order
+  fingerprint, category, limit and nothing written on any refusal or error;
+  `MAX_BULK_CATEGORY_ARTIFACTS`; `setCategoryForListedArtifactsAction` re-parsing every posted
+  filter and refusing invalid, repeated or forged fields; no posted count or ids); FR-124-16 for
+  the bulk action (every outcome refreshes both layouts); §8.3 `bulkCategorySchema`; the §11 and
+  §11.4 UI (D27 to D37: the row under the filters in the list Card, the D28 sentences, the select
+  of active categories keeping the submitted one, the two outline buttons and the one Risky-action
+  panel with the count, the reasons and the no-filter reason, the D34 copy, the D35 focus map,
+  the result line surviving an emptied list); D38 ("No artifact has this category." for an
+  archived category without artifacts); D39 (the Filtered list rule and `BulkAction` story, the
+  Checkbox rows). NFR-124-01: bulk assign of 10,000 artifacts took 57 ms and bulk remove with `q`
+  145 ms in the database test on the development machine (measured once, not enforced). Verified
+  acceptance criteria: AC-8; the bulk halves of AC-3 and AC-4 (an archived category leaves the
+  bulk select and is refused when a stale page posts it); AC-10 for `/artifacts`.
+- **Interpretations recorded in the Phase 4 PR:** `setCategoryForListedArtifacts` keeps at most
+  `limit + 1` ids and looks one match further without keeping it, so a list of exactly
+  `limit + 1` whose fingerprint matches is `too-many` (the §15 lowered-limit test) and a longer
+  list is `list-changed` with its count read after the transaction; an empty recomputed list is
+  `list-changed` ("now no artifacts"), since the page never offers the action on an empty list.
+  The bulk form's state is `BulkCategoryFormState` (the `MetadataFormState` kinds plus
+  `categoryId`, D30) rather than `MetadataFormState` (§10).
 
 ## 21. Phasing and implementation plan
 
