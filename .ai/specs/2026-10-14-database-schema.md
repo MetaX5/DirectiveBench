@@ -63,7 +63,7 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | id | text PK | |
 | slug | text NOT NULL | **U** `categories_slug_unique` |
 | name | text NOT NULL | stored normalised (`normalizeCategoryName`) |
-| name_key | text NOT NULL (SQL `DEFAULT ''` for `ALTER TABLE ADD` only; no Drizzle default) | `categoryNameKey(name)`; **U** `categories_active_name_key_unique` partial, `WHERE archived_at IS NULL`: names are unique case-insensitively among active categories ([SPEC-124](2026-11-04-category-lifecycle-and-assignment.md) §8.1, migration `0005_category_name_key`) |
+| name_key | text NOT NULL (SQL `DEFAULT ''` for `ALTER TABLE ADD` only; no Drizzle default) | `categoryNameKey(name)`; **U** `categories_active_name_key_unique` partial, `WHERE archived_at IS NULL`: names are unique case-insensitively among active categories ([SPEC-124](implemented/2026-11-04-category-lifecycle-and-assignment.md) §8.1, migration `0005_category_name_key`) |
 | description | text | |
 | predefined | int bool NOT NULL default 0 | seeded from `PREDEFINED_CATEGORIES` (idempotent; a slug or name-key clash is skipped) |
 | archived_at | text | soft archive |

@@ -3,14 +3,14 @@ title: Bulk assign and bulk remove of a category on the filtered Artifacts list 
 date: 2026-11-10
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request, run through om-auto-implement-spec (engine om-auto-create-pr)
-status: in-progress
+status: completed
 branch: feat/category-bulk
 specs: [SPEC-124, SPEC-106, SPEC-101, SPEC-122, SPEC-014]
 ---
 
 # Run: Bulk assign and bulk remove of a category on the filtered Artifacts list (SPEC-124 Phase 4)
 
-Source doc: .ai/specs/2026-11-04-category-lifecycle-and-assignment.md
+Source doc: .ai/specs/implemented/2026-11-04-category-lifecycle-and-assignment.md
 
 ## Objective
 
@@ -85,12 +85,65 @@ uncontrolled forms after an action (lesson 2026-10-28), so the select is control
 4. Step 4.3 `feat(web)` `app/artifacts/bulk-category-form.tsx` and the page wiring (2ab1930).
 5. Step 4.4 `fix(web)` D38 copy (2f8b941).
 6. Step 4.5 `docs(design-system)` D39 rule, `BulkAction` story, Checkbox rows (379d970).
-7. Step 4.6 `test(web)` Playwright cases in `categories.spec.ts`.
+7. Step 4.6 `test(web)` Playwright cases in `categories.spec.ts` (270666c), then the e2e
+   clean-up and story landmark fix (8166148).
+8. Step 4.7 spec status (d9fa120); after review, QA and Codex, SPEC-124 moved to `implemented/`.
 
 ## Verification
 
+| Command | Result |
+| --- | --- |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass |
+| `pnpm test` | pass, 100% lines, branches, functions, statements in every package (core 295, database 233, web 532 tests) |
+| `pnpm build`, `pnpm verify:pack` | pass |
+| `pnpm test:e2e` | 144 passed (after the clean-up fix; the first full run failed 2 in `home.spec.ts` and `management.spec.ts`) |
+| `pnpm test:storybook` | 306 passed (after naming the story's two search landmarks; the first run failed axe `landmark-unique`) |
+| GitHub CI on 57752d6 | all 10 checks green |
+| NFR-124-01 | bulk assign of 10,000 artifacts 57 ms, bulk remove with `q` 145 ms (database test, measured once) |
+
+Red-first: database mutations (keyset without the id tie-break, no empty-list refusal, category
+checked before the fingerprint, no limit check, the over-limit count inside the transaction),
+web mutations (invalid filters accepted, no refresh on a refusal, D28 order swapped) and UI
+mutations (select change not closing the panel, D38 copy reverted) each failed exactly the
+intended test and passed again once restored.
+
+Real app: `sh .ai/scripts/test-env-up.sh` (demo data, mock agent only) and an exploratory
+agent-browser QA agent: 26 steps PASS (flows, forged hidden fields, invalid URL values,
+concurrency while the panel is open, keyboard only, both themes, 320px with a 64-character name,
+10,000 and 10,005 listed, console clean, D38). `test-env-down.sh` stopped it.
+
+Reviews: `om-auto-review-pr 206 --autofix` (COMMENT, approve-level, two minors documented);
+Codex adversarial review round 1: approve, no material findings.
+
+Not verified: two tabs confirming at the same instant in a browser (covered by `BEGIN IMMEDIATE`
+and the database transaction test); screen reader output; the D28 too-many sentence has no
+Playwright case (unit tests and the QA agent's manual run with 10,005 artifacts cover it).
+
 ## Problems and deviations
+
+- The first full e2e run failed outside the changed file: the bulk tests' fixture repository left
+  artifacts and jobs that `home.spec.ts` and `management.spec.ts` count. Fixed with an `afterAll`
+  clean-up; lesson recorded.
+- The `BulkAction` story rendered two `role="search"` forms without names (axe
+  `landmark-unique`); each now has an `aria-label`.
+- Interpretations of the spec, listed under Decisions and in SPEC-124 §20.
+- QA observations left as is, since the spec does not decide them: an earlier result line stays
+  under a newly opened panel (same as the Archive panel); SPEC-124 §14's example
+  `?category=pyhton` is a well-formed slug and filters to an empty list rather than being
+  ignored; §11.4 quotes the select text contrast as foreground while it is muted (6.01 / 6.23,
+  passes).
 
 ## Lessons recorded
 
+- [.ai/lessons/2026-11-10-e2e-fixtures-must-leave-the-shared-database-as-found.md](../lessons/2026-11-10-e2e-fixtures-must-leave-the-shared-database-as-found.md)
+
 ## Follow-ups
+
+- Extract the shared `Messages` copy of the category forms (D39 follow-up).
+- Correct SPEC-124 §14's `?category=pyhton` example and the §11.4 select contrast figure
+  (maintainer's call; behaviour is safe).
+- Decide whether a result line should hide while a new confirmation panel is open (bulk row and
+  Archive panel alike).
+- Issue 53 (pagination) must keep the bulk count and fingerprint over every match (§19).
+- `what-is-missing.mdx` still lists Dialog, Combobox, Checkbox and Toast as missing for issue 22
+  in its roadmap table; with issue 22 closed that row may be reworded.
