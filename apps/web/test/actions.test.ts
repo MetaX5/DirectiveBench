@@ -1278,7 +1278,12 @@ describe('artifact category actions (SPEC-124 Phase 3, §11.3)', () => {
     const categoryId = await create('Documentation');
     vi.clearAllMocks();
     for (const action of [assignArtifactCategoryAction, unassignArtifactCategoryAction]) {
-      for (const fields of [{ artifactId }, { categoryId }, { artifactId, categoryId: '' }]) {
+      const forms: Record<string, string>[] = [
+        { artifactId },
+        { categoryId },
+        { artifactId, categoryId: '' },
+      ];
+      for (const fields of forms) {
         expect(await action(idle, form(fields)), JSON.stringify(fields)).toEqual({
           kind: 'error',
           message: INCOMPLETE_FORM_MESSAGE,
