@@ -3,7 +3,7 @@ title: Assign and remove categories on the artifact page (SPEC-124 Phase 3, issu
 date: 2026-11-05
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer approved implementing SPEC-124 Phase 3 only (issue #22)
-status: in-progress
+status: complete
 branch: feat/category-assignment
 specs: [SPEC-124, SPEC-101, SPEC-014]
 ---
@@ -61,7 +61,7 @@ a client card importing `lib/categories.ts` values would break `next build` (les
 ### Phase 4: Browser tests and docs
 
 - [x] 4.1 Playwright: assign, remove, archived removable, focus, keyboard, 320px, contrast — a437bd2
-- [ ] 4.2 SPEC-124 §8.2 and §20, run log
+- [x] 4.2 SPEC-124 §8.2 and §20, run log — fc72319, 92dfb33
 
 ## Decisions
 
@@ -85,11 +85,55 @@ a client card importing `lib/categories.ts` values would break `next build` (les
   `metadata-forms.tsx` (types only from `lib/categories.ts`, model computed on the server), moves
   categories out of the Metadata card and adds nine Playwright tests to `categories.spec.ts`;
   SPEC-124 §20 and SPEC-101 §20 updated.
+- Review (`om-auto-review-pr 198 --autofix`, COMMENT review): two minors fixed in 7761446 (D24
+  pending lines untested; D21/D22 sentences not contrast-scanned).
+- QA (`om-auto-qa-pr 198`, agent-browser on the built app after `demo`): PASS, 9 steps (assign,
+  remove, archived chip removal, dark theme, 320px, forged hidden id, console). Screenshots
+  stay local (`.ai/qa/artifacts_pr198/` in the main checkout); no `qa-evidence-*` branch.
+- Codex adversarial review: round 1 found the picker loading `listCategories` (an aggregate over
+  `artifact_categories`) on every Overview load, fixed with `listActiveCategoryNames` (ba3db69);
+  round 2 found that an unarchive between the no-op insert and the explaining read gave
+  "already-assigned" without an assignment, fixed first with a bounded retry (38abe02); round 3
+  found the exhausted retry reporting an active category as archived, so 92dfb33 replaced the
+  retry with one `withTransaction` (`assignArtifactCategory` now takes the handle); round 4
+  flagged "No categories yet." and the D21 sentence as unspecified copy, declined: both are
+  verbatim in SPEC-124 §11; round 5, given that citation, approved with no findings.
 
 ## Verification
 
+| Command (head 92dfb33, TMPDIR under /var/tmp) | Result |
+| --- | --- |
+| `pnpm format:check` | pass |
+| `pnpm lint` | pass |
+| `pnpm typecheck` | pass |
+| `pnpm test` | pass, 100% lines, branches, functions, statements in every package |
+| `pnpm build` | pass |
+| `pnpm verify:pack` | pass |
+| `pnpm test:e2e` | 128 passed |
+| `pnpm test:storybook` | 304 passed |
+
+Red-first proofs: the D25 "Remove that took its place" test fails with an off-by-one in the
+focus fallback; the pending-line test fails with a fixed "Assigning…"; the transaction test
+fails with the `withTransaction` wrapper removed (statements outside a transaction).
+
 ## Problems and deviations
+
+- b4b57f3 (session 1) left `pnpm typecheck` failing; fixed in 02eacbc.
+- `assignArtifactCategory(db, …)` became `assignArtifactCategory(handle, …)` (SPEC-124 §8.2
+  updated): the race fix needs `withTransaction`.
 
 ## Lessons recorded
 
+- [Explain a no-op conditional write inside the same transaction](../lessons/2026-11-10-explain-a-no-op-write-in-its-transaction.md)
+
+## Not verified
+
+- QA ran on 7761446, before the database changes of ba3db69 and 92dfb33 (no UI change since);
+  the e2e suite covers the card on the final head.
+- A real concurrent archive from a second process during an assign is argued from
+  `BEGIN IMMEDIATE`, not reproduced (one writable connection per test thread, lesson
+  2026-11-04); the test proves every statement runs inside the transaction.
+
 ## Follow-ups
+
+- SPEC-124 Phase 4 (bulk assign and remove on the Artifacts list); issue #22 stays open.
