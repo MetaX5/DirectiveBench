@@ -1065,6 +1065,18 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
     .from(artifactVersions)
     .where(eq(artifactVersions.artifactId, artifactId))
     .orderBy(desc(artifactVersions.version));
+  // The repositories the versions were first seen in (FR-103-15). A version keeps its
+  // provenance after its occurrence moves or disappears, so these are not the occurrences'.
+  const sourceRepositories = await db
+    .selectDistinct({
+      id: repositories.id,
+      name: repositories.name,
+      provider: repositories.provider,
+    })
+    .from(artifactVersions)
+    .innerJoin(repositories, eq(artifactVersions.sourceRepositoryId, repositories.id))
+    .where(eq(artifactVersions.artifactId, artifactId))
+    .orderBy(repositories.name, repositories.id);
   const occurrences = await db
     .select({ occurrence: artifactOccurrences, repository: repositories })
     .from(artifactOccurrences)
@@ -1103,6 +1115,7 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
   return {
     artifact,
     versions,
+    sourceRepositories,
     occurrences,
     categories: cats.map(toArtifactCategory),
     suites,
