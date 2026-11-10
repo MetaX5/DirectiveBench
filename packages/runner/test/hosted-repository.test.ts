@@ -643,6 +643,22 @@ describe('scanHostedRepository', () => {
     expect(await handle.db.$count(schema.artifactOccurrences)).toBe(4);
   });
 
+  it("names git's error line, not the clone progress line, for a clone that fails (issue #195)", async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    // Without its root tree the remote cannot pack the commit. git 2.53 prints "Cloning into bare
+    // repository '…'...", the remote's "remote: fatal: bad tree object …", then its own
+    // `error:`/`fatal:` lines, none of which a classifier pattern knows.
+    const tree = git(remote.bare, ['rev-parse', 'refs/heads/main^{tree}']).trim();
+    rmSync(join(remote.bare, 'objects', tree.slice(0, 2), tree.slice(2)));
+    expect(await scan(repository)).toEqual({
+      ok: false,
+      code: 'git-failed',
+      message: 'git failed: git upload-pack: git-pack-objects died with error.',
+    });
+    expect(existsSync(cacheOf(repository.id))).toBe(false);
+  });
+
   it('stops and deletes the cache when the trees alone exceed the cache limit', async () => {
     const remote = teamSkills();
     const repository = await registered(remote);
