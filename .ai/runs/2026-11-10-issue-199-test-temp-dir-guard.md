@@ -28,7 +28,7 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
 
 ## Decisions
 
-- **A private temp directory per run, not a before/after diff.** `vitest.tmp-guard.ts` is a
+- **A private temp directory per run, not a before/after diff.** `test-support/temp-dir-guard.ts` is a
   Vitest `globalSetup`. It points `TMPDIR`, `TMP` and `TEMP` at a fresh
   `directivebench-vitest-*` directory, and its teardown fails the run when anything is left in
   it, then removes it either way. turbo runs the seven packages in parallel in one `TMPDIR`, so
@@ -40,10 +40,12 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
   keeps on purpose (moving it is a non-goal of the issue). The guard accepts that directory only
   when it is empty; any run workspace inside it, and any other entry under `directivebench`, is
   reported.
-- **The guard lives at the root, next to `vitest.shared.ts`**, which exports its path as
-  `tempDirGuard`. Its tests are in `packages/core/test/vitest-tmp-guard.test.ts`, because
-  `core` is the leaf package and there is no root test project. The root file is outside every
-  coverage `include`; its coverage was measured separately (100%).
+- **The guard lives in `test-support/`**, the home of shared test code (like `linear-time.ts`),
+  which turbo lists in the `test` and `typecheck` cache inputs. `vitest.shared.ts` exports its
+  path as `tempDirGuard`. Its tests are in `packages/core/test/temp-dir-guard.test.ts`, the
+  package at the root of the dependency graph, as for `linear-time.ts`. `test-support/` is
+  outside every coverage `include`; the guard's coverage was measured separately (100%). It was
+  first at the repository root; review round 1 moved it (see below).
 
 ## Work performed
 
@@ -80,7 +82,7 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
   unconditional (`||` for `&&`) → 3 of 6 fail. Without the runner test fix → the guard fails
   with 10 entries. Without the export test fix and without the workspace-root allowance → the
   guard fails in `apps/cli` with `db-cli-export-out-*` (4) and `directivebench`.
-- Guard coverage, measured with `--coverage.include=../../vitest.tmp-guard.ts
+- Guard coverage, measured with `--coverage.include=../../test-support/temp-dir-guard.ts
   --coverage.allowExternal`: 100% statements, branches, functions and lines.
 - `pnpm format:check` pass, `pnpm lint` pass, `pnpm typecheck` pass (7/7), `pnpm build` pass,
   `pnpm verify:pack` pass ("Packaging verification passed").

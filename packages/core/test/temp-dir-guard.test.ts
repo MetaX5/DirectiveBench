@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import setup, { isolateTempDir } from '../../../vitest.tmp-guard';
+import setup, { isolateTempDir } from '../../../test-support/temp-dir-guard';
 
 /** Starts the guard on a fake environment and returns its private directory and teardown. */
 function start(env: NodeJS.ProcessEnv = { TMPDIR: '/previous' }) {

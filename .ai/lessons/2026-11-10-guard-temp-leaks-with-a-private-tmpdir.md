@@ -31,7 +31,7 @@ runs and catches leaks under any name, not just `directivebench-*`.
 
 ## How to apply
 
-- The guard is `vitest.tmp-guard.ts`, exported as `tempDirGuard` from `vitest.shared.ts`. Every
+- The guard is `test-support/temp-dir-guard.ts`, exported as `tempDirGuard` from `vitest.shared.ts`. Every
   `vitest.config.ts` lists it in `globalSetup`. A new package config must list it too.
 - A leak fails the run with `Tests left N entries in the temp directory: …`. Remove what the
   test creates in `afterEach`/`afterAll` or `try/finally`, and keep every directory a test
