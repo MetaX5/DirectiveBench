@@ -3,7 +3,7 @@ title: Hosted git failure messages name git's error line, not the clone progress
 date: 2026-11-10
 agent: Claude Code / claude-opus-5-5
 trigger: issue #195 via om-auto-fix-issue
-status: in-progress
+status: completed
 branch: fix/issue-195-hosted-git-first-line
 specs: [SPEC-104, SPEC-105]
 ---
@@ -62,6 +62,14 @@ git output → minimal fix in `firstLine` → gate → PR → om-auto-review-pr 
   no UI change, so no e2e/storybook/browser QA. Not verified against github.com itself: the
   recordings are file:// and loopback https; the change does not touch which stderr is
   classified, only which line is quoted.
+
+## Review
+
+- Round 1 (d7232b4): `om-auto-review-pr --autofix` / `om-code-review`, submitted as COMMENT:
+  approve verdict, 0 blockers, 0 majors, 0 minors, 1 nit (this run log still `in-progress`).
+  Full configured gate re-run for the review, including `pnpm build` and `pnpm verify:pack`
+  (both pass).
+- Round 2: nit fixed (run log finalised).
 
 ## Problems and deviations
 
