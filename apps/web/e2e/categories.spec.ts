@@ -1,6 +1,8 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { scanTextContrast } from './contrast';
-import { DEMO_ARTIFACT, count, withDatabase } from './support';
+import { DEMO_ARTIFACT, count, e2eTmpRoot, withDatabase } from './support';
 
 // SPEC-124 Phase 2: create, rename, archive (after a confirmation) and unarchive categories on
 // `/categories` and `/categories/[slug]`, archived chips and the archived filter option. Phase 3:
@@ -858,3 +860,423 @@ for (const theme of ['light', 'dark'] as const) {
     expect(errorFailures).toEqual([]);
   });
 }
+
+// Phase 4: bulk assign and bulk remove on the filtered Artifacts list (SPEC-124 FR-124-13, §11.4
+// D27 to D39). The tests list the artifacts of their own fixture repository, registered and
+// scanned through the UI, so other spec files' artifacts never join the list.
+
+/** The runner polls every second; leave room for a slow CI host. */
+const RUNNER_TIMEOUT = 30_000;
+const BULK_REPOSITORY = 'category-bulk-e2e';
+const bulkSources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'category-bulk-')));
+const bulkRoot = join(bulkSources, BULK_REPOSITORY);
+
+function writeSkill(name: string): void {
+  const file = join(bulkRoot, '.agents/skills', name, 'SKILL.md');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `---\nname: ${name}\ndescription: Bulk fixture ${name}.\n---\n# ${name}\n`);
+}
+
+async function scanBulkRepository(page: Page): Promise<void> {
+  await page.goto('/repositories');
+  await page.getByRole('button', { name: `Scan ${BULK_REPOSITORY}` }).click();
+  await expect(page.getByTestId('scan-status')).toContainText(`Scanned ${BULK_REPOSITORY}:`, {
+    timeout: RUNNER_TIMEOUT,
+  });
+}
+
+async function bulkRepositoryId(): Promise<string> {
+  return withDatabase(
+    (db) =>
+      (
+        db.prepare('select id from repositories where name = ?').get(BULK_REPOSITORY) as {
+          id: string;
+        }
+      ).id,
+  );
+}
+
+async function assignmentsOf(slug: string): Promise<number> {
+  return withDatabase((db) =>
+    count(
+      db,
+      `select count(*) as n from artifact_categories ac join categories c on c.id = ac.category_id
+        where c.slug = ?`,
+      slug,
+    ),
+  );
+}
+
+function bulkArea(page: Page) {
+  return page.getByTestId('bulk-category');
+}
+
+/** The bulk select; addressed by name, since the filter's select is labelled "Category" too. */
+function bulkSelect(page: Page) {
+  return bulkArea(page).locator('select[name="categoryId"]');
+}
+
+test.describe.serial('bulk category changes on the filtered Artifacts list', () => {
+  let listUrl = '';
+
+  test.beforeAll(async ({ browser }) => {
+    for (const name of ['bulk-alpha', 'bulk-beta', 'bulk-gamma']) writeSkill(name);
+    const page = await browser.newPage();
+    await page.goto('/repositories');
+    await page.getByLabel('Path').fill(bulkRoot);
+    await page.getByRole('button', { name: 'Register' }).click();
+    await expect(page.getByTestId('registration-status')).toContainText(
+      `Registered ${BULK_REPOSITORY}`,
+      { timeout: RUNNER_TIMEOUT },
+    );
+    await scanBulkRepository(page);
+    await page.close();
+    listUrl = `/artifacts?repository=${await bulkRepositoryId()}`;
+  });
+
+  test.afterAll(() => rmSync(bulkSources, { recursive: true, force: true }));
+
+  test('assign and remove ask first with the count; Cancel writes nothing; focus moves into the panel and back', async ({
+    page,
+  }) => {
+    const first = await createCategory(page, 'Bulk First E2E');
+    const second = await createCategory(page, 'Bulk Second E2E');
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    const select = bulkSelect(page);
+    await expect(area.getByText('Category for the 3 listed artifacts')).toBeVisible();
+    const assign = area.getByRole('button', { name: 'Assign to all listed' });
+    const remove = area.getByRole('button', { name: 'Remove from all listed' });
+    // The outline buttons match the select's height (AGENTS.md §7).
+    expect((await assign.boundingBox())?.height).toBe((await select.boundingBox())?.height);
+
+    await select.selectOption({ label: 'Bulk Second E2E' });
+    await assign.click();
+    const panel = area.getByRole('alert');
+    const question = panel.getByText('Assign Bulk Second E2E to 3 artifacts?');
+    await expect(question).toBeFocused();
+    await expect(assign).toHaveAttribute('aria-expanded', 'true');
+    await expect(panel).toContainText(
+      'This changes every artifact that matches the current filters, not only the rows on screen.',
+    );
+    // A filter is set: no whole-registry reason.
+    await expect(panel).not.toContainText('No filter is set');
+    await expect(panel.getByRole('button', { name: 'Assign to 3 artifacts' })).toBeVisible();
+
+    await panel.getByRole('button', { name: 'Cancel' }).click();
+    await expect(panel).toBeHidden();
+    await expect(assign).toBeFocused();
+    await expect(area.locator('[role="status"]')).toHaveText('');
+    expect(await assignmentsOf(second)).toBe(0);
+
+    // The other button switches the panel; the same button again closes it.
+    await assign.click();
+    await remove.click();
+    await expect(area.getByText('Remove Bulk Second E2E from 3 artifacts?')).toBeFocused();
+    await expect(remove).toHaveAttribute('aria-expanded', 'true');
+    await expect(assign).toHaveAttribute('aria-expanded', 'false');
+    await remove.click();
+    await expect(area.getByRole('alert')).toBeHidden();
+    await expect(remove).toBeFocused();
+
+    // Changing the category closes the panel and keeps the focus on the select.
+    await assign.click();
+    await select.focus();
+    await select.selectOption({ label: 'Bulk First E2E' });
+    await expect(area.getByRole('alert')).toBeHidden();
+    await expect(select).toBeFocused();
+    await select.selectOption({ label: 'Bulk Second E2E' });
+
+    await assign.click();
+    await area.getByRole('button', { name: 'Assign to 3 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText('Assigned Bulk Second E2E to 3 artifacts.');
+    await expect(area.getByRole('alert')).toBeHidden();
+    await expect(assign).toBeFocused();
+    // The select keeps the submitted category (D30).
+    await expect(select.locator('option:checked')).toHaveText('Bulk Second E2E');
+    expect(await assignmentsOf(second)).toBe(3);
+    await expect(page.locator('tbody').getByText('Bulk Second E2E')).toHaveCount(3);
+
+    await remove.click();
+    await area.getByRole('button', { name: 'Remove from 3 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText('Removed Bulk Second E2E from 3 artifacts.');
+    await expect(remove).toBeFocused();
+    expect(await assignmentsOf(second)).toBe(0);
+    expect(await assignmentsOf(first)).toBe(0);
+
+    // A second remove: nothing to remove.
+    await remove.click();
+    await area.getByRole('button', { name: 'Remove from 3 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText(
+      'None of the 3 listed artifacts had Bulk Second E2E.',
+    );
+  });
+
+  test('a list changed by a scan in another page is refused, then a retry succeeds', async ({
+    page,
+    context,
+  }) => {
+    const slug = await createCategory(page, 'Bulk Changed E2E');
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    await bulkSelect(page).selectOption({ label: 'Bulk Changed E2E' });
+    await area.getByRole('button', { name: 'Assign to all listed' }).click();
+    await expect(area.getByText('Assign Bulk Changed E2E to 3 artifacts?')).toBeVisible();
+
+    // A second page adds a skill to the repository and scans it.
+    writeSkill('bulk-delta');
+    const other = await context.newPage();
+    await scanBulkRepository(other);
+    await other.close();
+
+    await area.getByRole('button', { name: 'Assign to 3 artifacts' }).click();
+    await expect(area.getByRole('alert')).toHaveText(
+      'The list changed since the page loaded (now 4 artifacts). Check it and try again.',
+    );
+    expect(await assignmentsOf(slug)).toBe(0);
+    // The refresh shows the current list; the retry acts on it.
+    await expect(area.getByText('Category for the 4 listed artifacts')).toBeVisible();
+    await expect(bulkSelect(page).locator('option:checked')).toHaveText('Bulk Changed E2E');
+    await area.getByRole('button', { name: 'Assign to all listed' }).click();
+    await area.getByRole('button', { name: 'Assign to 4 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText('Assigned Bulk Changed E2E to 4 artifacts.');
+    expect(await assignmentsOf(slug)).toBe(4);
+  });
+
+  test('a category archived in another page is refused and leaves the select', async ({ page }) => {
+    const slug = await createCategory(page, 'Bulk Archived E2E');
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    await bulkSelect(page).selectOption({ label: 'Bulk Archived E2E' });
+    await area.getByRole('button', { name: 'Assign to all listed' }).click();
+    await setArchived(slug, true);
+    await area.getByRole('button', { name: 'Assign to 4 artifacts' }).click();
+    await expect(area.getByRole('alert')).toHaveText(
+      'Bulk Archived E2E is archived. Unarchive it on its page before assigning it.',
+    );
+    expect(await assignmentsOf(slug)).toBe(0);
+    await expect(bulkSelect(page).locator('option', { hasText: 'Bulk Archived E2E' })).toHaveCount(
+      0,
+    );
+  });
+
+  test('removing the filtered category empties the list and keeps the result line', async ({
+    page,
+  }) => {
+    const slug = await createCategory(page, 'Bulk Emptied E2E');
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    await bulkSelect(page).selectOption({ label: 'Bulk Emptied E2E' });
+    await area.getByRole('button', { name: 'Assign to all listed' }).click();
+    await area.getByRole('button', { name: 'Assign to 4 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText('Assigned Bulk Emptied E2E to 4 artifacts.');
+
+    await page.goto(`/artifacts?category=${slug}`);
+    await expect(area.getByText('Category for the 4 listed artifacts')).toBeVisible();
+    await bulkSelect(page).selectOption({ label: 'Bulk Emptied E2E' });
+    // Assigning the filtered category changes nothing.
+    await area.getByRole('button', { name: 'Assign to all listed' }).click();
+    await area.getByRole('button', { name: 'Assign to 4 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText(
+      'All 4 listed artifacts already had Bulk Emptied E2E.',
+    );
+    await area.getByRole('button', { name: 'Remove from all listed' }).click();
+    await area.getByRole('button', { name: 'Remove from 4 artifacts' }).click();
+    await expect(area.getByRole('status')).toHaveText('Removed Bulk Emptied E2E from 4 artifacts.');
+    await expect(page.getByText('No artifacts match the filters')).toBeVisible();
+    await expect(area.getByRole('combobox')).toHaveCount(0);
+    await expect(page.getByRole('search').getByRole('textbox', { name: 'Search' })).toBeFocused();
+  });
+
+  test('the row gives way to a sentence for an ignored URL value or no active category, and to nothing for an empty list', async ({
+    page,
+  }) => {
+    await page.goto(`${listUrl}&type=script`);
+    await expect(page.getByTestId('filter-notice')).toContainText('type');
+    await expect(bulkArea(page)).toHaveText(
+      'Fix or clear the filters in the URL before changing categories for the whole list.',
+    );
+    await expect(bulkArea(page).getByRole('button')).toHaveCount(0);
+
+    await page.goto('/artifacts?q=no-artifact-matches-this-e2e');
+    await expect(page.getByText('No artifacts match the filters')).toBeVisible();
+    await expect(bulkArea(page)).toHaveText('');
+
+    const archivedIds = await withDatabase((db) =>
+      (
+        db
+          .prepare('update categories set archived_at = ? where archived_at is null returning id')
+          .all(new Date().toISOString()) as { id: string }[]
+      ).map((row) => row.id),
+    );
+    try {
+      await page.goto(listUrl);
+      await expect(bulkArea(page)).toHaveText(
+        'There are no active categories. Create or unarchive one on the Categories page.',
+      );
+      await expect(bulkArea(page).getByRole('link', { name: 'Categories page' })).toHaveAttribute(
+        'href',
+        '/categories',
+      );
+    } finally {
+      await withDatabase((db) => {
+        const unarchive = db.prepare('update categories set archived_at = null where id = ?');
+        for (const id of archivedIds) unarchive.run(id);
+      });
+    }
+  });
+
+  test('without a filter the panel says it is the whole registry; counts use thousands separators', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const slug = await createCategory(page, 'Bulk Thousands E2E');
+    const prefix = 'thousands-bulk-e2e';
+    await withDatabase((db) => {
+      const now = new Date().toISOString();
+      const insert = db.prepare(
+        `insert into artifacts (id, slug, name, type, created_at, updated_at)
+         values (?, ?, ?, 'rule', ?, ?)`,
+      );
+      db.exec('begin');
+      for (let i = 0; i < 1_240; i += 1) {
+        insert.run(`art_${prefix}-${i}`, `${prefix}-${i}`, `${prefix}-${i}`, now, now);
+      }
+      db.exec('commit');
+    });
+    try {
+      await page.goto(`/artifacts?q=${prefix}`);
+      const area = bulkArea(page);
+      await expect(area.getByText('Category for the 1,240 listed artifacts')).toBeVisible();
+      await bulkSelect(page).selectOption({ label: 'Bulk Thousands E2E' });
+      await area.getByRole('button', { name: 'Assign to all listed' }).click();
+      await expect(area.getByText('Assign Bulk Thousands E2E to 1,240 artifacts?')).toBeFocused();
+      await area.getByRole('button', { name: 'Assign to 1,240 artifacts' }).click();
+      await expect(area.getByRole('status')).toHaveText(
+        'Assigned Bulk Thousands E2E to 1,240 artifacts.',
+      );
+      expect(await assignmentsOf(slug)).toBe(1_240);
+
+      await page.goto('/artifacts');
+      await area.getByRole('button', { name: 'Remove from all listed' }).click();
+      await expect(area.getByRole('alert')).toContainText(
+        'No filter is set, so this is every artifact in the registry.',
+      );
+      await area.getByRole('button', { name: 'Cancel' }).click();
+      expect(await assignmentsOf(slug)).toBe(1_240);
+    } finally {
+      await withDatabase((db) =>
+        db.prepare('delete from artifacts where slug like ?').run(`${prefix}-%`),
+      );
+    }
+  });
+
+  test('bulk assign works by keyboard alone', async ({ page }) => {
+    const slug = await createCategory(page, 'Bulk Keyboard E2E');
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    const select = bulkSelect(page);
+    await select.focus();
+    await page.keyboard.type('Bulk Keyboard');
+    await expect(select.locator('option:checked')).toHaveText('Bulk Keyboard E2E');
+    await page.keyboard.press('Tab');
+    const assign = area.getByRole('button', { name: 'Assign to all listed' });
+    await expect(assign).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(area.getByText('Assign Bulk Keyboard E2E to 4 artifacts?')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(area.getByRole('button', { name: 'Assign to 4 artifacts' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(area.getByRole('status')).toHaveText('Assigned Bulk Keyboard E2E to 4 artifacts.');
+    await expect(assign).toBeFocused();
+    expect(await assignmentsOf(slug)).toBe(4);
+  });
+
+  test('the bulk row and panel fit a 320px screen with a 64-character name', async ({ page }) => {
+    const long = 'B'.repeat(64);
+    await createCategory(page, long);
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto(listUrl);
+    const area = bulkArea(page);
+    await bulkSelect(page).selectOption({ label: long });
+    for (const button of ['Assign to all listed', 'Remove from all listed']) {
+      await area.getByRole('button', { name: button }).click();
+      await expect(area.getByRole('alert')).toBeVisible();
+      expect(await horizontalOverflow(page)).toBe(0);
+    }
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the bulk row, panel, result line, error and a D28 sentence have AA contrast in ${theme}`, async ({
+      page,
+    }) => {
+      const slug = await createCategory(page, `Bulk Contrast ${theme} E2E`);
+      await page.emulateMedia({ colorScheme: theme });
+      const scan = async (what: string) => {
+        const failures = (await scanTextContrast(page)).filter((row) => row.ratio < row.threshold);
+        expect(failures, `${theme}: ${what}`).toEqual([]);
+      };
+      await page.goto(listUrl);
+      await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
+      const area = bulkArea(page);
+      await bulkSelect(page).selectOption({ label: `Bulk Contrast ${theme} E2E` });
+      await scan('bulk row');
+      for (const button of ['Assign to all listed', 'Remove from all listed']) {
+        await area.getByRole('button', { name: button }).click();
+        await expect(area.getByRole('alert')).toBeVisible();
+        await scan(`panel open by ${button}`);
+      }
+      await area.getByRole('button', { name: 'Remove from 4 artifacts' }).click();
+      await expect(area.getByRole('status')).toContainText('Bulk Contrast');
+      await scan('result line');
+      // The list-changed error: another artifact joins the repository's list.
+      await area.getByRole('button', { name: 'Assign to all listed' }).click();
+      const repositoryId = await bulkRepositoryId();
+      await withDatabase((db) => {
+        const now = new Date().toISOString();
+        db.prepare(
+          `insert into artifact_occurrences
+             (id, artifact_id, repository_id, path, latest_version_id, status, last_seen_at,
+              created_at, updated_at)
+           select ?, a.id, ?, ?, v.id, 'active', ?, ?, ?
+             from artifacts a join artifact_versions v on v.artifact_id = a.id
+            where a.slug = ? order by v.version desc limit 1`,
+        ).run(
+          `occ_contrast_${theme}`,
+          repositoryId,
+          `contrast-${theme}`,
+          now,
+          now,
+          now,
+          DEMO_ARTIFACT,
+        );
+      });
+      try {
+        await area.getByRole('button', { name: 'Assign to 4 artifacts' }).click();
+        await expect(area.getByRole('alert')).toContainText('The list changed');
+        await scan('list-changed error');
+      } finally {
+        await withDatabase((db) =>
+          db.prepare('delete from artifact_occurrences where id = ?').run(`occ_contrast_${theme}`),
+        );
+      }
+      expect(await assignmentsOf(slug)).toBe(0);
+      await page.goto(`${listUrl}&type=script`);
+      await scan('D28 sentence');
+    });
+  }
+});
+
+test('an archived category without artifacts says no artifact has it, without suggesting to assign it', async ({
+  page,
+}) => {
+  const slug = await createCategory(page, 'Archived Empty E2E');
+  await page.goto(`/categories/${slug}`);
+  const artifactsCard = card(page, 'Artifacts');
+  await expect(artifactsCard).toContainText(
+    "No artifact has this category yet. Assign it on an artifact's page or to a filtered list on Artifacts.",
+  );
+  await setArchived(slug, true);
+  await page.reload();
+  await expect(artifactsCard.locator('p')).toHaveText('No artifact has this category.');
+});
