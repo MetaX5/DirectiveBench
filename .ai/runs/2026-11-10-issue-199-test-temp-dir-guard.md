@@ -3,7 +3,7 @@ title: Stop tests leaving directories in the OS temp dir, and guard every packag
 date: 2026-11-10
 agent: Claude Code / claude-opus-5-5 (om-auto-fix-issue chain)
 trigger: issue #199, run through om-auto-fix-issue 199
-status: in-progress
+status: completed
 branch: fix/issue-199-runner-tests-leave-tmp-dirs
 specs: [SPEC-012]
 ---
@@ -67,7 +67,15 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
 6. Guard tests: six cases, including leaks at the top level, inside `directivebench/workspaces`,
    a file named `directivebench` and the real `globalSetup` entry.
 7. SPEC-012 §9 implementation-status note, a new lesson, and an update to the house-layout
-   lesson (maintainer correction on labels).
+   lesson (maintainer correction on labels). Commit f057693; PR #203 opened (labels `review`,
+   `bug`, `needs-qa`, `priority-low`, `risk-low`).
+8. Review round 1 (`om-auto-review-pr 203 --autofix`, engine `om-code-review`, submitted as
+   COMMENT): request changes, 0 blockers, 1 major, 1 nit. Major: the guard sat at the root,
+   outside turbo's `test`/`typecheck` inputs (`test-support/**`, `vitest.shared.ts`), so a
+   guard-only edit could be served from the cache. Merged `origin/main` (#200, no conflict),
+   moved the guard to `test-support/temp-dir-guard.ts` (ab5d435). Nit: this run log was still
+   `in-progress`; finalised here.
+9. Review round 2 (re-review, COMMENT): approve verdict, no findings.
 
 ## Verification
 
@@ -75,9 +83,9 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
   them.
 - Green: `TMPDIR=<empty dir> pnpm test --force --continue --concurrency=2`. The guard reports
   nothing in any package. Afterwards the dedicated `TMPDIR` holds only `node-compile-cache`.
-  Coverage is 100% in every package. core 297 passed + 2 skipped, database 215,
-  agent-adapters 364 + 2 skipped, benchmark-engine 518, runner 244, web 503, cli 163 of 164
-  (see below).
+  Coverage is 100% in every package. After the merge of `origin/main`: core 297 passed + 2
+  skipped, database 215, agent-adapters 364 + 2 skipped, benchmark-engine 518, runner 250, web
+  503, cli 163 of 164 (see below).
 - Seam checks: guard throw disabled → 3 of 6 guard tests fail. Directory check made
   unconditional (`||` for `&&`) → 3 of 6 fail. Without the runner test fix → the guard fails
   with 10 entries. Without the export test fix and without the workspace-root allowance → the
@@ -94,9 +102,10 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
 
 - `apps/cli` `test/cli.test.ts > doctor > warns with a hint when the data directory does not
   exist yet` fails on this machine. It also fails with the unchanged `origin/main` Vitest config
-  and the real `TMPDIR`, so it predates this change. The assertion
-  `every non-ok check has a hint` is false here. It belongs to the doctor work (#60) and was
-  left alone. The first full run also had 5 s timeouts in several packages at load average 31
+  and the real `TMPDIR`, so it predates this change. The built CLI's `doctor --json` shows the
+  cause: with a local, logged-out `claude` install, `agent:claude-code:subscription` and
+  `agent:claude-code:api-key` are `warn` without a `hint`, so `every non-ok check has a hint` is
+  false. CI has no `claude` installed. Out of scope here (`apps/cli` doctor) and left alone. The first full run also had 5 s timeouts in several packages at load average 31
   (other agents running); with `--concurrency=2` they passed.
 - turbo needs `pnpm` on `PATH`; corepack shims were installed into
   `.ai/tmp/om-auto-fix-issue/bin` for the run and removed afterwards.
@@ -109,6 +118,10 @@ Only the one-line `globalSetup` entry touches the configs of those packages.
   `skip-qa` or `merge-queue`).
 
 ## Follow-ups
+
+- Doctor: the Claude Code readiness warnings (`auth-missing`) have no `hint`, which makes
+  `cli.test.ts > doctor > warns with a hint …` fail on any machine with a logged-out `claude`.
+  Worth an issue for the doctor work.
 
 - `node-compile-cache` stays in the real `TMPDIR` after a run. It is Node's module compile cache,
   created by the Vitest main process before `globalSetup`, and is reused across runs.
