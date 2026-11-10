@@ -3,7 +3,7 @@ id: SPEC-106
 title: Category Management
 status: draft
 created: 2026-10-14
-updated: 2026-11-05
+updated: 2026-11-10
 category: feature
 related: [SPEC-101, SPEC-105, SPEC-108, SPEC-109, SPEC-113, SPEC-116, SPEC-005, SPEC-006]
 ---
@@ -51,7 +51,7 @@ With dozens or hundreds of artifacts from many repositories, users need a way to
 | FR-106-03 | **Create**: name (1–64 characters after normalisation: Unicode NFC, trimmed, whitespace runs collapsed; no control characters), unique case-insensitively (`categoryNameKey`, full Unicode lower case) among non-archived categories, enforced by a partial unique index; optional description (≤ 500 chars). The slug is derived from the name once (`categorySlug`: `slugify` cut to 64 characters without a trailing hyphen) and is globally unique including archived; a name whose slug another category holds is refused, never suffixed. A name with no Latin letter or digit gets the smallest free generated slug `category-N`. No user-chosen slug on create. Refined by [SPEC-124](2026-11-04-category-lifecycle-and-assignment.md) A4 to A7 and A18. |
 | FR-106-04 | **Edit/rename**: name and description are editable for all categories, predefined included. Renaming SHALL NOT change the slug. |
 | FR-106-05 | **Slug change** is an explicit advanced action (not part of rename) that records the old slug as an alias so existing references resolve; it SHALL warn that external definitions using the old slug will resolve through the alias. |
-| FR-106-06 | **Assign/unassign**: artifacts ↔ categories many-to-many via `artifact_categories` (`artifact_id`, `category_id`, `created_at`, composite primary key). Assign is idempotent. Bulk assign/unassign for multiple selected artifacts SHALL be supported. Archived categories cannot be newly assigned. |
+| FR-106-06 | **Assign/unassign**: artifacts ↔ categories many-to-many via `artifact_categories` (`artifact_id`, `category_id`, `created_at`, composite primary key). Assign is idempotent. Bulk assign/unassign for every artifact a filtered list shows SHALL be supported (SPEC-124 A14: the filtered list is the selection). Archived categories cannot be newly assigned. |
 | FR-106-07 | **Benchmark suites** declare categories as slugs in their definition (`categories: string[]`, [SPEC-108](2026-10-14-benchmark-definition-format.md)). On import, slugs are resolved (including aliases); unknown slugs SHALL produce an import warning and remain in the definition verbatim (definitions are immutable) — they are not auto-created. |
 | FR-106-08 | **Archive/unarchive**: sets/clears `archived_at`. Archived categories are hidden from pickers and default filters, remain on existing assignments (shown muted), and remain resolvable by slug. Categories are never hard-deleted in the MVP. |
 | FR-106-09 | **Merge** `source → target`: in one transaction, move all `artifact_categories` rows of the source to the target (skipping duplicates), record the source slug as an alias of the target (planned table `category_aliases(slug, category_id)`), and archive the source with `merged_into_id` (planned column). Benchmark definitions referencing the source slug resolve to the target. Merge is irreversible in the UI (audit via alias table). |
@@ -121,7 +121,7 @@ Planned `/api/v1/categories` (CRUD + `POST /api/v1/categories/:id/merge`).
 
 - Bootstrap: Categories page is a read-only list of seeded categories.
 - Planned: Categories page with inline "New category", row actions (Edit, Archive/Unarchive, Merge into…, Change slug in an "Advanced" menu); confirmation dialogs stating impact ("12 artifacts will move to Testing").
-- Artifact detail: category chips with an add/remove picker (search, keyboard). Artifact list: bulk "Assign category" on selected rows.
+- Artifact detail: category chips with an add/remove picker (search, keyboard). Artifact list: bulk assign and remove of one category for every artifact the current filters list (SPEC-124 A14, §11.4).
 - Archived categories shown muted with "(archived)".
 - Predefined categories marked with a subtle badge; they are fully editable.
 
