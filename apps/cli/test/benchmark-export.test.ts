@@ -69,7 +69,6 @@ let dataDir: string;
 let demoRunId: string;
 let hostileRunId: string;
 let corruptRunId: string;
-let scratch: string;
 
 const file = (path: string, over: Partial<AgentRunFileInput> = {}): AgentRunFileInput => ({
   path,
@@ -204,22 +203,24 @@ afterEach(() => {
   fsHooks.before = null;
   fsHooks.afterLstat = null;
   vi.restoreAllMocks();
-  if (scratch) rmSync(scratch, { recursive: true, force: true });
-  for (const dir of siblings.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** Scratch directories of the current test; a test can create several (#199). */
+const scratchDirs: string[] = [];
 
 /** A second scratch directory, removed with the first. */
 function newScratchSibling(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'db-cli-export-other-')));
-  siblings.push(dir);
+  scratchDirs.push(dir);
   return dir;
 }
-const siblings: string[] = [];
 
 function newScratch(): string {
   // Canonical, as the export reports it (macOS's temporary directory is behind a symlink).
-  scratch = realpathSync(mkdtempSync(join(tmpdir(), 'db-cli-export-out-')));
-  return scratch;
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'db-cli-export-out-')));
+  scratchDirs.push(dir);
+  return dir;
 }
 
 async function exportRun(runId: string, out: string, json = false) {

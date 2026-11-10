@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,8 @@ const examples = fileURLToPath(new URL('../../../examples', import.meta.url));
 
 let handle: DatabaseHandle;
 let dataDir: string;
+/** Suite roots written by `writeSuite` in the current test. */
+const suiteRoots: string[] = [];
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-runner-docs-'));
@@ -27,11 +29,16 @@ beforeEach(async () => {
   await seedPredefinedCategories(handle.db);
 });
 
-afterEach(() => handle.close());
+afterEach(() => {
+  handle.close();
+  for (const dir of [dataDir, ...suiteRoots.splice(0)])
+    rmSync(dir, { recursive: true, force: true });
+});
 
 /** A mock suite whose agent writes a Markdown estimate; `pattern` is a required phrase. */
 function writeSuite(pattern: string): string {
   const root = mkdtempSync(join(tmpdir(), 'directivebench-doc-suite-'));
+  suiteRoots.push(root);
   mkdirSync(join(root, 'fixture'));
   writeFileSync(join(root, 'fixture/brief.md'), 'Estimate the widget.\n');
   const estimate = `# Assumptions\n\n# Estimate\n\n| Item | Hours |\n| - | - |\n| Backend API | 24 |\n\n# Risks\n\n${'a'.repeat(32)}!\n`;
