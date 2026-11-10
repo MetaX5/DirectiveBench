@@ -16,12 +16,16 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea';
 import {
   addArtifactTagAction,
+  assignArtifactCategoryAction,
   assignArtifactSuiteAction,
   removeArtifactTagAction,
   saveArtifactNotesAction,
+  unassignArtifactCategoryAction,
   unassignArtifactSuiteAction,
 } from '@/lib/actions';
 import type { MetadataFormState } from '@/lib/artifact-metadata';
+// Types only: `lib/categories.ts` imports core values, which cannot reach the browser bundle.
+import type { CategoriesCardModel } from '@/lib/categories';
 
 // Editing forms of the artifact detail page (SPEC-101 §11, issue #64), built on the Form
 // pattern: a visible label, the field error under the field, a role="status" line while saving
@@ -40,6 +44,10 @@ function byIntent(
 
 const addOrRemoveTag = byIntent(addArtifactTagAction, removeArtifactTagAction);
 const assignOrUnassignSuite = byIntent(assignArtifactSuiteAction, unassignArtifactSuiteAction);
+const assignOrUnassignCategory = byIntent(
+  assignArtifactCategoryAction,
+  unassignArtifactCategoryAction,
+);
 
 /**
  * Focuses the card's field, or `fallback()` when the field is gone or disabled (the last suite
@@ -395,6 +403,155 @@ export function SuitesCard({
         pending={pending}
         pendingText="Saving the assignment."
         errorId="suite-error"
+        fieldError={false}
+      />
+    </Section>
+  );
+}
+
+/** The "Categories page" link of the sentences that replace the picker (SPEC-124 D21, D22). */
+const categoriesPageLink = (ref: RefObject<HTMLAnchorElement | null>) => (
+  <Link ref={ref} href="/categories" className="text-primary-text underline">
+    Categories page
+  </Link>
+);
+
+/**
+ * The artifact page's Categories card (SPEC-124 §11, §11.3): the assigned categories as chips
+ * with a Remove each, archived ones included, and a picker of the active categories not yet
+ * assigned. The chip labels and which sentence replaces the picker come from the server
+ * (`categoriesCardModel`), so this file imports no values from core.
+ */
+export function CategoriesCard({
+  artifactId,
+  model,
+}: {
+  artifactId: string;
+  model: CategoriesCardModel;
+}) {
+  const { chips, available, noPicker } = model;
+  const card = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLSelectElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const link = useRef<HTMLAnchorElement>(null);
+  // What the last submit did, for the focus map (D25): the category and, for a remove, the
+  // place its chip had in the list.
+  const submitted = useRef<{ categoryId: FormDataEntryValue | null; removedAt: number | null }>({
+    categoryId: null,
+    removedAt: null,
+  });
+  // Which button was pressed, for the pending line ("Assigning…" or "Removing…", D24).
+  const [pressed, setPressed] = useState<'assign' | 'remove'>('assign');
+  const [state, dispatch, pending] = useActionState(
+    (previous: MetadataFormState, formData: FormData) => {
+      const categoryId = formData.get('categoryId');
+      const items = [
+        ...(list.current?.querySelectorAll<HTMLElement>('li[data-category-id]') ?? []),
+      ];
+      const index = items.findIndex((item) => item.dataset.categoryId === categoryId);
+      submitted.current = {
+        categoryId,
+        removedAt: formData.get('intent') === 'remove' && index >= 0 ? index : null,
+      };
+      return assignOrUnassignCategory(previous, formData);
+    },
+    idle,
+  );
+
+  // D25: after an assign or a remove the focus is in the select. Without a picker it goes to the
+  // assigned chip's Remove, or the Remove that took the removed chip's place, else the last
+  // chip's Remove, else the "Categories page" link.
+  useEffect(() => {
+    if (state.kind === 'idle') return;
+    focusField(card.current, field.current, () => {
+      const buttons = [
+        ...(list.current?.querySelectorAll<HTMLElement>('li[data-category-id]') ?? []),
+      ].map((item) => ({ id: item.dataset.categoryId, button: item.querySelector('button') }));
+      const { categoryId, removedAt } = submitted.current;
+      const target =
+        (removedAt === null
+          ? buttons.find((item) => item.id === categoryId)
+          : buttons[removedAt]) ?? buttons.at(-1);
+      return target?.button ?? link.current;
+    });
+  }, [state]);
+
+  return (
+    <Section
+      card={card}
+      title="Categories"
+      description="Groups for filtering the Artifacts list. A rescan keeps them."
+    >
+      {chips.length ? (
+        <ul ref={list} aria-label="Categories" className="flex flex-wrap gap-inline">
+          {/* Active categories first, then archived ones, muted (FR-124-14). */}
+          {chips.map((chip) => (
+            <li
+              key={chip.id}
+              data-category-id={chip.id}
+              className="flex max-w-full min-w-0 items-center gap-inline-tight"
+            >
+              <Badge
+                variant={chip.archived ? 'muted' : 'secondary'}
+                className="min-w-0 shrink break-all"
+              >
+                {chip.label}
+              </Badge>
+              <form action={dispatch} onSubmit={() => setPressed('remove')}>
+                <input type="hidden" name="intent" value="remove" />
+                <input type="hidden" name="artifactId" value={artifactId} />
+                <input type="hidden" name="categoryId" value={chip.id} />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  disabled={pending}
+                  aria-label={`Remove category ${chip.label}`}
+                >
+                  Remove
+                </Button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-ui text-muted-foreground">No categories yet.</p>
+      )}
+      {noPicker === null ? (
+        <form
+          action={dispatch}
+          onSubmit={() => setPressed('assign')}
+          className="flex flex-wrap items-end gap-inline"
+        >
+          <input type="hidden" name="artifactId" value={artifactId} />
+          <label className="flex max-w-full min-w-0 flex-col gap-1 text-ui text-muted-foreground">
+            Category
+            <NativeSelect ref={field} name="categoryId" disabled={pending} className="max-w-full">
+              {available.map((category) => (
+                <NativeSelectOption key={category.id} value={category.id}>
+                  {category.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </label>
+          <Button type="submit" disabled={pending}>
+            Assign
+          </Button>
+        </form>
+      ) : noPicker === 'all-assigned' ? (
+        <p className="text-ui text-muted-foreground">
+          Every active category is assigned. Create more on the {categoriesPageLink(link)}.
+        </p>
+      ) : (
+        <p className="text-ui text-muted-foreground">
+          There are no active categories. Create or unarchive one on the {categoriesPageLink(link)}.
+        </p>
+      )}
+      <Messages
+        state={state}
+        pending={pending}
+        pendingText={pressed === 'assign' ? 'Assigning…' : 'Removing…'}
+        errorId="category-error"
         fieldError={false}
       />
     </Section>

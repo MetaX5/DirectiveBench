@@ -219,7 +219,8 @@ getCategoryBySlug(db, slug): (CategoryRef & { description: string | null; predef
   artifactCount: number }) | null;
 
 listCategories(db)                 // existing, unchanged shape (name_key is not exposed)
-assignArtifactCategory(db, artifactId, categoryId):
+listActiveCategoryNames(db)        // Phase 3: { id, name } of active categories by name, no counts
+assignArtifactCategory(handle, artifactId, categoryId):
   | { status: 'assigned' | 'already-assigned' | 'category-archived'; category: CategoryRef }
   | { status: 'category-not-found' | 'artifact-not-found' };
 unassignArtifactCategory(db, artifactId, categoryId):
@@ -228,6 +229,9 @@ unassignArtifactCategory(db, artifactId, categoryId):
 // The category is read after the write, so a rename elsewhere shows the current name
 // (maintainer decision 2026-11-05, Phase 3). The assigned categories that
 // getArtifactDetail returns (ArtifactCategory) also carry the category `id`.
+// assignArtifactCategory takes the handle and runs the insert and the reads that explain a
+// no-op in one withTransaction, so no archive or unarchive lands between them (Codex review,
+// PR 198).
 
 setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   filter: ArtifactListFilter, listFingerprint: string }):
@@ -663,13 +667,29 @@ categories, a `directivebench category` CLI, transliterated slugs for non-Latin 
   "Renamed to …" from "Saved.". The archived half of AC-4 (filter dropdown, chips), AC-1, AC-2
   (rename keeps `/artifacts?category=<slug>`), AC-5, AC-6 and AC-7 are verified; AC-4's picker and
   bulk form do not exist yet.
-- **Partially implemented:** FR-124-11 and FR-124-12 at the repository level only: no page, form
-  or Server Action assigns or removes a category yet (Phase 3). The copy "Assign it on an
-  artifact's page or to a filtered list on Artifacts" and "the bulk form" in the Archive reason
-  name surfaces that arrive in Phases 3 and 4.
-- **Not implemented:** FR-124-13 (bulk), the assignment actions (Phase 3), `listArtifactIds`,
-  `setCategoryForListedArtifacts` and `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-3, AC-8 and the
-  picker and bulk parts of AC-4 and AC-10 are not verified.
+- **Implemented (Phase 3, assignment on the artifact page; verified on 2026-11-10 by
+  `packages/database/test/category-assignment.test.ts`, `apps/web/test/categories.test.ts`
+  (`assignCategoryState`, `unassignCategoryState`, `categoriesCardModel`),
+  `apps/web/test/actions.test.ts` "category actions (SPEC-124 §10)",
+  `apps/web/e2e/categories.spec.ts` (the Categories card tests), `apps/web/e2e/text-contrast.spec.ts`
+  in both themes):** FR-124-11 and FR-124-12 end to end
+  (`assignArtifactCategoryAction`, `unassignArtifactCategoryAction`; already assigned and
+  already removed are statuses, an archived category is refused, an archived assignment is
+  removable without confirmation); FR-124-16 for both actions (every submit revalidates the
+  artifact page and both layouts, D26); the §8.2 contract change (the outcomes name the category
+  read after the write; `ArtifactCategory.id`); the Categories card of §11 and §11.3 (D16 to
+  D26: position after Metadata, chips with Remove named "Remove category <chip text>", no chip
+  links, the picker of active unassigned categories with the first option preselected, the D21
+  and D22 sentences with the Categories page link, the D24 copy and pending lines, the D25 focus
+  map, keyboard only, 320px with a 64-character name, contrast of chips, status line and error in
+  both themes). Verified acceptance criteria: AC-3's single-artifact half (assigned once), AC-4's
+  picker half (an archived category leaves the picker, and a stale page that assigns it is
+  refused), AC-10 for the artifact page.
+- **Partially implemented:** the copy "or to a filtered list on Artifacts" and "the bulk form" in
+  the Archive reason name a surface that arrives in Phase 4.
+- **Not implemented:** FR-124-13 (bulk), `listArtifactIds`, `setCategoryForListedArtifacts` and
+  `MAX_BULK_CATEGORY_ARTIFACTS` (Phase 4). AC-8 and the bulk parts of AC-3, AC-4 and AC-10 are
+  not verified.
 
 ## 21. Phasing and implementation plan
 
