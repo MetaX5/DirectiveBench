@@ -228,6 +228,9 @@ unassignArtifactCategory(db, artifactId, categoryId):
 // The category is read after the write, so a rename elsewhere shows the current name
 // (maintainer decision 2026-11-05, Phase 3). The assigned categories that
 // getArtifactDetail returns (ArtifactCategory) also carry the category `id`.
+// A no-op assign is "already-assigned" only when the same read finds the assignment; a
+// category archived at the insert and active at the read (an unarchive raced it) gets the
+// insert again, up to ASSIGN_CATEGORY_ATTEMPTS (2), then "category-archived".
 
 setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   filter: ArtifactListFilter, listFingerprint: string }):

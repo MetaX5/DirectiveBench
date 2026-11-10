@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASSIGN_CATEGORY_ATTEMPTS,
   assignArtifactCategory,
   assignCategoriesBySlug,
   createCategory,
@@ -72,6 +73,65 @@ describe('assignArtifactCategory', () => {
       });
     }
     expect(await assignmentCount(handle)).toBe(1);
+  });
+
+  /**
+   * A handle on which another process archives the category right before each of the first
+   * `races` assignment inserts and unarchives it right before the follow-up read, so the insert
+   * is a no-op although the read sees an active category (Codex review on PR 198).
+   */
+  function racingArchive(handle: DatabaseHandle, categoryId: string, races: number) {
+    const seen = { inserts: 0, unarchives: 0 };
+    let raced = false;
+    const racing = interceptHandle(handle, (query) => {
+      if (query.startsWith('insert into "artifact_categories"')) {
+        seen.inserts += 1;
+        if (seen.inserts <= races) {
+          handle.sqlite
+            .prepare('update categories set archived_at = ? where id = ?')
+            .run('t', categoryId);
+          raced = true;
+        }
+      } else if (raced && query.startsWith('select') && query.includes('from "categories"')) {
+        handle.sqlite
+          .prepare('update categories set archived_at = null where id = ?')
+          .run(categoryId);
+        seen.unarchives += 1;
+        raced = false;
+      }
+      return 'run';
+    });
+    return { racing, seen };
+  }
+
+  it('assigns after all when an unarchive lands between its no-op insert and the read', async () => {
+    const handle = getHandle();
+    const artifactId = await artifact(handle);
+    const python = await category(handle, 'Python');
+    const { racing, seen } = racingArchive(handle, python.id, 1);
+    expect(await assignArtifactCategory(racing.db, artifactId, python.id)).toEqual({
+      status: 'assigned',
+      category: python,
+    });
+    // The race happened once and the insert ran again.
+    expect(seen).toEqual({ inserts: 2, unarchives: 1 });
+    expect(await assignmentCount(handle)).toBe(1);
+  });
+
+  it('never reports "already assigned" without the assignment, however often the race repeats', async () => {
+    const handle = getHandle();
+    const artifactId = await artifact(handle);
+    const python = await category(handle, 'Python');
+    const { racing, seen } = racingArchive(handle, python.id, Infinity);
+    expect(await assignArtifactCategory(racing.db, artifactId, python.id)).toEqual({
+      status: 'category-archived',
+      category: python,
+    });
+    expect(seen).toEqual({
+      inserts: ASSIGN_CATEGORY_ATTEMPTS,
+      unarchives: ASSIGN_CATEGORY_ATTEMPTS,
+    });
+    expect(await assignmentCount(handle)).toBe(0);
   });
 
   it('reports a missing category or artifact and writes nothing', async () => {
