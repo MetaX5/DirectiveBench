@@ -264,14 +264,17 @@ setCategoryForListedArtifacts(handle, { categoryId, mode: 'assign' | 'remove',
   under SQLite's variable limit; `changed` is the returned rows, `unchanged` the listed count
   minus `changed`. No artifact ids come from the browser, so there is no id limit and no
   per-id "not found" count: an artifact that vanished changes the fingerprint.
-- Bounded work under the write lock (Codex review of the Phase 4 decisions): the bulk path
-  collects at most `limit + 1` ids. The page never offers bulk on a list above the limit (§11.4
+- Bounded memory under the write lock (Codex review of the Phase 4 decisions): the bulk path
+  keeps at most `limit + 1` ids. The page never offers bulk on a list above the limit (§11.4
   D28), so a recomputed list above it cannot match the posted fingerprint and is refused as
   `list-changed` as soon as the `limit + 1`th match is found; its `actualCount` is counted after
   the transaction has ended (outside the write lock, like the fresh read after a unique
-  violation), so the message still states the current count. Inside the lock the matching scan
-  stops at `limit + 1` matches; its candidate rows are the same as one render of the list page
-  (NFR-124-01 sizing). The refusal order (fingerprint, category, limit) stays as decided.
+  violation), so the message still states the current count. This bounds the ids kept, not
+  the rows read: with `q`, the scan still reads every artifact the SQL conditions leave (as one
+  render of the list page does) before it can stop, and holds the write lock while it does. That
+  cost is accepted with the approved one-transaction recompute (§11.4 D33) and sized by
+  NFR-124-01; the Phase 4 database test times it once on 10,000 artifacts. The refusal order
+  (fingerprint, category, limit) stays as decided.
 - `getArtifactDetail` and `listArtifacts` return `archived: boolean` on each category, active
   ones first, then by name.
 - Generated slugs (A5): inside its `withTransaction`, `createCategory` reads the slugs that
