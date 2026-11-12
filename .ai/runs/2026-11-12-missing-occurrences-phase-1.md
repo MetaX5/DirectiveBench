@@ -3,7 +3,7 @@ title: SPEC-125 Phase 1, missing occurrences (issue 21)
 date: 2026-11-12
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (implement SPEC-125 Phase 1, decisions D1 to D11 approved)
-status: in-progress
+status: completed
 branch: feat/missing-occurrences-phase-1
 specs: [SPEC-125, SPEC-101, SPEC-102, SPEC-103, SPEC-105, SPEC-124]
 ---
@@ -66,7 +66,7 @@ PR: #214
 ### Phase 4: Verification and docs
 
 - [x] 4.1 Umbrella spec updates and SPEC-125 implementation status — 9541345
-- [ ] 4.2 Full gate, real-app run, browser QA, Codex review, run log
+- [x] 4.2 Full gate, real-app run, browser QA, Codex review, run log — 5321431
 
 ## Decisions
 
@@ -93,6 +93,9 @@ PR: #214
    the Detail view rule.
 6. `81a2f7f` Playwright: `missing-occurrences.spec.ts` and the D11 contrast addition.
 7. `9541345` umbrella specs (SPEC-101, 102, 103, 105) and SPEC-125 §20 and ACs.
+8. `5321431` run log and lesson; PR #214 marked ready with labels.
+9. `om-auto-review-pr 214` (engine `om-code-review`): approve, posted as a COMMENT (self-review), one nit fixed in `b9156c1`.
+10. `om-auto-qa-pr 214`: PASS, screenshots posted on the PR (scan lines as element screenshots, so no local paths appear).
 
 ## Verification
 
