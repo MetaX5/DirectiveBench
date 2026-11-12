@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, userEvent } from 'storybook/test';
 import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 
 // Pattern: confirming a risky action, modelled on "Register anyway" (/repositories, D05). The
 // question names the object, the reasons are listed, leaving is easy and the action is a verb.
@@ -130,18 +131,18 @@ export const FromTableRow: Story = {
           </a>
         </form>
       </div>
-      <table className="w-full text-ui">
-        <tbody>
-          <tr id="repository-client-a">
-            <td className="font-medium">client-a</td>
-            <td className="text-right">
+      <Table>
+        <TableBody>
+          <TableRow id="repository-client-a">
+            <TableCell className="font-medium">client-a</TableCell>
+            <TableCell className="text-right">
               <Button size="sm" variant="outline" aria-label="Remove client-a">
                 Remove
               </Button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </div>
   ),
   play: async ({ canvas }) => {
