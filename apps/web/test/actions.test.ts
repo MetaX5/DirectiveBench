@@ -15,6 +15,7 @@ import {
   insertAgentRun,
   getJob,
   getRepositoryRegistration,
+  getRepository,
   getRepositoryScan,
   importArtifactVersion,
   registerLocalRepository,
@@ -37,6 +38,7 @@ import {
   enqueueBenchmarkRunAction,
   registerRepositoryAction,
   removeArtifactTagAction,
+  removeRepositoryAction,
   saveArtifactNotesAction,
   scanRepositoryAction,
   setCategoryForListedArtifactsAction,
@@ -566,6 +568,64 @@ describe('scanRepositoryAction', () => {
     );
     await expect(scanRepositoryAction(form({ repositoryId }))).rejects.toThrow();
     expect(next.redirect).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeRepositoryAction (SPEC-125 FR-125-16)', () => {
+  it('removes the repository, keeps its artifact and returns with the counts', async () => {
+    const { artifactId } = await importArtifact();
+    const repositoryId = (
+      handle.sqlite.prepare('select id from repositories').get() as { id: string }
+    ).id;
+    expect(await redirectOf(removeRepositoryAction(form({ repositoryId })))).toBe(
+      '/repositories?removedOccurrences=1&missingArtifacts=1#remove-result',
+    );
+    expect(await getRepository(handle.db, repositoryId)).toBeNull();
+    expect(await getArtifactDetail(handle.db, artifactId)).toMatchObject({
+      missing: true,
+      lastFoundAt: null,
+    });
+    expect(next.revalidatePath.mock.calls).toEqual([
+      ['/repositories'],
+      ['/artifacts', 'layout'],
+      ['/categories', 'layout'],
+      ['/'],
+    ]);
+    // Posting again (a double submit) finds nothing to remove.
+    expect(await redirectOf(removeRepositoryAction(form({ repositoryId })))).toBe(
+      '/repositories?removeError=not-found',
+    );
+  });
+
+  it('returns with an error for missing input and for the bundled examples, writing nothing', async () => {
+    expect(await redirectOf(removeRepositoryAction(form({})))).toBe(
+      '/repositories?removeError=invalid',
+    );
+    const bundled = await upsertRepository(handle.db, {
+      provider: 'bundled-examples',
+      name: 'Bundled',
+      location: '/opt/examples',
+    });
+    expect(await redirectOf(removeRepositoryAction(form({ repositoryId: bundled })))).toBe(
+      '/repositories?removeError=invalid',
+    );
+    expect(await getRepository(handle.db, bundled)).not.toBeNull();
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed transaction without its error text and changes nothing', async () => {
+    await importArtifact();
+    const repositoryId = (
+      handle.sqlite.prepare('select id from repositories').get() as { id: string }
+    ).id;
+    handle.sqlite.exec(
+      "CREATE TRIGGER fail_occurrences BEFORE DELETE ON artifact_occurrences BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    expect(await redirectOf(removeRepositoryAction(form({ repositoryId })))).toBe(
+      '/repositories?removeError=failed',
+    );
+    expect(await getRepository(handle.db, repositoryId)).not.toBeNull();
+    expect(next.revalidatePath).not.toHaveBeenCalled();
   });
 });
 

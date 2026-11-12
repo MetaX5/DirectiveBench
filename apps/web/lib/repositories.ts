@@ -8,10 +8,13 @@ import {
 import {
   SCANNABLE_PROVIDERS,
   type RepositoryRecord,
+  type RepositoryRemovalImpact,
   type RepositoryRegistration,
   type RepositoryRegistrationResult,
   type RepositoryScan,
 } from '@directivebench/database';
+import { z } from 'zod';
+import { INCOMPLETE_FORM_MESSAGE } from './artifact-metadata';
 import { formatCount, formatDate, formatDuration } from './utils';
 
 export type RepositoryProvider = RepositoryRecord['provider'];
@@ -262,7 +265,7 @@ function occurrenceChanges(result: {
   const kept = result.emptyScanKeptOccurrences;
   if (kept > 0) {
     const verb = kept === 1 ? 'was' : 'were';
-    return ` No artifacts found, so the ${formatCount(kept)} found before ${verb} not marked missing. Check that the location is mounted and has the expected files.`;
+    return ` No artifacts found, so the ${formatCount(kept)} found before ${verb} not marked missing. Check that the location is mounted and has the expected files. If they were deleted on purpose, remove the repository.`;
   }
   const clauses = [
     ...(result.removedOccurrences > 0
@@ -351,4 +354,122 @@ const SCAN_REQUEST_ERRORS = new Map<string, string>([
 /** The page-level error for `?scanError=`, or null for no or an unknown value. */
 export function scanRequestError(code: string | undefined): string | null {
   return code === undefined ? null : (SCAN_REQUEST_ERRORS.get(code) ?? null);
+}
+
+/**
+ * Whether the Repositories page offers "Remove" for a repository: every one except the internal
+ * `bundled-examples` repository, which `directivebench demo` re-imports (SPEC-125 A15, §11.3 D12).
+ */
+export function canRemove(repository: Pick<RepositoryRecord, 'provider'>): boolean {
+  return repository.provider !== 'bundled-examples';
+}
+
+/** Why a removal did not happen (`?removeError=` from the action, SPEC-125 §10). */
+export type RemoveErrorCode = 'not-found' | 'invalid' | 'failed';
+
+/** The removal state the Repositories page reads from its URL (SPEC-125 §10). */
+export interface RemovalParams {
+  /** The repository whose Risky-action panel to show (`?remove=`). */
+  remove: string | null;
+  /** The counts of a completed removal (`?removedOccurrences=&missingArtifacts=`). */
+  removed: { occurrences: number; missingArtifacts: number } | null;
+  error: RemoveErrorCode | null;
+}
+
+const repositoryIdSchema = z.string().regex(/^repo_[A-Za-z0-9_-]{1,64}$/);
+/** A plain decimal count; `z.coerce` would also take '', ' 1', '1e3' or '0x10'. */
+const countSchema = z
+  .string()
+  .regex(/^\d{1,15}$/)
+  .transform(Number);
+const removeErrorSchema = z.enum(['not-found', 'invalid', 'failed']);
+
+/** The parsed value, or null when the parameter is missing, repeated or invalid. */
+function parsed<T>(schema: z.ZodType<T, unknown>, value: unknown): T | null {
+  const result = schema.safeParse(value);
+  return result.success ? result.data : null;
+}
+
+/**
+ * Parses the removal parameters (SPEC-125 §10). Each one is checked on its own and an invalid or
+ * repeated value is ignored; the counts count only as a pair.
+ */
+export function parseRemovalParams(params: {
+  remove?: string | string[];
+  removedOccurrences?: string | string[];
+  missingArtifacts?: string | string[];
+  removeError?: string | string[];
+}): RemovalParams {
+  const occurrences = parsed(countSchema, params.removedOccurrences);
+  const missingArtifacts = parsed(countSchema, params.missingArtifacts);
+  return {
+    remove: parsed(repositoryIdSchema, params.remove),
+    removed:
+      occurrences !== null && missingArtifacts !== null ? { occurrences, missingArtifacts } : null,
+    error: parsed(removeErrorSchema, params.removeError),
+  };
+}
+
+/**
+ * The reasons of the removal panel (SPEC-125 FR-125-15, §11.3 D15), each one sentence, in order:
+ * what is deleted, what becomes missing, what is not touched, and what registering it again does.
+ * A repository without occurrences shows only the first and the location reason.
+ */
+export function removalReasons(impact: RepositoryRemovalImpact): string[] {
+  const location =
+    impact.provider === 'github' || impact.provider === 'gitlab'
+      ? `The copy downloaded from ${providerLabel(impact.provider)} stays in DirectiveBench's cache. Deleting it is planned.`
+      : `Nothing in ${impact.location} is changed.`;
+  if (impact.occurrences === 0) return ['It has no occurrences.', location];
+  const missing = impact.artifactsLeftMissing;
+  return [
+    impact.occurrences === 1
+      ? 'Its 1 occurrence is deleted from DirectiveBench.'
+      : `Its ${formatCount(impact.occurrences)} occurrences are deleted from DirectiveBench.`,
+    missing === 0
+      ? 'Every artifact found here is also found in another repository, or is already missing.'
+      : missing === 1
+        ? '1 artifact is then missing from every repository. Its versions, categories, notes and benchmark results are kept.'
+        : `${formatCount(missing)} artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept.`,
+    location,
+    'Registering it again later creates new artifacts instead of reusing these ones.',
+  ];
+}
+
+/** A removal line on the Repositories page (§11.3 D18): `done` is green, `error` an alert. */
+export interface RemovalLine {
+  kind: 'done' | 'error' | 'info';
+  message: string;
+}
+
+const REMOVE_ERRORS: Record<RemoveErrorCode, string> = {
+  'not-found': 'That repository is no longer registered. Nothing was removed.',
+  invalid: INCOMPLETE_FORM_MESSAGE,
+  failed: 'The repository could not be removed. Nothing was changed.',
+};
+
+/** The success line for a completed removal (§11.3 D18). */
+function removedMessage(removed: { occurrences: number; missingArtifacts: number }): string {
+  if (removed.occurrences === 0) return 'Repository removed. It had no occurrences.';
+  const deleted = plural(removed.occurrences, 'occurrence');
+  if (removed.missingArtifacts === 0)
+    return `Repository removed: ${deleted} deleted. No artifact became missing.`;
+  const history = removed.missingArtifacts === 1 ? 'Its' : 'Their';
+  return `Repository removed: ${deleted} deleted, ${plural(removed.missingArtifacts, 'artifact')} now missing from every repository. ${history} history is kept.`;
+}
+
+/**
+ * The one removal line the page shows, or null (SPEC-125 §10, §13, §11.3 D18): an error wins over
+ * a result, and `?remove=` for a repository that is not registered says so. `unknownTarget` is
+ * true only for an id the page does not list (not for `bundled-examples`, which shows nothing).
+ */
+export function removalResult(
+  params: RemovalParams,
+  options: { unknownTarget: boolean },
+): RemovalLine | null {
+  if (params.error) return { kind: 'error', message: REMOVE_ERRORS[params.error] };
+  if (params.removed) return { kind: 'done', message: removedMessage(params.removed) };
+  if (params.remove !== null && options.unknownTarget)
+    return { kind: 'info', message: 'That repository is no longer registered.' };
+  return null;
 }
