@@ -89,3 +89,9 @@ None yet.
   diagram, §11, §14, §15, Phase 1 and Phase 2 steps, and added AC-10. Deleting every skill on
   purpose is recorded by removing the repository (Phase 2).
 - Every other default (A1 to A22 except A7, UD-1 to UD-7) accepted as written.
+- Codex adversarial review of the A7 change (round 1, 99117b8): needs-attention, one medium
+  finding: Phase 1 alone could not record a repository emptied on purpose, AC-1 contradicted
+  AC-10, and SPEC-103 FR-103-11 / SPEC-105 §14 needed the exception. Fixed: Phase 1 and Phase 2
+  ship in one npm release, AC-1 and G1 qualified, summary item 1 names the guard, the SPEC-103
+  and SPEC-105 updates are listed, AC-10 and the tests cover deleting the sole artifact and then
+  removing the repository, and the Playwright fixture has at least two skills.

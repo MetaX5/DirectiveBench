@@ -25,7 +25,9 @@ This spec is the story slice of SPEC-103 (FR-103-11), SPEC-105 (FR-105-12) and S
 1. A scan that **completed and observed the whole repository** marks every occurrence it did not
    find as `removed` (shown as "missing"). A scan whose apply transaction did not commit (failed,
    cancelled, limit-aborted, or interrupted before the commit) marks nothing, and neither do the
-   parts of a successful scan it could not read.
+   parts of a successful scan it could not read. A successful scan that finds no artifact at all
+   marks nothing either (A7, empty-scan guard); a repository emptied on purpose is recorded by
+   removing it (item 4).
 2. A missing occurrence whose path is found again is reactivated, with the same artifact.
 3. A missing artifact keeps its versions, categories, tags, notes, benchmark assignments and
    results, and its pages say clearly that it is missing.
@@ -59,8 +61,10 @@ and a "Show removed" filter (issue #53) stay out (§4, §5a).
 
 ## 3. Goals
 
-- G1: A deleted file is visible as missing after the next successful scan of its repository,
-  for every scannable provider (`local-git`, `local-directory`, `github`).
+- G1: A deleted file is visible as missing after the next successful scan of its repository
+  that finds at least one artifact, for every scannable provider (`local-git`,
+  `local-directory`, `github`). A repository with no artifact left is recorded by removing it
+  (G5, A7).
 - G2: Never mark an occurrence missing because of a scan that did not look at it: a scan whose
   apply transaction did not commit (failed, cancelled, limit-aborted, interrupted before the
   commit), a per-artifact discovery error, an unreadable directory (also one inside a skill) or a
@@ -552,7 +556,8 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
     cancelled, the signal aborted or the repository removed (existing tests extended with a
     removed-candidate occurrence); rolls back the marking when a later statement fails (SQLite
     trigger injection, lesson 2026-11-05).
-  - `removeRepository`: counts, cascade, versions' source set to null, artifacts and their
+  - `removeRepository`: after an empty scan kept the sole artifact's occurrence (A7), removal
+    leaves that artifact missing with its history (AC-10); counts, cascade, versions' source set to null, artifacts and their
     metadata and runs kept, `not-found` and `not-removable`, rollback on an injected failure,
     and a second call after removal.
   - `listArtifacts` / `getArtifactDetail`: `missing` and `lastFoundAt` for active, missing and
@@ -572,11 +577,13 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   parsing of `remove`, `removedOccurrences`, `missingArtifacts`, `removeError`;
   `removeRepositoryAction` outcomes and revalidation; results stored without the new counts
   parse with 0.
-- **Playwright** (`apps/web/e2e`): register a fixture repository, scan, delete a skill file,
+- **Playwright** (`apps/web/e2e`): register a fixture repository with at least two skills (so the
+  A7 guard does not apply), scan, delete a skill file,
   rescan → result line, Missing badge in the list, note and badge on the artifact page with its
   versions and evaluation history visible; restore and rescan → active. Remove: panel with the
   counts, Cancel writes nothing, confirm → status line, artifacts missing with the "removed"
-  note; `bundled-examples` has no Remove. Keyboard only, 320px, both themes in the contrast
+  note; delete every skill and rescan → the empty-scan sentence and nothing missing, then Remove →
+  missing (AC-10, Phase 2); `bundled-examples` has no Remove. Keyboard only, 320px, both themes in the contrast
   specs. The spec leaves the shared database as it found it (lesson 2026-11-10).
 - **Storybook**: no new component; the Risky-action stories are unchanged. If UD-2 or UD-5 change
   to a new variant, it gets stories in both themes with axe.
@@ -584,7 +591,7 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
 ## 16. Acceptance criteria
 
 - [ ] AC-1: Given a skill deleted from a repository, when the repository is rescanned
-  successfully, then its occurrence is marked missing (`removed`), for `local-directory`,
+  successfully and the scan finds at least one artifact (A7, AC-10), then its occurrence is marked missing (`removed`), for `local-directory`,
   `local-git` and `github` (issue AC 1, SPEC-013 M1 AC4).
 - [ ] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
   benchmark assignments and evaluation history remain visible on its page, which says it is
@@ -609,15 +616,19 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   `pnpm verify:pack`, `pnpm test:e2e` and `pnpm test:storybook` pass.
 - [ ] AC-10: Given a successful scan that discovers no artifact in a repository with active
   occurrences, then none of them is marked missing and the scan result line says how many were
-  kept and asks to check the location (A7).
+  kept and asks to check the location (A7); and given the repository's only artifact was deleted
+  on purpose, then removing the repository leaves that artifact missing with its history
+  (Phase 2).
 
 ## 17. Dependencies
 
 - Issues: #19 (closed, rescans), #16 and #18 (scans), epic #11; D08 (S1 shipped); related open
   issues #53 (Show removed filter), #59 (hosted cache deletion), #58 (branch choice), #20
   (cross-repository identity).
-- Specs changed by the implementation PRs: SPEC-103 §20 (removed-occurrence handling), SPEC-105
-  FR-105-12 and §20 (the "complete scan" rule and unobserved paths), SPEC-104 FR-104-15 ("Cached
+- Specs changed by the implementation PRs: SPEC-103 FR-103-11 (the A7 exception: an empty scan
+  marks nothing) and §20 (removed-occurrence handling), SPEC-105 FR-105-12, its §14 edge case
+  "Repository becomes empty" (replaced by the A7 guard; the planned 50 % confirmation is
+  dropped) and §20 (the "complete scan" rule and unobserved paths), SPEC-104 FR-104-15 ("Cached
   clones are deleted" moves to issue #59; disable stays planned), its §10 contract line
   (`removeRepository({ id, confirm: true }) → { removedOccurrences, orphanedArtifacts }` becomes
   §8.3's `removeRepository(handle, id)` outcome union) and §20, SPEC-102 (`DiscoveryResult.unobserved`), SPEC-101 FR-101-03 and §11 (missing
@@ -650,7 +661,11 @@ confirm or change before approving the spec.
 
 ## 21. Phasing and implementation plan
 
-Each phase is one PR that leaves the app working and passes the full gate.
+Each phase is one PR that leaves the app working and passes the full gate. **Phase 1 and Phase 2
+ship in the same npm release:** no `directivebench` version is published between their merges,
+so no released version has the A7 guard without repository removal, the supported way to record
+a repository emptied on purpose. On `main` between the two merges, such a repository keeps its
+occurrences active; nothing is lost and Phase 2 resolves it.
 
 ### Phase 1: Mark missing, reactivate and show it
 
@@ -669,7 +684,8 @@ Each phase is one PR that leaves the app working and passes the full gate.
 5. Playwright: delete, rescan, result line, list Badge, artifact page with versions, categories,
    notes and a mock run visible (AC-2), restore, rescan, active again; keyboard, 320px, contrast
    in both themes.
-6. Update SPEC-103 §20, SPEC-105 FR-105-12 and §20, SPEC-102 (`unobserved`), SPEC-101 FR-101-03
+6. Update SPEC-103 FR-103-11 (A7 exception) and §20, SPEC-105 FR-105-12, §14 ("Repository
+   becomes empty") and §20, SPEC-102 (`unobserved`), SPEC-101 FR-101-03
    and §20; this spec's §20.
 
 ### Phase 2: Remove a repository
