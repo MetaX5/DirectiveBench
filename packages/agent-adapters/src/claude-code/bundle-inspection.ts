@@ -42,11 +42,13 @@ const CONFIGURATION_FILES = new Set([
  */
 export function canonicalSegment(segment: string): string {
   // NFKC and an upper-case round trip fold non-ASCII look-alikes (`ſ` → `s`) as macOS does.
-  return segment
-    .normalize('NFKC')
-    .toUpperCase()
-    .toLowerCase()
-    .replace(/[. ]+$/, (tail) => (tail === segment ? tail : ''));
+  const folded = segment.normalize('NFKC').toUpperCase().toLowerCase();
+  // One backward scan, not `/[. ]+$/`: that regex retries from every dot or space and is
+  // quadratic on a long run of them followed by another character (CodeQL js/polynomial-redos).
+  let end = folded.length;
+  while (end > 0 && (folded[end - 1] === '.' || folded[end - 1] === ' ')) end -= 1;
+  // A segment that is only dots and spaces (`.`, `..`) keeps them, as before.
+  return folded.slice(end) === segment ? folded : folded.slice(0, end);
 }
 
 /** Frontmatter key as compared here: lowercase, without `-` and `_` (`allowed_tools` too). */
