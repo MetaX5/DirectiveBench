@@ -3,7 +3,7 @@ title: Remediation hints for doctor's Claude Code readiness warnings (issue 204)
 date: 2026-11-12
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer-approved issue #204, run through om-auto-fix-issue
-status: in-progress
+status: completed
 branch: fix/issue-204-doctor-readiness-hints
 specs: [SPEC-009, SPEC-203, SPEC-118]
 ---
@@ -69,6 +69,7 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   directory (a user-level `apiKeyHelper` changes the bare command's answer). Fixed: the hint is
   built from `CLAUDE_EXECUTABLE` and `CLAUDE_AUTH_STATUS_ARGS`, and a unit test pins it to them.
   CLI tests: 195.
+- Codex round 6: **approve**, no material findings.
 
 ## Verification
 
@@ -85,7 +86,11 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   `PATH=<fake bin>:<node>:/usr/bin:/bin`, the fake `claude` 2.1.302 reporting
   `{"loggedIn":false}`: both readiness warnings print `→ <hint>` and carry `hint` in JSON; with
   the fake reporting 2.1.0 and a planted `ANTHROPIC_API_KEY`, both modes show the update hint and
-  the key appears nowhere in the output.
+  the key appears nowhere in the output. Re-run on the final build (694ae41) with a logged-out
+  fake, an unreadable probe plus a too-short key, and a `claude` whose `--version` fails: each
+  warning shows the final hint text, in text and `--json`.
+- Not verified: a pre-launch probe failure reaching `auth-missing` (only a transient
+  temporary-directory failure could; see Codex round 3).
 - Not verified: `doctor` against a real logged-out or expired `claude` (no real `claude` was run;
   the expiry text is the §9 assumption the probe already uses); `binary-not-found` cannot reach
   `doctor` (readiness is only listed for an installed agent) and is covered by the unit test only.
