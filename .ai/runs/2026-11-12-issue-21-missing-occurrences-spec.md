@@ -81,3 +81,11 @@ None yet.
 - After approval: `om-auto-implement-spec` phase by phase.
 - Proposed follow-up issue: move and rename detection (FR-103-09) on top of the marking.
 - Issue #59 (hosted cache deletion) and #53 (Show removed filter) stay open.
+
+## Maintainer decisions (2026-11-12)
+
+- A7 changed to the alternative: a successful scan that discovers no artifact marks nothing
+  (empty-scan guard). Updated FR-125-04, FR-125-06, FR-125-12, UD-4, §8.3, §8.4, the data-flow
+  diagram, §11, §14, §15, Phase 1 and Phase 2 steps, and added AC-10. Deleting every skill on
+  purpose is recorded by removing the repository (Phase 2).
+- Every other default (A1 to A22 except A7, UD-1 to UD-7) accepted as written.

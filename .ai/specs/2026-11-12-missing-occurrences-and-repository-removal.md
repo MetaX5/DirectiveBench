@@ -112,7 +112,7 @@ before approving the spec.
 | A4 | Paths a successful scan could not observe (per-artifact discovery errors, every unreadable directory including one inside a skill, skipped user-level folders) | Occurrences at, inside or containing such a path stay `active` and keep their version (FR-105-11, FR-101-05). Core computes the list, where the walk's data is (FR-125-03) | Mark them missing with a reason | Fail closed: "could not read" is not "deleted" |
 | A5 | Reactivation | The occurrence at the same repository and path is reactivated whatever its content; equal content reuses the matching version, other content adds the next version (location identity, issue #16 and #19 rules) | Reactivate only for identical content (literal FR-103-11), else a new artifact | Scans already identify an artifact by repository and path; a skill edited while it was deleted is still the same skill |
 | A6 | Schema change for "missing since" or a removal reason? | None. `status = 'removed'` and the existing `last_seen_at` ("last found on") are enough; `updated_at` is set when the status changes | Add `removed_at` and `removal_reason` columns (migration `0006`) | No migration; "last found" is what DirectiveBench knows; the reason column only pays off with discovery settings (FR-105-12 `excluded`) |
-| A7 | Guard against marking everything missing when a successful scan finds nothing (an empty or unmounted directory)? | No guard. The scan's result line says how many occurrences went missing; the next successful scan that finds them reactivates them | Refuse to mark when the scan finds 0 artifacts but the repository had active occurrences | Deleting every skill is a legitimate change; marking is reversible and loses nothing; a heuristic would hide real deletions |
+| A7 | Guard against marking everything missing when a successful scan finds nothing (an empty or unmounted directory)? | **Guard (maintainer decision, 2026-11-12).** A successful scan that discovers no artifact at all marks nothing; its result line says how many occurrences it kept and why (FR-125-04, FR-125-12) | No guard: the result line says how many went missing and the next good scan reactivates them | An empty snapshot is far more often a location problem (an unmounted disk, a wrong checkout, an emptied work tree) than deleting every skill; the guard is one cheap check, and a repository whose skills were all deleted on purpose is removed instead (Phase 2), which leaves its artifacts missing with their history |
 | A8 | What makes an artifact "missing"? | It has no `active` occurrence (all its occurrences are `removed`, or it has none left because their repositories were removed) | Only "has ≥ 1 occurrence and all removed" (SPEC-101 §8) | One rule covers both missing files and removed repositories (SPEC-104 calls the latter "orphaned") |
 | A9 | Artifacts list | Missing artifacts stay listed and are labelled (UD-1); no lifecycle filter in this story | Hide them by default with a "Show removed" filter (SPEC-101 §11, issue #53) | Smallest change; keeps every list, count and the SPEC-124 bulk fingerprint consistent; the filter belongs to #53 with the rest of FR-101-11 |
 | A10 | The repository filter on the Artifacts list | Unchanged: it lists artifacts with an active occurrence in that repository, so a missing artifact leaves its repository's filtered list | Also list artifacts whose only occurrence there is missing | It is the existing rule (`listConditions`), and "in this repository" means found there now |
@@ -138,9 +138,9 @@ before approving the spec.
 | FR-125-01 | **Only a complete scan marks.** Occurrences are marked `removed` only inside `applyRepositoryScan`, in the same transaction that writes the scan's versions and records `sync_status = 'ok'`; a scan whose apply did not commit marks nothing. It is called only after discovery returned a `DiscoveryResult` for the whole snapshot (local: the walk of the registered location; hosted: the listing of one commit). Every failure path that exists today returns before it and therefore marks nothing: location checks (`path-not-found`, `not-a-directory`, `permission-denied`, `location-changed`, `filesystem-root`), an unreadable root, a discovery exception, the per-scan limits `maxCandidatesPerScan` and `maxScanBytes` (`DiscoveryLimitError`), the hosted limits (cache limit, `TREE_LISTING_MAX_BYTES`, `HOSTED_READ_TOTAL_BYTES`, the text budget in step 5, every git timeout), any git or cache failure, a cancellation or shutdown (`ScanCancelledError`, `JobNoLongerRunningError`, checked inside the transaction), and a store failure (the transaction rolls back, the marking with it). |
 | FR-125-02 | **Future limits fail closed.** A limit added later that skips part of a snapshot instead of aborting MUST report what it skipped as unobserved (FR-125-03) or abort the scan. A test (§15) pins that every `DiscoveryLimitError` and every hosted limit failure leaves all occurrences `active`. |
 | FR-125-03 | **Unobserved paths.** Discovery itself reports `unobserved` in its `DiscoveryResult` (§8.2), because only the walk knows what it could not read: the `path` of **every** discovery error; **every** directory the walk could not list or that changed during the scan, including those that `planCandidates` folds into a skill's `read-failed` error today (that error is recorded at the skill's `SKILL.md`, so without the directory a nested skill or rule file below it would look deleted); and every skipped user-level folder (D05), with `.` for the whole location. The runner passes it unchanged; it never rebuilds it from the job result, whose `errors` and `skippedUserLevelFolders` are cut to `MAX_REPORTED_SCAN_ERRORS` and `MAX_SKIPPED_USER_LEVEL_FOLDERS`. An active occurrence is **kept** when its path equals an unobserved path, lies inside one, or contains one, compared by whole `/` segments (`a` contains `a/b/SKILL.md` but not `ab/SKILL.md`); `''` (the repository-root skill's occurrence path) and `.` contain every path, on either side. So a skill whose `SKILL.md` failed (`too-large`, `binary-primary`, `symlink`, `too-many-files`, `read-failed`), a single-file artifact that failed, and everything below an unreadable directory keep their previous version and stay `active` (FR-105-11). Keeping a containing occurrence is deliberately conservative (§14). |
-| FR-125-04 | **Marking.** Every other `active` occurrence of the scanned repository whose path the scan did not discover gets `status = 'removed'` and `updated_at = now`; `latest_version_id`, `commit_sha` and `last_seen_at` stay as they were (the last version found and when). Occurrences of other repositories are never touched. Nothing is deleted (FR-105-12). The comparison is exact on the stored path (UTF-16 code units, as paths are stored). |
+| FR-125-04 | **Marking.** **Empty-scan guard (A7):** when the scan discovered no artifact at all (`artifacts` is empty), nothing is marked and `emptyScanKeptOccurrences` counts the repository's `active` occurrences; the rest of the apply (status `ok`, `last_sync_at`) is unchanged. Otherwise every other `active` occurrence of the scanned repository whose path the scan did not discover gets `status = 'removed'` and `updated_at = now`; `latest_version_id`, `commit_sha` and `last_seen_at` stay as they were (the last version found and when). Occurrences of other repositories are never touched. Nothing is deleted (FR-105-12). The comparison is exact on the stored path (UTF-16 code units, as paths are stored). |
 | FR-125-05 | **Reactivation.** A discovered path whose occurrence is `removed` makes it `active` again through the existing writer (`writeArtifactVersion`, location identity): same occurrence id, same artifact; the matching version is reused, or the next version is added when the content differs (A5). `last_seen_at`, `commit_sha` and `updated_at` are set as for any found occurrence. |
-| FR-125-06 | **Summary.** `applyRepositoryScan` returns `removedOccurrences` (marked by this scan) and `reactivatedOccurrences` (found again by this scan). The job result (`repositoryScanResultSchema`) gains both as counts with `.default(0)`, so results stored before them still parse. |
+| FR-125-06 | **Summary.** `applyRepositoryScan` returns `removedOccurrences` (marked by this scan), `reactivatedOccurrences` (found again by this scan) and `emptyScanKeptOccurrences` (kept by the A7 guard, 0 otherwise). The job result (`repositoryScanResultSchema`) gains all three as counts with `.default(0)`, so results stored before them still parse. |
 | FR-125-07 | **No other writer marks.** The example import, registration and every web action never set `removed` (A22). Sync never changes user-owned data on a missing or reactivated artifact (FR-105-13): categories, tags, notes and benchmark assignments stay. |
 
 ### 6.2 Showing missing artifacts
@@ -151,7 +151,7 @@ before approving the spec.
 | FR-125-09 | **Artifact page.** A missing artifact's page shows a `muted` Badge "Missing" in the PageHeader and, under the header, a note (§11) saying when it was last found, that its versions, categories, notes and benchmark results are kept, and that it becomes active again when a scan finds it at the same path. Every tab works as before: versions, content, evaluation history, comparisons, categories, tags, notes and suites stay visible and editable (AC-2). |
 | FR-125-10 | **Occurrences table.** The Status column reads "active" (`outline` Badge, as today) or "missing" (`muted` Badge) instead of the raw `removed`; "Last seen" keeps the date. |
 | FR-125-11 | **Artifacts list.** A missing artifact stays in the list (A9) and its Repositories cell, empty today for it, shows a `muted` Badge "Missing" (UD-1). The occurrence count (active occurrences) reads 0. Counts, filters, the SPEC-124 bulk action and its fingerprint are unchanged. |
-| FR-125-12 | **Scan result.** The Repositories page's scan result line (`describeScan`) adds "N no longer found (marked missing)" when `removedOccurrences > 0` and "N found again" when `reactivatedOccurrences > 0` (§11). |
+| FR-125-12 | **Scan result.** The Repositories page's scan result line (`describeScan`) adds "N no longer found (marked missing)" when `removedOccurrences > 0`, "N found again" when `reactivatedOccurrences > 0`, and "No artifacts found, so the N found before were not marked missing. Check that the location is mounted and has the expected files." when `emptyScanKeptOccurrences > 0` (A7; Phase 2 appends "If they were deleted on purpose, remove the repository.") (§11). |
 
 ### 6.3 Removing a repository
 
@@ -245,11 +245,13 @@ export interface RepositoryScanSummary {
   createdVersions: number;
   removedOccurrences: number;      // FR-125-06
   reactivatedOccurrences: number;  // FR-125-06
+  emptyScanKeptOccurrences: number; // FR-125-04 empty-scan guard (A7)
 }
 
 // applyRepositoryScan: after the existing per-artifact writes and before the repository status
 // update, in the same transaction:
 //   1. read the repository's active occurrence paths (ids and paths only);
+//      if `artifacts` is empty, stop here: emptyScanKeptOccurrences = their count (A7);
 //   2. unseenOccurrencePaths({ active, discovered: artifacts' paths, unobserved });
 //   3. UPDATE artifact_occurrences SET status = 'removed', updated_at = now
 //      WHERE repository_id = ? AND status = 'active' AND id IN (…batch…).
@@ -285,14 +287,16 @@ export async function removeRepository(
 functions already read (`occurrences`), so no extra query is needed.
 
 `repositoryScanResultSchema` (`repositories/jobs.ts`) gains
-`removedOccurrences: count.default(0)` and `reactivatedOccurrences: count.default(0)` in the `ok`
+`removedOccurrences: count.default(0)`, `reactivatedOccurrences: count.default(0)` and
+`emptyScanKeptOccurrences: count.default(0)` in the `ok`
 branch (the object stays `.strict()`).
 
 ### 8.4 Runner (`@directivebench/runner`)
 
 `scanLocalRepository` and `scanHostedRepository` pass
 `unobserved: discovery.unobserved` from the **full** `DiscoveryResult` to
-`storeScanResults`, and copy `removedOccurrences` and `reactivatedOccurrences` into the job result.
+`storeScanResults`, and copy `removedOccurrences`, `reactivatedOccurrences` and
+`emptyScanKeptOccurrences` into the job result.
 No other runner change: every failure path already returns before `storeScanResults`
 (FR-125-01).
 
@@ -319,7 +323,10 @@ flowchart TD
   T --> C{job still running,<br/>signal not aborted,<br/>repository exists?}
   C -- no --> X[nothing written]
   C -- yes --> W[write versions and occurrences<br/>removed found again -> active]
-  W --> M[unseen active occurrences -> removed]
+  W --> G{any artifact<br/>discovered?}
+  G -- no --> K[mark nothing: emptyScanKeptOccurrences, A7]
+  K --> S
+  G -- yes --> M[unseen active occurrences -> removed]
   M --> S[repository sync_status = ok]
   S --> R[job result: removedOccurrences, reactivatedOccurrences]
 ```
@@ -378,6 +385,10 @@ contains no en or em dash.
 - Scan result line, examples: "Scanned client-a: 214 files in 1.2 s, 9 artifacts found (0 new,
   1 new version), 0 errors. 2 no longer found (marked missing), 1 found again." The two clauses
   appear only when their count is above 0.
+- Empty scan (A7), example: "Scanned client-a: 0 files in 0.1 s, 0 artifacts found (0 new, 0 new
+  versions), 0 errors. No artifacts found, so the 9 found before were not marked missing. Check
+  that the location is mounted and has the expected files." Same `muted` status line as every
+  scan result; nothing else on the page changes.
 - Each removable row: after Scan, an `outline` `sm` "Remove" Button named "Remove <name>" in a
   `GET` form. The actions cell wraps (`flex-wrap`) at narrow widths.
 - With `?remove=<id>`, the Registered repositories Card shows, above the table, the Risky-action
@@ -430,7 +441,7 @@ system).
 | UD-1 | How a missing artifact shows in the Artifacts list | Listed, with a `muted` "Missing" Badge in its (otherwise empty) Repositories cell | (a) Hidden by default with a Status filter "Active / Missing / All" (SPEC-101 §11 "Show removed"; with issue #53); (b) the Badge next to the name |
 | UD-2 | How the artifact page says it is missing | `muted` Badge in the PageHeader plus one `role="note"` paragraph under it | A `warning` panel (looks like an error; nothing is wrong to fix) |
 | UD-3 | Occurrence status label | "active" / "missing" | Keep the raw "removed" |
-| UD-4 | Scan result clauses | "N no longer found (marked missing)", "N found again", only when above 0 | Always show both counts |
+| UD-4 | Scan result clauses | "N no longer found (marked missing)", "N found again", and the A7 empty-scan sentence, each only when its count is above 0 | Always show both counts |
 | UD-5 | Where Remove asks first | `GET` form → `/repositories?remove=<id>` renders the Risky-action panel above the table (server-rendered like "Register anyway", one impact query, works without JavaScript) | A client panel opening in place in an extra table row (SPEC-124 D11 rule 6); needs the counts of every row on page load or a fetch |
 | UD-6 | Confirmation needed at all? | Yes: removing a repository cannot be undone (registering again creates new artifacts), so the Risky-action pattern applies without the SPEC-124 UD-5 exception | No confirmation, result line only |
 | UD-7 | Copy | The strings in §11 and §13 | Maintainer's wording |
@@ -478,9 +489,11 @@ system).
 - **File becomes a symlink**: a `symlink` discovery error at its path keeps it active (it is
   still there, DirectiveBench does not follow it). A skill directory replaced by a symlink is not
   a candidate any more and goes missing.
-- **Unmounted or emptied local directory** that still resolves to itself: a successful scan with
-  zero artifacts marks everything missing (A7); the next scan after remounting reactivates all of
-  them with their history. The result line says how many went missing.
+- **Unmounted or emptied local directory** that still resolves to itself, or a hosted commit or
+  `local-git` branch with no artifact: a successful scan with zero artifacts marks nothing (A7
+  guard); the result line says how many it kept and asks to check the location. A scan that
+  finds at least one artifact marks the rest as usual, so a partly emptied location still marks
+  what is gone. Deleting every skill on purpose is recorded by removing the repository (Phase 2).
 - **Registered location is the user-level folder itself** (`skippedDirectories = ['.']`): nothing
   is read and nothing is marked.
 - **`CLAUDE_CONFIG_DIR` changed** so a folder with old occurrences is now skipped: those
@@ -532,7 +545,8 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
 - **Database** (`packages/database/test`):
   - `applyRepositoryScan` marks unseen active occurrences of the scanned repository only, leaves
     `last_seen_at`, `latest_version_id`, `commit_sha` unchanged, sets `updated_at`, counts
-    `removedOccurrences`; keeps occurrences protected by `unobserved`; reactivates a removed
+    `removedOccurrences`; with no artifact discovered marks nothing and counts
+    `emptyScanKeptOccurrences` (A7), and with one artifact discovered marks the rest; keeps occurrences protected by `unobserved`; reactivates a removed
     occurrence with equal and with changed content and counts `reactivatedOccurrences`; keeps
     categories, tags, notes, assignments and runs (AC-2); writes nothing when the job was
     cancelled, the signal aborted or the repository removed (existing tests extended with a
@@ -545,7 +559,8 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
     occurrence-less artifacts.
   - NFR-125-02 measured once.
 - **Runner** (`packages/runner/test`): for `local-directory`, `local-git` and `github` (local bare
-  remote): delete a skill and rescan → missing (AC-1); restore → active again (AC-5). Failure
+  remote): delete a skill and rescan → missing (AC-1); restore → active again (AC-5); delete every artifact and
+  rescan → all stay active and the result counts them (AC-10). Failure
   paths mark nothing (AC-4): path removed, location changed, `maxCandidatesPerScan` and
   `maxScanBytes` lowered through the existing limit options, an unreadable subdirectory (outside
   and inside a skill, with a nested skill below it) and a `too-large` skill in an otherwise
@@ -553,7 +568,7 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   and for hosted the cache limit, the tree listing limit, `readTotalBytes` and a git timeout. A
   test with more than `MAX_REPORTED_SCAN_ERRORS` errors proves that the 101st error's occurrence
   stays active.
-- **Web unit** (`apps/web/test`): `describeScan` clauses; `missingNote`; `canRemove`; params
+- **Web unit** (`apps/web/test`): `describeScan` clauses, including the empty-scan sentence; `missingNote`; `canRemove`; params
   parsing of `remove`, `removedOccurrences`, `missingArtifacts`, `removeError`;
   `removeRepositoryAction` outcomes and revalidation; results stored without the new counts
   parse with 0.
@@ -592,6 +607,9 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   meet the contrast targets in both themes (Playwright).
 - [ ] AC-9: `pnpm lint && pnpm typecheck && pnpm test` pass with 100% coverage; `pnpm build`,
   `pnpm verify:pack`, `pnpm test:e2e` and `pnpm test:storybook` pass.
+- [ ] AC-10: Given a successful scan that discovers no artifact in a repository with active
+  occurrences, then none of them is marked missing and the scan result line says how many were
+  kept and asks to check the location (A7).
 
 ## 17. Dependencies
 
@@ -638,9 +656,9 @@ Each phase is one PR that leaves the app working and passes the full gate.
 
 1. Core: `DiscoveryResult.unobserved` in `discoverArtifacts` and `discoverArtifactsInTree`
    (including directories folded into a skill's error); `unseenOccurrencePaths`; tests (§15 core).
-2. Database: `RepositoryScanApplication.unobserved` (required), the marking step and
-   `removedOccurrences` in `applyRepositoryScan`; `reactivatedOccurrences` from
-   `writeArtifactVersion`; `repositoryScanResultSchema` gains both counts with `.default(0)`;
+2. Database: `RepositoryScanApplication.unobserved` (required), the marking step with the A7
+   empty-scan guard, `removedOccurrences` and `emptyScanKeptOccurrences` in `applyRepositoryScan`; `reactivatedOccurrences` from
+   `writeArtifactVersion`; `repositoryScanResultSchema` gains the three counts with `.default(0)`;
    `missing` on `ArtifactListItem`, `missing` and `lastFoundAt` on the detail; tests incl.
    rollback, an old result that parses, and the 10,000-occurrence measurement.
 3. Runner: both scans pass `discovery.unobserved` and copy the counts; the §15 runner tests for
@@ -663,4 +681,4 @@ Each phase is one PR that leaves the app working and passes the full gate.
 4. Playwright: panel, Cancel, confirm, artifacts left missing with the "removed" note,
    `bundled-examples` without Remove, keyboard, 320px, contrast; clean up the shared database.
 5. Update SPEC-104 FR-104-15, §10 and §20 (remove done; disable and #59 not), SPEC-006; move this
-   spec to `implemented/` only when AC-1 to AC-9 are verified. The PR closes issue #21.
+   spec to `implemented/` only when AC-1 to AC-10 are verified. The PR closes issue #21.
