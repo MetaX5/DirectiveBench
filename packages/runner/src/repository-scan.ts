@@ -263,6 +263,8 @@ export async function scanLocalRepository(
     artifacts: discovery.artifacts.map(toScannedArtifact),
     commitSha: null,
     signal: options.signal,
+    // From the full discovery result, never from the truncated `errors` of the job result.
+    unobserved: discovery.unobserved,
   });
   if (!stored.ok) return stored;
   const { summary } = stored;
@@ -272,6 +274,9 @@ export async function scanLocalRepository(
     discovered: discovery.artifacts.length,
     createdArtifacts: summary.createdArtifacts,
     createdVersions: summary.createdVersions,
+    removedOccurrences: summary.removedOccurrences,
+    reactivatedOccurrences: summary.reactivatedOccurrences,
+    emptyScanKeptOccurrences: summary.emptyScanKeptOccurrences,
     warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),

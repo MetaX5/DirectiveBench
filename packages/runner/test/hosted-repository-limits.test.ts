@@ -14,7 +14,7 @@ import {
 } from '@directivebench/database';
 import type * as hostedGit from '../src/hosted-git';
 import { ScanCancelledError, registerHostedUrl, scanHostedRepository } from '../src/index';
-import { FixtureRemote, fileTransport } from './support/hosted-fixtures';
+import { FixtureRemote, fileTransport, git } from './support/hosted-fixtures';
 
 // The per-scan byte limit, lowered so a small fixture exceeds it, and a hook into discovery.
 const hooks = vi.hoisted(() => ({
@@ -22,6 +22,8 @@ const hooks = vi.hoisted(() => ({
   beforeDiscovery: null as ((contents: ReadonlyMap<string, unknown>) => void) | null,
   tooManyCandidates: false,
   readFails: false,
+  /** `ls-tree` printed more than `TREE_LISTING_MAX_BYTES` (SPEC-125 FR-125-02). */
+  listingExceeded: false,
   /** The blob IDs of every `readBlobs` call, in order. */
   reads: [] as string[][],
   /** The time limit of every `readBlobs` call, in order. */
@@ -65,6 +67,14 @@ vi.mock('../src/hosted-git', async (importOriginal) => {
           })
         : actual.readBlobs(...args);
     },
+    listSnapshot: (...args: Parameters<typeof actual.listSnapshot>) =>
+      hooks.listingExceeded
+        ? Promise.resolve({
+            ok: false,
+            code: 'git-failed',
+            message: 'git ls-tree printed more output than DirectiveBench reads.',
+          })
+        : actual.listSnapshot(...args),
   };
 });
 
@@ -86,6 +96,7 @@ afterEach(() => {
   hooks.beforeDiscovery = null;
   hooks.tooManyCandidates = false;
   hooks.readFails = false;
+  hooks.listingExceeded = false;
   hooks.reads = [];
   hooks.readTimeouts = [];
   handle.close();
@@ -127,6 +138,7 @@ async function prepare(
   return {
     run: () => scanHostedRepository(handle, { jobId: job.id, repository }, options),
     repository,
+    remote,
   };
 }
 
@@ -274,5 +286,44 @@ describe('scanHostedRepository limits and late failures', () => {
       code: 'repository-not-found',
       message: 'The repository was removed during the scan.',
     });
+  });
+});
+
+describe('scanHostedRepository failures mark nothing missing (SPEC-125 AC-4)', () => {
+  it('keeps every occurrence active when a per-scan limit or the tree listing limit stops the scan', async () => {
+    const { run, remote } = await prepare();
+    expect(await run()).toMatchObject({ ok: true, discovered: 2 });
+    // The skill is deleted upstream: a successful scan would mark it missing.
+    git(remote.work, ['rm', '-q', '-r', 'skill']);
+    remote.commit({}, 'delete skill');
+    const statuses = () =>
+      handle.sqlite
+        .prepare('select path, status from artifact_occurrences order by path')
+        .all()
+        .map((row) => [row.path, row.status]);
+    const active = [
+      ['AGENTS.md', 'active'],
+      ['skill', 'active'],
+    ];
+    const failures: [string, () => void][] = [
+      ['maxScanBytes', () => (hooks.maxScanBytes = 1)],
+      ['maxCandidatesPerScan', () => (hooks.tooManyCandidates = true)],
+      ['tree listing', () => (hooks.listingExceeded = true)],
+      ['blob read', () => (hooks.readFails = true)],
+    ];
+    for (const [, fail] of failures) {
+      fail();
+      expect(await run()).toMatchObject({ ok: false });
+      expect(statuses()).toEqual(active);
+      hooks.maxScanBytes = undefined;
+      hooks.tooManyCandidates = false;
+      hooks.listingExceeded = false;
+      hooks.readFails = false;
+    }
+    expect(await run()).toMatchObject({ ok: true, removedOccurrences: 1 });
+    expect(statuses()).toEqual([
+      ['AGENTS.md', 'active'],
+      ['skill', 'removed'],
+    ]);
   });
 });

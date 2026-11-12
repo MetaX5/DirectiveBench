@@ -887,9 +887,21 @@ describe('applyRepositoryScan', () => {
         unobserved: [],
         artifacts: [scanned('AGENTS.md', content)],
       });
-    expect(await apply('v1', first.jobId)).toEqual({ ...unmarked, createdArtifacts: 1, createdVersions: 1 });
-    expect(await apply('v1', first.jobId)).toEqual({ ...unmarked, createdArtifacts: 0, createdVersions: 0 });
-    expect(await apply('v2', first.jobId)).toEqual({ ...unmarked, createdArtifacts: 0, createdVersions: 1 });
+    expect(await apply('v1', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 1,
+      createdVersions: 1,
+    });
+    expect(await apply('v1', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 0,
+      createdVersions: 0,
+    });
+    expect(await apply('v2', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 0,
+      createdVersions: 1,
+    });
     const versions = await handle.db
       .select({ version: schema.artifactVersions.version })
       .from(schema.artifactVersions);

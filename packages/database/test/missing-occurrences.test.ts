@@ -184,7 +184,10 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
     await apply([scanned('AGENTS.md', 'keep'), scanned('skill', 'v1')]);
     const [, occurrence] = await occurrencesOf(handle, scan.repositoryId);
     const artifactId = occurrence?.artifactId ?? '';
-    const { suiteId, versionId: suiteVersionId } = await importSuiteVersion(handle, suiteInput('h'));
+    const { suiteId, versionId: suiteVersionId } = await importSuiteVersion(
+      handle,
+      suiteInput('h'),
+    );
     await addArtifactTag(handle, artifactId, 'security');
     await setArtifactNotes(handle.db, artifactId, 'Checked in client A.');
     await assignArtifactSuite(handle, artifactId, suiteId);
@@ -332,9 +335,10 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       create trigger refuse_status before update on repositories
       begin select raise(abort, 'refused by trigger'); end;
     `);
-    const failure = await scanWith(handle, scan)([scanned('AGENTS.md', 'x')]).catch(
-      (error: unknown) => error,
-    );
+    const failure = await scanWith(
+      handle,
+      scan,
+    )([scanned('AGENTS.md', 'x')]).catch((error: unknown) => error);
     handle.sqlite.exec('drop trigger refuse_status');
     expect(failure).toHaveProperty('cause.message', 'refused by trigger');
     expect(await statusByPath(handle, scan.repositoryId)).toEqual([
