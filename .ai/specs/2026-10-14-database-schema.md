@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-11-05
+updated: 2026-11-12
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -119,7 +119,7 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | path | text NOT NULL | repository-relative; skill root dir for skills |
 | latest_version_id | text NOT NULL | FK → artifact_versions |
 | commit_sha | text | |
-| status | text NOT NULL default `active` | `active` \| `removed` |
+| status | text NOT NULL default `active` | `active` \| `removed`; `removed` (shown as "missing") is set only by a complete scan that did not find the path, and a scan that finds it again sets `active` (SPEC-125 FR-125-04, FR-125-05); removing the repository deletes the row (cascade, SPEC-125 FR-125-14) |
 | last_seen_at | text NOT NULL | |
 | created_at, updated_at | text | |
 
