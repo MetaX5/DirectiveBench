@@ -42,7 +42,18 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
 ## Work performed
 
 - Red-first tests, then `agentReadinessHint` and its use in `doctorCommand`.
-- SPEC-009 §12: implementation-status entry for issue #204.
+- SPEC-009 §12: implementation-status entry for issue #204. Commit 2dc57d7; PR #211.
+- `om-auto-review-pr 211 --autofix`: approve-level (COMMENT on own PR), one minor (the
+  `auth-missing` hint after a probe failure) and one nit (an unusable key).
+- Codex adversarial review round 1: needs-attention, one medium finding, the same point:
+  `auth-missing` also covers a login probe that timed out, failed or gave unreadable output, and an
+  API key that is set but unusable. Fixed in d6cfa8a by rewording both `auth-missing` hints so they
+  fit every case and adding a doctor-level test (unreadable probe, planted multi-line key). The
+  readiness codes stay unchanged (the issue puts the probe out of scope).
+- Codex round 2: needs-attention, one medium finding: the subscription hint still pointed only at
+  login when the probe itself fails for a logged-in user. Fixed by a hint that covers both outcomes
+  (check `claude auth status`; `/login` when it shows no subscription login; fix or update Claude
+  Code when it fails or hangs) and a doctor test where the fake reports a login but exits 3.
 
 ## Verification
 
@@ -53,7 +64,7 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   with it (temporary edit reverted).
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
 - `pnpm test`: pass, 7/7 tasks, 100% lines, branches, functions and statements in every package
-  (CLI 192 tests).
+  (CLI 192 tests; 193 after the Codex fix, gate re-run after each Codex fix).
 - `pnpm build && pnpm verify:pack`: pass.
 - Real run: `node apps/cli/dist/cli.js doctor` and `doctor --json` from the build with
   `PATH=<fake bin>:<node>:/usr/bin:/bin`, the fake `claude` 2.1.302 reporting
@@ -66,7 +77,10 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
 
 ## Problems and deviations
 
-None.
+- CI `Unit tests (100% coverage)` failed on 2dc57d7 in `packages/runner`
+  `hosted-repository.test.ts > versions only changed content on a rescan …` (5 s test timeout on
+  the loaded Linux runner; untouched by this PR, passed locally and on macOS); the failed job was
+  re-run.
 
 ## Lessons recorded
 

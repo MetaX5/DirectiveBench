@@ -118,7 +118,7 @@ async function runDoctor(dataDir: string, json = true) {
 }
 
 const SUBSCRIPTION_LOGIN_HINT =
-  'Make sure `claude` starts and is logged in with a Claude subscription account (run `claude` and `/login`), or set ANTHROPIC_API_KEY to use API key mode.';
+  'Check `claude auth status`: if it shows no Claude subscription login, run `claude` and `/login`; if it fails or hangs, fix or update Claude Code and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
 const API_KEY_HINT =
   'Set ANTHROPIC_API_KEY to your full API key (at least 8 characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
 const GENERIC_HINT = 'Fix the problem described above, then run `directivebench doctor` again.';
@@ -366,13 +366,17 @@ describe('doctor', () => {
 
   // `auth-missing` also stands for a probe that gave no readable status and for a key that is set
   // but unusable; the hint must fit those details too and never echo the key.
-  it('gives probe failures and an unusable API key a hint that fits them', async () => {
+  it('gives a failing probe and an unusable API key a hint that fits them', async () => {
     const plantedKey = 'sk-ant-planted-multiline-key-0123456789\nsecond-line';
     vi.stubEnv('ANTHROPIC_API_KEY', plantedKey);
     const bin = tempDir();
     actualFs.writeFileSync(
       join(bin, 'claude'),
-      fakeClaudeScript('2.1.302 (Claude Code)', `echo 'unexpected output'; exit 3`),
+      // Logged in, but the probe itself fails: the hint must not only point at `/login`.
+      fakeClaudeScript(
+        '2.1.302 (Claude Code)',
+        `echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 3`,
+      ),
       { mode: 0o755 },
     );
     vi.stubEnv('PATH', bin);

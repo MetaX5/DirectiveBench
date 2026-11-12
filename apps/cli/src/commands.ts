@@ -141,7 +141,7 @@ const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => stri
   'auth-missing': (mode) =>
     mode === 'api-key'
       ? `Set ${CLAUDE_API_KEY_VARIABLE} to your full API key (at least ${MIN_KNOWN_SECRET_LENGTH} characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`
-      : `Make sure \`claude\` starts and is logged in with a Claude subscription account (run \`claude\` and \`/login\`), or ${USE_API_KEY_MODE}.`,
+      : `Check \`claude auth status\`: if it shows no Claude subscription login, run \`claude\` and \`/login\`; if it fails or hangs, fix or update Claude Code and run \`directivebench doctor\` again. Or ${USE_API_KEY_MODE}.`,
   'auth-expired': () =>
     `Run \`claude\` and \`/login\` to renew the expired login, or ${USE_API_KEY_MODE}.`,
   'auth-mismatch': () =>
