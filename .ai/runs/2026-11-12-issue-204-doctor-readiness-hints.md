@@ -64,6 +64,11 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   which also covers a failed or unreadable `claude --version`. Fixed by a hint that checks
   `claude --version` first (update only when it is older than the minimum, otherwise fix the cause
   the warning names) and a doctor test with a `--version` that exits 1. CLI tests: 194.
+- Codex round 5: needs-attention, one medium finding: the hint named bare `claude auth status`,
+  while the probe runs `claude --setting-sources project,local auth status --json` in an empty
+  directory (a user-level `apiKeyHelper` changes the bare command's answer). Fixed: the hint is
+  built from `CLAUDE_EXECUTABLE` and `CLAUDE_AUTH_STATUS_ARGS`, and a unit test pins it to them.
+  CLI tests: 195.
 
 ## Verification
 
@@ -74,7 +79,7 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   with it (temporary edit reverted).
 - `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
 - `pnpm test`: pass, 7/7 tasks, 100% lines, branches, functions and statements in every package
-  (CLI 192 tests, 194 after the Codex fixes; full gate including build and `verify:pack` re-run after each Codex fix).
+  (CLI 192 tests, 195 after the Codex fixes; full gate including build and `verify:pack` re-run after each Codex fix).
 - `pnpm build && pnpm verify:pack`: pass.
 - Real run: `node apps/cli/dist/cli.js doctor` and `doctor --json` from the build with
   `PATH=<fake bin>:<node>:/usr/bin:/bin`, the fake `claude` 2.1.302 reporting

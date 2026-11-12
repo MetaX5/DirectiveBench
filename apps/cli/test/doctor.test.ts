@@ -3,7 +3,11 @@ import { createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ClaudeReadinessCode } from '@directivebench/agent-adapters';
+import {
+  CLAUDE_AUTH_STATUS_ARGS,
+  CLAUDE_EXECUTABLE,
+  type ClaudeReadinessCode,
+} from '@directivebench/agent-adapters';
 import { agentReadinessHint, doctorCommand } from '../src/commands';
 import type * as RuntimeModule from '../src/runtime';
 import { ExitCode, checkSqlite, resolveAssets, type Assets } from '../src/runtime';
@@ -118,7 +122,7 @@ async function runDoctor(dataDir: string, json = true) {
 }
 
 const SUBSCRIPTION_LOGIN_HINT =
-  'Check `claude auth status`: if it shows no Claude subscription login, run `claude` and `/login`; otherwise fix the cause named in the warning (for example a `claude` that fails, hangs or cannot be started) and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
+  'Run `claude --setting-sources project,local auth status --json` in an empty directory (the probe doctor runs): if it shows no Claude subscription login, run `claude` and `/login`; otherwise fix the cause named in the warning (for example a `claude` that fails, hangs or cannot be started) and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
 const API_KEY_HINT =
   'Set ANTHROPIC_API_KEY to your full API key (at least 8 characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
 const VERSION_HINT =
@@ -439,6 +443,16 @@ describe('doctor', () => {
         expect(hint).not.toContain('sk-ant-planted-hint-key-0123456789');
       },
     );
+
+    it('names the exact login probe readiness runs, so the user sees what doctor saw', () => {
+      const hint = agentReadinessHint('claude-code', {
+        mode: 'subscription',
+        ready: false,
+        code: 'auth-missing',
+        detail: '',
+      });
+      expect(hint).toContain(`\`${[CLAUDE_EXECUTABLE, ...CLAUDE_AUTH_STATUS_ARGS].join(' ')}\``);
+    });
 
     it('names installing Claude Code when the binary is missing', () => {
       expect(

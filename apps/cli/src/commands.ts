@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   CLAUDE_API_KEY_VARIABLE,
+  CLAUDE_AUTH_STATUS_ARGS,
   CLAUDE_CODE_ADAPTER_ID,
   CLAUDE_CODE_MIN_VERSION,
   CLAUDE_EXECUTABLE,
@@ -125,6 +126,9 @@ async function caBundleCheck(env: NodeJS.ProcessEnv): Promise<Check> {
   };
 }
 
+/** The exact login probe of readiness, so a user reproduces what `doctor` saw. */
+const CLAUDE_AUTH_STATUS_COMMAND = [CLAUDE_EXECUTABLE, ...CLAUDE_AUTH_STATUS_ARGS].join(' ');
+
 const USE_API_KEY_MODE = `set ${CLAUDE_API_KEY_VARIABLE} to use API key mode`;
 
 /**
@@ -141,7 +145,7 @@ const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => stri
   'auth-missing': (mode) =>
     mode === 'api-key'
       ? `Set ${CLAUDE_API_KEY_VARIABLE} to your full API key (at least ${MIN_KNOWN_SECRET_LENGTH} characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`
-      : `Check \`claude auth status\`: if it shows no Claude subscription login, run \`claude\` and \`/login\`; otherwise fix the cause named in the warning (for example a \`claude\` that fails, hangs or cannot be started) and run \`directivebench doctor\` again. Or ${USE_API_KEY_MODE}.`,
+      : `Run \`${CLAUDE_AUTH_STATUS_COMMAND}\` in an empty directory (the probe doctor runs): if it shows no Claude subscription login, run \`claude\` and \`/login\`; otherwise fix the cause named in the warning (for example a \`claude\` that fails, hangs or cannot be started) and run \`directivebench doctor\` again. Or ${USE_API_KEY_MODE}.`,
   'auth-expired': () =>
     `Run \`claude\` and \`/login\` to renew the expired login, or ${USE_API_KEY_MODE}.`,
   'auth-mismatch': () =>
