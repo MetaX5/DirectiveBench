@@ -107,7 +107,7 @@ Written by `om-spec-writing --autonomous` for issue #21. None is marked
 `⚠ NEEDS HUMAN CONFIRMATION`: each default is reversible and keeps or adds history, never removes
 it. UI decisions are listed separately in §11.1. The maintainer approved the spec on 2026-11-12,
 with A7 changed to the empty-scan guard and every other row of §5a and §11.1 as written. The
-Phase 1 UI details are decided in §11.2.
+Phase 1 UI details are decided in §11.2, the Phase 2 ones in §11.3.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
@@ -164,9 +164,9 @@ Phase 1 UI details are decided in §11.2.
 | --- | --- |
 | FR-125-13 | **Impact.** `getRepositoryRemovalImpact(db, id)` returns, for a removable repository: its name, provider and location, `occurrences` (all its occurrence rows), `activeOccurrences`, and `artifactsLeftMissing`: artifacts with an active occurrence in this repository and no active occurrence in any other. Null for an unknown id or the `bundled-examples` repository (A15). |
 | FR-125-14 | **Remove.** `removeRepository(handle, id)` runs in one `withTransaction`: it reads the same counts, then deletes the repository row with one conditional statement (`DELETE … WHERE id = ? AND provider <> 'bundled-examples'`), which cascades to its occurrences and sets `artifact_versions.source_repository_id` to null (existing foreign keys). Artifacts, versions, categories, tags, notes, benchmark assignments and runs are not touched (FR-104-15). Outcomes: `{ status: 'removed', occurrences, artifactsLeftMissing }`, `{ status: 'not-found' }` (unknown or removed meanwhile), `{ status: 'not-removable' }` (`bundled-examples`). Any error rolls everything back. |
-| FR-125-15 | **Confirmation.** Every removable repository row on `/repositories` has an `outline` `sm` "Remove" button named "Remove <name>". It writes nothing: it opens the Risky-action panel for that repository (§11, UD-5) with the question, the counts from FR-125-13, what is kept, that files in the location are not touched, that a hosted download stays in the cache (A14), and that registering it again creates new artifacts (A17). Only the `destructive` "Remove repository" button submits; Cancel writes nothing. |
+| FR-125-15 | **Confirmation.** Every removable repository row on `/repositories` has an `outline` `sm` "Remove" button named "Remove <name>". It writes nothing: it opens the Risky-action panel for that repository (§11, UD-5) with the question (naming the repository's name, provider and location, §11.3 D14), the counts from FR-125-13, what is kept, that files in the location are not touched, that a hosted download stays in the cache (A14), and that registering it again creates new artifacts instead of reusing these ones (A17, §11.3 D15). Only the `destructive` "Remove repository" button submits; Cancel writes nothing and returns to the row (§11.3 D19). |
 | FR-125-16 | **Action.** `removeRepositoryAction` parses `FormData` with a Zod schema (`repositoryId`), calls `removeRepository` only, revalidates the `/repositories` page and the `/artifacts` and `/categories` layouts and `/`, and returns to `/repositories` with the outcome (§10). It never touches the file system and never runs a process (SPEC-003 §2.1, SPEC-014). |
-| FR-125-17 | **After removal.** The removed repository's artifacts that had no other active occurrence are missing (FR-125-08) with `lastFoundAt = null` and their own note text (§11); the Versions tab's First seen column already reads "Unknown repository" for versions whose source repository is gone (issue #65). |
+| FR-125-17 | **After removal.** The removed repository's artifacts that had no other active occurrence are missing (FR-125-08) with `lastFoundAt = null` and their own note text (§11); the Versions tab's First seen column already reads "Unknown repository" for versions whose source repository is gone (issue #65). An artifact with no occurrence left shows a sentence in its Occurrences card instead of an empty table (§11.3 D21). |
 
 ## 7. Non-functional requirements
 
@@ -350,9 +350,10 @@ with `getRepositoryRemovalImpact` → "Remove repository" posts `removeRepositor
 - `removeRepositoryAction(formData)`: `{ repositoryId }` parsed with
   `z.object({ repositoryId: z.string().min(1) })`, the schema the Scan action uses.
   Outcomes redirect to `/repositories` with:
-  - `removed`: `?removedOccurrences=<n>&missingArtifacts=<m>` (non-negative integers, parsed with
-    Zod; the result line names no repository, which no longer exists, so a crafted URL can only
-    show other numbers);
+  - `removed`: `?removedOccurrences=<n>&missingArtifacts=<m>#remove-result` (non-negative
+    integers, parsed with Zod; the result line names no repository, which no longer exists, so a
+    crafted URL can only show other numbers; the fragment scrolls the result line into view,
+    §11.3 D19);
   - `not-found`: `?removeError=not-found`;
   - `not-removable` or invalid input: `?removeError=invalid`;
   - an error thrown by the transaction: `?removeError=failed`.
@@ -403,7 +404,8 @@ contains no en or em dash.
   pattern puts the panel under the form that asked; here the asking control is a table row, and a
   panel inside a row would squeeze it, so it sits at the top of the same Card, first in reading
   order:
-  - Question: "Remove client-a?"
+  - Question: "Remove client-a (Local Git, /home/dev/client-a)?" (name, provider and location,
+    since names are not unique; §11.3 D14)
   - Reasons (each a sentence; counts formatted with `toLocaleString('en-US')` as in SPEC-124):
     - "Its 14 occurrences are deleted from DirectiveBench." (1: "Its 1 occurrence is …"; 0:
       "It has no occurrences.")
@@ -412,18 +414,28 @@ contains no en or em dash.
       repository, or is already missing.")
     - Local: "Nothing in /home/dev/client-a is changed." Hosted: "The copy downloaded from GitHub
       stays in DirectiveBench's cache. Deleting it is planned." (A14)
-    - "Registering it again later creates new artifacts; these ones stay missing." (A17)
+    - "Registering it again later creates new artifacts instead of reusing these ones." (A17,
+      §11.3 D15)
+    - With 0 occurrences only the first and the location reasons are shown (§11.3 D15).
   - `destructive` `sm` Button "Remove repository" (posts the action) and a Cancel link to
-    `/repositories` styled like the Register-anyway Cancel (`text-ui underline`), since it
-    navigates.
+    `/repositories#repository-<id>` (the row that asked; each row carries
+    `id="repository-<id>"`, §11.3 D19) styled like the Register-anyway Cancel
+    (`text-ui underline`), since it navigates.
   - The GET form's action is `/repositories#remove-panel` and the panel carries
     `id="remove-panel"` and `tabIndex={-1}`, so the browser scrolls to it and starts keyboard
     navigation there after the page loads, without client code (the Playwright test checks in
     Chromium that the next Tab reaches "Remove repository"; where a browser ignores the fragment,
-    the panel is still the first content of the Card). Cancel returns to the plain page.
-- After removal, a `role="status"` line above the table: "Repository removed: 14 occurrences
-  deleted, 9 artifacts now missing from every repository. Their history is kept." `not-found`:
-  `role="alert"` "That repository is no longer registered. Nothing was removed."
+    the panel is still the first content of the Card). Cancel returns to the plain page,
+    scrolled to the row that asked (§11.3 D19).
+- After removal, a `role="status"` line `id="remove-result"` in the page-level slot shared with
+  the scan request error, between the Register card and the list (not inside the list Card,
+  which the EmptyState replaces after the last removal; §11.3 D18): "Repository removed: 14
+  occurrences deleted, 9 artifacts now missing from every repository. Their history is kept."
+  (singular, zero-missing and zero-occurrence forms in §11.3 D18). `not-found`: `role="alert"`
+  "That repository is no longer registered. Nothing was removed."
+- On `/artifacts/[id]`, an artifact with no occurrence left shows "No occurrences left: the
+  repositories it was found in were removed." in its Occurrences card instead of an empty table
+  (§11.3 D21).
 
 - The PageHeader's planned Badge changes to "Planned: not implemented: private repositories,
   GitLab, removing a repository" in Phase 1 and to "Planned: not implemented: private
@@ -478,6 +490,34 @@ the card, is 7.61 light and 9.41 dark.
 | D9 | Design-system docs | No new component, variant or token. Text-only story updates (D7). One rule added to the Detail view pattern (`stories/patterns/detail-view.mdx`): an item whose source is gone keeps its page, with a muted Badge in the header and a `role="note"` under it that says what is kept and how it comes back; a static `MissingItem` story in `detail-view.stories.tsx`, checked in both themes by `pnpm test:storybook` |
 | D10 | Keyboard, 320px, a11y | Phase 1 adds no focusable element; the tab order of the three pages is unchanged. At 320px the header Badges wrap under the title, the note wraps, the Occurrences table scrolls inside its container |
 | D11 | Playwright contrast coverage | `text-contrast.spec.ts` also scans `/artifacts/<demo id>` and `/artifacts` with the demo occurrence set to `removed` through `withDatabase` and restored in `finally`; the scan line clauses are covered in `repositories.spec.ts` by the delete and rescan flow (§15) |
+
+### 11.3 Phase 2 UI decisions (maintainer decision, 2026-11-12)
+
+Refinements of §10, §11 and §11.1 (UD-5 to UD-7) for Phase 2, approved by the maintainer on
+2026-11-12, including the points that differ from the §11 text as first written (D14, D15, D18,
+D19, D21, D25); the spec text above is corrected to match. None needs a new component, variant or
+token, and there is no Dialog (the design system has none; the Risky-action pattern is an inline
+panel). Contrast (WCAG 2.x, rendered pixels in the built Storybook): the lowest pair is the
+destructive "Remove repository" on hover over the panel, 5.29 light and 4.81 dark; every other
+text pair is at least 5.5:1, focus indicators at least 5.7:1.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| D12 | Entry point (UD-5, FR-125-15) | Each removable row: after Scan, an `outline` `sm` Button "Remove", `aria-label="Remove <name>"`, in a `GET` `<form action="/repositories#remove-panel">` with a hidden `remove` field. The actions cell holds both forms in `<div className="flex flex-wrap justify-end gap-inline">`. The `bundled-examples` row has neither button. `canRemove(repository)` in `lib/repositories.ts` decides; a `gitlab` row would get Remove but no Scan. The `GET` form leaves out `scan` and `registration`, so the panel page has no `AutoRefresh` |
+| D13 | Where the panel sits | At the top of the Registered repositories `CardContent`, before the table, `id="remove-panel"`, `tabIndex={-1}`, `role="alert"`, the "Register anyway" classes plus `mb-4 min-w-0 outline-none`; `wrap-anywhere` on the question and reasons so a long URL does not widen it at 320px |
+| D14 | Question (Risky rule 1) | "Remove client-a (Local Git, /home/dev/client-a)?", the location in `font-mono`, the format of `describeRegistration`. **Differs from §11 as first written** ("Remove client-a?"): names are not unique (only provider plus location is), and the hosted reasons never show the location. Row buttons keep "Remove <name>" (issue 215) |
+| D15 | Reasons (FR-125-15, UD-7) | In order, counts with `formatCount`: (1) "Its 14 occurrences are deleted from DirectiveBench." / "Its 1 occurrence is deleted from DirectiveBench." / "It has no occurrences." (2) "9 artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept." / "1 artifact is then missing from every repository. Its versions, …" / "Every artifact found here is also found in another repository, or is already missing." (3) local: "Nothing in /home/dev/client-a is changed." / hosted: "The copy downloaded from GitHub stays in DirectiveBench's cache. Deleting it is planned." (4) "Registering it again later creates new artifacts instead of reusing these ones." With 0 occurrences only (1) and (3). Built by `removalReasons(impact)`. **Differs from §11 as first written** in (4) ("…; these ones stay missing." is false for an artifact also found elsewhere) and in the 0-occurrence omission |
+| D16 | Buttons in the panel (Risky rules 3, 4) | `destructive` `sm` `type="submit"` "Remove repository" in a POST form with a hidden `repositoryId` and `action={removeRepositoryAction}`, then a Cancel `Link` (`text-ui underline`); the form has `flex flex-wrap items-center gap-inline` |
+| D17 | Disabled and pending states | None. Remove stays enabled while a scan runs (A16); no pending text (no client component). A double submit gets `not-found` on the second post, whose alert is true |
+| D18 | Success and error lines (§10, §13) | One line `id="remove-result"` in the page-level slot shared with `scan-request-error`. Success, `role="status"` `text-ui text-success-foreground`: "Repository removed: 14 occurrences deleted, 9 artifacts now missing from every repository. Their history is kept." / for 1: "1 occurrence deleted", "1 artifact now missing from every repository. Its history is kept." / 0 missing: "Repository removed: 3 occurrences deleted. No artifact became missing." / 0 occurrences: "Repository removed. It had no occurrences." Errors, `role="alert"` `text-ui text-destructive-foreground`: not-found "That repository is no longer registered. Nothing was removed."; invalid "The form was incomplete. Reload the page and try again."; failed "The repository could not be removed. Nothing was changed." `?remove=<unknown id>`: `role="status"` `text-ui` "That repository is no longer registered." **Differs from §11 as first written** ("above the table"): after the last removal the EmptyState replaces the Card |
+| D19 | Focus and scroll after navigation | The Remove form's action carries `#remove-panel`. Cancel goes to `/repositories#repository-<id>` and each `TR` gets `id="repository-<id>"`. The success redirect carries `#remove-result`. Verified in Playwright (Chromium) after a full page load and after the Server Action redirect. **Differs from §11 as first written** (plain `/repositories` for Cancel and the redirect) |
+| D20 | Empty state after the last repository | The unchanged EmptyState "No repositories yet", with the D18 success line above it |
+| D21 | A removed repository's artifacts afterwards (FR-125-17) | Unchanged from Phase 1 (list Badge, Occurrences 0, header Badge, the second `missingNote` text, "Unknown repository" on Versions). New: with no occurrence left, the Occurrences card shows `<p className="text-body text-muted-foreground">No occurrences left: the repositories it was found in were removed.</p>` instead of an empty table (Table page: never an empty table). **A gap the spec as first written did not cover** |
+| D22 | Planned Badge on `/repositories` | "Planned: not implemented: private repositories, GitLab" (§11.2 D7); the `WithPlannedNotice` and `LongTextNarrowScreen` stories and the Phase 1 e2e assertion get the new text |
+| D23 | Scan explanation and the A7 sentence | The empty-scan sentence gets the suffix " If they were deleted on purpose, remove the repository." (FR-125-12) in `occurrenceChanges`; the scan explanation does not change |
+| D24 | Keyboard, 320px, a11y | Native buttons and links only. Tab order on the panel page: nav, Register form, the panel (start point after the fragment), "Remove repository", Cancel, the table container, then each row's Scan and Remove. At 320px the reasons and question wrap, the URL breaks, the table scrolls inside its container, no page scroll. A `role="alert"` panel present at load is usually not announced (accepted, as for "Register anyway") |
+| D25 | Design-system docs | No new component, variant or token. `risky-action.mdx` gains rule 7: "When the asking control is a table row, the panel opens through a `GET` form at the top of the Card that holds the table, with `id` and `tabIndex=-1` as the form's fragment target; Cancel is a link back to the row (SPEC-125)", plus a static `FromTableRow` story (both themes, axe). `what-is-missing.mdx` row E02-S03 becomes built (SPEC-125, no new primitive; Show removed is issue 53). The two D22 story texts. **A docs change the spec as first written did not list** |
+| D26 | Playwright coverage (AC-8) | (1) `missing-occurrences.spec.ts`: Remove, the panel with its counts, Tab reaches "Remove repository", Cancel writes nothing and returns to the row, confirm, the status line, the list Badge, the "repositories were removed" note and the D21 sentence; the empty scan then Remove (AC-10); `bundled-examples` has no Remove (AC-7); 320px with the panel open; `scanTextContrast` with the panel open in both themes. (2) `text-contrast.spec.ts`: the result and error lines through crafted URLs, with no database write. (3) `ui-contrast.spec.ts`: row Remove and the destructive confirm at rest, hover and focus, and the panel focus ring. The spec removes its fixture repository and jobs afterwards |
 
 ## 12. Security considerations
 
@@ -614,8 +654,9 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   note; delete every skill and rescan → the empty-scan sentence and nothing missing, then Remove →
   missing (AC-10, Phase 2); `bundled-examples` has no Remove. Keyboard only, 320px, both themes in the contrast
   specs. The spec leaves the shared database as it found it (lesson 2026-11-10).
-- **Storybook**: no new component; the Risky-action stories are unchanged. If UD-2 or UD-5 change
-  to a new variant, it gets stories in both themes with axe.
+- **Storybook**: no new component or variant. The Risky-action pattern gains rule 7 (a panel
+  opened from a table row) and a static `FromTableRow` story, checked in both themes with axe;
+  `what-is-missing.mdx` marks E02-S03 as built (§11.3 D25).
 
 ## 16. Acceptance criteria
 
