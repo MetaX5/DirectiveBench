@@ -1,7 +1,7 @@
 ---
 id: SPEC-125
 title: Removed files are marked missing and their history is kept; repositories can be removed (E02-S03)
-status: draft
+status: approved
 created: 2026-11-12
 updated: 2026-11-12
 category: feature
@@ -105,8 +105,9 @@ and a "Show removed" filter (issue #53) stay out (§4, §5a).
 
 Written by `om-spec-writing --autonomous` for issue #21. None is marked
 `⚠ NEEDS HUMAN CONFIRMATION`: each default is reversible and keeps or adds history, never removes
-it. UI decisions are listed separately in §11.1. The maintainer confirms or changes each row
-before approving the spec.
+it. UI decisions are listed separately in §11.1. The maintainer approved the spec on 2026-11-12,
+with A7 changed to the empty-scan guard and every other row of §5a and §11.1 as written;
+implementation has not started.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
