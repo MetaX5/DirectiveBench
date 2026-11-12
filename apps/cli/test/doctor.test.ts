@@ -118,7 +118,7 @@ async function runDoctor(dataDir: string, json = true) {
 }
 
 const SUBSCRIPTION_LOGIN_HINT =
-  'Check `claude auth status`: if it shows no Claude subscription login, run `claude` and `/login`; if it fails or hangs, fix or update Claude Code and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
+  'Check `claude auth status`: if it shows no Claude subscription login, run `claude` and `/login`; otherwise fix the cause named in the warning (for example a `claude` that fails, hangs or cannot be started) and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
 const API_KEY_HINT =
   'Set ANTHROPIC_API_KEY to your full API key (at least 8 characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
 const GENERIC_HINT = 'Fix the problem described above, then run `directivebench doctor` again.';

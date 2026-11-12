@@ -54,6 +54,12 @@ a hint …` passes with a logged-out `claude` on PATH; 100% coverage; no secret 
   login when the probe itself fails for a logged-in user. Fixed by a hint that covers both outcomes
   (check `claude auth status`; `/login` when it shows no subscription login; fix or update Claude
   Code when it fails or hangs) and a doctor test where the fake reports a login but exits 3.
+- Codex round 3: needs-attention, one medium finding: a probe that fails before `claude` starts
+  (no temporary directory) is not a Claude Code problem. Fixed by wording the second branch as
+  "otherwise fix the cause named in the warning (for example a `claude` that fails, hangs or cannot
+  be started)". No doctor-level test for that path: the version probe runs first through the same
+  `runProbe`, so a persistent temporary-directory failure surfaces as `version-unsupported`, and
+  only a transient one could reach `auth-missing` (not deterministic to construct).
 
 ## Verification
 
