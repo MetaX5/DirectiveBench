@@ -1,13 +1,19 @@
 import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  CLAUDE_API_KEY_VARIABLE,
+  CLAUDE_AUTH_STATUS_ARGS,
   CLAUDE_CODE_ADAPTER_ID,
+  CLAUDE_CODE_MIN_VERSION,
+  CLAUDE_EXECUTABLE,
   CLI_AGENTS,
   createExecutableAdapters,
   detectCliAgent,
   readVersionLine,
+  type AgentModeReadiness,
+  type ClaudeReadinessCode,
 } from '@directivebench/agent-adapters';
-import { dataDirLayout, resolveDataDir } from '@directivebench/core';
+import { MIN_KNOWN_SECRET_LENGTH, dataDirLayout, resolveDataDir } from '@directivebench/core';
 import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@directivebench/database';
 import {
   CA_BUNDLE_VARIABLE,
@@ -118,6 +124,44 @@ async function caBundleCheck(env: NodeJS.ProcessEnv): Promise<Check> {
         ? `${CA_BUNDLE_VARIABLE} not set (git's default CA bundle)`
         : `${CA_BUNDLE_VARIABLE} is set and resolves to a readable regular file`,
   };
+}
+
+/** The exact login probe of readiness, so a user reproduces what `doctor` saw. */
+const CLAUDE_AUTH_STATUS_COMMAND = [CLAUDE_EXECUTABLE, ...CLAUDE_AUTH_STATUS_ARGS].join(' ');
+
+const USE_API_KEY_MODE = `set ${CLAUDE_API_KEY_VARIABLE} to use API key mode`;
+
+/**
+ * Remediation hint per SPEC-203 §9 readiness code (SPEC-009 §4: every non-`ok` check has one).
+ * `auth-missing` also covers a login probe that timed out, failed or gave unreadable output, and
+ * an API key that is set but unusable, so its hints cover those cases too. Hints name the
+ * variable to set, never its value.
+ */
+const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => string> = {
+  'binary-not-found': () =>
+    `Install Claude Code and make sure \`${CLAUDE_EXECUTABLE}\` is on PATH.`,
+  'version-unsupported': () =>
+    `Check \`claude --version\`: if it shows a version older than ${CLAUDE_CODE_MIN_VERSION}, update Claude Code; otherwise fix the cause named in the warning (for example a \`claude\` that fails or cannot be started). Then run \`directivebench doctor\` again.`,
+  'auth-missing': (mode) =>
+    mode === 'api-key'
+      ? `Set ${CLAUDE_API_KEY_VARIABLE} to your full API key (at least ${MIN_KNOWN_SECRET_LENGTH} characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`
+      : `Run \`${CLAUDE_AUTH_STATUS_COMMAND}\` in an empty directory (the probe doctor runs): if it shows no Claude subscription login, run \`claude\` and \`/login\`; otherwise fix the cause named in the warning (for example a \`claude\` that fails, hangs or cannot be started) and run \`directivebench doctor\` again. Or ${USE_API_KEY_MODE}.`,
+  'auth-expired': () =>
+    `Run \`claude\` and \`/login\` to renew the expired login, or ${USE_API_KEY_MODE}.`,
+  'auth-mismatch': () =>
+    `Run \`claude\` and \`/login\` with a Claude subscription account (not an API key or key helper), or ${USE_API_KEY_MODE}.`,
+};
+
+/** Hint for an auth mode that is not ready; a generic one for a code no table covers. */
+export function agentReadinessHint(agentId: string, { mode, code }: AgentModeReadiness): string {
+  if (
+    agentId !== CLAUDE_CODE_ADAPTER_ID ||
+    code === null ||
+    !Object.hasOwn(CLAUDE_READINESS_HINTS, code)
+  ) {
+    return 'Fix the problem described above, then run `directivebench doctor` again.';
+  }
+  return CLAUDE_READINESS_HINTS[code as ClaudeReadinessCode](mode);
 }
 
 /** Read-only diagnostics; never creates or migrates anything. */
@@ -254,6 +298,7 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
         `agent:${descriptor.id}:${mode.mode}`,
         mode.ready || detection.auth === 'ready' ? 'ok' : 'warn',
         mode.ready ? `ready: ${mode.detail}` : `not ready (${mode.code}): ${mode.detail}`,
+        agentReadinessHint(descriptor.id, mode),
       );
     }
   }
