@@ -3,7 +3,8 @@ import { createServer, type AddressInfo, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { doctorCommand } from '../src/commands';
+import type { ClaudeReadinessCode } from '@directivebench/agent-adapters';
+import { agentReadinessHint, doctorCommand } from '../src/commands';
 import type * as RuntimeModule from '../src/runtime';
 import { ExitCode, checkSqlite, resolveAssets, type Assets } from '../src/runtime';
 import { initialize } from '../src/setup';
@@ -115,6 +116,12 @@ async function runDoctor(dataDir: string, json = true) {
   const output = JSON.parse(lines.at(-1) ?? '') as { checks: Check[] };
   return { code, checks: output.checks, lines };
 }
+
+const SUBSCRIPTION_LOGIN_HINT =
+  'Run `claude` and `/login` with a Claude subscription account, or set ANTHROPIC_API_KEY to use API key mode.';
+const API_KEY_HINT =
+  'Set ANTHROPIC_API_KEY in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
+const GENERIC_HINT = 'Fix the problem described above, then run `directivebench doctor` again.';
 
 const find = (checks: Check[], name: string) => checks.find((c) => c.name === name);
 
@@ -289,14 +296,114 @@ describe('doctor', () => {
         status: 'warn',
         detail:
           'not ready (auth-missing): Not logged in: run `claude` and `/login`, or use API key mode.',
+        hint: SUBSCRIPTION_LOGIN_HINT,
       },
       {
         name: 'agent:claude-code:api-key',
         status: 'warn',
         detail:
           "not ready (auth-missing): ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
+        hint: API_KEY_HINT,
       },
     ]);
+  });
+
+  // Issue 204: every readiness warning names the next step (SPEC-009 §4), in both output forms.
+  it('prints a remediation hint under each readiness warning in text form', async () => {
+    const bin = tempDir();
+    actualFs.writeFileSync(
+      join(bin, 'claude'),
+      fakeClaudeScript('2.1.302 (Claude Code)', `echo '{"loggedIn":false}'; exit 1`),
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', bin);
+    const { lines } = await runDoctor(await initialisedDataDir(), false);
+    const subscription = lines.findIndex((l) =>
+      l.startsWith('warn  agent:claude-code:subscription'),
+    );
+    expect(lines[subscription + 1]).toBe(`      → ${SUBSCRIPTION_LOGIN_HINT}`);
+    const apiKey = lines.findIndex((l) => l.startsWith('warn  agent:claude-code:api-key'));
+    expect(lines[apiKey + 1]).toBe(`      → ${API_KEY_HINT}`);
+  });
+
+  it.each([
+    {
+      code: 'auth-expired',
+      version: '2.1.302 (Claude Code)',
+      auth: `echo 'Login expired · Please run /login'; exit 1`,
+      hint: 'Run `claude` and `/login` to renew the expired login, or set ANTHROPIC_API_KEY to use API key mode.',
+    },
+    {
+      code: 'auth-mismatch',
+      version: '2.1.302 (Claude Code)',
+      auth: `echo '{"loggedIn":true,"authMethod":"api_key_helper"}'`,
+      hint: 'Run `claude` and `/login` with a Claude subscription account (not an API key or key helper), or set ANTHROPIC_API_KEY to use API key mode.',
+    },
+    {
+      code: 'version-unsupported',
+      version: 'not a version',
+      auth: 'exit 1',
+      hint: 'Update Claude Code to 2.1.259 or newer, then run `directivebench doctor` again.',
+    },
+  ])(
+    'gives the subscription check a $code hint when no mode is ready',
+    async ({ code, version, auth, hint }) => {
+      const bin = tempDir();
+      actualFs.writeFileSync(join(bin, 'claude'), fakeClaudeScript(version, auth), {
+        mode: 0o755,
+      });
+      vi.stubEnv('PATH', bin);
+      const { checks } = await runDoctor(await initialisedDataDir());
+      expect(find(checks, 'agent:claude-code:subscription')).toMatchObject({
+        status: 'warn',
+        detail: expect.stringContaining(`not ready (${code})`),
+        hint,
+      });
+      const warnings = checks.filter((c) => c.status !== 'ok');
+      expect(warnings.every((c) => c.hint)).toBe(true);
+    },
+  );
+
+  describe('agentReadinessHint (issue 204)', () => {
+    // A Record over the union fails to type-check when SPEC-203 §9 gains a code without a hint row.
+    const codes = Object.keys({
+      'binary-not-found': true,
+      'version-unsupported': true,
+      'auth-missing': true,
+      'auth-expired': true,
+      'auth-mismatch': true,
+    } satisfies Record<ClaudeReadinessCode, true>) as ClaudeReadinessCode[];
+
+    it.each(codes.flatMap((code) => ['subscription', 'api-key'].map((mode) => ({ code, mode }))))(
+      'has a hint for $code in $mode mode that names no secret',
+      ({ code, mode }) => {
+        vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-planted-hint-key-0123456789');
+        const hint = agentReadinessHint('claude-code', { mode, ready: false, code, detail: '' });
+        expect(hint).not.toBe(GENERIC_HINT);
+        expect(hint.length).toBeGreaterThan(0);
+        expect(hint).not.toContain('sk-ant-planted-hint-key-0123456789');
+      },
+    );
+
+    it('names installing Claude Code when the binary is missing', () => {
+      expect(
+        agentReadinessHint('claude-code', {
+          mode: 'subscription',
+          ready: false,
+          code: 'binary-not-found',
+          detail: '',
+        }),
+      ).toBe('Install Claude Code and make sure `claude` is on PATH.');
+    });
+
+    it('falls back to a generic hint for another agent or an unknown code', () => {
+      const readiness = { mode: 'subscription', ready: false, code: 'auth-missing', detail: '' };
+      expect(agentReadinessHint('codex', readiness)).toBe(GENERIC_HINT);
+      expect(agentReadinessHint('claude-code', { ...readiness, code: 'something-new' })).toBe(
+        GENERIC_HINT,
+      );
+      expect(agentReadinessHint('claude-code', { ...readiness, code: null })).toBe(GENERIC_HINT);
+    });
   });
 
   it('reports an unsupported version for every mode and never prints the API key', async () => {
@@ -312,6 +419,7 @@ describe('doctor', () => {
       status: 'warn',
       detail:
         'not ready (version-unsupported): Claude Code 2.1.0 is older than the minimum 2.1.259; update it.',
+      hint: 'Update Claude Code to 2.1.259 or newer, then run `directivebench doctor` again.',
     });
     expect(lines.join('\n')).not.toContain('sk-ant-planted-doctor-key');
   });
