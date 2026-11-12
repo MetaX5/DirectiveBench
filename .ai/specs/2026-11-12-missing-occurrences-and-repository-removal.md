@@ -12,7 +12,7 @@ related: [SPEC-103, SPEC-104, SPEC-105, SPEC-101, SPEC-102, SPEC-006, SPEC-007, 
 
 ## 1. Summary
 
-**Proposed, not implemented.** Today a rescan only adds and updates: when a skill, instruction
+**Phase 1 implemented (2026-11-12, §20); Phase 2 (repository removal) not implemented.** Before this spec a rescan only added and updated: when a skill, instruction
 or rule file is deleted from a registered repository, its occurrence stays `active` forever, the
 Artifacts list keeps counting it as found, and nothing tells the user it is gone
 (`applyRepositoryScan`, `packages/database/src/repositories/artifacts.ts`: "Occurrences that were
@@ -619,23 +619,23 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: Given a skill deleted from a repository, when the repository is rescanned
+- [x] AC-1: Given a skill deleted from a repository, when the repository is rescanned
   successfully and the scan finds at least one artifact (A7, AC-10), then its occurrence is marked missing (`removed`), for `local-directory`,
   `local-git` and `github` (issue AC 1, SPEC-013 M1 AC4).
-- [ ] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
+- [x] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
   benchmark assignments and evaluation history remain visible on its page, which says it is
   missing and when it was last found (issue AC 2).
 - [ ] AC-3: Given a removed repository, then its occurrences are deleted, but artifacts and
   versions (with `source_repository_id` null), categories, notes and results are kept; removal
   happens only after the inline confirmation that states the counts, and Cancel writes nothing
   (issue AC 3, FR-104-15).
-- [ ] AC-4: Given a repository whose scan failed, was cancelled, or stopped at a per-scan limit
+- [x] AC-4: Given a repository whose scan failed, was cancelled, or stopped at a per-scan limit
   before its apply transaction committed, then none of its occurrences is marked missing; and in
   a successful scan, occurrences covered by a discovery error, an unreadable directory (also one
   inside a skill) or a skipped user-level folder stay active (issue AC 4).
-- [ ] AC-5: Given a missing occurrence whose path is found again by a successful scan, then it is
+- [x] AC-5: Given a missing occurrence whose path is found again by a successful scan, then it is
   active again with the same artifact, reusing the matching version or adding the next one.
-- [ ] AC-6: The scan result line states how many occurrences went missing and how many were found
+- [x] AC-6: The scan result line states how many occurrences went missing and how many were found
   again.
 - [ ] AC-7: The `bundled-examples` repository cannot be removed, and the example import never marks
   anything missing.
@@ -683,10 +683,43 @@ confirm or change before approving the spec.
 
 ## 20. Implementation status
 
-- **Not implemented.** Nothing in this spec is built. Today: nothing sets
-  `artifact_occurrences.status = 'removed'`; reactivation of a removed occurrence by path already
-  happens in `writeArtifactVersion` (it sets `status: 'active'`) but cannot be reached; there is
-  no repository removal.
+- **Phase 1 implemented (verified on 2026-11-12):**
+  - Core: `DiscoveryResult.unobserved` in `discoverArtifacts` and `discoverArtifactsInTree`
+    (error paths, unreadable and changed directories including those folded into a skill's
+    error, skipped directories, `.` for a skipped root) and `unseenOccurrencePaths`
+    (`packages/core/src/repository-path.ts`). Verified by `packages/core/test/discovery.test.ts`,
+    `discovery-tree.test.ts` and `repository-path.test.ts` (equal, inside, containing, `''` and
+    `.` on either side, sibling prefixes, Unicode, 10,000 occurrences).
+  - Database: the marking step in `applyRepositoryScan` with the A7 guard, batches of
+    `REMOVED_OCCURRENCE_BATCH_SIZE` (500), `removedOccurrences`, `reactivatedOccurrences`,
+    `emptyScanKeptOccurrences`; `missing` on `ArtifactListItem`; `missing` and `lastFoundAt` on
+    the detail; the three counts in `repositoryScanResultSchema` with `.default(0)`. Verified by
+    `packages/database/test/missing-occurrences.test.ts` (other repositories untouched, version,
+    commit and `last_seen_at` kept, `updated_at` set, unobserved paths kept, A7, reactivation
+    with equal and changed content keeping tags, notes, categories, suites and runs, cancelled,
+    aborted and removed-repository scans, rollback through a SQLite trigger, an old result that
+    parses) and `artifacts.test.ts`. NFR-125-02: marking 10,000 occurrences, including inserting
+    them, took 84 ms in that test on the development machine.
+  - Runner: both scans pass `discovery.unobserved` and copy the counts. Verified by
+    `packages/runner/test/missing-occurrences.test.ts` (`local-directory` and `local-git`:
+    delete, restore, delete every artifact; a `local-git` branch switch; location gone or
+    replaced by a symlink; `maxCandidatesPerScan` and `maxScanBytes`; a cancellation after
+    discovery; unreadable directories outside and inside a skill with a nested skill below; a
+    too-large skill; the 101st error's occurrence) and the SPEC-125 tests in
+    `hosted-repository.test.ts` (`github`: delete, restore, an empty commit; cache limit, read
+    limit, fetch time limit) and `hosted-repository-limits.test.ts` (`maxScanBytes`, too many
+    candidates, the tree listing limit, a failed blob read). Cancellation inside the apply
+    transaction is covered by the existing `repository-scan.test.ts` shutdown test.
+  - Web: `describeScan` clauses and the `warning` kind, `missingNote`,
+    `occurrenceStatusLabel`; the Missing Badge and note on `/artifacts/[id]`, the list cell
+    Badge, the planned Badge text and the scan explanation on `/repositories` (§11.2 D1 to D11),
+    the Detail view rule and `MissingItem` story. Verified by `apps/web/test/repositories.test.ts`
+    and `artifacts.test.ts`, `apps/web/e2e/missing-occurrences.spec.ts` (delete, rescan, list,
+    page and every tab, restore, empty scan with the warning line, keyboard order, 320px,
+    contrast in both themes) and `text-contrast.spec.ts` (a missing demo artifact).
+- **Not implemented (Phase 2):** `getRepositoryRemovalImpact`, `removeRepository`, the Remove
+  button, the Risky-action panel and the removal result lines (FR-125-13 to FR-125-17); the
+  "repositories were removed" note text exists but is reachable only after Phase 2.
 
 ## 21. Phasing and implementation plan
 
