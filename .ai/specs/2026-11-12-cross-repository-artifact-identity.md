@@ -87,8 +87,10 @@ Prior art (from the tools' public documentation, not re-checked in this run):
 - G3: Same-named artifacts of the same type with different content are never merged and are
   visibly marked as possible duplicates.
 - G4: Identity is independent of scan order and of the slug: scanning A then B gives the same
-  artifacts as B then A (up to which copy was first seen). Version **numbers** of edits made in
-  two copies between scans follow scan order; lineage (A19) and comparisons do not.
+  artifacts as B then A (up to which copy was first seen), when every copy's content was already
+  recorded or is new everywhere. Version **numbers** of edits made in two copies between scans
+  follow scan order; lineage (A19) and comparisons do not. One case stays order-dependent by
+  design (A21): an edited skill copied before its source repository is rescanned.
 - G6: A diverged copy is compared with its own earlier versions, never with a parallel edit of
   another copy (A19).
 - G5: Linking and moving never touch user-owned metadata, versions or benchmark runs (FR-105-13,
@@ -147,6 +149,7 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | A18 | ADR | None: no new dependency or pattern; the identity rules live in SPEC-101 §8.3 and this spec | ADR for rule 3 | AGENTS.md asks ADRs for significant design decisions only; this implements an existing spec rule |
 | A19 | Version lineage once copies diverge | Every new version records `parent_version_id`: the version its occurrence held before this write (null for a new occurrence and for versions stored before the migration, whose parent is the previous number of the same artifact). "Results by version" compares a version with its nearest tested ancestor along that chain instead of the previous number (SPEC-111 FR-111-50, SPEC-118 FR-118-50/51) | Keep comparing with the previous number; or no lineage and a "diverged" warning only | After a link, edits in two copies become one numbered sequence (A8): copy A's v2 and copy B's v3 are parallel edits, and comparing them would report a "regression" between copies that never followed each other. The parent can only be recorded when the version is inserted (immutable rows, FR-103-01), so it must ship with the first link in Phase 1 |
 | A20 | Skipped files (binary or too large supporting files, which DirectiveBench neither stores, hashes, installs nor benchmarks) | Not part of identity, as they are not part of versions: rules 2 and 3 compare stored content only. A copy or move that differs only in skipped files links or moves; the skipped list of each observation stays visible where it is today (the version's parsed metadata) | Refuse a link or move when either side had skipped files, which needs a per-occurrence record of the latest observation (an earlier draft of this spec; Codex rounds 1 to 3 kept finding gaps in it: first-observation metadata, upgrade nulls, order within a scan) | SPEC-103 already decides that a skipped file does not change an artifact: a binary-only change creates no new version (FR-102-17, FR-103-04). Every benchmark run installs only the stored files, so no result ever depended on a skipped file, and moving or linking history between copies with equal stored content transfers exactly the evidence that applies to them. A guard here would make identity stricter than versioning and leave permanent false splits after an upgrade. Revisited when binary files are stored (OQ-103-04) |
+| A21 | Edit-then-copy before a rescan: X is recorded in A at content h1; A is edited to h2 and copied into B; B is scanned before A | Accepted limitation: B's h2 matches no recorded version, so it becomes a new artifact Y; the later scan of A records h2 as X's next version, and X and Y stay separate (rule 1). Both are flagged as possible duplicates with "Same latest content" (Phase 2), and the future manual link action joins them. Scanning A first links B to X | Reconcile after the fact: when a rule-1 write produces a hash that a young artifact holds, merge that artifact into this one | Reconciling is a merge of two existing artifacts (versions move and renumber, user metadata unions), which A6 rules out for automatic writes; the split is visible and cheap to repair, while a wrong automatic merge is not. The user avoids it by rescanning the source repository first, which nothing in the product enforces |
 
 ## 6. Functional requirements
 
@@ -417,6 +420,9 @@ verified (SPEC-125) but is re-checked on the new cells in both themes (`text-con
   v3: v3's parent is v1.
 - **A run of a version of the other copy as baseline** (SPEC-118 A/B with `--baseline v<n>`):
   allowed, the user chose the pair; both are versions of the same artifact.
+- **Edit then copy before a rescan** (A21): X in A at h1; A edited to h2 and copied into B.
+  Scanning A then B: one artifact, B linked at X's v2. Scanning B then A: B becomes Y (h2 is not
+  recorded yet), A adds X's v2; X and Y are possible duplicates with the same latest content.
 - **Scan order**: A then B links B to A's artifact; B then A links A to B's. Same artifacts, same
   counts; only `created_at` and provenance differ (G4). Two copies edited between scans get
   their version numbers in scan order, but each version's parent is its own copy's previous one.
@@ -440,7 +446,9 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
   frontmatter `name` named after the chosen occurrence's directory, and an artifact with no
   active occurrence left keeping its name; removing a repository refreshes the names of its
   artifacts (FR-126-23), before and after a rescan of the surviving copy giving the same name;
-  identity independent of the discovery order within one scan (shuffled input); `parent_version_id` on insert (new occurrence, rule-1 edit, link then edit,
+  identity independent of the discovery order within one scan (shuffled input);
+  edit-then-copy in both repository scan orders (A21: linked one way, two flagged artifacts the
+  other); `parent_version_id` on insert (new occurrence, rule-1 edit, link then edit,
   move) and never updated; user metadata, versions and runs untouched; rollback
   through a SQLite trigger (lesson 2026-11-05); batched lookup with one statement per 500 hashes
   (count the statements, lesson 2026-11-05 "assert the seam fired"); migration 0006 up and down;
@@ -486,7 +494,8 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
   only with its creation ancestors (FR-126-21), also after the copies converge and diverge again
   and after a revert to an untested version (§14); an artifact with one line shows the same
   comparisons as before.
-- [ ] AC-10: The same scan input gives the same identities in any discovery order, and the
+- [ ] AC-10: The same scan input gives the same identities in any discovery order; the
+  edit-then-copy case behaves as A21 states in both repository scan orders; and the
   artifact's name and description are a function of its active occurrences after every scan and
   every repository removal (FR-126-07, FR-126-23, FR-126-24).
 - [ ] AC-7: The SPEC-125 removal panel and result line stay true (UD-6; "No artifact became
@@ -512,8 +521,9 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
 None blocking: every question has a recommended default in §5a and §11.1 for the maintainer to
 confirm or change before approval. The most consequential ones are A3 (repository-level files
 excluded), A16 (only local repositories link; hosted copies never do), A19 (version lineage,
-a new column, changing how "Results by version" compares), A6 (no merge of existing duplicates)
-and A7 (oldest candidate instead of none).
+a new column, changing how "Results by version" compares), A6 (no merge of existing duplicates),
+A7 (oldest candidate instead of none) and A21 (an edit copied before its source is rescanned
+splits).
 
 ## 19. Future extensions
 
