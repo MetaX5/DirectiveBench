@@ -3,7 +3,7 @@ title: SPEC-125 Phase 2, repository removal (issue 21)
 date: 2026-11-12
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request (implement SPEC-125 Phase 2, decisions D12 to D26 approved)
-status: in-progress
+status: completed
 branch: feat/repository-removal
 specs: [SPEC-125, SPEC-104, SPEC-006, SPEC-014]
 ---
@@ -62,8 +62,8 @@ PR: #217
 
 ### Phase 4: Verification and docs
 
-- [x] 4.1 Umbrella spec updates, SPEC-125 implementation status and move to implemented
-- [ ] 4.2 Full gate, real-app run, browser QA, Codex review, run log
+- [x] 4.1 Umbrella spec updates, SPEC-125 implementation status and move to implemented — 28c5bd6
+- [x] 4.2 Full gate, real-app run, browser QA, Codex review, run log — a612ece
 
 ## Decisions
 
@@ -99,8 +99,20 @@ PR: #217
 6. `6bdf943` existing `repositories.spec.ts` row assertions read "ScanRemove"; the story uses the
    design-system Table (lint rule SPEC-121), both found by the first full gate.
 7. `7b29282` QA fix: error redirects carry `#remove-result`, with a regression test.
-8. Umbrella specs (SPEC-104 FR-104-15, §10, §20; SPEC-006 occurrence status), SPEC-125 §20 and
-   ACs, move to `implemented/`, index, links; lesson.
+8. `28c5bd6` umbrella specs (SPEC-104 FR-104-15, §10, §20; SPEC-006 occurrence status),
+   SPEC-125 §20 and ACs, move to `implemented/`, index, links; lesson.
+9. Codex adversarial review round 1 (`--scope branch --base main`, head `28c5bd6`):
+   needs-attention, one [high] finding: the correlated `artifactsLeftMissing` count was
+   quadratic (a full occurrence scan per artifact, inside the write transaction). `a612ece`
+   rewrites it as one grouped pass and adds a linear-time test (29× against the baseline before,
+   below 3.5 after). No index migration (A6). Round 2 (head `a612ece`, given the gate results):
+   approve, no material findings.
+10. `om-auto-review-pr 217 --autofix` (engine `om-code-review`): approve-equivalent, posted as a
+    COMMENT (self-review), two nits needing no change; labels `merge-queue`, `needs-qa`,
+    `feature`, `priority-medium`, `risk-medium`; manual-QA instructions posted.
+11. `om-auto-qa-pr 217`: PASS, ten screenshots posted on the PR through the
+    `qa-evidence-pr-217` branch (the bundled-examples location cell, a local home path, was
+    replaced with "[local path redacted]" before each screenshot).
 
 ## Verification
 
@@ -115,10 +127,14 @@ PR: #217
 | `pnpm test:e2e` | 151 passed |
 | `pnpm test:storybook` | 68 files, 310 tests passed (both themes, axe) |
 
+The table is the third full gate, on head `a612ece` (after the Codex fix); CI on that head passed
+every check (Linux and macOS unit tests, integration tests, Storybook, build, CodeQL).
+
 - The first full gate failed `lint` (raw `<table>` in the new story) and 5 `repositories.spec.ts`
   tests (the actions cell now reads "ScanRemove"; 4 of the 5 were the worker restart cascading);
   both fixed in `6bdf943`, and the second full gate above passed.
-- Red first: the new database tests import functions that did not exist on `main`; the QA
+- Red first: the new database tests import functions that did not exist on `main`; the
+  linear-time test failed at 29.1 against the correlated query and passes with the grouped one; the QA
   regression test (`a confirm for a repository removed meanwhile shows the alert in view at
   320px`) failed against the previous `actions.ts` (URL without `#remove-result`) and passes now.
 - D19 in Chromium (Playwright): after the GET form the URL is `?remove=<id>#remove-panel` and the
@@ -151,6 +167,9 @@ announcement of the panel.
 ## Lessons recorded
 
 - [Give every redirect outcome of a page-level line its fragment, not only success](../lessons/2026-11-12-every-redirect-outcome-needs-the-line-fragment.md)
+- Update to [Timing tests must survive a loaded runner](../lessons/2026-10-21-timing-tests-must-survive-a-loaded-runner.md):
+  await a Drizzle query in a linear-time baseline (an unawaited builder never runs, which made a
+  linear query fail at 11.8).
 
 ## Follow-ups
 
