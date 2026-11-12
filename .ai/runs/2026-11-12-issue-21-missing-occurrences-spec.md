@@ -3,7 +3,7 @@ title: Spec for issue 21 (removed files marked missing, repository removal)
 date: 2026-11-12
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer picked issue #21 as the next feature; om-auto-write-spec 21 (design only)
-status: in-progress
+status: completed
 branch: docs/spec-issue-21-removed-occurrences
 specs: [SPEC-125, SPEC-103, SPEC-104, SPEC-105, SPEC-101, SPEC-102, SPEC-124]
 ---
@@ -47,7 +47,8 @@ maintainer approves the spec before implementation.
   that skill's `SKILL.md` error; `artifact_occurrences.repository_id` cascades and
   `artifact_versions.source_repository_id` is set null on repository delete.
 - Wrote `.ai/specs/2026-11-12-missing-occurrences-and-repository-removal.md` (SPEC-125) and its
-  index row.
+  index row; opened PR #213 (design only, `Refs #21`) with labels, the defaults comment on the PR
+  and the issue; Codex adversarial review approved in round 1.
 
 ## Verification
 
@@ -56,6 +57,7 @@ maintainer approves the spec before implementation.
 | Spec-only change, no code | no quality gate needed; `.ai/` is outside Prettier |
 | Fresh-context staff-engineer review | 1 critical, 1 high, 4 medium, 6 low; all applied (see below) |
 | Dash check on proposed UI copy (§11, §13) | none |
+| Codex adversarial review, round 1 (head 80b7404) | approve, no material findings |
 
 Not verified: anything about implementation behaviour.
 
