@@ -95,9 +95,7 @@ export const States: Story = {
 export const LongTextNarrowScreen: Story = {
   render: () => (
     <div className="flex w-full max-w-80 flex-wrap gap-inline-tight border border-dashed p-2">
-      <Badge variant="muted">
-        Planned: not implemented: private repositories, GitLab, removing a repository
-      </Badge>
+      <Badge variant="muted">Planned: not implemented: private repositories, GitLab</Badge>
       <Badge variant="warning">Not conclusive: single nondeterministic repetition</Badge>
       <Badge variant="outline">instruction</Badge>
     </div>

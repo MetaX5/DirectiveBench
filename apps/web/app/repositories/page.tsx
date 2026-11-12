@@ -2,6 +2,7 @@ import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import {
   getRepositoryRegistration,
+  getRepositoryRemovalImpact,
   getRepositoryScan,
   listRepositories,
 } from '@directivebench/database';
@@ -23,17 +24,26 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
-import { cancelJobAction, registerRepositoryAction, scanRepositoryAction } from '@/lib/actions';
+import {
+  cancelJobAction,
+  registerRepositoryAction,
+  removeRepositoryAction,
+  scanRepositoryAction,
+} from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import {
   branchLabel,
+  canRemove,
   canScan,
   describeRegistration,
   describeScan,
   lastScanLabel,
   mayCarryCredentials,
+  parseRemovalParams,
   pathFieldError,
   providerLabel,
+  removalReasons,
+  removalResult,
   scanRequestError,
   urlFieldError,
   type RegistrationNotice,
@@ -41,7 +51,7 @@ import {
 
 export const metadata: Metadata = { title: 'Repositories' };
 
-const PLANNED = 'Planned: not implemented: private repositories, GitLab, removing a repository';
+const PLANNED = 'Planned: not implemented: private repositories, GitLab';
 
 export default async function RepositoriesPage({
   searchParams,
@@ -52,6 +62,10 @@ export default async function RepositoriesPage({
     urlError?: string;
     scan?: string;
     scanError?: string;
+    remove?: string | string[];
+    removedOccurrences?: string | string[];
+    missingArtifacts?: string | string[];
+    removeError?: string | string[];
   }>;
 }) {
   const handle = getDatabase();
@@ -85,6 +99,16 @@ export default async function RepositoriesPage({
   const scanNotice = scan ? describeScan(scan) : null;
   const scanError = scanRequestError(params.scanError);
   const repositories = await listRepositories(handle.db);
+  // SPEC-125 Phase 2: the Risky-action panel for `?remove=` and the outcome of a removal.
+  const removal = parseRemovalParams(params);
+  const removalImpact = removal.remove
+    ? await getRepositoryRemovalImpact(handle.db, removal.remove)
+    : null;
+  const removalLine = removalResult(removal, {
+    unknownTarget:
+      removal.remove !== null &&
+      !repositories.some((repository) => repository.id === removal.remove),
+  });
   const checking = notice?.kind === 'active';
   const fieldError = notice?.kind === 'fieldError' ? notice : null;
   const confirmation = notice?.kind === 'confirm' ? notice : null;
@@ -188,6 +212,24 @@ export default async function RepositoriesPage({
           </p>
         ) : null}
 
+        {removalLine ? (
+          <p
+            id="remove-result"
+            role={removalLine.kind === 'error' ? 'alert' : 'status'}
+            data-testid="remove-result"
+            data-state={removalLine.kind}
+            className={
+              removalLine.kind === 'error'
+                ? 'text-ui text-destructive-foreground'
+                : removalLine.kind === 'done'
+                  ? 'text-ui text-success-foreground'
+                  : 'text-ui'
+            }
+          >
+            {removalLine.message}
+          </p>
+        ) : null}
+
         {scanNotice ? (
           <Card>
             <CardContent className="space-y-stack pt-4">
@@ -265,6 +307,40 @@ export default async function RepositoriesPage({
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {removalImpact ? (
+                <div
+                  id="remove-panel"
+                  tabIndex={-1}
+                  role="alert"
+                  data-testid="remove-panel"
+                  className="mb-4 min-w-0 space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui outline-none"
+                >
+                  <p className="font-medium wrap-anywhere">
+                    Remove {removalImpact.name} ({providerLabel(removalImpact.provider)},{' '}
+                    <span className="font-mono">{removalImpact.location}</span>)?
+                  </p>
+                  <ul className="list-disc space-y-1 pl-4 wrap-anywhere">
+                    {removalReasons(removalImpact).map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                  <form
+                    action={removeRepositoryAction}
+                    className="flex flex-wrap items-center gap-inline"
+                  >
+                    <input type="hidden" name="repositoryId" value={removalImpact.id} />
+                    <Button type="submit" size="sm" variant="destructive">
+                      Remove repository
+                    </Button>
+                    <Link
+                      href={`/repositories#repository-${removalImpact.id}`}
+                      className="text-ui underline"
+                    >
+                      Cancel
+                    </Link>
+                  </form>
+                </div>
+              ) : null}
               <Table>
                 <THead>
                   <TR>
@@ -281,7 +357,11 @@ export default async function RepositoriesPage({
                 </THead>
                 <TBody>
                   {repositories.map((repository) => (
-                    <TR key={repository.id} data-provider={repository.provider}>
+                    <TR
+                      key={repository.id}
+                      id={`repository-${repository.id}`}
+                      data-provider={repository.provider}
+                    >
                       <TD className="font-medium">{repository.name}</TD>
                       <TD>{providerLabel(repository.provider)}</TD>
                       <TD
@@ -305,19 +385,34 @@ export default async function RepositoriesPage({
                         {lastScanLabel(repository)}
                       </TD>
                       <TD className="text-right">
-                        {canScan(repository) ? (
-                          <form action={scanRepositoryAction}>
-                            <input type="hidden" name="repositoryId" value={repository.id} />
-                            <Button
-                              type="submit"
-                              size="sm"
-                              variant="outline"
-                              aria-label={`Scan ${repository.name}`}
-                            >
-                              Scan
-                            </Button>
-                          </form>
-                        ) : null}
+                        <div className="flex flex-wrap justify-end gap-inline">
+                          {canScan(repository) ? (
+                            <form action={scanRepositoryAction}>
+                              <input type="hidden" name="repositoryId" value={repository.id} />
+                              <Button
+                                type="submit"
+                                size="sm"
+                                variant="outline"
+                                aria-label={`Scan ${repository.name}`}
+                              >
+                                Scan
+                              </Button>
+                            </form>
+                          ) : null}
+                          {canRemove(repository) ? (
+                            <form method="get" action="/repositories#remove-panel">
+                              <input type="hidden" name="remove" value={repository.id} />
+                              <Button
+                                type="submit"
+                                size="sm"
+                                variant="outline"
+                                aria-label={`Remove ${repository.name}`}
+                              >
+                                Remove
+                              </Button>
+                            </form>
+                          ) : null}
+                        </div>
                       </TD>
                     </TR>
                   ))}
