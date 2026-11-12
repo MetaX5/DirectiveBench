@@ -109,6 +109,18 @@ for (const theme of ['light', 'dark'] as const) {
           .run(artifactId),
       );
     }
+    // The repository removal lines (SPEC-125 §11.3 D18, D26) through crafted URLs, which write
+    // nothing: the green result, the alerts and the status line for an unknown panel target.
+    for (const query of [
+      'removedOccurrences=14&missingArtifacts=9',
+      'removeError=not-found',
+      'removeError=failed',
+      'remove=repo_unknown',
+    ]) {
+      await page.goto(`/repositories?${query}`);
+      await expect(page.getByTestId('remove-result')).toBeVisible();
+      await scan(`/repositories?${query}`);
+    }
     // Exercise every status variant and text role on actual app surface classes,
     // including regression-row and warning surfaces absent from an ordinary demo.
     await page.goto('/');

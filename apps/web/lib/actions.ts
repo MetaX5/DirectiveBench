@@ -26,6 +26,7 @@ import {
   getLatestArtifactVersionId,
   getSuiteVersion,
   removeArtifactTag,
+  removeRepository,
   requestJobCancellation,
   setArtifactNotes,
   setCategoryArchived,
@@ -34,6 +35,7 @@ import {
   unassignArtifactSuite,
   updateCategory,
   type ArtifactSuiteOutcome,
+  type RemoveRepositoryOutcome,
 } from '@directivebench/database';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -221,6 +223,39 @@ export async function scanRepositoryAction(formData: FormData): Promise<void> {
   if ('error' in outcome) redirect(`/repositories?scanError=${outcome.error}`);
   revalidatePath('/repositories');
   redirect(`/repositories?scan=${encodeURIComponent(outcome.jobId)}`);
+}
+
+const removeRepositorySchema = z.object({ repositoryId: z.string().min(1) });
+
+/**
+ * Removes a registered repository after the Risky-action panel (SPEC-125 FR-125-16): its
+ * occurrences are deleted in one transaction, its artifacts and their history stay. The web
+ * process only writes through the database package; it never touches the location or the cache.
+ * Every outcome returns to `/repositories#remove-result` with a fixed line (§10, §13), so the line
+ * is scrolled into view on a narrow screen; a failed transaction is rolled back and shown without
+ * its error text, which can hold query parameters.
+ */
+export async function removeRepositoryAction(formData: FormData): Promise<void> {
+  const input = removeRepositorySchema.safeParse({ repositoryId: formData.get('repositoryId') });
+  if (!input.success) redirect('/repositories?removeError=invalid#remove-result');
+  const handle = requireDatabase();
+  let outcome: RemoveRepositoryOutcome | null = null;
+  try {
+    outcome = await removeRepository(handle, input.data.repositoryId);
+  } catch {
+    // Reported on the page as "could not be removed"; the transaction rolled everything back.
+  }
+  if (outcome === null) redirect('/repositories?removeError=failed#remove-result');
+  if (outcome.status === 'not-found') redirect('/repositories?removeError=not-found#remove-result');
+  if (outcome.status === 'not-removable')
+    redirect('/repositories?removeError=invalid#remove-result');
+  revalidatePath('/repositories');
+  revalidatePath('/artifacts', 'layout');
+  revalidatePath('/categories', 'layout');
+  revalidatePath('/');
+  redirect(
+    `/repositories?removedOccurrences=${outcome.occurrences}&missingArtifacts=${outcome.artifactsLeftMissing}#remove-result`,
+  );
 }
 
 /** Re-renders the artifact page so the server components show what was saved. */

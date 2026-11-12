@@ -3,18 +3,23 @@ import { CREDENTIALS_IN_URL_MESSAGE } from '@directivebench/core';
 import type {
   RepositoryRecord,
   RepositoryRegistration,
+  RepositoryRemovalImpact,
   RepositoryScan,
 } from '@directivebench/database';
 import {
   branchLabel,
+  canRemove,
   canScan,
   describeRegistration,
   describeScan,
   lastScanLabel,
   looksLikeProtocolRelativeUrl,
   mayCarryCredentials,
+  parseRemovalParams,
   pathFieldError,
   providerLabel,
+  removalReasons,
+  removalResult,
   scanRequestError,
   urlFieldError,
 } from '../lib/repositories';
@@ -404,10 +409,10 @@ describe('describeScan', () => {
       'Scanned skills: 12,400 files in 1.2 s, 0 artifacts found (0 new, 1 new version), 0 errors.';
     expect(done({ emptyScanKeptOccurrences: 9 }, 0)).toMatchObject({
       kind: 'warning',
-      message: `${empty} No artifacts found, so the 9 found before were not marked missing. Check that the location is mounted and has the expected files.`,
+      message: `${empty} No artifacts found, so the 9 found before were not marked missing. Check that the location is mounted and has the expected files. If they were deleted on purpose, remove the repository.`,
     });
     expect(done({ emptyScanKeptOccurrences: 1 }, 0).message).toBe(
-      `${empty} No artifacts found, so the 1 found before was not marked missing. Check that the location is mounted and has the expected files.`,
+      `${empty} No artifacts found, so the 1 found before was not marked missing. Check that the location is mounted and has the expected files. If they were deleted on purpose, remove the repository.`,
     );
   });
 
@@ -502,5 +507,160 @@ describe('scanRequestError', () => {
     expect(scanRequestError(undefined)).toBeNull();
     expect(scanRequestError('toString')).toBeNull();
     expect(scanRequestError('<script>')).toBeNull();
+  });
+});
+
+describe('canRemove (SPEC-125 A15)', () => {
+  it('offers Remove for every provider except the bundled examples', () => {
+    for (const provider of ['github', 'gitlab', 'local-git', 'local-directory'] as const)
+      expect(canRemove({ provider })).toBe(true);
+    expect(canRemove({ provider: 'bundled-examples' })).toBe(false);
+  });
+});
+
+describe('parseRemovalParams (SPEC-125 §10)', () => {
+  it('reads the panel id, the counts as a pair and the error code', () => {
+    expect(
+      parseRemovalParams({
+        remove: 'repo_ab-C_9',
+        removedOccurrences: '14',
+        missingArtifacts: '0',
+        removeError: 'failed',
+      }),
+    ).toEqual({
+      remove: 'repo_ab-C_9',
+      removed: { occurrences: 14, missingArtifacts: 0 },
+      error: 'failed',
+    });
+    expect(parseRemovalParams({})).toEqual({ remove: null, removed: null, error: null });
+  });
+
+  it('ignores invalid, repeated and incomplete values', () => {
+    for (const remove of ['cat_1', 'repo_', 'repo_a/b', `repo_${'a'.repeat(65)}`, ''])
+      expect(parseRemovalParams({ remove }).remove).toBeNull();
+    expect(parseRemovalParams({ remove: ['repo_a', 'repo_b'] }).remove).toBeNull();
+    for (const count of ['', ' 1', '-1', '1.5', '1e3', '0x10', '1234567890123456'])
+      expect(
+        parseRemovalParams({ removedOccurrences: count, missingArtifacts: '1' }).removed,
+      ).toBeNull();
+    expect(parseRemovalParams({ removedOccurrences: '3' }).removed).toBeNull();
+    expect(parseRemovalParams({ missingArtifacts: '3' }).removed).toBeNull();
+    expect(
+      parseRemovalParams({ removedOccurrences: ['1', '2'], missingArtifacts: '1' }).removed,
+    ).toBeNull();
+    expect(parseRemovalParams({ removeError: 'boom' }).error).toBeNull();
+    expect(parseRemovalParams({ removeError: ['failed'] }).error).toBeNull();
+  });
+});
+
+describe('removalReasons (SPEC-125 FR-125-15, §11.3 D15)', () => {
+  const impact = (overrides: Partial<RepositoryRemovalImpact> = {}): RepositoryRemovalImpact => ({
+    id: 'repo_a',
+    name: 'client-a',
+    provider: 'local-git',
+    location: '/home/dev/client-a',
+    occurrences: 14,
+    activeOccurrences: 12,
+    artifactsLeftMissing: 9,
+    ...overrides,
+  });
+  const reregister =
+    'Registering it again later creates new artifacts instead of reusing these ones.';
+
+  it('says what is deleted, what goes missing, what is kept and what registering again does', () => {
+    expect(removalReasons(impact())).toEqual([
+      'Its 14 occurrences are deleted from DirectiveBench.',
+      '9 artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept.',
+      'Nothing in /home/dev/client-a is changed.',
+      reregister,
+    ]);
+    expect(
+      removalReasons(impact({ occurrences: 1234, artifactsLeftMissing: 1200 })).slice(0, 2),
+    ).toEqual([
+      'Its 1,234 occurrences are deleted from DirectiveBench.',
+      '1,200 artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept.',
+    ]);
+  });
+
+  it('uses singular forms and the zero-missing sentence', () => {
+    expect(removalReasons(impact({ occurrences: 1, artifactsLeftMissing: 1 })).slice(0, 2)).toEqual(
+      [
+        'Its 1 occurrence is deleted from DirectiveBench.',
+        '1 artifact is then missing from every repository. Its versions, categories, notes and benchmark results are kept.',
+      ],
+    );
+    expect(removalReasons(impact({ artifactsLeftMissing: 0 }))[1]).toBe(
+      'Every artifact found here is also found in another repository, or is already missing.',
+    );
+  });
+
+  it('says the hosted download stays in the cache, and shows only two reasons without occurrences', () => {
+    const hosted =
+      "The copy downloaded from GitHub stays in DirectiveBench's cache. Deleting it is planned.";
+    expect(
+      removalReasons(impact({ provider: 'github', location: 'https://github.com/o/r' }))[2],
+    ).toBe(hosted);
+    expect(removalReasons(impact({ provider: 'gitlab' }))[2]).toBe(
+      "The copy downloaded from GitLab stays in DirectiveBench's cache. Deleting it is planned.",
+    );
+    expect(
+      removalReasons(
+        impact({ provider: 'local-directory', occurrences: 0, artifactsLeftMissing: 0 }),
+      ),
+    ).toEqual(['It has no occurrences.', 'Nothing in /home/dev/client-a is changed.']);
+    expect(removalReasons(impact({ provider: 'github', occurrences: 0 }))).toEqual([
+      'It has no occurrences.',
+      hosted,
+    ]);
+  });
+});
+
+describe('removalResult (SPEC-125 §11.3 D18)', () => {
+  const none = { remove: null, removed: null, error: null };
+  const known = { unknownTarget: false };
+
+  it('reports a completed removal in every count form', () => {
+    const done = (occurrences: number, missingArtifacts: number) =>
+      removalResult({ ...none, removed: { occurrences, missingArtifacts } }, known);
+    expect(done(14, 9)).toEqual({
+      kind: 'done',
+      message:
+        'Repository removed: 14 occurrences deleted, 9 artifacts now missing from every repository. Their history is kept.',
+    });
+    expect(done(1, 1)?.message).toBe(
+      'Repository removed: 1 occurrence deleted, 1 artifact now missing from every repository. Its history is kept.',
+    );
+    expect(done(3, 0)?.message).toBe(
+      'Repository removed: 3 occurrences deleted. No artifact became missing.',
+    );
+    expect(done(0, 0)?.message).toBe('Repository removed. It had no occurrences.');
+    expect(done(12345, 0)?.message).toBe(
+      'Repository removed: 12,345 occurrences deleted. No artifact became missing.',
+    );
+  });
+
+  it('shows an error before a result, and nothing without parameters', () => {
+    const removed = { occurrences: 1, missingArtifacts: 1 };
+    expect(removalResult({ ...none, removed, error: 'not-found' }, known)).toEqual({
+      kind: 'error',
+      message: 'That repository is no longer registered. Nothing was removed.',
+    });
+    expect(removalResult({ ...none, error: 'invalid' }, known)?.message).toBe(
+      'The form was incomplete. Reload the page and try again.',
+    );
+    expect(removalResult({ ...none, error: 'failed' }, known)?.message).toBe(
+      'The repository could not be removed. Nothing was changed.',
+    );
+    expect(removalResult(none, known)).toBeNull();
+  });
+
+  it('says an unknown panel target is no longer registered, and nothing for a listed one', () => {
+    const remove = { ...none, remove: 'repo_gone' };
+    expect(removalResult(remove, { unknownTarget: true })).toEqual({
+      kind: 'info',
+      message: 'That repository is no longer registered.',
+    });
+    expect(removalResult(remove, known)).toBeNull();
+    expect(removalResult(none, { unknownTarget: true })).toBeNull();
   });
 });

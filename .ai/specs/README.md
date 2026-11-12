@@ -89,7 +89,7 @@ Agents never set `approved` on their own; approval is a maintainer decision.
 
 ## Index
 
-Specifications are drafts except SPEC-119, SPEC-120, SPEC-121, SPEC-123 and SPEC-124, implemented and verified on 2026-10-23, 2026-10-27, 2026-10-28, 2026-10-30 and 2026-11-10. They were created on 2026-10-14 during the bootstrap, except
+Specifications are drafts except SPEC-119, SPEC-120, SPEC-121, SPEC-123, SPEC-124 and SPEC-125, implemented and verified on 2026-10-23, 2026-10-27, 2026-10-28, 2026-10-30, 2026-11-10 and 2026-11-12. They were created on 2026-10-14 during the bootstrap, except
 SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23), SPEC-120 (2026-10-27), SPEC-121 and SPEC-122 (2026-10-28), SPEC-123 (2026-10-29), SPEC-124 (2026-11-04), SPEC-125 (2026-11-12).
 `implemented/` contains verified specifications; `archive/` is currently empty.
 
@@ -140,7 +140,7 @@ SPEC-014 and SPEC-117 (2026-10-15), SPEC-118 (2026-10-22), SPEC-119 (2026-10-23)
 | SPEC-122 | [Design-system documentation in Storybook](2026-10-28-design-system-storybook.md) | draft |
 | SPEC-123 | [Keep and review the files an agent run wrote](implemented/2026-10-29-agent-run-output-files.md) | implemented |
 | SPEC-124 | [Create, rename and archive categories and assign them to artifacts (E03-S01)](implemented/2026-11-04-category-lifecycle-and-assignment.md) | implemented |
-| SPEC-125 | [Removed files are marked missing and their history is kept; repositories can be removed (E02-S03)](2026-11-12-missing-occurrences-and-repository-removal.md) | approved |
+| SPEC-125 | [Removed files are marked missing and their history is kept; repositories can be removed (E02-S03)](implemented/2026-11-12-missing-occurrences-and-repository-removal.md) | implemented |
 
 ### Integrations
 

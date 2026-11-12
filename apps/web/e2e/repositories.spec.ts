@@ -98,7 +98,7 @@ test.describe('repositories', () => {
       'main',
       '0',
       'Never',
-      'Scan',
+      'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12)
     ]);
     expect(await rowsAt(repo)).toBe(1);
   });
@@ -127,7 +127,7 @@ test.describe('repositories', () => {
       '—',
       '0',
       'Never',
-      'Scan',
+      'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12)
     ]);
   });
 
@@ -389,7 +389,7 @@ test.describe('GitHub repositories by URL', () => {
       'main',
       '0',
       'Never',
-      'Scan',
+      'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12)
     ]);
     // Not clicked: a scan would reach github.com, and the suite stays offline.
     await expect(row.getByRole('button', { name: 'Scan acme/e2e-skills' })).toBeEnabled();

@@ -125,6 +125,38 @@ for (const theme of ['light', 'dark'] as const) {
     await confirmation.getByRole('link', { name: 'Cancel' }).click();
     await expect(confirmation).toHaveCount(0);
 
+    // SPEC-125 §11.3 D26: the row Remove (an outline button) at rest, on hover and with focus,
+    // and the destructive confirm's focus outline on the panel. The demo has no removable
+    // repository, so one without occurrences is seeded for the check and deleted afterwards.
+    const removable = `repo_contrast_${theme}`;
+    await withDatabase((db) =>
+      db
+        .prepare(
+          `insert into repositories (id, provider, name, location, created_at, updated_at)
+           values (?, 'local-directory', ?, ?, 't', 't')`,
+        )
+        .run(removable, `contrast-${theme}`, `/nonexistent/contrast-${theme}`),
+    );
+    try {
+      await page.goto(`/repositories?remove=${removable}#remove-panel`);
+      await page.addStyleTag({ content: '* { transition: none !important; }' });
+      const remove = page.getByRole('button', { name: `Remove contrast-${theme}` });
+      await page.mouse.move(0, 0);
+      await record(results, 'row remove border', contrast(remove, 'border'));
+      await remove.hover();
+      await record(results, 'row remove hover border', contrast(remove, 'border'));
+      await page.mouse.move(0, 0);
+      await keyboardFocus(page, remove);
+      await record(results, 'row remove focus outline', contrast(remove, 'outline'));
+      const confirm = page.getByRole('button', { name: 'Remove repository' });
+      await keyboardFocus(page, confirm);
+      await record(results, 'remove confirm focus outline', contrast(confirm, 'outline'));
+    } finally {
+      await withDatabase((db) =>
+        db.prepare('delete from repositories where id = ?').run(removable),
+      );
+    }
+
     await page.goto('/artifacts');
     await page.addStyleTag({ content: '* { transition: none !important; }' });
     const select = page.locator('select[name="type"]');

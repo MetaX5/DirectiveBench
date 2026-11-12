@@ -396,6 +396,105 @@ export async function getRepository(db: Database, id: string): Promise<Repositor
   return (await db.select().from(repositories).where(eq(repositories.id, id)).get()) ?? null;
 }
 
+/** What removing a repository deletes and leaves missing (SPEC-125 FR-125-13). */
+export interface RepositoryRemovalImpact {
+  id: string;
+  name: string;
+  provider: RepositoryRecord['provider'];
+  location: string;
+  /** All its occurrence rows, active and removed: the rows the removal deletes. */
+  occurrences: number;
+  activeOccurrences: number;
+  /** Artifacts active in this repository and in no other, so missing after the removal. */
+  artifactsLeftMissing: number;
+}
+
+/** The internal repository of the bundled examples; never removable (SPEC-125 A15). */
+const NOT_REMOVABLE_PROVIDER = 'bundled-examples';
+
+/**
+ * The FR-125-13 counts for one repository, read with the given (transaction's) db. Artifacts left
+ * missing are found in one pass over the active occurrences grouped by artifact: an artifact
+ * active here and nowhere else. A correlated "active elsewhere?" lookup per artifact would scan
+ * every occurrence again for each one (no index leads from an artifact to its occurrences), which
+ * is quadratic and runs inside the removal's write transaction (Codex review of PR #217).
+ */
+async function removalCounts(db: Database, repositoryId: string) {
+  const inRepository = eq(artifactOccurrences.repositoryId, repositoryId);
+  const leftMissing = await db
+    .select({ artifactId: artifactOccurrences.artifactId })
+    .from(artifactOccurrences)
+    .where(eq(artifactOccurrences.status, 'active'))
+    .groupBy(artifactOccurrences.artifactId)
+    .having(
+      sql`max(${artifactOccurrences.repositoryId} = ${repositoryId}) = 1 and max(${artifactOccurrences.repositoryId} <> ${repositoryId}) = 0`,
+    );
+  return {
+    occurrences: await db.$count(artifactOccurrences, inRepository),
+    activeOccurrences: await db.$count(
+      artifactOccurrences,
+      and(inRepository, eq(artifactOccurrences.status, 'active')),
+    ),
+    artifactsLeftMissing: leftMissing.length,
+  };
+}
+
+/**
+ * What removing a repository would delete (SPEC-125 FR-125-13): its occurrence counts and the
+ * artifacts it would leave missing from every repository. Null for an unknown id and for the
+ * `bundled-examples` repository, which cannot be removed (A15).
+ */
+export async function getRepositoryRemovalImpact(
+  db: Database,
+  repositoryId: string,
+): Promise<RepositoryRemovalImpact | null> {
+  const repository = await getRepository(db, repositoryId);
+  if (!repository || repository.provider === NOT_REMOVABLE_PROVIDER) return null;
+  return {
+    id: repository.id,
+    name: repository.name,
+    provider: repository.provider,
+    location: repository.location,
+    ...(await removalCounts(db, repositoryId)),
+  };
+}
+
+export type RemoveRepositoryOutcome =
+  | { status: 'removed'; occurrences: number; artifactsLeftMissing: number }
+  | { status: 'not-found' }
+  | { status: 'not-removable' };
+
+/**
+ * Removes a registered repository (SPEC-125 FR-125-14, SPEC-104 FR-104-15) in one transaction:
+ * the counts are read, then one conditional `DELETE` that refuses `bundled-examples` removes the
+ * row. Its occurrences cascade and its versions' `source_repository_id` becomes null (foreign
+ * keys); artifacts, versions, categories, tags, notes, suites and runs are not touched. Files and
+ * caches are never touched either. Any error rolls everything back.
+ */
+export async function removeRepository(
+  handle: DatabaseHandle,
+  repositoryId: string,
+): Promise<RemoveRepositoryOutcome> {
+  return withTransaction(handle, async (db) => {
+    const counts = await removalCounts(db, repositoryId);
+    const deleted = await db
+      .delete(repositories)
+      .where(
+        and(eq(repositories.id, repositoryId), ne(repositories.provider, NOT_REMOVABLE_PROVIDER)),
+      )
+      .returning({ id: repositories.id });
+    if (deleted.length === 0) {
+      const existing = await getRepository(db, repositoryId);
+      return existing ? { status: 'not-removable' } : { status: 'not-found' };
+    }
+    return {
+      status: 'removed',
+      occurrences: counts.occurrences,
+      artifactsLeftMissing: counts.artifactsLeftMissing,
+    };
+  });
+}
+
 /** A local source the user registers by path (SPEC-104 FR-104-01, FR-104-03). */
 export interface LocalRepositoryRegistration {
   provider: 'local-git' | 'local-directory';

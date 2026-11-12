@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { expect, fn, userEvent } from 'storybook/test';
 import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 
 // Pattern: confirming a risky action, modelled on "Register anyway" (/repositories, D05). The
 // question names the object, the reasons are listed, leaving is easy and the action is a verb.
@@ -90,4 +91,66 @@ export const NarrowScreen: Story = {
       </div>
     ),
   ],
+};
+
+/**
+ * Rule 7: opened from a table row (Remove on `/repositories`, SPEC-125). The server renders the
+ * panel at the top of the Card for `?remove=<id>#remove-panel`; the panel is the fragment target
+ * (`tabIndex=-1`), so keyboard navigation starts there, and Cancel links back to the row.
+ */
+export const FromTableRow: Story = {
+  render: () => (
+    <div className="max-w-xl rounded-surface border border-border bg-card p-4">
+      <div
+        id="remove-panel"
+        tabIndex={-1}
+        role="alert"
+        className="mb-4 min-w-0 space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui outline-none"
+      >
+        <p className="font-medium wrap-anywhere">
+          Remove client-a (Local Git, <span className="font-mono">/home/dev/client-a</span>)?
+        </p>
+        <ul className="list-disc space-y-1 pl-4 wrap-anywhere">
+          <li>Its 14 occurrences are deleted from DirectiveBench.</li>
+          <li>
+            9 artifacts are then missing from every repository. Their versions, categories, notes
+            and benchmark results are kept.
+          </li>
+          <li>Nothing in /home/dev/client-a is changed.</li>
+          <li>Registering it again later creates new artifacts instead of reusing these ones.</li>
+        </ul>
+        <form
+          className="flex flex-wrap items-center gap-inline"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <Button type="submit" size="sm" variant="destructive">
+            Remove repository
+          </Button>
+          <a href="#repository-client-a" className="text-ui underline">
+            Cancel
+          </a>
+        </form>
+      </div>
+      <Table>
+        <TableBody>
+          <TableRow id="repository-client-a">
+            <TableCell className="font-medium">client-a</TableCell>
+            <TableCell className="text-right">
+              <Button size="sm" variant="outline" aria-label="Remove client-a">
+                Remove
+              </Button>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    const panel = canvas.getByRole('alert');
+    panel.focus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Remove repository' })).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('link', { name: 'Cancel' })).toHaveFocus();
+  },
 };

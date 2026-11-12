@@ -108,34 +108,40 @@ function OverviewTab({
           <CardDescription>Where this artifact was found, per repository and path.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table data-testid="occurrences">
-            <THead>
-              <TR>
-                <TH>Repository</TH>
-                <TH>Provider</TH>
-                <TH>Path</TH>
-                <TH>Status</TH>
-                <TH>Last seen</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {occurrences.map(({ occurrence, repository }) => (
-                <TR key={occurrence.id}>
-                  <TD title={repository.location}>{repository.name}</TD>
-                  <TD className="text-ui">{providerLabel(repository.provider)}</TD>
-                  <TD className="font-mono text-ui">{occurrence.path}</TD>
-                  <TD>
-                    <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
-                      {occurrenceStatusLabel(occurrence.status)}
-                    </Badge>
-                  </TD>
-                  <TD className="text-ui text-muted-foreground">
-                    {formatDate(occurrence.lastSeenAt)}
-                  </TD>
+          {occurrences.length === 0 ? (
+            <p data-testid="no-occurrences" className="text-body text-muted-foreground">
+              No occurrences left: the repositories it was found in were removed.
+            </p>
+          ) : (
+            <Table data-testid="occurrences">
+              <THead>
+                <TR>
+                  <TH>Repository</TH>
+                  <TH>Provider</TH>
+                  <TH>Path</TH>
+                  <TH>Status</TH>
+                  <TH>Last seen</TH>
                 </TR>
-              ))}
-            </TBody>
-          </Table>
+              </THead>
+              <TBody>
+                {occurrences.map(({ occurrence, repository }) => (
+                  <TR key={occurrence.id}>
+                    <TD title={repository.location}>{repository.name}</TD>
+                    <TD className="text-ui">{providerLabel(repository.provider)}</TD>
+                    <TD className="font-mono text-ui">{occurrence.path}</TD>
+                    <TD>
+                      <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
+                        {occurrenceStatusLabel(occurrence.status)}
+                      </Badge>
+                    </TD>
+                    <TD className="text-ui text-muted-foreground">
+                      {formatDate(occurrence.lastSeenAt)}
+                    </TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
