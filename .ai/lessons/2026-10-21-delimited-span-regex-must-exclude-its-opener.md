@@ -28,3 +28,8 @@ searches that stop at the first opener without an end.
 - For BEGIN…END blocks use `exec` for BEGIN, then for END from there, and stop when END is missing.
 - Check equivalence against the old pattern on edge cases, and add a test with input of the
   maximum allowed size whose bound is orders of magnitude from the old time.
+- Updated 2026-11-12 (CodeQL alert 9): an anchored trailing run such as `/[. ]+$/` has the same
+  shape. Every character of a run that does not reach the end starts a new attempt that scans
+  the rest of the run, so `'  …x'` is quadratic (40,000 spaces took 0.5 s in
+  `canonicalSegment`). Trim a trailing run with one backward loop, and treat a CodeQL
+  `js/polynomial-redos` alert as a real finding until a measurement shows otherwise.

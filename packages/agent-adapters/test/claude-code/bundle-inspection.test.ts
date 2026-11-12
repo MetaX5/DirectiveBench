@@ -8,6 +8,11 @@ import {
   inspectArtifactBundle,
   inspectArtifactVersions,
 } from '../../src/claude-code';
+import {
+  expectLinearTime,
+  LINEAR_TIME_TEST_TIMEOUT_MS,
+  textBaseline,
+} from '../../../../test-support/linear-time';
 import { bundle } from './helpers';
 
 function skill(frontmatter: string, body = 'Do the task.\n', extra: Record<string, string> = {}) {
@@ -262,5 +267,28 @@ describe('canonicalSegment', () => {
     expect(canonicalSegment('.')).toBe('.');
     expect(canonicalSegment('Notes')).toBe('notes');
     expect(canonicalSegment('.mcp.jſon')).toBe('.mcp.json');
+    expect(canonicalSegment('. .')).toBe('. .');
+    expect(canonicalSegment('a . .')).toBe('a');
+    expect(canonicalSegment('a . b')).toBe('a . b');
   });
+
+  it(
+    'runs in linear time on a long run of spaces that does not end the segment (CodeQL js/polynomial-redos)',
+    async () => {
+      // A trailing-run regex retried from every space: quadratic on `'    …x'`, which a hosted
+      // repository's tree entry name can carry, since git puts no limit on its length.
+      for (const tail of ['x', ' x', '.x']) {
+        await expectLinearTime(
+          {
+            build: (size) => `${' '.repeat(size)}${tail}`,
+            run: canonicalSegment,
+            baseline: textBaseline,
+            size: 64_000,
+          },
+          `spaces then ${JSON.stringify(tail)}`,
+        );
+      }
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 });
