@@ -6,6 +6,7 @@ import {
   pathRelation,
   repositoryLocationSchema,
   repositoryPathInputSchema,
+  unseenOccurrencePaths,
 } from '../src/repository-path';
 
 describe('expandHomePath', () => {
@@ -99,5 +100,53 @@ describe('repositoryLocationSchema', () => {
     ]) {
       expect(repositoryLocationSchema.safeParse(value).success).toBe(false);
     }
+  });
+});
+
+describe('unseenOccurrencePaths', () => {
+  const unseen = (active: string[], discovered: string[], unobserved: string[]) =>
+    unseenOccurrencePaths({ active, discovered, unobserved });
+
+  it('returns the active paths that were not discovered, in their order', () => {
+    expect(unseen(['c', 'a', 'b/AGENTS.md', ''], ['a'], [])).toEqual(['c', 'b/AGENTS.md', '']);
+    expect(unseen([], ['a'], [])).toEqual([]);
+  });
+
+  it('keeps a path equal to, inside or containing an unobserved path', () => {
+    const active = ['a', 'a/b', 'a/b/c/SKILL.md', 'x/y', 'other', 'q'];
+    // `a/b` equals; `a/b/c/SKILL.md` lies inside; `a` contains; `x/y` contains `x/y/z`.
+    expect(unseen(active, [], ['a/b', 'x/y/z'])).toEqual(['other', 'q']);
+  });
+
+  it('compares whole segments, not string prefixes', () => {
+    expect(unseen(['a', 'ab', 'ab/SKILL.md', 'a-b'], [], ['ab/SKILL.md'])).toEqual(['a', 'a-b']);
+    expect(unseen(['ab', 'a.md'], [], ['a'])).toEqual(['ab', 'a.md']);
+    // `a/` sorts after `a.md` and `a-b`, but before `a0`: the range lookup must find `a/x`.
+    expect(unseen(['a'], [], ['a-b', 'a.md', 'a/x', 'a0'])).toEqual([]);
+    expect(unseen(['a'], [], ['a-b', 'a.md', 'a0'])).toEqual(['a']);
+  });
+
+  it("treats '' and '.' as containing every path, on either side", () => {
+    expect(unseen(['a', 'b/c'], [], ['.'])).toEqual([]);
+    expect(unseen(['a', 'b/c'], [], [''])).toEqual([]);
+    // The root skill contains any unobserved path, and with none it can go missing.
+    expect(unseen(['', '.', 'a'], [], ['z/AGENTS.md'])).toEqual(['a']);
+    expect(unseen(['', 'a'], [], [])).toEqual(['', 'a']);
+  });
+
+  it('compares Unicode paths exactly', () => {
+    expect(unseen(['zażółć/SKILL.md', 'zazolc'], [], ['zażółć'])).toEqual(['zazolc']);
+    expect(unseen(['café'], ['cafe\u0301'], [])).toEqual(['café']);
+  });
+
+  it('handles 10,000 occurrences', () => {
+    const active = Array.from({ length: 10_000 }, (_, i) => `skills/s${i}`);
+    const discovered = active.filter((_, i) => i % 2 === 0);
+    const unobserved = ['skills/s1/SKILL.md', 'skills/s3/locked'];
+    const result = unseen(active, discovered, unobserved);
+    expect(result).toHaveLength(4_998);
+    expect(result).not.toContain('skills/s1');
+    expect(result).not.toContain('skills/s3');
+    expect(result[0]).toBe('skills/s5');
   });
 });

@@ -90,6 +90,14 @@ export interface DiscoveryResult {
    * inside one (nothing is read then). Not errors.
    */
   skippedDirectories: string[];
+  /**
+   * Repository-relative paths this discovery could not observe (SPEC-125 FR-125-03): the path of
+   * every error, every directory the walk could not list or that changed during the scan (also
+   * those folded into a skill's `read-failed` error, which is recorded at its `SKILL.md`), and
+   * every skipped directory (`.` for the whole root). Taken from the full result, never from a
+   * truncated report. Sorted, without duplicates.
+   */
+  unobserved: string[];
 }
 
 export interface DiscoveryOptions {
@@ -520,7 +528,13 @@ export async function discoverArtifacts(
   const skipDirectories = new Set(options.skipDirectories ?? []);
   const insideSkipped = (dir: string) => ['same', 'inside'].includes(pathRelation(realRoot, dir));
   if ([...skipDirectories].some(insideSkipped)) {
-    return { artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: ['.'] };
+    return {
+      artifacts: [],
+      errors: [],
+      scannedFiles: 0,
+      skippedDirectories: ['.'],
+      unobserved: ['.'],
+    };
   }
 
   const listing = await walk(realRoot, options.signal, skipDirectories);
@@ -633,11 +647,17 @@ async function discoverListing(
     }
   }
 
+  const unobserved = new Set([
+    ...errors.map((error) => error.path),
+    ...unreadable.map((dir) => dir.path),
+    ...skipped,
+  ]);
   return {
     artifacts,
     errors: errors.sort((a, b) => byCodeUnit(a.path, b.path)),
     scannedFiles: entries.filter((entry) => entry.kind === 'file').length,
     skippedDirectories: skipped,
+    unobserved: [...unobserved].sort(byCodeUnit),
   };
 }
 

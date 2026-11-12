@@ -534,13 +534,21 @@ describe('listArtifacts', () => {
       categories: [],
       repositories: [],
       occurrenceCount: 0,
+      // No occurrence at all: missing (SPEC-125 A8).
+      missing: true,
       benchmarkCount: 0,
       latestEvaluation: null,
     });
-    expect(list[1]).toMatchObject({ format: 'skill-md', latestVersion: 1 });
+    expect(list[1]).toMatchObject({ format: 'skill-md', latestVersion: 1, missing: false });
 
     const detail = await getArtifactDetail(handle.db, 'art_empty');
-    expect(detail).toMatchObject({ versions: [], occurrences: [], evaluations: [] });
+    expect(detail).toMatchObject({
+      versions: [],
+      occurrences: [],
+      evaluations: [],
+      missing: true,
+      lastFoundAt: null,
+    });
     expect(await getLatestArtifactVersionId(handle.db, 'art_empty')).toBeNull();
   });
 
@@ -815,6 +823,9 @@ async function slugsByPath(handle: DatabaseHandle): Promise<string[][]> {
   return rows.map((row) => [row.repository, row.path, row.slug]);
 }
 
+/** A scan summary's SPEC-125 counts when nothing was marked, found again or kept. */
+const unmarked = { removedOccurrences: 0, reactivatedOccurrences: 0, emptyScanKeptOccurrences: 0 };
+
 describe('applyRepositoryScan', () => {
   it('stores discovered artifacts with recomputed hashes and records a successful scan', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -829,9 +840,10 @@ describe('applyRepositoryScan', () => {
       repositoryId: repository.id,
       jobId,
       signal,
+      unobserved: [],
       artifacts: [input, scanned('packages/api/AGENTS.md', '# API\n', 'packages/api/AGENTS.md')],
     });
-    expect(summary).toEqual({ createdArtifacts: 2, createdVersions: 2 });
+    expect(summary).toEqual({ ...unmarked, createdArtifacts: 2, createdVersions: 2 });
 
     const versions = await handle.db.select().from(schema.artifactVersions);
     const root = versions.find((version) => version.sourcePath === 'AGENTS.md');
@@ -872,11 +884,24 @@ describe('applyRepositoryScan', () => {
         repositoryId: first.repository.id,
         jobId,
         signal,
+        unobserved: [],
         artifacts: [scanned('AGENTS.md', content)],
       });
-    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 1, createdVersions: 1 });
-    expect(await apply('v1', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 0 });
-    expect(await apply('v2', first.jobId)).toEqual({ createdArtifacts: 0, createdVersions: 1 });
+    expect(await apply('v1', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 1,
+      createdVersions: 1,
+    });
+    expect(await apply('v1', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 0,
+      createdVersions: 0,
+    });
+    expect(await apply('v2', first.jobId)).toEqual({
+      ...unmarked,
+      createdArtifacts: 0,
+      createdVersions: 1,
+    });
     const versions = await handle.db
       .select({ version: schema.artifactVersions.version })
       .from(schema.artifactVersions);
@@ -893,6 +918,7 @@ describe('applyRepositoryScan', () => {
         repositoryId: first.repository.id,
         jobId: first.jobId,
         signal,
+        unobserved: [],
         artifacts: [scanned('AGENTS.md', content)],
       });
     await apply('v1');
@@ -904,7 +930,7 @@ describe('applyRepositoryScan', () => {
     await assignArtifactSuite(handle, artifactId, suiteId);
 
     await apply('v1');
-    expect(await apply('v2')).toEqual({ createdArtifacts: 0, createdVersions: 1 });
+    expect(await apply('v2')).toEqual({ ...unmarked, createdArtifacts: 0, createdVersions: 1 });
 
     const detail = await getArtifactDetail(handle.db, artifactId);
     expect(detail?.artifact).toMatchObject({
@@ -922,12 +948,13 @@ describe('applyRepositoryScan', () => {
     vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
     const handle = getHandle();
     const { repository, jobId } = await runningScan(handle, '/srv/skills');
-    const apply = (artifacts: ScannedArtifactInput[]) =>
+    const apply = (artifacts: ScannedArtifactInput[], unobserved: string[] = []) =>
       applyRepositoryScan(handle, {
         repositoryId: repository.id,
         jobId,
         artifacts,
         signal,
+        unobserved,
         commitSha: null,
       });
     await apply([scanned('AGENTS.md', 'v1'), scanned('packages/api/AGENTS.md', 'v1', 'api')]);
@@ -936,7 +963,9 @@ describe('applyRepositoryScan', () => {
     const artifactsBefore = await handle.db.select().from(schema.artifacts);
 
     vi.setSystemTime(new Date('2026-04-02T00:00:00.000Z'));
-    expect(await apply([scanned('AGENTS.md', 'v2')])).toEqual({
+    // Discovery reports the failed artifact's path as unobserved (SPEC-125 FR-125-03).
+    expect(await apply([scanned('AGENTS.md', 'v2')], ['packages/api/AGENTS.md'])).toEqual({
+      ...unmarked,
       createdArtifacts: 0,
       createdVersions: 1,
     });
@@ -972,6 +1001,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: a.repository.id,
       jobId: a.jobId,
       signal,
+      unobserved: [],
       artifacts: [scanned('AGENTS.md', 'same'), scanned('docs/x/AGENTS.md', 'same')],
     });
     const b = await runningScan(handle, '/srv/b');
@@ -980,6 +1010,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: b.repository.id,
       jobId: b.jobId,
       signal,
+      unobserved: [],
       artifacts: [scanned('AGENTS.md', 'same')],
     });
     // A later bundled import (moved install) still finds its own artifact, not a scanned one.
@@ -1011,6 +1042,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: scan.repository.id,
       jobId: scan.jobId,
       signal,
+      unobserved: [],
       artifacts: [{ ...scanned('skills/validate', 'mine', 'validate'), type: 'skill' }],
     });
     // Scan first, bundled example second: the bundled import must not attach to the scanned skill.
@@ -1046,11 +1078,12 @@ describe('applyRepositoryScan', () => {
         repositoryId: repository.id,
         jobId,
         signal,
+        unobserved: [],
         artifacts: paths.map((path) => ({ ...scanned(path, path, 'review'), type: 'skill' })),
       });
       const statements = prepare.mock.calls.map(([query]) => query);
       prepare.mockRestore();
-      expect(summary).toEqual({ createdArtifacts: count, createdVersions: count });
+      expect(summary).toEqual({ ...unmarked, createdArtifacts: count, createdVersions: count });
       const slugs = new Map((await slugsByPath(handle)).map(([, path, slug]) => [path, slug]));
       expect(paths.map((path) => slugs.get(path))).toEqual(
         paths.map((_, i) => (i === 0 ? 'review' : `review-${i + 1}`)),
@@ -1070,6 +1103,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: first.repository.id,
       jobId: first.jobId,
       signal,
+      unobserved: [],
       artifacts: [
         scanned('AGENTS.md', 'x'),
         scanned('a/AGENTS.md', 'x'),
@@ -1082,6 +1116,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: second.repository.id,
       jobId: second.jobId,
       signal,
+      unobserved: [],
       artifacts: [
         scanned('1/AGENTS.md', 'x'),
         // Base `agents-md-6`, read after `agents-md` was: the next `agents-md`s must skip it.
@@ -1114,6 +1149,7 @@ describe('applyRepositoryScan', () => {
       jobId,
       artifacts: [scanned('AGENTS.md', 'x')],
       signal,
+      unobserved: [],
       commitSha: null,
     };
     await requestJobCancellation(handle.db, jobId);
@@ -1130,6 +1166,7 @@ describe('applyRepositoryScan', () => {
         repositoryId: other.repository.id,
         jobId: other.jobId,
         signal,
+        unobserved: [],
         artifacts: [scanned('AGENTS.md', 'x')],
       }),
     ).rejects.toThrow(NotFoundError);
@@ -1149,6 +1186,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: repository.id,
       jobId,
       signal,
+      unobserved: [],
       artifacts: [scanned('AGENTS.md', 'ok'), broken],
     }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ArtifactStoreError);
@@ -1174,6 +1212,7 @@ describe('applyRepositoryScan', () => {
       repositoryId: repository.id,
       jobId,
       signal,
+      unobserved: [],
       artifacts: [scanned('AGENTS.md', 'x'.repeat(256 * 1024))],
     }).catch((error: unknown) => error);
     handle.sqlite.exec('pragma max_page_count = 1073741823');
@@ -1206,6 +1245,7 @@ describe('applyRepositoryScan', () => {
       jobId,
       artifacts: [scanned('AGENTS.md', 'x')],
       signal: controller.signal,
+      unobserved: [],
     });
     controller.abort('shutdown');
     release();
@@ -1231,6 +1271,7 @@ describe('applyRepositoryScan', () => {
         repositoryId: repository.id,
         jobId,
         signal,
+        unobserved: [],
         artifacts: [scanned('AGENTS.md', 'bad \ud800')],
       }),
     ).rejects.toThrow(/not well-formed Unicode/);

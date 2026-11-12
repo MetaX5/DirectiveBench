@@ -177,6 +177,13 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
       discovered: count,
       createdArtifacts: count,
       createdVersions: count,
+      /**
+       * Occurrences this scan marked missing, found again, and kept by the empty-scan guard
+       * (SPEC-125 FR-125-06, A7). Absent in results stored before they existed.
+       */
+      removedOccurrences: count.default(0),
+      reactivatedOccurrences: count.default(0),
+      emptyScanKeptOccurrences: count.default(0),
       warningCount: count,
       errorCount: count,
       errors: z.array(scanDiscoveryErrorSchema).max(MAX_REPORTED_SCAN_ERRORS),

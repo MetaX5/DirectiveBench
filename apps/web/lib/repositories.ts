@@ -12,7 +12,7 @@ import {
   type RepositoryRegistrationResult,
   type RepositoryScan,
 } from '@directivebench/database';
-import { formatDate, formatDuration } from './utils';
+import { formatCount, formatDate, formatDuration } from './utils';
 
 export type RepositoryProvider = RepositoryRecord['provider'];
 
@@ -229,9 +229,13 @@ export function lastScanLabel(
   return repository.lastSyncAt ? formatDate(repository.lastSyncAt) : 'Never';
 }
 
-/** What the Repositories page says about a scan job; `active` keeps the page refreshing. */
+/**
+ * What the Repositories page says about a scan job; `active` keeps the page refreshing. `warning`
+ * is a completed scan that asks the user to check something: the empty-scan guard kept the
+ * occurrences found before (SPEC-125 A7, §11.2 D6b).
+ */
 export interface ScanNotice {
-  kind: 'active' | 'done' | 'error';
+  kind: 'active' | 'done' | 'warning' | 'error';
   message: string;
   /** Discovery errors to list (path, code, message); empty unless the scan completed. */
   errors: { path: string; code: string; message: string }[];
@@ -242,7 +246,33 @@ export interface ScanNotice {
 }
 
 function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+  return `${formatCount(count)} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * The SPEC-125 sentences after a completed scan's counts (FR-125-12, §11.2 D6 and D6a): how many
+ * occurrences went missing and were found again, each only when above 0, or, after an empty scan
+ * that kept the occurrences found before (A7), why nothing was marked. Empty when there is none.
+ */
+function occurrenceChanges(result: {
+  removedOccurrences: number;
+  reactivatedOccurrences: number;
+  emptyScanKeptOccurrences: number;
+}): string {
+  const kept = result.emptyScanKeptOccurrences;
+  if (kept > 0) {
+    const verb = kept === 1 ? 'was' : 'were';
+    return ` No artifacts found, so the ${formatCount(kept)} found before ${verb} not marked missing. Check that the location is mounted and has the expected files.`;
+  }
+  const clauses = [
+    ...(result.removedOccurrences > 0
+      ? [`${formatCount(result.removedOccurrences)} no longer found (marked missing)`]
+      : []),
+    ...(result.reactivatedOccurrences > 0
+      ? [`${formatCount(result.reactivatedOccurrences)} found again`]
+      : []),
+  ];
+  return clauses.length === 0 ? '' : ` ${clauses.join(', ')}.`;
 }
 
 export function describeScan(scan: RepositoryScan): ScanNotice {
@@ -286,12 +316,13 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
   if (!result) return notice('error', 'The runner finished without a result.');
   if (!result.ok) return notice('error', result.message);
   return {
-    kind: 'done',
+    kind: result.emptyScanKeptOccurrences > 0 ? 'warning' : 'done',
     message:
       `Scanned ${name}${result.commitSha ? ` at commit ${result.commitSha.slice(0, 12)}` : ''}: ` +
       `${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
-      `${plural(result.discovered, 'artifact')} found (${result.createdArtifacts} new, ` +
-      `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.`,
+      `${plural(result.discovered, 'artifact')} found (${formatCount(result.createdArtifacts)} new, ` +
+      `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.` +
+      occurrenceChanges(result),
     errors: result.errors,
     errorCount: result.errorCount,
     info: skippedFoldersInfo(result.skippedUserLevelFolders),

@@ -12,7 +12,7 @@ related: [SPEC-103, SPEC-104, SPEC-105, SPEC-101, SPEC-102, SPEC-006, SPEC-007, 
 
 ## 1. Summary
 
-**Proposed, not implemented.** Today a rescan only adds and updates: when a skill, instruction
+**Phase 1 implemented (2026-11-12, §20); Phase 2 (repository removal) not implemented.** Before this spec a rescan only added and updated: when a skill, instruction
 or rule file is deleted from a registered repository, its occurrence stays `active` forever, the
 Artifacts list keeps counting it as found, and nothing tells the user it is gone
 (`applyRepositoryScan`, `packages/database/src/repositories/artifacts.ts`: "Occurrences that were
@@ -106,8 +106,8 @@ and a "Show removed" filter (issue #53) stay out (§4, §5a).
 Written by `om-spec-writing --autonomous` for issue #21. None is marked
 `⚠ NEEDS HUMAN CONFIRMATION`: each default is reversible and keeps or adds history, never removes
 it. UI decisions are listed separately in §11.1. The maintainer approved the spec on 2026-11-12,
-with A7 changed to the empty-scan guard and every other row of §5a and §11.1 as written;
-implementation has not started.
+with A7 changed to the empty-scan guard and every other row of §5a and §11.1 as written. The
+Phase 1 UI details are decided in §11.2.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
@@ -392,8 +392,10 @@ contains no en or em dash.
   appear only when their count is above 0.
 - Empty scan (A7), example: "Scanned client-a: 0 files in 0.1 s, 0 artifacts found (0 new, 0 new
   versions), 0 errors. No artifacts found, so the 9 found before were not marked missing. Check
-  that the location is mounted and has the expected files." Same `muted` status line as every
-  scan result; nothing else on the page changes.
+  that the location is mounted and has the expected files." The line uses
+  `text-warning-foreground` (data-state `warning`) instead of the `text-success-foreground` of
+  every other completed scan, because it asks the user to check something (§11.2 D6b); nothing
+  else on the page changes.
 - Each removable row: after Scan, an `outline` `sm` "Remove" Button named "Remove <name>" in a
   `GET` form. The actions cell wraps (`flex-wrap`) at narrow widths.
 - With `?remove=<id>`, the Registered repositories Card shows, above the table, the Risky-action
@@ -423,11 +425,12 @@ contains no en or em dash.
   deleted, 9 artifacts now missing from every repository. Their history is kept." `not-found`:
   `role="alert"` "That repository is no longer registered. Nothing was removed."
 
-- The PageHeader's planned Badge changes to "Planned, not implemented: private repositories,
-  GitLab, removing a repository" in Phase 1 and to "Planned, not implemented: private
-  repositories, GitLab" in Phase 2 (the new strings have no em dash). The Card description
-  (`scan-explanation`) gains the sentence "A file that a later scan does not find is marked
-  missing; its history is kept."
+- The PageHeader's planned Badge changes to "Planned: not implemented: private repositories,
+  GitLab, removing a repository" in Phase 1 and to "Planned: not implemented: private
+  repositories, GitLab" in Phase 2 (the design system's colon form; the new strings have no em
+  dash; §11.2 D7). The Card description (`scan-explanation`) gains the sentence "A file that a
+  later scan does not find is marked missing; its history is kept." and its two em dashes become
+  parentheses (§11.2 D8).
 
 States: success, not found, invalid, failed. No pending state: like Scan and "Register anyway",
 the form posts without a client component.
@@ -450,6 +453,31 @@ system).
 | UD-5 | Where Remove asks first | `GET` form → `/repositories?remove=<id>` renders the Risky-action panel above the table (server-rendered like "Register anyway", one impact query, works without JavaScript) | A client panel opening in place in an extra table row (SPEC-124 D11 rule 6); needs the counts of every row on page load or a fetch |
 | UD-6 | Confirmation needed at all? | Yes: removing a repository cannot be undone (registering again creates new artifacts), so the Risky-action pattern applies without the SPEC-124 UD-5 exception | No confirmation, result line only |
 | UD-7 | Copy | The strings in §11 and §13 | Maintainer's wording |
+
+### 11.2 Phase 1 UI decisions (maintainer decision, 2026-11-12)
+
+Refinements of §11 and §11.1 (UD-1 to UD-4, UD-7) for Phase 1, approved by the maintainer on
+2026-11-12, including the three points that differ from the §11 text as first written (D6b,
+D7, D8) and the optional D9. None needs a new component, variant or token. Contrast (WCAG 2.x,
+from the OKLCH tokens): the lowest pair is the muted Badge, `muted-foreground` on `muted`, 5.50
+light and 5.83 dark (the SPEC-124 archived chip); the empty-scan line, `warning-foreground` on
+the card, is 7.61 light and 9.41 dark.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| D1 | "Missing" marker on `/artifacts/[id]` (UD-2) | `<Badge variant="muted">Missing</Badge>` last in the PageHeader `actions`, after the type Badge (`outline`) and the format Badge (`secondary`); PageHeader is unchanged |
+| D2 | The note under the header (UD-2) | One `<p role="note" data-testid="missing-note" className="mb-4 text-body">` between the PageHeader and the tab `nav`, so it shows on every tab; inherited `text-foreground`, no fill, no border; text from `missingNote({ lastFoundAt })` in `lib/artifacts.ts`. It comes before the existing `artifact-notice` status line, which stays after the tabs |
+| D3 | Note copy | The §11 text unchanged, including the leading "Missing:"; the date through `formatDate`. `missingNote` branches on `lastFoundAt === null` before formatting (`formatDate(null)` returns a dash placeholder). Both texts are built and unit-tested in Phase 1; the second becomes reachable in Phase 2 |
+| D4 | Occurrences table Status (UD-3, FR-125-10) | Lower case "active" (`outline`, as today) and "missing" (`muted`), from `occurrenceStatusLabel(status)` in `lib/artifacts.ts`; the raw value is never shown; row order and "Last seen" unchanged |
+| D5 | Artifacts list, Repository column (UD-1, FR-125-11) | `missing ? <Badge variant="muted">Missing</Badge> : repositoriesLabel(repositories)`, no `title` when missing, the cell's classes unchanged; Occurrences reads 0 |
+| D6 | Scan result clauses (UD-4, FR-125-12) | Appended to the `describeScan` sentence, each only when its count is above 0, in this order: "2 no longer found (marked missing), 1 found again." Counts use `formatCount`; the existing counts on that line switch from raw numbers to `formatCount` too, so one line uses one number format |
+| D6a | Empty-scan sentence (A7) | The §11 copy plus a singular form: "No artifacts found, so the 9 found before were not marked missing. Check that the location is mounted and has the expected files." and, for 1, "…so the 1 found before was not marked missing. …". It never appears together with the D6 clauses |
+| D6b | Empty-scan line colour | `text-warning-foreground`: `ScanNotice.kind` gains `'warning'` (data-state `warning`), used only when `emptyScanKeptOccurrences > 0`; the page maps it to the class like `done` and `error`; the auto refresh still stops (it checks only `active`). This corrects §11, which first called the line "muted" (the completed-scan line is `text-success-foreground`) |
+| D7 | PageHeader planned Badge on `/repositories` | "Planned: not implemented: private repositories, GitLab, removing a repository" (Phase 2: "Planned: not implemented: private repositories, GitLab"), the design system's colon form instead of §11's "Planned, not implemented:". The two stories quoting the old text (`page-header.stories.tsx` `WithPlannedNotice`, `ui/badge.stories.tsx` `LongTextNarrowScreen`) get the new text; the `/settings` Badge stays for issue 123 |
+| D8 | Scan explanation (`scan-explanation`) | Append "A file that a later scan does not find is marked missing; its history is kept." and replace the paragraph's two em dashes with parentheses ("…it reads the files on disk (the working tree, including uncommitted and untracked files, also for Git repositories) and skips…"). Other dashes on the page stay for issue 123 |
+| D9 | Design-system docs | No new component, variant or token. Text-only story updates (D7). One rule added to the Detail view pattern (`stories/patterns/detail-view.mdx`): an item whose source is gone keeps its page, with a muted Badge in the header and a `role="note"` under it that says what is kept and how it comes back; a static `MissingItem` story in `detail-view.stories.tsx`, checked in both themes by `pnpm test:storybook` |
+| D10 | Keyboard, 320px, a11y | Phase 1 adds no focusable element; the tab order of the three pages is unchanged. At 320px the header Badges wrap under the title, the note wraps, the Occurrences table scrolls inside its container |
+| D11 | Playwright contrast coverage | `text-contrast.spec.ts` also scans `/artifacts/<demo id>` and `/artifacts` with the demo occurrence set to `removed` through `withDatabase` and restored in `finally`; the scan line clauses are covered in `repositories.spec.ts` by the delete and rescan flow (§15) |
 
 ## 12. Security considerations
 
@@ -591,23 +619,23 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: Given a skill deleted from a repository, when the repository is rescanned
+- [x] AC-1: Given a skill deleted from a repository, when the repository is rescanned
   successfully and the scan finds at least one artifact (A7, AC-10), then its occurrence is marked missing (`removed`), for `local-directory`,
   `local-git` and `github` (issue AC 1, SPEC-013 M1 AC4).
-- [ ] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
+- [x] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
   benchmark assignments and evaluation history remain visible on its page, which says it is
   missing and when it was last found (issue AC 2).
 - [ ] AC-3: Given a removed repository, then its occurrences are deleted, but artifacts and
   versions (with `source_repository_id` null), categories, notes and results are kept; removal
   happens only after the inline confirmation that states the counts, and Cancel writes nothing
   (issue AC 3, FR-104-15).
-- [ ] AC-4: Given a repository whose scan failed, was cancelled, or stopped at a per-scan limit
+- [x] AC-4: Given a repository whose scan failed, was cancelled, or stopped at a per-scan limit
   before its apply transaction committed, then none of its occurrences is marked missing; and in
   a successful scan, occurrences covered by a discovery error, an unreadable directory (also one
   inside a skill) or a skipped user-level folder stay active (issue AC 4).
-- [ ] AC-5: Given a missing occurrence whose path is found again by a successful scan, then it is
+- [x] AC-5: Given a missing occurrence whose path is found again by a successful scan, then it is
   active again with the same artifact, reusing the matching version or adding the next one.
-- [ ] AC-6: The scan result line states how many occurrences went missing and how many were found
+- [x] AC-6: The scan result line states how many occurrences went missing and how many were found
   again.
 - [ ] AC-7: The `bundled-examples` repository cannot be removed, and the example import never marks
   anything missing.
@@ -655,10 +683,43 @@ confirm or change before approving the spec.
 
 ## 20. Implementation status
 
-- **Not implemented.** Nothing in this spec is built. Today: nothing sets
-  `artifact_occurrences.status = 'removed'`; reactivation of a removed occurrence by path already
-  happens in `writeArtifactVersion` (it sets `status: 'active'`) but cannot be reached; there is
-  no repository removal.
+- **Phase 1 implemented (verified on 2026-11-12):**
+  - Core: `DiscoveryResult.unobserved` in `discoverArtifacts` and `discoverArtifactsInTree`
+    (error paths, unreadable and changed directories including those folded into a skill's
+    error, skipped directories, `.` for a skipped root) and `unseenOccurrencePaths`
+    (`packages/core/src/repository-path.ts`). Verified by `packages/core/test/discovery.test.ts`,
+    `discovery-tree.test.ts` and `repository-path.test.ts` (equal, inside, containing, `''` and
+    `.` on either side, sibling prefixes, Unicode, 10,000 occurrences).
+  - Database: the marking step in `applyRepositoryScan` with the A7 guard, batches of
+    `REMOVED_OCCURRENCE_BATCH_SIZE` (500), `removedOccurrences`, `reactivatedOccurrences`,
+    `emptyScanKeptOccurrences`; `missing` on `ArtifactListItem`; `missing` and `lastFoundAt` on
+    the detail; the three counts in `repositoryScanResultSchema` with `.default(0)`. Verified by
+    `packages/database/test/missing-occurrences.test.ts` (other repositories untouched, version,
+    commit and `last_seen_at` kept, `updated_at` set, unobserved paths kept, A7, reactivation
+    with equal and changed content keeping tags, notes, categories, suites and runs, cancelled,
+    aborted and removed-repository scans, rollback through a SQLite trigger, an old result that
+    parses) and `artifacts.test.ts`. NFR-125-02: marking 10,000 occurrences, including inserting
+    them, took 84 ms in that test on the development machine.
+  - Runner: both scans pass `discovery.unobserved` and copy the counts. Verified by
+    `packages/runner/test/missing-occurrences.test.ts` (`local-directory` and `local-git`:
+    delete, restore, delete every artifact; a `local-git` branch switch; location gone or
+    replaced by a symlink; `maxCandidatesPerScan` and `maxScanBytes`; a cancellation after
+    discovery; unreadable directories outside and inside a skill with a nested skill below; a
+    too-large skill; the 101st error's occurrence) and the SPEC-125 tests in
+    `hosted-repository.test.ts` (`github`: delete, restore, an empty commit; cache limit, read
+    limit, fetch time limit) and `hosted-repository-limits.test.ts` (`maxScanBytes`, too many
+    candidates, the tree listing limit, a failed blob read). Cancellation inside the apply
+    transaction is covered by the existing `repository-scan.test.ts` shutdown test.
+  - Web: `describeScan` clauses and the `warning` kind, `missingNote`,
+    `occurrenceStatusLabel`; the Missing Badge and note on `/artifacts/[id]`, the list cell
+    Badge, the planned Badge text and the scan explanation on `/repositories` (§11.2 D1 to D11),
+    the Detail view rule and `MissingItem` story. Verified by `apps/web/test/repositories.test.ts`
+    and `artifacts.test.ts`, `apps/web/e2e/missing-occurrences.spec.ts` (delete, rescan, list,
+    page and every tab, restore, empty scan with the warning line, keyboard order, 320px,
+    contrast in both themes) and `text-contrast.spec.ts` (a missing demo artifact).
+- **Not implemented (Phase 2):** `getRepositoryRemovalImpact`, `removeRepository`, the Remove
+  button, the Risky-action panel and the removal result lines (FR-125-13 to FR-125-17); the
+  "repositories were removed" note text exists but is reachable only after Phase 2.
 
 ## 21. Phasing and implementation plan
 

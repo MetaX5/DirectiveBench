@@ -395,6 +395,8 @@ export async function scanHostedRepository(
     artifacts: discovery.artifacts.map(toScannedArtifact),
     commitSha,
     signal: options.signal,
+    // From the full discovery result, never from the truncated `errors` of the job result.
+    unobserved: discovery.unobserved,
   });
   if (!stored.ok) return stored;
   return {
@@ -403,6 +405,9 @@ export async function scanHostedRepository(
     discovered: discovery.artifacts.length,
     createdArtifacts: stored.summary.createdArtifacts,
     createdVersions: stored.summary.createdVersions,
+    removedOccurrences: stored.summary.removedOccurrences,
+    reactivatedOccurrences: stored.summary.reactivatedOccurrences,
+    emptyScanKeptOccurrences: stored.summary.emptyScanKeptOccurrences,
     warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),

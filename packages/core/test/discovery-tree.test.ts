@@ -112,6 +112,8 @@ describe('discoverArtifactsInTree', () => {
         'large/logo.png is 6 bytes, larger than the limit of 5 bytes',
       ],
     ]);
+    // Every error's path is unobserved (SPEC-125 FR-125-03); a tree has no unreadable directory.
+    expect(result.unobserved).toEqual(['AGENTS.md', 'CLAUDE.md', 'large/SKILL.md']);
     const tooLarge = await discoverArtifactsInTree(
       [{ path: 'AGENTS.md', kind: 'file' }],
       only({ 'AGENTS.md': { binary: true, size: 10 } }),
@@ -152,6 +154,7 @@ describe('discoverArtifactsInTree', () => {
       ['CLAUDE.md', 'symlink'],
       ['big/SKILL.md', 'too-many-files'],
     ]);
+    expect(result.unobserved).toEqual(['CLAUDE.md', 'big/SKILL.md']);
   });
 
   it('aborts before reading when there are too many candidates', async () => {

@@ -45,7 +45,7 @@ export const WithPlannedNotice: Story = {
   args: {
     actions: (
       <Badge variant="muted">
-        Planned: not implemented: private repositories, GitLab, marking deleted artifacts as missing
+        Planned: not implemented: private repositories, GitLab, removing a repository
       </Badge>
     ),
   },

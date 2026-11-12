@@ -810,3 +810,81 @@ describe('scanHostedRepository', () => {
     expect(FIXTURE_GIT_ENV.GIT_CONFIG_GLOBAL).toBe('/dev/null');
   });
 });
+
+describe('missing occurrences of a hosted repository (SPEC-125)', () => {
+  const statuses = () =>
+    handle.sqlite
+      .prepare('select path, status from artifact_occurrences order by path')
+      .all()
+      .map((row) => [row.path, row.status]);
+
+  function skills(): FixtureRemote {
+    return new FixtureRemote(remotes, 'acme', 'missing', {
+      'AGENTS.md': '# Rules\n',
+      'review/SKILL.md': SKILL,
+      'other/SKILL.md': SKILL.replace('review', 'other'),
+    });
+  }
+
+  it('marks a deleted skill missing, reactivates it when restored, and keeps all on an empty commit', async () => {
+    const remote = skills();
+    const repository = await registered(remote);
+    expect(await scan(repository)).toMatchObject({ ok: true, discovered: 3 });
+
+    git(remote.work, ['rm', '-q', '-r', 'review']);
+    remote.commit({}, 'delete review');
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      removedOccurrences: 1,
+      reactivatedOccurrences: 0,
+      emptyScanKeptOccurrences: 0,
+    });
+    expect(statuses()).toEqual([
+      ['AGENTS.md', 'active'],
+      ['other', 'active'],
+      ['review', 'removed'],
+    ]);
+
+    remote.commit({ 'review/SKILL.md': SKILL }, 'restore review');
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      createdVersions: 0,
+      removedOccurrences: 0,
+      reactivatedOccurrences: 1,
+    });
+    expect(statuses().every(([, status]) => status === 'active')).toBe(true);
+
+    // A commit without any artifact: the empty-scan guard keeps all three (A7).
+    git(remote.work, ['rm', '-q', '-r', '.']);
+    remote.commit({ 'README.md': '# Emptied\n' }, 'delete everything');
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      discovered: 0,
+      removedOccurrences: 0,
+      emptyScanKeptOccurrences: 3,
+    });
+    expect(statuses().every(([, status]) => status === 'active')).toBe(true);
+  });
+
+  it('marks nothing when the cache limit, the read limit or a git time limit stops the scan', async () => {
+    const remote = skills();
+    const repository = await registered(remote);
+    expect(await scan(repository)).toMatchObject({ ok: true });
+    git(remote.work, ['rm', '-q', '-r', 'review']);
+    remote.commit({}, 'delete review');
+    expect(await scan(repository, { cacheLimitBytes: 1 })).toMatchObject({
+      ok: false,
+      code: 'cache-limit-exceeded',
+    });
+    expect(await scan(repository, { readTotalBytes: 1 })).toMatchObject({
+      ok: false,
+      code: 'scan-failed',
+    });
+    expect(await scan(repository, { timeouts: { fetch: 0 } })).toMatchObject({
+      ok: false,
+      code: 'timeout',
+    });
+    expect(statuses().every(([, status]) => status === 'active')).toBe(true);
+    expect(await scan(repository)).toMatchObject({ ok: true, removedOccurrences: 1 });
+  });
+});

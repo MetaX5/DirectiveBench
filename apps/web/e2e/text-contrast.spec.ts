@@ -89,6 +89,26 @@ for (const theme of ['light', 'dark'] as const) {
     } finally {
       await setArchived('code-quality', false);
     }
+    // A missing artifact (SPEC-125 §11.2 D11): the muted Missing Badge in the header and the list,
+    // the note and the "missing" occurrence status. Nothing in the demo data is missing.
+    await withDatabase((db) =>
+      db
+        .prepare(`update artifact_occurrences set status = 'removed' where artifact_id = ?`)
+        .run(artifactId),
+    );
+    try {
+      for (const path of [`/artifacts/${artifactId}`, '/artifacts']) {
+        await page.goto(path);
+        await expect(page.getByText('Missing', { exact: true }).first()).toBeVisible();
+        await scan(`${path} (demo artifact missing)`);
+      }
+    } finally {
+      await withDatabase((db) =>
+        db
+          .prepare(`update artifact_occurrences set status = 'active' where artifact_id = ?`)
+          .run(artifactId),
+      );
+    }
     // Exercise every status variant and text role on actual app surface classes,
     // including regression-row and warning surfaces absent from an ordinary demo.
     await page.goto('/');

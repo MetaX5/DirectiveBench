@@ -50,6 +50,8 @@ import {
   ARTIFACT_TABS,
   artifactHref,
   invalidParamsNotice,
+  missingNote,
+  occurrenceStatusLabel,
   parseArtifactDetailParams,
   parseArtifactId,
   selectContent,
@@ -124,7 +126,7 @@ function OverviewTab({
                   <TD className="font-mono text-ui">{occurrence.path}</TD>
                   <TD>
                     <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
-                      {occurrence.status}
+                      {occurrenceStatusLabel(occurrence.status)}
                     </Badge>
                   </TD>
                   <TD className="text-ui text-muted-foreground">
@@ -563,9 +565,16 @@ export default async function ArtifactPage({
           <>
             <Badge variant="outline">{artifact.type}</Badge>
             {latest ? <Badge variant="secondary">{latest.format}</Badge> : null}
+            {detail.missing ? <Badge variant="muted">Missing</Badge> : null}
           </>
         }
       />
+      {/* No active occurrence anywhere (SPEC-125 FR-125-09, D1 to D3): shown on every tab. */}
+      {detail.missing ? (
+        <p role="note" data-testid="missing-note" className="mb-4 text-body">
+          {missingNote(detail)}
+        </p>
+      ) : null}
       <Tabs artifactId={artifact.id} current={query.tab} />
       {notices.length ? (
         <div
