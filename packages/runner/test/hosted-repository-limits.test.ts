@@ -311,10 +311,10 @@ describe('scanHostedRepository failures mark nothing missing (SPEC-125 AC-4)', (
       ['tree listing', () => (hooks.listingExceeded = true)],
       ['blob read', () => (hooks.readFails = true)],
     ];
-    for (const [, fail] of failures) {
+    for (const [name, fail] of failures) {
       fail();
-      expect(await run()).toMatchObject({ ok: false });
-      expect(statuses()).toEqual(active);
+      expect(await run(), name).toMatchObject({ ok: false });
+      expect(statuses(), name).toEqual(active);
       hooks.maxScanBytes = undefined;
       hooks.tooManyCandidates = false;
       hooks.listingExceeded = false;
