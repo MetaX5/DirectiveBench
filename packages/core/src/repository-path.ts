@@ -80,3 +80,55 @@ export function pathRelation(path: string, other: string): PathRelation {
   if (isStrictlyInside(other, path)) return 'contains';
   return 'unrelated';
 }
+
+/** True for `''` and `.`: the repository root, which contains every path (FR-125-03). */
+function isRepositoryRoot(path: string): boolean {
+  return path === '' || path === '.';
+}
+
+/** UTF-16 code-unit order, so every path below `p/` forms one contiguous range. */
+function byCodeUnit(a: string, b: string): number {
+  return Number(a > b) - Number(a < b);
+}
+
+/** Index of the first entry of the sorted `list` that is not less than `value`. */
+function lowerBound(list: readonly string[], value: string): number {
+  let low = 0;
+  let high = list.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if ((list[middle] as string) < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * The active occurrence paths a complete scan did not find and may mark missing (SPEC-125
+ * FR-125-03, FR-125-04): not discovered, and not equal to, inside or containing an unobserved
+ * path, compared by whole `/` segments (`a` contains `a/b/SKILL.md`, not `ab/SKILL.md`). `''` and
+ * `.` contain every path, on either side. Exact comparison on the stored strings. Each path checks
+ * its own ancestors in a set and its descendants with one binary search in the sorted unobserved
+ * list, so the cost is O((n + u) log u) times the path depth (NFR-125-01). Pure; keeps the order
+ * of `active`.
+ */
+export function unseenOccurrencePaths(input: {
+  active: readonly string[];
+  discovered: readonly string[];
+  unobserved: readonly string[];
+}): string[] {
+  const unobserved = new Set(input.unobserved);
+  if ([...unobserved].some(isRepositoryRoot)) return [];
+  const discovered = new Set(input.discovered);
+  const sorted = [...unobserved].sort(byCodeUnit);
+  const covered = (path: string): boolean => {
+    if (sorted.length === 0) return false;
+    if (isRepositoryRoot(path) || unobserved.has(path)) return true;
+    for (let end = path.indexOf('/'); end !== -1; end = path.indexOf('/', end + 1)) {
+      if (unobserved.has(path.slice(0, end))) return true;
+    }
+    const below = sorted[lowerBound(sorted, `${path}/`)];
+    return below !== undefined && below.startsWith(`${path}/`);
+  };
+  return input.active.filter((path) => !discovered.has(path) && !covered(path));
+}

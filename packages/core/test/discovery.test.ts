@@ -238,7 +238,13 @@ describe('discoverArtifacts edge cases', () => {
     await writeFile(join(outside, 'skills/evil/SKILL.md'), SKILL);
     await symlink(join(outside, 'skills'), join(root, 'skills'));
     const result = await discoverArtifacts(root);
-    expect(result).toEqual({ artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: [] });
+    expect(result).toEqual({
+      artifacts: [],
+      errors: [],
+      scannedFiles: 0,
+      skippedDirectories: [],
+      unobserved: [],
+    });
   });
 
   it('scans through a root that is itself a symlink to a directory', async () => {
@@ -275,13 +281,20 @@ describe('discoverArtifacts skipDirectories (user-level folders, D05)', () => {
     expect(result.errors).toEqual([]);
     expect(result.scannedFiles).toBe(2);
     expect(result.skippedDirectories).toEqual(['home/.claude']);
+    expect(result.unobserved).toEqual(['home/.claude']);
   });
 
   it('reads nothing when the root is a skipped directory or lies inside one', async () => {
     await write('home/.claude/skills/global/SKILL.md', SKILL);
     const realRoot = await realpath(root);
     const skipDirectories = [join(realRoot, 'home/.claude')];
-    const empty = { artifacts: [], errors: [], scannedFiles: 0, skippedDirectories: ['.'] };
+    const empty = {
+      artifacts: [],
+      errors: [],
+      scannedFiles: 0,
+      skippedDirectories: ['.'],
+      unobserved: ['.'],
+    };
     expect(await discoverArtifacts(join(realRoot, 'home/.claude'), { skipDirectories })).toEqual(
       empty,
     );
@@ -310,6 +323,7 @@ describe('discoverArtifacts robustness', () => {
           message: 'Cannot read directory locked (EACCES); its files were not scanned',
         },
       ]);
+      expect(result.unobserved).toEqual(['locked']);
     } finally {
       await chmod(join(root, 'locked'), 0o755);
     }
@@ -337,6 +351,12 @@ describe('discoverArtifacts robustness', () => {
           message:
             'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned (and 1 more directory)',
         },
+      ]);
+      // The folded directories stay unobserved (SPEC-125 FR-125-03), as does the skill's error.
+      expect(result.unobserved).toEqual([
+        'skills/x/SKILL.md',
+        'skills/x/references/a',
+        'skills/x/references/b',
       ]);
     } finally {
       await chmod(join(root, 'skills/x/references/a'), 0o755);
@@ -367,6 +387,16 @@ describe('discoverArtifacts robustness', () => {
       expect(result.errors[0]?.message).toBe(
         'Skill SKILL.md is incomplete and was not discovered. Cannot read directory other/locked (EACCES); its files were not scanned (and 2 more directories)',
       );
+      // A root SKILL.md with unreadable subdirectories: each of them and both errors, sorted and
+      // without duplicates.
+      expect(result.unobserved).toEqual([
+        'SKILL.md',
+        'other/locked',
+        'other/locked-2',
+        'other/locked-3',
+        'skills/outer/inner/SKILL.md',
+        'skills/outer/inner/locked',
+      ]);
     } finally {
       await chmod(join(root, 'skills/outer/inner/locked'), 0o755);
       for (const dir of rootLocked) await chmod(join(root, dir), 0o755);
