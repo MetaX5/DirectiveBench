@@ -12,7 +12,7 @@ import {
   type AgentModeReadiness,
   type ClaudeReadinessCode,
 } from '@directivebench/agent-adapters';
-import { dataDirLayout, resolveDataDir } from '@directivebench/core';
+import { MIN_KNOWN_SECRET_LENGTH, dataDirLayout, resolveDataDir } from '@directivebench/core';
 import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@directivebench/database';
 import {
   CA_BUNDLE_VARIABLE,
@@ -129,7 +129,9 @@ const USE_API_KEY_MODE = `set ${CLAUDE_API_KEY_VARIABLE} to use API key mode`;
 
 /**
  * Remediation hint per SPEC-203 §9 readiness code (SPEC-009 §4: every non-`ok` check has one).
- * Hints name the variable to set, never its value.
+ * `auth-missing` also covers a login probe that timed out, failed or gave unreadable output, and
+ * an API key that is set but unusable, so its hints cover those cases too. Hints name the
+ * variable to set, never its value.
  */
 const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => string> = {
   'binary-not-found': () =>
@@ -138,8 +140,8 @@ const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => stri
     `Update Claude Code to ${CLAUDE_CODE_MIN_VERSION} or newer, then run \`directivebench doctor\` again.`,
   'auth-missing': (mode) =>
     mode === 'api-key'
-      ? `Set ${CLAUDE_API_KEY_VARIABLE} in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`
-      : `Run \`claude\` and \`/login\` with a Claude subscription account, or ${USE_API_KEY_MODE}.`,
+      ? `Set ${CLAUDE_API_KEY_VARIABLE} to your full API key (at least ${MIN_KNOWN_SECRET_LENGTH} characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`
+      : `Make sure \`claude\` starts and is logged in with a Claude subscription account (run \`claude\` and \`/login\`), or ${USE_API_KEY_MODE}.`,
   'auth-expired': () =>
     `Run \`claude\` and \`/login\` to renew the expired login, or ${USE_API_KEY_MODE}.`,
   'auth-mismatch': () =>

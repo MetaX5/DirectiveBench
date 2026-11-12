@@ -118,9 +118,9 @@ async function runDoctor(dataDir: string, json = true) {
 }
 
 const SUBSCRIPTION_LOGIN_HINT =
-  'Run `claude` and `/login` with a Claude subscription account, or set ANTHROPIC_API_KEY to use API key mode.';
+  'Make sure `claude` starts and is logged in with a Claude subscription account (run `claude` and `/login`), or set ANTHROPIC_API_KEY to use API key mode.';
 const API_KEY_HINT =
-  'Set ANTHROPIC_API_KEY in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
+  'Set ANTHROPIC_API_KEY to your full API key (at least 8 characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
 const GENERIC_HINT = 'Fix the problem described above, then run `directivebench doctor` again.';
 
 const find = (checks: Check[], name: string) => checks.find((c) => c.name === name);
@@ -363,6 +363,36 @@ describe('doctor', () => {
       expect(warnings.every((c) => c.hint)).toBe(true);
     },
   );
+
+  // `auth-missing` also stands for a probe that gave no readable status and for a key that is set
+  // but unusable; the hint must fit those details too and never echo the key.
+  it('gives probe failures and an unusable API key a hint that fits them', async () => {
+    const plantedKey = 'sk-ant-planted-multiline-key-0123456789\nsecond-line';
+    vi.stubEnv('ANTHROPIC_API_KEY', plantedKey);
+    const bin = tempDir();
+    actualFs.writeFileSync(
+      join(bin, 'claude'),
+      fakeClaudeScript('2.1.302 (Claude Code)', `echo 'unexpected output'; exit 3`),
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', bin);
+    const { checks, lines } = await runDoctor(await initialisedDataDir());
+    expect(find(checks, 'agent:claude-code:subscription')).toMatchObject({
+      status: 'warn',
+      detail:
+        'not ready (auth-missing): Login not confirmed: `claude auth status` gave no readable status (exit 3).',
+      hint: SUBSCRIPTION_LOGIN_HINT,
+    });
+    expect(find(checks, 'agent:claude-code:api-key')).toMatchObject({
+      status: 'warn',
+      detail:
+        'not ready (auth-missing): API Key Mode needs an ANTHROPIC_API_KEY of at least 8 characters on one line.',
+      hint: API_KEY_HINT,
+    });
+    const output = lines.join('\n');
+    expect(output).not.toContain('sk-ant-planted-multiline-key');
+    expect(output).not.toContain('second-line');
+  });
 
   describe('agentReadinessHint (issue 204)', () => {
     // A Record over the union fails to type-check when SPEC-203 §9 gains a code without a hint row.
