@@ -98,3 +98,7 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   prove one slug query: 0.85 s locally, but 24.7 s on a green Linux CI job and 31.2 s (timeout)
   on another, because `pnpm test` runs every package at once there. The statement counts catch a
   per-candidate query at any size; 500 artifacts take 0.2 s locally and 1.6 s under load.
+- A Drizzle query builder is lazy: it runs only when awaited (update 2026-11-12, PR #217). A
+  baseline `(db) => db.select().from(table)` returned the builder unawaited, `expectLinearTime`
+  measured an empty call, and a linear query failed at 11.8; write database baselines as
+  `async (db) => await db.select()…` and check that both series take real time.

@@ -1,18 +1,4 @@
-import {
-  and,
-  desc,
-  eq,
-  getTableColumns,
-  gte,
-  inArray,
-  isNull,
-  lt,
-  ne,
-  exists,
-  notExists,
-  sql,
-  type SQL,
-} from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import {
   PREDEFINED_CATEGORIES,
   categoryNameKey,
@@ -426,33 +412,30 @@ export interface RepositoryRemovalImpact {
 /** The internal repository of the bundled examples; never removable (SPEC-125 A15). */
 const NOT_REMOVABLE_PROVIDER = 'bundled-examples';
 
-/** The FR-125-13 counts for one repository, read with the given (transaction's) db. */
+/**
+ * The FR-125-13 counts for one repository, read with the given (transaction's) db. Artifacts left
+ * missing are found in one pass over the active occurrences grouped by artifact: an artifact
+ * active here and nowhere else. A correlated "active elsewhere?" lookup per artifact would scan
+ * every occurrence again for each one (no index leads from an artifact to its occurrences), which
+ * is quadratic and runs inside the removal's write transaction (Codex review of PR #217).
+ */
 async function removalCounts(db: Database, repositoryId: string) {
   const inRepository = eq(artifactOccurrences.repositoryId, repositoryId);
-  const activeIn = (repository: SQL) =>
-    db
-      .select({ id: artifactOccurrences.id })
-      .from(artifactOccurrences)
-      .where(
-        and(
-          eq(artifactOccurrences.artifactId, artifacts.id),
-          eq(artifactOccurrences.status, 'active'),
-          repository,
-        ),
-      );
+  const leftMissing = await db
+    .select({ artifactId: artifactOccurrences.artifactId })
+    .from(artifactOccurrences)
+    .where(eq(artifactOccurrences.status, 'active'))
+    .groupBy(artifactOccurrences.artifactId)
+    .having(
+      sql`max(${artifactOccurrences.repositoryId} = ${repositoryId}) = 1 and max(${artifactOccurrences.repositoryId} <> ${repositoryId}) = 0`,
+    );
   return {
     occurrences: await db.$count(artifactOccurrences, inRepository),
     activeOccurrences: await db.$count(
       artifactOccurrences,
       and(inRepository, eq(artifactOccurrences.status, 'active')),
     ),
-    artifactsLeftMissing: await db.$count(
-      artifacts,
-      and(
-        exists(activeIn(inRepository)),
-        notExists(activeIn(ne(artifactOccurrences.repositoryId, repositoryId))),
-      ),
-    ),
+    artifactsLeftMissing: leftMissing.length,
   };
 }
 

@@ -768,7 +768,10 @@ confirm or change before approving the spec.
     occurrence and an artifact shared with another repository, zero counts, the cascade and
     set-null, artifacts, versions, tags, notes, categories, suites and runs kept (AC-3), an
     already missing occurrence, removal after an empty scan (AC-10), `not-removable` and
-    `not-found` without writes (AC-7), a second call, rollback through a SQLite trigger.
+    `not-found` without writes (AC-7), a second call, rollback through a SQLite trigger, and the
+    impact query growing linearly with the catalog (`expectLinearTime`, 3,200 artifacts: it
+    counts the artifacts left missing in one grouped pass over the active occurrences; the first
+    version, a correlated lookup per artifact, measured 29× against the baseline, Codex review).
   - Web: `canRemove`, `parseRemovalParams`, `removalReasons`, `removalResult`, the empty-scan
     suffix (D23) and `removeRepositoryAction` (FR-125-16); the Remove button, the Risky-action
     panel, the page-level result line, the row fragments and the D21 sentence (§11.3 D12 to

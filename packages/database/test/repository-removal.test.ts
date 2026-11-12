@@ -22,7 +22,8 @@ import {
   type ScannedArtifactInput,
 } from '../src/index';
 import { artifactInput, registerLocal, seedRun, suiteInput } from './support/fixtures';
-import { useTestDatabase } from './support/test-database';
+import { openTestDatabase, useTestDatabase, type TestDatabase } from './support/test-database';
+import { expectLinearTime, LINEAR_TIME_TEST_TIMEOUT_MS } from '../../../test-support/linear-time';
 
 // SPEC-125 Phase 2: removing a repository deletes its occurrences in one transaction and keeps
 // its artifacts, versions and their history; `bundled-examples` cannot be removed.
@@ -297,4 +298,81 @@ describe('removeRepository (SPEC-125 FR-125-14, AC-3)', () => {
       .all() as { source: string | null }[];
     expect(versions).toEqual([{ source: a.repositoryId }]);
   });
+});
+
+describe('removal impact cost (Codex review of PR #217)', () => {
+  /**
+   * A catalog of `size` artifacts in the target repository (every second one also active in a
+   * second repository) and `size` unrelated artifacts in a third, written with raw SQL so building
+   * it stays fast. A correlated "active elsewhere?" lookup per artifact scanned every occurrence
+   * again for each one: quadratic, inside the removal's write transaction.
+   */
+  async function catalog(size: number): Promise<TestDatabase & { target: string }> {
+    const database = await openTestDatabase();
+    const { sqlite } = database.handle;
+    const repository = sqlite.prepare(
+      `insert into repositories (id, provider, name, location, created_at, updated_at)
+       values (?, 'local-directory', ?, ?, 't', 't')`,
+    );
+    const artifact = sqlite.prepare(
+      `insert into artifacts (id, slug, name, type, created_at, updated_at)
+       values (?, ?, ?, 'rule', 't', 't')`,
+    );
+    const version = sqlite.prepare(
+      `insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+       values (?, ?, 1, 'h', 'agents-md', 'AGENTS.md', '[]', '{}', 't')`,
+    );
+    const occurrence = sqlite.prepare(
+      `insert into artifact_occurrences (id, artifact_id, repository_id, path, latest_version_id, status, last_seen_at, created_at, updated_at)
+       values (?, ?, ?, ?, ?, 'active', 't', 't', 't')`,
+    );
+    sqlite.exec('BEGIN');
+    for (const id of ['repo_target', 'repo_shared', 'repo_other']) repository.run(id, id, `/${id}`);
+    for (let i = 0; i < 2 * size; i += 1) {
+      const id = `art_${i}`;
+      artifact.run(id, id, id);
+      version.run(`ver_${i}`, id);
+      const home = i < size ? 'repo_target' : 'repo_other';
+      occurrence.run(`occ_${i}`, id, home, `p${i}`, `ver_${i}`);
+      if (i < size && i % 2 === 0)
+        occurrence.run(`occ_shared_${i}`, id, 'repo_shared', `p${i}`, `ver_${i}`);
+    }
+    sqlite.exec('COMMIT');
+    return { ...database, target: 'repo_target' };
+  }
+
+  it(
+    'grows linearly with the catalog',
+    async () => {
+      const built: TestDatabase[] = [];
+      const build = async (size: number) => {
+        const database = await catalog(size);
+        built.push(database);
+        return database;
+      };
+      try {
+        // Half of the target's artifacts are also active in another repository.
+        const small = await build(10);
+        expect(await getRepositoryRemovalImpact(small.handle.db, small.target)).toMatchObject({
+          occurrences: 10,
+          activeOccurrences: 10,
+          artifactsLeftMissing: 5,
+        });
+        await expectLinearTime({
+          build,
+          run: (database) => getRepositoryRemovalImpact(database.handle.db, database.target),
+          // Reading every occurrence row once is linear in the same data.
+          // (awaited: a Drizzle query only runs when awaited).
+          baseline: async (database) =>
+            await database.handle.db
+              .select({ id: schema.artifactOccurrences.id, path: schema.artifactOccurrences.path })
+              .from(schema.artifactOccurrences),
+          size: 3_200,
+        });
+      } finally {
+        for (const database of built) database.dispose();
+      }
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 });
