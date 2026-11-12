@@ -21,6 +21,7 @@ import {
   nowIso,
   sha256,
   slugify,
+  unseenOccurrencePaths,
 } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import type { CategoryRef } from './catalog';
@@ -240,7 +241,7 @@ async function writeArtifactVersion(
   target: VersionTarget,
   input: VersionContent,
   recomputed: { files: StoredArtifactFile[]; contentHash: string },
-): Promise<ImportArtifactResult & { createdArtifact: boolean }> {
+): Promise<ImportArtifactResult & { createdArtifact: boolean; reactivatedOccurrence: boolean }> {
   const now = nowIso();
   const { repositoryId, commitSha } = target;
   const { files, contentHash } = recomputed;
@@ -302,7 +303,7 @@ async function writeArtifactVersion(
   }
 
   const occurrence = await db
-    .select({ id: artifactOccurrences.id })
+    .select({ id: artifactOccurrences.id, status: artifactOccurrences.status })
     .from(artifactOccurrences)
     .where(
       and(
@@ -343,6 +344,8 @@ async function writeArtifactVersion(
     version: version.version,
     createdVersion,
     createdArtifact,
+    // A missing occurrence found again (SPEC-125 FR-125-05): same occurrence, same artifact.
+    reactivatedOccurrence: occurrence?.status === 'removed',
   };
 }
 
@@ -359,7 +362,11 @@ export async function importArtifactVersion(
   const recomputed = recomputeFiles(input);
   return withTransaction(handle, async (db) => {
     const repositoryId = await upsertRepository(db, input.repository);
-    const { createdArtifact: _created, ...result } = await writeArtifactVersion(
+    const {
+      createdArtifact: _created,
+      reactivatedOccurrence: _reactivated,
+      ...result
+    } = await writeArtifactVersion(
       db,
       slugAllocator(db),
       {
@@ -400,7 +407,16 @@ export class ArtifactStoreError extends Error {
 export interface RepositoryScanSummary {
   createdArtifacts: number;
   createdVersions: number;
+  /** Active occurrences this scan did not find and marked `removed` (SPEC-125 FR-125-06). */
+  removedOccurrences: number;
+  /** `removed` occurrences this scan found again and made `active` (FR-125-05). */
+  reactivatedOccurrences: number;
+  /** Active occurrences kept by the empty-scan guard (A7, FR-125-04); 0 otherwise. */
+  emptyScanKeptOccurrences: number;
 }
+
+/** Most occurrence ids marked `removed` by one statement: well under SQLite's parameter limit. */
+export const REMOVED_OCCURRENCE_BATCH_SIZE = 500;
 
 export interface RepositoryScanApplication {
   repositoryId: string;
@@ -418,6 +434,12 @@ export interface RepositoryScanApplication {
    * on the shared connection, and a shutdown records nothing in the `jobs` row to re-check.
    */
   signal: AbortSignal;
+  /**
+   * Repository-relative paths the scan could not observe (`DiscoveryResult.unobserved`, SPEC-125
+   * FR-125-03), from the full discovery result. Occurrences equal to, inside or containing one
+   * are never marked `removed`. Required, so a caller that forgets it does not compile.
+   */
+  unobserved: readonly string[];
 }
 
 /**
@@ -426,8 +448,15 @@ export interface RepositoryScanApplication {
  * `importArtifactVersion` (hashes recomputed from content, dedup by content hash) with location
  * identity, and the repository records a successful scan (`last_sync_at`, `sync_status = 'ok'`,
  * `sync_error = null`) with the commit read (`last_commit_sha`; null for a working-tree scan, which
- * reads no commit). Occurrences that
- * were not found again are left as they are (removed files are issue #21). The job is re-checked
+ * reads no commit).
+ *
+ * The scan observed the whole snapshot (every failure path returns before this call), so in the
+ * same transaction every other active occurrence of this repository that it did not find is marked
+ * `removed`, shown as missing (SPEC-125 FR-125-04): `status` and `updated_at` change, its version,
+ * commit and `last_seen_at` stay. Occurrences covered by an `unobserved` path are kept
+ * (FR-125-03), and a scan that found no artifact at all marks nothing (the empty-scan guard, A7):
+ * its result counts the active occurrences it kept. A `removed` occurrence found again becomes
+ * `active` with the same artifact (FR-125-05). Nothing is deleted. The job is re-checked
  * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
  * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
  * meanwhile is a `NotFoundError`. A failure while one artifact is written rolls everything back
@@ -460,7 +489,13 @@ export async function applyRepositoryScan(
       .where(eq(repositories.id, repositoryId))
       .get();
     if (!repository) throw new NotFoundError(`Repository ${repositoryId} not found`);
-    const summary: RepositoryScanSummary = { createdArtifacts: 0, createdVersions: 0 };
+    const summary: RepositoryScanSummary = {
+      createdArtifacts: 0,
+      createdVersions: 0,
+      removedOccurrences: 0,
+      reactivatedOccurrences: 0,
+      emptyScanKeptOccurrences: 0,
+    };
     const allocateSlug = slugAllocator(db);
     for (const { input, recomputed } of prepared) {
       const result = await writeArtifactVersion(
@@ -480,7 +515,9 @@ export async function applyRepositoryScan(
       });
       summary.createdArtifacts += Number(result.createdArtifact);
       summary.createdVersions += Number(result.createdVersion);
+      summary.reactivatedOccurrences += Number(result.reactivatedOccurrence);
     }
+    await markUnseenOccurrences(db, application, summary);
     const now = nowIso();
     await db
       .update(repositories)
@@ -494,6 +531,54 @@ export async function applyRepositoryScan(
       .where(eq(repositories.id, repositoryId));
     return summary;
   });
+}
+
+/**
+ * The marking step of {@link applyRepositoryScan} (SPEC-125 FR-125-04), inside its transaction,
+ * after the scan's own writes: with no artifact discovered it only counts the active occurrences
+ * it keeps (A7); otherwise it marks the unseen ones `removed`, in batches by id.
+ */
+async function markUnseenOccurrences(
+  db: Database,
+  application: RepositoryScanApplication,
+  summary: RepositoryScanSummary,
+): Promise<void> {
+  const { repositoryId } = application;
+  const active = await db
+    .select({ id: artifactOccurrences.id, path: artifactOccurrences.path })
+    .from(artifactOccurrences)
+    .where(
+      and(
+        eq(artifactOccurrences.repositoryId, repositoryId),
+        eq(artifactOccurrences.status, 'active'),
+      ),
+    );
+  if (application.artifacts.length === 0) {
+    summary.emptyScanKeptOccurrences = active.length;
+    return;
+  }
+  const unseen = new Set(
+    unseenOccurrencePaths({
+      active: active.map((occurrence) => occurrence.path),
+      discovered: application.artifacts.map((artifact) => artifact.path),
+      unobserved: application.unobserved,
+    }),
+  );
+  const ids = active.filter((occurrence) => unseen.has(occurrence.path)).map(({ id }) => id);
+  const now = nowIso();
+  for (let start = 0; start < ids.length; start += REMOVED_OCCURRENCE_BATCH_SIZE) {
+    await db
+      .update(artifactOccurrences)
+      .set({ status: 'removed', updatedAt: now })
+      .where(
+        and(
+          eq(artifactOccurrences.repositoryId, repositoryId),
+          eq(artifactOccurrences.status, 'active'),
+          inArray(artifactOccurrences.id, ids.slice(start, start + REMOVED_OCCURRENCE_BATCH_SIZE)),
+        ),
+      );
+  }
+  summary.removedOccurrences = ids.length;
 }
 
 /**
@@ -866,6 +951,8 @@ export interface ArtifactListItem {
   repositories: { id: string; name: string }[];
   /** Active occurrences across all repositories (a path found in several places counts each). */
   occurrenceCount: number;
+  /** No active occurrence anywhere (SPEC-125 FR-125-08, A8): shown as missing. */
+  missing: boolean;
   benchmarkCount: number;
   latestEvaluation: LatestEvaluation | null;
 }
@@ -1070,6 +1157,7 @@ export async function listArtifacts(
         ).values(),
       ],
       occurrenceCount: found.length,
+      missing: found.length === 0,
       benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
     };
@@ -1319,8 +1407,21 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
           .innerJoin(artifactVersions, eq(benchmarkRuns.artifactVersionId, artifactVersions.id))
           .where(inArray(benchmarkRuns.artifactVersionId, versionIds))
           .orderBy(desc(benchmarkRuns.startedAt));
+  // Missing: no active occurrence (SPEC-125 FR-125-08, A8). Last found: the latest `last_seen_at`
+  // of its occurrences (ISO strings order as dates), or null when none is left.
+  const missing = !occurrences.some(({ occurrence }) => occurrence.status === 'active');
+  let lastFoundAt: string | null = null;
+  if (missing) {
+    for (const { occurrence } of occurrences) {
+      if (lastFoundAt === null || occurrence.lastSeenAt > lastFoundAt) {
+        lastFoundAt = occurrence.lastSeenAt;
+      }
+    }
+  }
   return {
     artifact,
+    missing,
+    lastFoundAt,
     versions,
     sourceRepositories,
     occurrences,

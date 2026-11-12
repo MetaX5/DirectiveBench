@@ -665,6 +665,10 @@ describe('getRepositoryScan', () => {
       ...success,
       skippedUserLevelFolders: ['.claude'],
       commitSha: null,
+      // Stored before the SPEC-125 counts existed: read as 0.
+      removedOccurrences: 0,
+      reactivatedOccurrences: 0,
+      emptyScanKeptOccurrences: 0,
     });
     // A hosted scan names the commit it read; anything but a full hex object ID is rejected.
     const commitSha = 'a'.repeat(40);
