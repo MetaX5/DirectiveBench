@@ -137,7 +137,7 @@ const CLAUDE_READINESS_HINTS: Record<ClaudeReadinessCode, (mode: string) => stri
   'binary-not-found': () =>
     `Install Claude Code and make sure \`${CLAUDE_EXECUTABLE}\` is on PATH.`,
   'version-unsupported': () =>
-    `Update Claude Code to ${CLAUDE_CODE_MIN_VERSION} or newer, then run \`directivebench doctor\` again.`,
+    `Check \`claude --version\`: if it shows a version older than ${CLAUDE_CODE_MIN_VERSION}, update Claude Code; otherwise fix the cause named in the warning (for example a \`claude\` that fails or cannot be started). Then run \`directivebench doctor\` again.`,
   'auth-missing': (mode) =>
     mode === 'api-key'
       ? `Set ${CLAUDE_API_KEY_VARIABLE} to your full API key (at least ${MIN_KNOWN_SECRET_LENGTH} characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run \`claude\` and \`/login\` to use subscription mode.`

@@ -121,6 +121,8 @@ const SUBSCRIPTION_LOGIN_HINT =
   'Check `claude auth status`: if it shows no Claude subscription login, run `claude` and `/login`; otherwise fix the cause named in the warning (for example a `claude` that fails, hangs or cannot be started) and run `directivebench doctor` again. Or set ANTHROPIC_API_KEY to use API key mode.';
 const API_KEY_HINT =
   'Set ANTHROPIC_API_KEY to your full API key (at least 8 characters, on one line) in the environment that runs DirectiveBench to use API key mode, or run `claude` and `/login` to use subscription mode.';
+const VERSION_HINT =
+  'Check `claude --version`: if it shows a version older than 2.1.259, update Claude Code; otherwise fix the cause named in the warning (for example a `claude` that fails or cannot be started). Then run `directivebench doctor` again.';
 const GENERIC_HINT = 'Fix the problem described above, then run `directivebench doctor` again.';
 
 const find = (checks: Check[], name: string) => checks.find((c) => c.name === name);
@@ -343,7 +345,7 @@ describe('doctor', () => {
       code: 'version-unsupported',
       version: 'not a version',
       auth: 'exit 1',
-      hint: 'Update Claude Code to 2.1.259 or newer, then run `directivebench doctor` again.',
+      hint: VERSION_HINT,
     },
   ])(
     'gives the subscription check a $code hint when no mode is ready',
@@ -363,6 +365,25 @@ describe('doctor', () => {
       expect(warnings.every((c) => c.hint)).toBe(true);
     },
   );
+
+  it('gives a failing version command the version hint, not only an update', async () => {
+    const bin = tempDir();
+    actualFs.writeFileSync(
+      join(bin, 'claude'),
+      '#!/bin/sh\nif [ "$1" = --version ]; then exit 1; fi\nexit 1\n',
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', bin);
+    const { checks } = await runDoctor(await initialisedDataDir());
+    for (const mode of ['subscription', 'api-key']) {
+      expect(find(checks, `agent:claude-code:${mode}`)).toMatchObject({
+        status: 'warn',
+        detail:
+          'not ready (version-unsupported): Could not read the Claude Code version from `claude --version`.',
+        hint: VERSION_HINT,
+      });
+    }
+  });
 
   // `auth-missing` also stands for a probe that gave no readable status and for a key that is set
   // but unusable; the hint must fit those details too and never echo the key.
@@ -453,7 +474,7 @@ describe('doctor', () => {
       status: 'warn',
       detail:
         'not ready (version-unsupported): Claude Code 2.1.0 is older than the minimum 2.1.259; update it.',
-      hint: 'Update Claude Code to 2.1.259 or newer, then run `directivebench doctor` again.',
+      hint: VERSION_HINT,
     });
     expect(lines.join('\n')).not.toContain('sk-ant-planted-doctor-key');
   });
