@@ -318,6 +318,38 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     expect((await statusesOf()).every((o) => o.status === 'active')).toBe(true);
   });
 
+  test('a confirm for a repository removed meanwhile shows the alert in view at 320px', async ({
+    page,
+  }) => {
+    // QA finding on PR 217: the error redirects carried no fragment, so at 320px the alert sat
+    // below the Register card. A repository seeded for this check is deleted behind the panel.
+    const stale = 'repo_stale_e2e';
+    await withDatabase((db) =>
+      db
+        .prepare(
+          `insert into repositories (id, provider, name, location, created_at, updated_at)
+           values (?, 'local-directory', 'stale-e2e', ?, 't', 't')`,
+        )
+        .run(stale, join(sources, 'stale')),
+    );
+    try {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.goto(`/repositories?remove=${stale}#remove-panel`);
+      await expect(page.getByTestId('remove-panel')).toBeVisible();
+      await withDatabase((db) => db.prepare('delete from repositories where id = ?').run(stale));
+      await page.getByRole('button', { name: 'Remove repository' }).click();
+      const alert = page.getByTestId('remove-result');
+      await expect(alert).toHaveText(
+        'That repository is no longer registered. Nothing was removed.',
+      );
+      await expect(alert).toHaveAttribute('role', 'alert');
+      await expect(page).toHaveURL(/\/repositories\?removeError=not-found#remove-result$/);
+      await expect(alert).toBeInViewport();
+    } finally {
+      await withDatabase((db) => db.prepare('delete from repositories where id = ?').run(stale));
+    }
+  });
+
   test('confirming removes the repository; its artifacts are missing with their history (AC-3, AC-10)', async ({
     page,
   }) => {

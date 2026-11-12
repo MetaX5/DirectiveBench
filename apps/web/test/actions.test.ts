@@ -593,13 +593,13 @@ describe('removeRepositoryAction (SPEC-125 FR-125-16)', () => {
     ]);
     // Posting again (a double submit) finds nothing to remove.
     expect(await redirectOf(removeRepositoryAction(form({ repositoryId })))).toBe(
-      '/repositories?removeError=not-found',
+      '/repositories?removeError=not-found#remove-result',
     );
   });
 
   it('returns with an error for missing input and for the bundled examples, writing nothing', async () => {
     expect(await redirectOf(removeRepositoryAction(form({})))).toBe(
-      '/repositories?removeError=invalid',
+      '/repositories?removeError=invalid#remove-result',
     );
     const bundled = await upsertRepository(handle.db, {
       provider: 'bundled-examples',
@@ -607,7 +607,7 @@ describe('removeRepositoryAction (SPEC-125 FR-125-16)', () => {
       location: '/opt/examples',
     });
     expect(await redirectOf(removeRepositoryAction(form({ repositoryId: bundled })))).toBe(
-      '/repositories?removeError=invalid',
+      '/repositories?removeError=invalid#remove-result',
     );
     expect(await getRepository(handle.db, bundled)).not.toBeNull();
     expect(next.revalidatePath).not.toHaveBeenCalled();
@@ -622,7 +622,7 @@ describe('removeRepositoryAction (SPEC-125 FR-125-16)', () => {
       "CREATE TRIGGER fail_occurrences BEFORE DELETE ON artifact_occurrences BEGIN SELECT RAISE(ABORT, 'disk full'); END",
     );
     expect(await redirectOf(removeRepositoryAction(form({ repositoryId })))).toBe(
-      '/repositories?removeError=failed',
+      '/repositories?removeError=failed#remove-result',
     );
     expect(await getRepository(handle.db, repositoryId)).not.toBeNull();
     expect(next.revalidatePath).not.toHaveBeenCalled();

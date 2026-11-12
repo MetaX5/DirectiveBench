@@ -231,12 +231,13 @@ const removeRepositorySchema = z.object({ repositoryId: z.string().min(1) });
  * Removes a registered repository after the Risky-action panel (SPEC-125 FR-125-16): its
  * occurrences are deleted in one transaction, its artifacts and their history stay. The web
  * process only writes through the database package; it never touches the location or the cache.
- * Every outcome returns to `/repositories` with a fixed line (§10, §13); a failed transaction is
- * rolled back and shown without its error text, which can hold query parameters.
+ * Every outcome returns to `/repositories#remove-result` with a fixed line (§10, §13), so the line
+ * is scrolled into view on a narrow screen; a failed transaction is rolled back and shown without
+ * its error text, which can hold query parameters.
  */
 export async function removeRepositoryAction(formData: FormData): Promise<void> {
   const input = removeRepositorySchema.safeParse({ repositoryId: formData.get('repositoryId') });
-  if (!input.success) redirect('/repositories?removeError=invalid');
+  if (!input.success) redirect('/repositories?removeError=invalid#remove-result');
   const handle = requireDatabase();
   let outcome: RemoveRepositoryOutcome | null = null;
   try {
@@ -244,9 +245,10 @@ export async function removeRepositoryAction(formData: FormData): Promise<void> 
   } catch {
     // Reported on the page as "could not be removed"; the transaction rolled everything back.
   }
-  if (outcome === null) redirect('/repositories?removeError=failed');
-  if (outcome.status === 'not-found') redirect('/repositories?removeError=not-found');
-  if (outcome.status === 'not-removable') redirect('/repositories?removeError=invalid');
+  if (outcome === null) redirect('/repositories?removeError=failed#remove-result');
+  if (outcome.status === 'not-found') redirect('/repositories?removeError=not-found#remove-result');
+  if (outcome.status === 'not-removable')
+    redirect('/repositories?removeError=invalid#remove-result');
   revalidatePath('/repositories');
   revalidatePath('/artifacts', 'layout');
   revalidatePath('/categories', 'layout');

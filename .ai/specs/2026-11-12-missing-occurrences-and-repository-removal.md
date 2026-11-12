@@ -1,7 +1,7 @@
 ---
 id: SPEC-125
 title: Removed files are marked missing and their history is kept; repositories can be removed (E02-S03)
-status: approved
+status: implemented
 created: 2026-11-12
 updated: 2026-11-12
 category: feature
@@ -12,7 +12,7 @@ related: [SPEC-103, SPEC-104, SPEC-105, SPEC-101, SPEC-102, SPEC-006, SPEC-007, 
 
 ## 1. Summary
 
-**Phase 1 implemented (2026-11-12, §20); Phase 2 (repository removal) not implemented.** Before this spec a rescan only added and updated: when a skill, instruction
+**Implemented (Phase 1 and Phase 2 verified on 2026-11-12, §20).** Before this spec a rescan only added and updated: when a skill, instruction
 or rule file is deleted from a registered repository, its occurrence stays `active` forever, the
 Artifacts list keeps counting it as found, and nothing tells the user it is gone
 (`applyRepositoryScan`, `packages/database/src/repositories/artifacts.ts`: "Occurrences that were
@@ -354,9 +354,10 @@ with `getRepositoryRemovalImpact` → "Remove repository" posts `removeRepositor
     integers, parsed with Zod; the result line names no repository, which no longer exists, so a
     crafted URL can only show other numbers; the fragment scrolls the result line into view,
     §11.3 D19);
-  - `not-found`: `?removeError=not-found`;
-  - `not-removable` or invalid input: `?removeError=invalid`;
-  - an error thrown by the transaction: `?removeError=failed`.
+  - `not-found`: `?removeError=not-found#remove-result`;
+  - `not-removable` or invalid input: `?removeError=invalid#remove-result`;
+  - an error thrown by the transaction: `?removeError=failed#remove-result` (the error redirects
+    carry the fragment too, so the alert is in view at 320px; browser QA finding on PR 217).
 - The panel is server-rendered from `?remove=<id>`: an unknown or not removable id renders no
   panel and a `role="status"` line "That repository is no longer registered." or nothing for
   `bundled-examples` (its row has no Remove button, so only a crafted URL reaches it).
@@ -510,7 +511,7 @@ text pair is at least 5.5:1, focus indicators at least 5.7:1.
 | D16 | Buttons in the panel (Risky rules 3, 4) | `destructive` `sm` `type="submit"` "Remove repository" in a POST form with a hidden `repositoryId` and `action={removeRepositoryAction}`, then a Cancel `Link` (`text-ui underline`); the form has `flex flex-wrap items-center gap-inline` |
 | D17 | Disabled and pending states | None. Remove stays enabled while a scan runs (A16); no pending text (no client component). A double submit gets `not-found` on the second post, whose alert is true |
 | D18 | Success and error lines (§10, §13) | One line `id="remove-result"` in the page-level slot shared with `scan-request-error`. Success, `role="status"` `text-ui text-success-foreground`: "Repository removed: 14 occurrences deleted, 9 artifacts now missing from every repository. Their history is kept." / for 1: "1 occurrence deleted", "1 artifact now missing from every repository. Its history is kept." / 0 missing: "Repository removed: 3 occurrences deleted. No artifact became missing." / 0 occurrences: "Repository removed. It had no occurrences." Errors, `role="alert"` `text-ui text-destructive-foreground`: not-found "That repository is no longer registered. Nothing was removed."; invalid "The form was incomplete. Reload the page and try again."; failed "The repository could not be removed. Nothing was changed." `?remove=<unknown id>`: `role="status"` `text-ui` "That repository is no longer registered." **Differs from §11 as first written** ("above the table"): after the last removal the EmptyState replaces the Card |
-| D19 | Focus and scroll after navigation | The Remove form's action carries `#remove-panel`. Cancel goes to `/repositories#repository-<id>` and each `TR` gets `id="repository-<id>"`. The success redirect carries `#remove-result`. Verified in Playwright (Chromium) after a full page load and after the Server Action redirect. **Differs from §11 as first written** (plain `/repositories` for Cancel and the redirect) |
+| D19 | Focus and scroll after navigation | The Remove form's action carries `#remove-panel`. Cancel goes to `/repositories#repository-<id>` and each `TR` gets `id="repository-<id>"`. The success redirect carries `#remove-result`, and so do the error redirects (added after the browser QA of PR 217 found the alert below the fold at 320px). Verified in Playwright (Chromium) after a full page load and after the Server Action redirect. **Differs from §11 as first written** (plain `/repositories` for Cancel and the redirect) |
 | D20 | Empty state after the last repository | The unchanged EmptyState "No repositories yet", with the D18 success line above it |
 | D21 | A removed repository's artifacts afterwards (FR-125-17) | Unchanged from Phase 1 (list Badge, Occurrences 0, header Badge, the second `missingNote` text, "Unknown repository" on Versions). New: with no occurrence left, the Occurrences card shows `<p className="text-body text-muted-foreground">No occurrences left: the repositories it was found in were removed.</p>` instead of an empty table (Table page: never an empty table). **A gap the spec as first written did not cover** |
 | D22 | Planned Badge on `/repositories` | "Planned: not implemented: private repositories, GitLab" (§11.2 D7); the `WithPlannedNotice` and `LongTextNarrowScreen` stories and the Phase 1 e2e assertion get the new text |
@@ -666,7 +667,7 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
 - [x] AC-2: Given that missing occurrence, then the artifact's versions, categories, tags, notes,
   benchmark assignments and evaluation history remain visible on its page, which says it is
   missing and when it was last found (issue AC 2).
-- [ ] AC-3: Given a removed repository, then its occurrences are deleted, but artifacts and
+- [x] AC-3: Given a removed repository, then its occurrences are deleted, but artifacts and
   versions (with `source_repository_id` null), categories, notes and results are kept; removal
   happens only after the inline confirmation that states the counts, and Cancel writes nothing
   (issue AC 3, FR-104-15).
@@ -678,13 +679,13 @@ Per SPEC-012 and the 100% coverage rule; no network, mock agent only.
   active again with the same artifact, reusing the matching version or adding the next one.
 - [x] AC-6: The scan result line states how many occurrences went missing and how many were found
   again.
-- [ ] AC-7: The `bundled-examples` repository cannot be removed, and the example import never marks
+- [x] AC-7: The `bundled-examples` repository cannot be removed, and the example import never marks
   anything missing.
-- [ ] AC-8: The changed pages work by keyboard alone, have no horizontal page scroll at 320px and
+- [x] AC-8: The changed pages work by keyboard alone, have no horizontal page scroll at 320px and
   meet the contrast targets in both themes (Playwright).
-- [ ] AC-9: `pnpm lint && pnpm typecheck && pnpm test` pass with 100% coverage; `pnpm build`,
+- [x] AC-9: `pnpm lint && pnpm typecheck && pnpm test` pass with 100% coverage; `pnpm build`,
   `pnpm verify:pack`, `pnpm test:e2e` and `pnpm test:storybook` pass.
-- [ ] AC-10: Given a successful scan that discovers no artifact in a repository with active
+- [x] AC-10: Given a successful scan that discovers no artifact in a repository with active
   occurrences, then none of them is marked missing and the scan result line says how many were
   kept and asks to check the location (A7); and given the repository's only artifact was deleted
   on purpose, then removing the repository leaves that artifact missing with its history
@@ -758,9 +759,33 @@ confirm or change before approving the spec.
     and `artifacts.test.ts`, `apps/web/e2e/missing-occurrences.spec.ts` (delete, rescan, list,
     page and every tab, restore, empty scan with the warning line, keyboard order, 320px,
     contrast in both themes) and `text-contrast.spec.ts` (a missing demo artifact).
-- **Not implemented (Phase 2):** `getRepositoryRemovalImpact`, `removeRepository`, the Remove
-  button, the Risky-action panel and the removal result lines (FR-125-13 to FR-125-17); the
-  "repositories were removed" note text exists but is reachable only after Phase 2.
+- **Phase 2 implemented (verified on 2026-11-12):**
+  - Database: `getRepositoryRemovalImpact` (all occurrences, active ones, artifacts left missing
+    everywhere; null for an unknown id and `bundled-examples`) and `removeRepository` (one
+    `withTransaction`: counts, then one conditional `DELETE … WHERE id = ? AND provider <>
+    'bundled-examples'`; occurrences cascade, versions' `source_repository_id` becomes null).
+    Verified by `packages/database/test/repository-removal.test.ts`: counts with a missing
+    occurrence and an artifact shared with another repository, zero counts, the cascade and
+    set-null, artifacts, versions, tags, notes, categories, suites and runs kept (AC-3), an
+    already missing occurrence, removal after an empty scan (AC-10), `not-removable` and
+    `not-found` without writes (AC-7), a second call, rollback through a SQLite trigger.
+  - Web: `canRemove`, `parseRemovalParams`, `removalReasons`, `removalResult`, the empty-scan
+    suffix (D23) and `removeRepositoryAction` (FR-125-16); the Remove button, the Risky-action
+    panel, the page-level result line, the row fragments and the D21 sentence (§11.3 D12 to
+    D25); Risky-action rule 7 and the `FromTableRow` story. Verified by
+    `apps/web/test/repositories.test.ts` and `actions.test.ts` (outcomes, revalidation, a failed
+    transaction, the bundled examples), `apps/web/e2e/missing-occurrences.spec.ts` (Remove, the
+    panel with its counts, Tab from the panel to the confirm and Cancel, Cancel back to the row
+    with nothing written, contrast with the panel open and the confirm hovered, 320px, confirm
+    at 320px with the redirect fragment in view, the list Badge, the "repositories were removed"
+    note, the D21 sentence, "Unknown repository" on Versions, an unknown `?remove=` id, no
+    Remove on `bundled-examples`), `text-contrast.spec.ts` (the result and error lines) and
+    `ui-contrast.spec.ts` (row Remove at rest, hover and focus, the confirm's focus outline).
+  - AC-7: the example import never marks (Phase 1) and the bundled examples cannot be removed.
+  - AC-9: the full gate passed (run log `.ai/runs/2026-11-12-repository-removal.md`).
+- **Not implemented (out of scope, §4):** repository disable and edit, deleting a hosted cache on
+  removal (issue #59), a CLI `repo remove`; identical accessible names for same-named
+  repositories (issue #215) and `/artifacts?repository=<removed id>` (issue #216) are follow-ups.
 
 ## 21. Phasing and implementation plan
 
