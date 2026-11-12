@@ -553,8 +553,9 @@ category page line "No artifact has this category.". The assign refusal, `CATEGO
 and `INCOMPLETE_FORM_MESSAGE` are the §13 strings. None contains U+2013 or U+2014.
 
 Contrast (computed from the tokens in both themes; no pair beyond Phase 2 and 3): muted text on
-card 6.00 / 6.91; foreground on the select and the outline buttons at rest 19.79 / 15.33, on
-hover or `aria-expanded` 18.15 / 14.03; foreground on the warning panel 17.92 / 14.27;
+card 6.00 / 6.91; the bulk select's text, which inherits the row's muted foreground, 6.01 / 6.23
+(measured in the built app during the Phase 4 QA); foreground on the outline buttons at rest
+19.79 / 15.33, on hover or `aria-expanded` 18.15 / 14.03; foreground on the warning panel 17.92 / 14.27;
 destructive-foreground on the confirm button at rest 6.38 / 5.73 and on hover 5.34 / 4.83 (the
 lowest pair); Cancel (primary-text) on the panel 7.90 / 9.70; errors on card 8.37 / 9.33; the
 "Categories page" link on card 8.72 / 11.67; UI boundaries: control border on card 4.73 / 3.79,
@@ -618,8 +619,10 @@ output does not depend on the server's locale.
 - A bookmark `/artifacts?category=python` after archive still filters; the dropdown shows
   "Python (archived)".
 - A filter that matches nothing: no bulk form (nothing to act on).
-- A URL value the list page ignored (`/artifacts?category=pyhton` lists every artifact with the
-  "Ignored invalid value in the URL" notice): no bulk row, the §11.4 D28 sentence instead.
+- A URL value the list page ignored (`/artifacts?type=script` lists every artifact with the
+  "Ignored invalid value in the URL" notice): no bulk row, the §11.4 D28 sentence instead. A
+  well-formed slug of no category (`/artifacts?category=pyhton`) is not ignored: it filters to an
+  empty list, so there is no bulk form (the case above).
 - No filter set: bulk is allowed on the whole registry; the panel adds "No filter is set, so this
   is every artifact in the registry.".
 - The URL filters by an archived category: the bulk select lists active categories only, so the
