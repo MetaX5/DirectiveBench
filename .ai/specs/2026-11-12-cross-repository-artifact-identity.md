@@ -39,7 +39,7 @@ FR-105-16 that issue #20 (E02-S02) asks for:
 4. **No slug matching for repository content** (already true since issue #16, pinned by tests).
 
 Existing duplicates are not merged (A6); they get the possible-duplicate hint. No new component is
-planned; one migration adds a nullable column and two indexes. Every UI decision in §11 is **to be approved with
+planned; one migration adds two nullable columns and two indexes. Every UI decision in §11 is **to be approved with
 Storybook before code**.
 
 ## 2. Motivation and problem statement
@@ -135,7 +135,7 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | A6 | Artifacts already duplicated before this ships | Not merged. A rescan keeps them separate (rule 1 wins); they get the possible-duplicate hint, which says when their latest content is identical | A one-time migration merging exact duplicates | A merge moves versions to another artifact and renumbers them, which breaks the immutability of `artifact_versions` (FR-103-01), changes `vN` labels users and run reports already show, and unions categories, notes and suite assignments; it is the manual link action's job, with a confirmation (follow-up) |
 | A7 | Several candidate artifacts (only possible with pre-existing duplicates) | Link to the oldest candidate (`created_at`, then `id`), which keeps one stable target; the result line counts these links separately | Link to none and create another artifact (SPEC-105 FR-105-16 d as written) | With legacy duplicates `review` and `review-2`, "link to none" would create `review-3` on every new copy, so duplicates would grow with every repository. Every candidate already has the same type, format, name and an identical version, so the choice cannot merge unrelated content. FR-105-16 (d) is updated |
 | A8 | After a link, an edit in one copy | Stays the same artifact (rule 1): the edited copy adds the next version of the shared artifact; the other occurrence keeps its version. The occurrence table shows each occurrence's version (UD-3) | Split the edited copy into a new artifact | SPEC-101 US-101-03 ("one copy has diverged") is exactly this; splitting on every edit would undo G1 for any skill that is ever customised |
-| A9 | Which copy names the artifact (`name`, `description`)? | Once per scan, after its writes and the SPEC-125 marking: when the highest version held by the artifact's active occurrences is one this scan wrote, the name and description come from that copy; otherwise they stay (FR-126-07) | Last write wins (today) | Last write wins makes the name flip with scan order once two copies differ. The new rule is order-independent, ignores a copy deleted in the same scan, and for an artifact with one occurrence behaves exactly as today (a revert still sets the reverted name) |
+| A9 | Which copy names the artifact (`name`, `description`)? | Derived from state, not from the last write: at the end of every scan, for each artifact the scan wrote, linked, moved or marked missing, the active occurrence holding the highest version names it; the name and description are parsed from that version's primary file at that occurrence's path with core's `parseArtifactFile` (the same parser discovery uses). With no active occurrence left they stay as they were (FR-126-07) | Last write wins (today); or only the copy this scan wrote | Last write wins makes the name flip with scan order once two copies differ, and "only what this scan wrote" still depends on order when the highest copy is deleted (Codex round 2). A function of the active occurrences is order-independent; versions store no name, but name and description are a pure function of the version's primary file and the path, so they can be recomputed. With one occurrence this is today's behaviour, a revert included |
 | A10 | Which version is "latest" for the list, the header and "Run benchmark"? | Unchanged: the highest version number (SPEC-101 §8.2, OQ-101-02) | The version of a chosen occurrence | No contract change in this story; UD-3 makes divergence visible |
 | A11 | Rule 2 matching (moves) | Per scan of one repository: a **new** path (no occurrence row) and an **unseen** active occurrence (SPEC-125 `unseenOccurrencePaths`) of the same format match when, for a directory skill, the content hash is equal, or, for a single file, the primary file's `sha256` is equal (FR-103-09). Only a one-to-one match moves; any other match is ambiguous and nothing moves | Pick a best match on ties (git's rename heuristics) | FR-103-09 as written; a wrong move silently re-labels history, an unapplied one only leaves a missing row |
 | A12 | An ambiguous move | Not applied (counted in the result line). The new path then goes through rule 3, so a directory skill whose candidates all belong to one artifact still links to it | New artifacts with a warning (FR-103-09 as written) | Rule 3 already guarantees an exact copy is never a false merge; FR-103-09's last sentence is updated to "rules 3 and 4 decide" |
@@ -146,7 +146,7 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | A17 | Words | UI: "linked" is not shown; the scan result line says "matched an existing artifact"; "possible duplicate" as in SPEC-101 | "merged" | Nothing is merged; the occurrence is added to an existing artifact |
 | A18 | ADR | None: no new dependency or pattern; the identity rules live in SPEC-101 §8.3 and this spec | ADR for rule 3 | AGENTS.md asks ADRs for significant design decisions only; this implements an existing spec rule |
 | A19 | Version lineage once copies diverge | Every new version records `parent_version_id`: the version its occurrence held before this write (null for a new occurrence and for versions stored before the migration, whose parent is the previous number of the same artifact). "Results by version" compares a version with its nearest tested ancestor along that chain instead of the previous number (SPEC-111 FR-111-50, SPEC-118 FR-118-50/51) | Keep comparing with the previous number; or no lineage and a "diverged" warning only | After a link, edits in two copies become one numbered sequence (A8): copy A's v2 and copy B's v3 are parallel edits, and comparing them would report a "regression" between copies that never followed each other. The parent can only be recorded when the version is inserted (immutable rows, FR-103-01), so it must ship with the first link in Phase 1 |
-| A20 | Skipped files (binary or too large supporting files, `parsedMetadata.skipped`) | Rule 3 does not link and rule 2 does not move when either side has skipped files (FR-126-02, FR-126-15) | Add the skipped list to the match key | Skipped files are not in the manifest, so two directories that differ only in them hash the same; refusing the link keeps "exact copy" true at the cost of a false split, which is cheap |
+| A20 | Skipped files (binary or too large supporting files, which are neither stored nor hashed) | Rule 3 does not link and rule 2 does not move when either side had skipped files at its latest observation. A version's `parsedMetadata.skipped` records only its first observation (versions are reused by hash, FR-103-07), so each occurrence records its own count, `artifact_occurrences.skipped_files`, on every scan that finds it (FR-126-22) | Add the skipped list to the match key; or ignore skipped files (they are never stored or installed) | Two directories that differ only in skipped files hash the same; refusing the link or move keeps "exact copy" true at the cost of a false split, which the future manual link can repair |
 
 ## 6. Functional requirements
 
@@ -155,12 +155,12 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | ID | Requirement |
 | --- | --- |
 | FR-126-01 | **Order.** For every artifact a repository scan discovered, `applyRepositoryScan` resolves identity in this order: rule 1 (an occurrence row at the same repository and path, `active` or `removed`: same artifact, unchanged, SPEC-125 FR-125-05); rule 2 (Phase 3, §6.3); rule 3; rule 4 (a new artifact with the first free slug). |
-| FR-126-02 | **Rule 3.** A discovered artifact of a linkable format (A2, A3) at a new path, with no skipped files, is linked to an existing artifact `X` when `X` is not a bundled example (FR-126-05), the scanned repository is local and `X` has at least one occurrence (any status) and all of them are in local repositories (A4, A16), and `X` has a version with no skipped files whose `content_hash` and `format` equal the discovered ones. The occurrence is inserted for `X`, pointing at that version; no version is created (FR-103-07). The artifact's `name` is not compared (A2). |
+| FR-126-02 | **Rule 3.** A discovered artifact of a linkable format (A2, A3) at a new path, with no skipped files in this scan, is linked to an existing artifact `X` when `X` is not a bundled example (FR-126-05), the scanned repository is local and `X` has at least one occurrence (any status) and all of them are in local repositories (A4, A16), and `X` has a version whose recorded `parsedMetadata.skipped` is empty, which no occurrence with `skipped_files > 0` currently holds (FR-126-22), and whose `content_hash` and `format` equal the discovered ones. The occurrence is inserted for `X`, pointing at that version; no version is created (FR-103-07). The artifact's `name` is not compared (A2). |
 | FR-126-03 | **Several candidates.** When more than one artifact qualifies, the oldest by `created_at`, then `id`, is chosen (A7) and the scan counts it in `ambiguousLinks`. |
 | FR-126-04 | **Within one scan.** Artifacts created or linked earlier in the same apply transaction are candidates for later ones: two identical new paths in one scan become one artifact with two occurrences, as do identical paths in two scans of different repositories (the second apply transaction sees the first, `BEGIN IMMEDIATE`). |
 | FR-126-05 | **Bundled examples.** An artifact with an occurrence in a `bundled-examples` repository is never a rule-3 candidate; `importArtifactVersion` never applies rule 3 (A5). |
 | FR-126-06 | **Repository-level files.** Formats outside the linkable set (instructions, `gitlab-duo-chat-rules`, skills without a frontmatter `name`) skip rule 3 (A2, A3); rules 1, 2 (§6.3) and 4 apply to them as to any artifact. |
-| FR-126-07 | **Source fields.** After the scan's writes and SPEC-125's marking, once per artifact the scan wrote: if the highest version held by the artifact's `active` occurrences is a version this scan wrote, `artifacts.name` and `description` are set from that discovered artifact; otherwise they stay (A9). One grouped read over the written artifacts, in batches of `IDENTITY_LOOKUP_BATCH_SIZE`, never one query per write (NFR-126-01). With one occurrence this is today's behaviour, a revert included. `slug` never changes (FR-105-13). |
+| FR-126-07 | **Source fields.** At the end of the apply transaction, after the writes and SPEC-125's marking, for every artifact this scan wrote, linked, moved or marked an occurrence of: take its `active` occurrences, pick the one holding the highest version number (ties: oldest occurrence `created_at`, then `id`), parse that version's primary file at that occurrence's path with `parseArtifactFile` (core), and set `artifacts.name` and `description` when they differ. An artifact with no active occurrence keeps them. Reads are grouped and batched by `IDENTITY_LOOKUP_BATCH_SIZE` (NFR-126-01). The result depends only on the active occurrences, never on scan order (A9). `slug` never changes (FR-105-13). |
 | FR-126-08 | **User data.** Linking, like every scan write, never changes notes, tags, categories, suite assignments, versions or runs (FR-105-13, FR-103-01). The linked occurrence shares the artifact's user metadata. A missing artifact (SPEC-125 A8) that gains an active linked occurrence is no longer missing. |
 | FR-126-09 | **Summary.** `RepositoryScanSummary` and the job result (`repositoryScanResultSchema`, `ok` branch, `.strict()`) gain `linkedOccurrences` (rule 3 links, ambiguous ones included) and `ambiguousLinks`, counts with `.default(0)` so stored results still parse. `createdArtifacts` no longer counts linked occurrences. |
 | FR-126-10 | **Scan result line.** `describeScan` adds "N matched an existing artifact" when `linkedOccurrences > 0` (§11.1 UD-1). |
@@ -172,6 +172,7 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | FR-126-19 | **Parent.** `artifact_versions.parent_version_id` (nullable, references `artifact_versions.id`, `ON DELETE SET NULL`) is set when a version is inserted, never updated (FR-103-01): the `latest_version_id` the writing occurrence held before this write when that version belongs to the same artifact, else null (a new occurrence, a new artifact). Rows inserted before migration 0006 keep null. |
 | FR-126-20 | **Effective parent.** `effectiveParent(version)` = `parent_version_id` when set; otherwise, for `version > 1`, the version numbered `version - 1` of the same artifact (all versions before this spec form one line, since nothing was linked); otherwise none. |
 | FR-126-21 | **Comparisons.** "Results by version" (SPEC-118 FR-118-50/51, SPEC-111 FR-111-50/51, `apps/web/lib/artifact-runs.ts`) compares a version with its nearest ancestor along `effectiveParent` that has a comparable run in the same group, instead of the previous tested version number, and names it ("compared with v1, the version it was edited from"). The chain is **creation ancestry**: what the content was edited from when the version first appeared. Later transitions that reuse an existing version (a revert, or a copy adopting another copy's content, FR-103-07) add no edge, so a comparison can skip a version a copy held in between but never compares two parallel edits. For an artifact with one line the result is unchanged. A/B runs with an explicit baseline version (SPEC-118 FR-118-13) are unchanged: the user chose the pair. |
+| FR-126-22 | **Skipped files per occurrence.** `artifact_occurrences.skipped_files` (integer, nullable) is set on every scan write of an occurrence (rule 1, a link, a move, a new occurrence) to the number of skipped files of that observation (`DiscoveredArtifact.skipped`). Null means not recorded since migration 0006: rule 2 treats it as "has skipped files" (fail closed); rule 3 ignores a null on the candidate's occurrences and relies on the version's recorded list, so links to artifacts in repositories not rescanned since the upgrade still work. |
 
 ### 6.2 Possible duplicates (Phase 2)
 
@@ -186,7 +187,7 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 | ID | Requirement |
 | --- | --- |
 | FR-126-14 | **Candidates.** Inside the apply transaction, before any write, the scan computes the **new** discovered paths (no occurrence row of this repository at that path) and the **unseen** active occurrences (`unseenOccurrencePaths`, SPEC-125 FR-125-03/04: not discovered and not covered by an unobserved path). With no artifact discovered (SPEC-125 A7) nothing moves. |
-| FR-126-15 | **Match.** A new path and an unseen occurrence match when their formats are equal and: for format `skill-md`, the discovered content hash equals the occurrence's latest version's `content_hash`; for every single-file format, the discovered primary file's recomputed `sha256` equals the `sha256` of the occurrence's latest version's primary file (FR-103-09). Neither side may have skipped files (the new artifact's `skipped` list or the occurrence's latest version's `parsedMetadata.skipped`): skipped files are not in the manifest or the primary file, so two directories that differ only in them would look identical (A20). A pure function `matchMoves` in `@directivebench/core` pairs them; a pair is applied only when each side has exactly one match (A11). Every other matching path is counted once in `ambiguousMoves`. |
+| FR-126-15 | **Match.** A new path and an unseen occurrence match when their formats are equal and: for format `skill-md`, the discovered content hash equals the occurrence's latest version's `content_hash`; for every single-file format, the discovered primary file's recomputed `sha256` equals the `sha256` of the occurrence's latest version's primary file (FR-103-09). Neither side may have skipped files: the new artifact's `skipped` list must be empty and the unseen occurrence's `skipped_files` must be `0` (null, not yet recorded, refuses the move); skipped files are not in the manifest or the primary file, so two directories that differ only in them would look identical (A20). A pure function `matchMoves` in `@directivebench/core` pairs them; a pair is applied only when each side has exactly one match (A11). Every other matching path is counted once in `ambiguousMoves`. |
 | FR-126-16 | **Apply.** A move updates the unseen occurrence in place: `path` to the new path, `latest_version_id` (reused for a skill, the next version for a renamed single file, A13), `commit_sha`, `status = 'active'`, `last_seen_at`, `updated_at`. Same occurrence id and artifact; not counted as removed or created. The source fields follow FR-126-07. |
 | FR-126-17 | **Unmatched.** An unseen occurrence that did not move is marked `removed` (SPEC-125); a new path that did not move goes on to rule 3, then rule 4 (A12). |
 | FR-126-18 | **Summary and line.** The summary and job result gain `movedOccurrences` and `ambiguousMoves` (`.default(0)`); `describeScan` adds "N moved" and "N possible moves were not applied because several files matched" (UD-1). |
@@ -201,7 +202,8 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
   creations update (FR-126-04).
 - NFR-126-02: Migration `0006` adds `artifact_versions_content_hash_idx` on
   `artifact_versions(content_hash)` (the unique index leads with `artifact_id` and cannot serve a
-  hash lookup) and `artifacts_type_name_idx` on `artifacts(type, name)` (duplicate counts), and the nullable column `artifact_versions.parent_version_id` (FR-126-19).
+  hash lookup) and `artifacts_type_name_idx` on `artifacts(type, name)` (duplicate counts), the nullable column `artifact_versions.parent_version_id` (FR-126-19) and the
+  nullable column `artifact_occurrences.skipped_files` (FR-126-22).
   Plain DDL, portable to the planned PostgreSQL backend (SPEC-117). Up and down tested
   (lesson 2026-10-22 "pin each migration's up/down test").
 - NFR-126-03: Move matching reads the latest version of unseen occurrences only (their `files`
@@ -219,9 +221,10 @@ maintainer; the default is the recommendation. UI decisions are in §11.1.
 
 ### 8.1 Data model
 
-Migration `0006_artifact_identity.sql`: the two indexes of NFR-126-02 and the nullable column
+Migration `0006_artifact_identity.sql`: the two indexes of NFR-126-02, the nullable column
 `artifact_versions.parent_version_id` (FR-126-19, references `artifact_versions.id`, `ON DELETE
-SET NULL`), set only on insert. No new table.
+SET NULL`), set only on insert, and the nullable column `artifact_occurrences.skipped_files`
+(FR-126-22), written on every scan write of the occurrence. No new table.
 Existing columns carry the feature: `artifact_occurrences.artifact_id` (a link inserts an
 occurrence for an existing artifact; a move updates `path`), `artifact_versions.content_hash`,
 `format`, `files` (primary file `sha256`), `artifacts.name`, `type`, `created_at`.
@@ -261,6 +264,7 @@ export interface PossibleDuplicate {                                       // Ph
   sameLatestContent: boolean;
 }
 // artifact_versions gains parentVersionId: string | null (FR-126-19), written on insert only.
+// artifact_occurrences gains skippedFiles: number | null (FR-126-22), written on every scan write.
 // getArtifactDetail(...) gains:
 //   possibleDuplicates: { items: PossibleDuplicate[]; total: number }
 //   occurrences[i].version: number   (the occurrence's latest_version_id's number, Phase 1, UD-3)
@@ -433,8 +437,12 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
   `github` occurrence (A16); bundled example never a candidate and the demo import never
   linking (both orders, lesson 2026-10-19); a missing candidate linked and an artifact without
   occurrences not (A4); an old copy linking after a rename (A2); FR-126-07 with two diverged
-  copies in both scan orders, with a single-occurrence revert, and with the highest copy deleted
-  in the same scan; `parent_version_id` on insert (new occurrence, rule-1 edit, link then edit,
+  copies in both scan orders, with a single-occurrence revert, with the highest copy deleted
+  in the same scan and in a separate scan (both orders end with the same name), a skill without
+  frontmatter `name` named after the chosen occurrence's directory, and an artifact with no
+  active occurrence left keeping its name; `skipped_files` written on every scan write, a clean
+  scan then a binary-only addition then a move with the binary removed (no move), a null value
+  refusing a move; `parent_version_id` on insert (new occurrence, rule-1 edit, link then edit,
   move) and never updated; user metadata, versions and runs untouched; rollback
   through a SQLite trigger (lesson 2026-11-05); batched lookup with one statement per 500 hashes
   (count the statements, lesson 2026-11-05 "assert the seam fired"); migration 0006 up and down;
@@ -481,8 +489,9 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
   only with its creation ancestors (FR-126-21), also after the copies converge and diverge again
   and after a revert to an untested version (§14); an artifact with one line shows the same
   comparisons as before.
-- [ ] AC-10: A move is never applied when either side has skipped files (equal text manifests,
-  different binary assets: one missing occurrence plus a new artifact).
+- [ ] AC-10: A move or a link is never applied when either side had skipped files at its latest
+  observation (equal text manifests, different binary assets), also when the binary asset was
+  added only after the version was first stored (FR-126-22).
 - [ ] AC-7: The SPEC-125 removal panel and result line stay true (UD-6; "No artifact became
   missing." reachable and tested).
 - [ ] AC-8: Every UI point of §11.1 was approved in Storybook before its page code; Playwright,
@@ -534,8 +543,8 @@ in an npm release without the UD-6 text change (it is in Phase 1). The PR of Pha
 1. Storybook: UD-3 (Occurrences table with the Version column), UD-6 (removal reason) and the
    "Results by version" block with two diverged lines (FR-126-21) stories;
    maintainer approval before step 5.
-2. Database: migration 0006 (both indexes and `parent_version_id`) with up/down test; the parent
-   written on every version insert; the identity resolution in
+2. Database: migration 0006 (both indexes, `parent_version_id`, `skipped_files`) with up/down
+   test; the parent written on every version insert and `skipped_files` on every occurrence write; the identity resolution in
    `applyRepositoryScan` (rules 1, 3, 4, batched lookup, in-transaction map), FR-126-07, the counts
    and the result schema; `occurrences[i].version` in `getArtifactDetail`; tests (§15).
 3. Runner: copy the counts; runner tests for the three providers.
