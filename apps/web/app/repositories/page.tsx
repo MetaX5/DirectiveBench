@@ -41,8 +41,7 @@ import {
 
 export const metadata: Metadata = { title: 'Repositories' };
 
-const PLANNED =
-  'Planned — not implemented: private repositories, GitLab, marking deleted artifacts as missing';
+const PLANNED = 'Planned: not implemented: private repositories, GitLab, removing a repository';
 
 export default async function RepositoriesPage({
   searchParams,
@@ -202,7 +201,9 @@ export default async function RepositoriesPage({
                       ? 'text-ui text-destructive-foreground'
                       : scanNotice.kind === 'done'
                         ? 'text-ui text-success-foreground'
-                        : 'text-ui'
+                        : scanNotice.kind === 'warning'
+                          ? 'text-ui text-warning-foreground'
+                          : 'text-ui'
                   }
                 >
                   {scanNotice.message}
@@ -253,13 +254,14 @@ export default async function RepositoriesPage({
               <CardTitle>Registered repositories</CardTitle>
               <CardDescription data-testid="scan-explanation">
                 Scan finds the skills, instructions and rules in a repository. For a local
-                repository it reads the files on disk — the working tree, including uncommitted and
-                untracked files, also for Git repositories — and skips user-level agent folders such
+                repository it reads the files on disk (the working tree, including uncommitted and
+                untracked files, also for Git repositories) and skips user-level agent folders such
                 as ~/.claude. For a GitHub repository it downloads only the candidate files of the
                 default branch&apos;s latest commit into a private cache, without a checkout, and
                 records that commit. Either way it skips .git and node_modules, never follows
                 symbolic links and never runs anything from the repository. Rescanning keeps one
-                artifact per path and adds a version only when its content changed.
+                artifact per path and adds a version only when its content changed. A file that a
+                later scan does not find is marked missing; its history is kept.
               </CardDescription>
             </CardHeader>
             <CardContent>

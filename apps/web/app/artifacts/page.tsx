@@ -219,9 +219,14 @@ export default async function ArtifactsPage({
                       </TD>
                       <TD
                         className="min-w-32 text-ui text-muted-foreground wrap-anywhere"
-                        title={a.repositories.map((r) => r.name).join(', ')}
+                        title={a.missing ? undefined : a.repositories.map((r) => r.name).join(', ')}
                       >
-                        {repositoriesLabel(a.repositories)}
+                        {/* No active occurrence anywhere: missing (SPEC-125 FR-125-11, D5). */}
+                        {a.missing ? (
+                          <Badge variant="muted">Missing</Badge>
+                        ) : (
+                          repositoriesLabel(a.repositories)
+                        )}
                       </TD>
                       <TD className="text-right tabular-nums">{a.occurrenceCount}</TD>
                       <TD

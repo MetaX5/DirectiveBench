@@ -18,6 +18,8 @@ type Detail = {
   path: string;
   description?: string;
   latest?: { status: 'passed' | 'regression'; score: string; mock: boolean };
+  /** The note of an item whose source is gone (rule 5). */
+  missingNote?: string;
 };
 
 const skill: Detail = {
@@ -62,6 +64,7 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
           <>
             <Badge variant="outline">{artifact.type}</Badge>
             <Badge variant="outline">v{artifact.version}</Badge>
+            {artifact.missingNote ? <Badge variant="muted">Missing</Badge> : null}
             <Button>
               <Play aria-hidden data-icon="inline-start" />
               Run benchmark
@@ -69,6 +72,11 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
           </>
         }
       />
+      {artifact.missingNote ? (
+        <p role="note" className="mb-4 text-body">
+          {artifact.missingNote}
+        </p>
+      ) : null}
       <div className="space-y-section">
         <Card>
           <CardHeader>
@@ -135,6 +143,22 @@ export const NotFound: Story = {
   args: { artifact: null },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('link', { name: 'Back to all artifacts' })).toBeVisible();
+  },
+};
+
+/** Source gone (rule 5): the page stays, with a muted Badge and a note on what is kept. */
+export const MissingItem: Story = {
+  args: {
+    artifact: {
+      ...skill,
+      missingNote:
+        'Missing: no registered repository contained this artifact in its last scan. Last found on 28 Oct 2026, 12:00 UTC. Its versions, categories, notes and benchmark results are kept, and it becomes active again when a scan finds it at the same path.',
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText('Missing', { exact: true })).toBeVisible();
+    await expect(canvas.getByRole('note')).toHaveTextContent(/kept/);
+    await expect(canvas.getByRole('button', { name: 'Run benchmark' })).toBeEnabled();
   },
 };
 

@@ -277,6 +277,9 @@ describe('canScan and lastScanLabel', () => {
   });
 });
 
+/** A scan result's SPEC-125 counts when nothing went missing, came back or was kept. */
+const unchanged = { removedOccurrences: 0, reactivatedOccurrences: 0, emptyScanKeptOccurrences: 0 };
+
 describe('describeScan', () => {
   function scan(overrides: Partial<RepositoryScan>): RepositoryScan {
     return {
@@ -321,6 +324,7 @@ describe('describeScan', () => {
       discovered: 1,
       createdArtifacts: 1,
       createdVersions: 1,
+      ...unchanged,
       warningCount: 0,
       errorCount: 0,
       errors: [],
@@ -344,6 +348,7 @@ describe('describeScan', () => {
             discovered: 4,
             createdArtifacts: 4,
             createdVersions: 1,
+            ...unchanged,
             warningCount: 0,
             errorCount: 101,
             errors,
@@ -363,6 +368,49 @@ describe('describeScan', () => {
     });
   });
 
+  it('adds what went missing, what came back, and the empty-scan sentence (SPEC-125)', () => {
+    const done = (counts: Partial<typeof unchanged>, discovered = 9) =>
+      describeScan(
+        scan({
+          result: {
+            ok: true,
+            scannedFiles: 12_400,
+            discovered,
+            createdArtifacts: 0,
+            createdVersions: 1,
+            ...unchanged,
+            ...counts,
+            warningCount: 0,
+            errorCount: 0,
+            errors: [],
+            skippedUserLevelFolders: [],
+            commitSha: null,
+            durationMs: 1200,
+          },
+        }),
+      );
+    const counts =
+      'Scanned skills: 12,400 files in 1.2 s, 9 artifacts found (0 new, 1 new version), 0 errors.';
+    expect(done({ removedOccurrences: 2, reactivatedOccurrences: 1 })).toMatchObject({
+      kind: 'done',
+      message: `${counts} 2 no longer found (marked missing), 1 found again.`,
+    });
+    expect(done({ removedOccurrences: 1_240 }).message).toBe(
+      `${counts} 1,240 no longer found (marked missing).`,
+    );
+    expect(done({ reactivatedOccurrences: 1 }).message).toBe(`${counts} 1 found again.`);
+    expect(done({}).message).toBe(counts);
+    const empty =
+      'Scanned skills: 12,400 files in 1.2 s, 0 artifacts found (0 new, 1 new version), 0 errors.';
+    expect(done({ emptyScanKeptOccurrences: 9 }, 0)).toMatchObject({
+      kind: 'warning',
+      message: `${empty} No artifacts found, so the 9 found before were not marked missing. Check that the location is mounted and has the expected files.`,
+    });
+    expect(done({ emptyScanKeptOccurrences: 1 }, 0).message).toBe(
+      `${empty} No artifacts found, so the 1 found before was not marked missing. Check that the location is mounted and has the expected files.`,
+    );
+  });
+
   it('mentions the user-level agent folders a scan skipped, as information (D05)', () => {
     const done = (skippedUserLevelFolders: string[]) =>
       describeScan(
@@ -373,6 +421,7 @@ describe('describeScan', () => {
             discovered: 0,
             createdArtifacts: 0,
             createdVersions: 0,
+            ...unchanged,
             warningCount: 0,
             errorCount: 0,
             errors: [],

@@ -15,6 +15,8 @@ import {
   parseArtifactListForm,
   parseArtifactListParams,
   rawViewNotice,
+  missingNote,
+  occurrenceStatusLabel,
   repositoriesLabel,
   repositoryOptions,
   selectContent,
@@ -115,6 +117,29 @@ describe('invalidParamsNotice', () => {
     expect(invalidParamsNotice(['type', 'tab'])).toBe(
       'Ignored invalid values in the URL: type, tab.',
     );
+  });
+});
+
+describe('missingNote (SPEC-125 FR-125-09)', () => {
+  it('says when the artifact was last found, what is kept and how it comes back', () => {
+    expect(missingNote({ lastFoundAt: '2026-10-28T12:00:00.000Z' })).toBe(
+      'Missing: no registered repository contained this artifact in its last scan. Last found on 28 Oct 2026, 12:00 UTC. Its versions, categories, notes and benchmark results are kept, and it becomes active again when a scan finds it at the same path.',
+    );
+  });
+
+  it('says its repositories were removed when no occurrence is left, without a dash placeholder', () => {
+    const note = missingNote({ lastFoundAt: null });
+    expect(note).toBe(
+      'Missing: the repositories it was found in were removed. Its versions, categories, notes and benchmark results are kept.',
+    );
+    expect(note).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe('occurrenceStatusLabel (SPEC-125 FR-125-10)', () => {
+  it('shows a removed occurrence as missing and never the raw value', () => {
+    expect(occurrenceStatusLabel('active')).toBe('active');
+    expect(occurrenceStatusLabel('removed')).toBe('missing');
   });
 });
 

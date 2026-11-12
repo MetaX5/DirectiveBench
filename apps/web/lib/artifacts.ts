@@ -1,6 +1,7 @@
 import { ARTIFACT_TYPES, CATEGORY_SLUG_MAX_LENGTH } from '@directivebench/core';
 import type { ArtifactListFilter, StoredArtifactFile } from '@directivebench/database';
 import { z } from 'zod';
+import { formatDate } from './utils';
 
 /** Next.js page search params: a repeated parameter arrives as an array. */
 export type SearchParams = Record<string, string | string[] | undefined>;
@@ -106,6 +107,23 @@ export function invalidParamsNotice(invalid: readonly string[]): string | null {
 }
 
 /** The "Repository" cell (FR-101-10): the first repository and "+N" for the others. */
+/**
+ * The note under a missing artifact's header (SPEC-125 FR-125-09, §11.2 D2 and D3): when it was
+ * last found, what is kept and how it comes back; or, with no occurrence left (its repositories
+ * were removed), what is kept. Branches before formatting: `formatDate(null)` is a placeholder.
+ */
+export function missingNote({ lastFoundAt }: { lastFoundAt: string | null }): string {
+  if (lastFoundAt === null) {
+    return 'Missing: the repositories it was found in were removed. Its versions, categories, notes and benchmark results are kept.';
+  }
+  return `Missing: no registered repository contained this artifact in its last scan. Last found on ${formatDate(lastFoundAt)}. Its versions, categories, notes and benchmark results are kept, and it becomes active again when a scan finds it at the same path.`;
+}
+
+/** The Occurrences table's Status label (FR-125-10, §11.2 D4): the stored `removed` reads "missing". */
+export function occurrenceStatusLabel(status: 'active' | 'removed'): 'active' | 'missing' {
+  return status === 'removed' ? 'missing' : 'active';
+}
+
 export function repositoriesLabel(repositories: readonly { name: string }[]): string {
   const [first, ...rest] = repositories;
   if (!first) return '—';
