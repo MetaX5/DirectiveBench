@@ -67,7 +67,7 @@ a gate file before `fetch`); `doctor` must keep the database read-only.
 
 ## Decisions
 
-All behaviour follows the approved decisions J1 to J14; no decision was taken beyond them. Two
+All behaviour follows the approved decisions J1 to J14; no decision was taken beyond them. Three
 interpretations:
 
 - J12 names "SPEC-010 §4" for the `doctor` row, but SPEC-010 §4 is "First run" and the `doctor`
