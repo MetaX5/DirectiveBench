@@ -11,7 +11,7 @@ across repositories, coding agents and AI models.
 It helps answer questions such as: *Does this skill actually improve my coding agent? Did the new
 version regress? Does a rule activate only where it should? Can the result be reproduced?*
 
-> **Project status: early (v0.1, [on npm](https://www.npmjs.com/package/directivebench)),
+> **Project status: early (v0.2, [on npm](https://www.npmjs.com/package/directivebench)),
 > building the artifact registry.** The foundation and one end-to-end vertical slice work: a
 > local SQLite registry, a benchmark engine with RED/GREEN comparison, a job runner, a web UI
 > and a CLI. You can register local
@@ -29,7 +29,7 @@ version regress? Does a rule activate only where it should? Can the result be re
 | --- | --- |
 | Local web UI (dashboard, repositories, artifacts, benchmarks, executions, results, run details, dark/light theme) | ✅ Implemented |
 | Local repository registration by path (Git work tree or plain directory, inspected read-only by the runner; `/` rejected, home directory and overlapping paths confirmed) | ✅ Implemented |
-| Scan of a registered local repository (working tree, read-only, nothing executed) | ✅ Implemented; marking deleted artifacts and cross-repository identity planned |
+| Scan of a registered local repository (working tree, read-only, nothing executed) | ✅ Implemented; files deleted upstream are marked missing with their history kept; cross-repository identity planned ([#20](https://github.com/MetaX5/DirectiveBench/issues/20)) |
 | Public GitHub repository by URL (no credentials; the scan downloads only candidate files into a private bare cache and records the commit; needs git ≥ 2.44) | ✅ Implemented; private repositories, branch picker and change tracking planned |
 | SQLite registry with immutable artifact and benchmark-suite versions | ✅ Implemented |
 | Artifact parsers: `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/rules`, Copilot instructions, Cursor `.mdc`, GitLab Duo rules | ✅ Implemented |
@@ -42,7 +42,10 @@ version regress? Does a rule activate only where it should? Can the result be re
 | Real agent execution with Codex and Cursor, and from the web UI | 📝 Specified, not implemented |
 | Private GitHub, GitLab (incl. self-managed) and commit-based local Git synchronisation | 📝 Specified, not implemented |
 | Model providers (Anthropic, OpenAI, DeepSeek, Z.AI GLM, Kimi, custom) | 📝 Specified, not implemented |
-| Benchmark Builder UI, category management UI, Docker sandbox, LLM-as-judge | 📝 Specified, not implemented |
+| Repository removal (artifacts and their history are kept) | ✅ Implemented |
+| Categories: create, rename, archive, assign on the artifact page and in bulk on the Artifacts list | ✅ Implemented |
+| Output files an agent run wrote: export, side-by-side comparison and blind review | ✅ Implemented |
+| Benchmark Builder UI, Docker sandbox, LLM-as-judge | 📝 Specified, not implemented |
 | Self-hosted multi-user server and remote runners | 📝 Architecture documented only |
 
 ## Local-first architecture

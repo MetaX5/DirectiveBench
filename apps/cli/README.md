@@ -5,9 +5,13 @@ instructions and rules.
 
 > **Status: early (0.x).** The local web UI, SQLite registry and benchmark engine work end to
 > end. You can register local repositories and public GitHub repositories (by URL) and scan them
-> for skills, instructions and rules. Benchmarks run only with a deterministic **mock** agent,
-> which is **not an AI evaluation**; real agent integrations (Claude Code, Codex, Cursor), private
-> and GitLab repositories are specified but **not implemented yet**.
+> for skills, instructions and rules; files deleted upstream are marked missing with their history
+> kept, repositories can be removed, and artifacts can be organised into categories. From the CLI
+> you can benchmark your own skill with your installed **Claude Code** (`benchmark init`,
+> `benchmark run`, against no skill or another version); this is not yet checked against a real
+> login. The web UI and `demo` run a deterministic **mock** agent, which is **not an AI
+> evaluation**. Codex and Cursor integrations, private and GitLab repositories are specified but
+> **not implemented yet**.
 
 ## Usage
 
@@ -16,6 +20,9 @@ npx directivebench            # start the local UI on http://127.0.0.1:4280 and 
 npx directivebench demo       # import the bundled example and run it with the mock agent
 npx directivebench doctor     # diagnose the environment
 npx directivebench init       # create the data directory and database only
+npx directivebench benchmark init    # scaffold a benchmark suite for one of your skills
+npx directivebench benchmark run     # run it with Claude Code (A/B against no skill or a version)
+npx directivebench benchmark export  # write the output files a run kept to a directory
 npx directivebench --help
 ```
 
