@@ -12,7 +12,7 @@ related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, 
 
 ## 1. Summary
 
-**Phase 1 implemented (exact copies, lineage, §20); Phases 2 and 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
+**Phases 1 (exact copies, lineage) and 2 (possible-duplicate hints) implemented (§20); Phase 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
 §8.3 rule 1: same repository and path) and otherwise creates a new artifact (rule 4). A skill
 copied unchanged into a second repository therefore becomes a second artifact (`review`,
 `review-2`) with its own versions, categories and history, and a skill directory moved inside one
@@ -625,7 +625,7 @@ and A21 (an edit copied before its source is rescanned splits).
 ## 20. Implementation status
 
 **Phase 1 implemented (issue #20, branch `feat/spec-126-phase-1-exact-copies`, run log
-`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phases 2 and 3 not implemented.** Verified on
+`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phase 2 below; Phase 3 not implemented.** Verified on
 2026-11-13 by the full gate (format, lint, typecheck, unit tests with 100% coverage, build,
 `verify:pack`, Playwright, Storybook) and a run of the built app:
 
@@ -654,9 +654,29 @@ and A21 (an edit copied before its source is rescanned splits).
   (3,200 linked skills against 100).
 
 Acceptance criteria verified for Phase 1: AC-1, AC-5, AC-6, AC-7, AC-9, AC-10, and AC-8 for the
-Phase 1 UI points. Not implemented: possible-duplicate hints (Phase 2: FR-126-11 to FR-126-13,
-UD-4, UD-5, AC-2), moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example
-tests of Phase 1; its full check closes with Phase 3.
+Phase 1 UI points.
+
+**Phase 2 implemented (issue #20, branch `feat/spec-126-phase-2-possible-duplicates`, run log
+`.ai/runs/2026-11-13-spec-126-phase-2.md`).** Verified on 2026-11-13 by the full gate and a run
+of the built app:
+
+- FR-126-11, FR-126-12 (§11.4 G1, G2, G14): `ArtifactListItem.possibleDuplicates` from one
+  grouped statement on `artifacts_type_name_idx` (type, exact name, latest format among
+  `POSSIBLE_DUPLICATE_FORMATS`; the format alone decides); the Name cell's `outline` Badge on its
+  own line, no `title` (`identity.test.ts` "possible duplicates", incl. the query plan and a
+  linear-time test with 10,016 artifacts; `apps/web/e2e/identity.spec.ts`,
+  `artifacts-full-hd.spec.ts`: one line box and an unchanged Name column at 1920).
+- FR-126-13 (§11.4 G3 to G13): `getArtifactDetail().possibleDuplicates` (at most
+  `MAX_LISTED_DUPLICATES`, oldest first, total, active repositories, `sameLatestContent`); the
+  header Badge on every tab, the Overview card under Occurrences with the slug link, the
+  repositories or "Missing", the content, the overflow line with a search link cut at a code
+  point boundary, and the G11 note (`apps/web/test/artifacts.test.ts` `possibleDuplicatesCard`,
+  `searchPrefix`; e2e incl. 320px, keyboard and contrast in both themes, `text-contrast.spec.ts`).
+- G16 stories (`filtered-list`, `detail-view`), in both themes by `pnpm test:storybook`.
+
+Acceptance criteria verified for Phase 2: AC-2, and AC-8 for the Phase 2 UI points. Not
+implemented: moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example tests of
+Phase 1; its full check closes with Phase 3.
 
 ## 21. Phasing and implementation plan
 
