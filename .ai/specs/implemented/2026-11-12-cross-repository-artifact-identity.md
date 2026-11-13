@@ -1,7 +1,7 @@
 ---
 id: SPEC-126
 title: The same skill in two repositories is one artifact with two occurrences; moves keep identity (E02-S02)
-status: approved
+status: implemented
 created: 2026-11-12
 updated: 2026-11-13
 category: feature
@@ -12,7 +12,7 @@ related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, 
 
 ## 1. Summary
 
-**Phases 1 (exact copies, lineage) and 2 (possible-duplicate hints) implemented (§20); Phase 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
+**Implemented: Phases 1 (exact copies, lineage), 2 (possible-duplicate hints) and 3 (moves), verified on 2026-11-13 (§20).** Before this spec a scan identified an artifact only by its location (SPEC-101
 §8.3 rule 1: same repository and path) and otherwise creates a new artifact (rule 4). A skill
 copied unchanged into a second repository therefore becomes a second artifact (`review`,
 `review-2`) with its own versions, categories and history, and a skill directory moved inside one
@@ -589,34 +589,34 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
 
 ## 16. Acceptance criteria
 
-- [ ] AC-1: Given identical skill content in two repositories, when both are scanned (either
+- [x] AC-1: Given identical skill content in two repositories, when both are scanned (either
   order), then it is one artifact version with two occurrences (SPEC-013 M1 AC3 for skills with
   a frontmatter `name` and rules named after their file, in local repositories; SPEC-101 §8.3
   rule 3).
-- [ ] AC-2: Given two skills with the same name but different content in different repositories,
+- [x] AC-2: Given two skills with the same name but different content in different repositories,
   when they are scanned, then they are not merged, their slugs differ by a suffix, and the list
   and both artifact pages mark them as possible duplicates.
-- [ ] AC-3: Given a skill moved within one repository between two scans, when it is scanned, then
+- [x] AC-3: Given a skill moved within one repository between two scans, when it is scanned, then
   it stays the same artifact and the same occurrence row with the updated path (rule 2), shown
   by a case rule 3 cannot explain (a renamed rule file, a skill without a frontmatter `name`);
   an ambiguous move is not applied.
-- [ ] AC-4: Given repository content, slug matching never decides identity (regression tests in
+- [x] AC-4: Given repository content, slug matching never decides identity (regression tests in
   both orders with the bundled example).
-- [ ] AC-5: Linking and moving keep categories, tags, notes, suite assignments, versions and runs;
+- [x] AC-5: Linking and moving keep categories, tags, notes, suite assignments, versions and runs;
   a linked occurrence shows its version and whether it is older than the latest.
-- [ ] AC-6: Repository-level files, skills without a frontmatter `name` and bundled examples are
+- [x] AC-6: Repository-level files, skills without a frontmatter `name` and bundled examples are
   never linked; copies in hosted repositories are never linked.
-- [ ] AC-9: After two copies of one artifact diverge, "Results by version" compares each version
+- [x] AC-9: After two copies of one artifact diverge, "Results by version" compares each version
   only with its creation ancestors (FR-126-21), also after the copies converge and diverge again
   and after a revert to an untested version (§14); an artifact with one line shows the same
   comparisons as before.
-- [ ] AC-10: The same scan input gives the same identities in any discovery order; the
+- [x] AC-10: The same scan input gives the same identities in any discovery order; the
   edit-then-copy case behaves as A21 states in both repository scan orders; and the
   artifact's name and description are a function of its active occurrences after every scan and
   every repository removal (FR-126-07, FR-126-23, FR-126-24).
-- [ ] AC-7: The SPEC-125 removal panel and result line stay true (UD-6; "No artifact became
+- [x] AC-7: The SPEC-125 removal panel and result line stay true (UD-6; "No artifact became
   missing." reachable and tested).
-- [ ] AC-8: Every UI point of §11.1 was approved in Storybook before its page code; Playwright,
+- [x] AC-8: Every UI point of §11.1 was approved in Storybook before its page code; Playwright,
   Storybook, keyboard, 320px and contrast in both themes pass; the full gate passes.
 
 ## 17. Dependencies
@@ -651,8 +651,9 @@ and A21 (an edit copied before its source is rescanned splits).
 
 ## 20. Implementation status
 
-**Phase 1 implemented (issue #20, branch `feat/spec-126-phase-1-exact-copies`, run log
-`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phase 2 below; Phase 3 not implemented.** Verified on
+**Implemented: all three phases (issue #20). Phase 1 (branch
+`feat/spec-126-phase-1-exact-copies`, run log `.ai/runs/2026-11-13-spec-126-phase-1.md`) below;
+Phases 2 and 3 after it.** Verified on
 2026-11-13 by the full gate (format, lint, typecheck, unit tests with 100% coverage, build,
 `verify:pack`, Playwright, Storybook) and a run of the built app:
 
@@ -701,9 +702,43 @@ of the built app:
   `searchPrefix`; e2e incl. 320px, keyboard and contrast in both themes, `text-contrast.spec.ts`).
 - G16 stories (`filtered-list`, `detail-view`), in both themes by `pnpm test:storybook`.
 
-Acceptance criteria verified for Phase 2: AC-2, and AC-8 for the Phase 2 UI points. Not
-implemented: moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example tests of
-Phase 1; its full check closes with Phase 3.
+Acceptance criteria verified for Phase 2: AC-2, and AC-8 for the Phase 2 UI points.
+
+**Phase 3 implemented (issue #20, branch `feat/spec-126-phase-3-moves`, run log
+`.ai/runs/2026-11-13-spec-126-phase-3.md`).** Verified on 2026-11-13 by the full gate (format,
+lint, typecheck, unit tests with 100% coverage, build, `verify:pack`, Playwright, Storybook), a run
+of the built app and an exploratory browser QA pass:
+
+- FR-126-15 (§11.5 H2): core `matchMoves` pairs new paths and unseen occurrences by format and
+  match hash in linear time; only a group with one of each moves, every new path of another
+  matching group counts in `ambiguous` (`packages/core/test/moves.test.ts`, incl. 10,016 pairs with
+  `expectLinearTime`).
+- FR-126-14, FR-126-16, FR-126-17, FR-126-24: `applyRepositoryScan` resolves rule 1, then rule 2
+  (`resolveMoves`: the unseen active occurrences from the rows read before the writes, not under an
+  unobserved path, nothing with an empty scan), then rules 3 and 4 for the paths that did not move;
+  a move updates the occurrence in place through the version writer (same id and artifact, new
+  path, a directory skill's version reused, a renamed single file's next version with the old one
+  as parent), the name follows (FR-126-07), user metadata is kept; a missing occurrence never
+  moves; a move into a missing row's path is rule 1; the whole scan rolls back on a failed move
+  (`packages/database/test/identity.test.ts` "rule 2", incl. both discovery orders, a GitHub
+  repository, slug and name never deciding a move next to the bundled example, AC-4).
+- NFR-126-03: the unseen occurrences' latest versions are read only when both sides exist, one
+  statement per `IDENTITY_LOOKUP_BATCH_SIZE` (statement count test), without loading a skill's
+  file content; moving 3,200 skills grows linearly (`expectLinearTime`).
+- FR-126-18 (§11.5 H1 to H3): `movedOccurrences` and `ambiguousMoves` in the summary and the job
+  result (`.default(0)`); `describeScan` adds "N moved" after "N new" and the ambiguous-move
+  sentence before the F2 sentence, `done` kind (`apps/web/test/repositories.test.ts`).
+- Runner tests for `local-git`, `local-directory` and `github` (local bare remote): a moved skill
+  directory and a renamed rule keep their occurrence rows, two identical skills moved at once do
+  not move (`packages/runner/test/missing-occurrences.test.ts`, `hosted-repository.test.ts`).
+- H4 scan explanation, H6 Version history description; H12 Playwright in
+  `apps/web/e2e/identity.spec.ts` (the scan line, the same artifact URL, one Occurrences row with
+  the new path, the rule's v2, the H6 text, the ambiguous-move sentence, contrast in both themes,
+  320px).
+
+Acceptance criteria verified for Phase 3: AC-3, AC-4 (with the Phase 1 bundled-example tests), and
+AC-8 for the Phase 3 UI points (approved with throwaway stories, H11). With Phases 1 and 2, AC-1
+to AC-10 are all verified.
 
 ## 21. Phasing and implementation plan
 
