@@ -199,10 +199,10 @@ implementation has not started.
 | ID | Requirement |
 | --- | --- |
 | FR-126-14 | **Candidates.** Inside the apply transaction, before any write, the scan computes the **new** discovered paths (no occurrence row of this repository at that path) and the **unseen** active occurrences (`unseenOccurrencePaths`, SPEC-125 FR-125-03/04: not discovered and not covered by an unobserved path). With no artifact discovered (SPEC-125 A7) nothing moves. |
-| FR-126-15 | **Match.** A new path and an unseen occurrence match when their formats are equal and: for format `skill-md`, the discovered content hash equals the occurrence's latest version's `content_hash`; for every single-file format, the discovered primary file's recomputed `sha256` equals the `sha256` of the occurrence's latest version's primary file (FR-103-09). A pure function `matchMoves` in `@directivebench/core` pairs them; a pair is applied only when each side has exactly one match (A11). Every other matching path is counted once in `ambiguousMoves`. |
+| FR-126-15 | **Match.** A new path and an unseen occurrence match when their formats are equal and: for format `skill-md`, the discovered content hash equals the occurrence's latest version's `content_hash`; for every single-file format, the discovered primary file's recomputed `sha256` equals the `sha256` of the occurrence's latest version's primary file (FR-103-09). A pure function `matchMoves` in `@directivebench/core` pairs them; a pair is applied only when each side has exactly one match (A11). Every **new** path that matched at least one unseen occurrence but did not move is counted once in `ambiguousMoves` (§11.5 H2); the unseen occurrences are already counted as "no longer found". |
 | FR-126-16 | **Apply.** A move updates the unseen occurrence in place: `path` to the new path, `latest_version_id` (reused for a skill, the next version for a renamed single file, A13), `commit_sha`, `status = 'active'`, `last_seen_at`, `updated_at`. Same occurrence id and artifact; not counted as removed or created. The source fields follow FR-126-07. |
 | FR-126-17 | **Unmatched.** An unseen occurrence that did not move is marked `removed` (SPEC-125); a new path that did not move goes on to rule 3, then rule 4 (A12). |
-| FR-126-18 | **Summary and line.** The summary and job result gain `movedOccurrences` and `ambiguousMoves` (`.default(0)`); `describeScan` adds "N moved" and "N possible moves were not applied because several files matched" (UD-1). |
+| FR-126-18 | **Summary and line.** The summary and job result gain `movedOccurrences` and `ambiguousMoves` (`.default(0)`); `describeScan` adds "N moved" inside the parentheses after "N new" when `movedOccurrences > 0`, and, when `ambiguousMoves > 0`, the sentence "N possible move was (moves were) not applied because several files matched." right after the counts sentence and before the F2 sentence; the line keeps the `done` kind (UD-1, §11.5 H1 to H3). |
 
 ## 7. Non-functional requirements
 
@@ -339,7 +339,7 @@ maintainer approves them, then the page code follows (the SPEC-125 §11.2 / §11
 
 | # | Point | Proposed default |
 | --- | --- | --- |
-| UD-1 | Scan result line on `/repositories` | Phase 1 (refined by §11.3 F1, F2): "3 matched an existing artifact" inside the parentheses after "N new" ("9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions)"), and, when links chose between several artifacts, "1 matched several existing artifacts and was added to the oldest one." after the counts sentence. Phase 3: "1 moved", "1 possible move was not applied because several files matched" (placement decided then). Plain text in the existing line; no new kind |
+| UD-1 | Scan result line on `/repositories` | Phase 1 (refined by §11.3 F1, F2): "3 matched an existing artifact" inside the parentheses after "N new" ("9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions)"), and, when links chose between several artifacts, "1 matched several existing artifacts and was added to the oldest one." after the counts sentence. Phase 3 (refined by §11.5 H1 to H3): "1 moved" inside the parentheses right after "N new" and before "N matched an existing artifact" ("9 artifacts found (0 new, 1 moved, 0 new versions)"), and "1 possible move was not applied because several files matched." after the counts sentence, before the F2 sentence. Plain text in the existing line; no new kind |
 | UD-2 | Artifacts list for a linked artifact | No change: the Repository cell already shows the first repository plus "+N" and Occurrences counts active occurrences across repositories, which is AC-1 visible |
 | UD-3 | Occurrences table on the artifact page (Phase 1) | New column "Version" after Path: "v3"; when it is not the artifact's latest version, a `muted` Badge "older version" next to it, so a diverged copy is visible (US-126-02). The column is a link to `?tab=content&version=3` |
 | UD-4 | List Name cell (Phase 2) | Refined by §11.4 G1, G2: under the name, on its own line, an `outline` Badge "Possible duplicate" (`whitespace-nowrap`), no `title` and no icon; keeps the issue #122 widths (the badge wraps under the name, never widens the column) |
@@ -421,6 +421,33 @@ pixels in the built Storybook): the lowest new pair is the "Missing" Badge in th
 | G16 | Stories and design-system docs | No new component, variant or token. `filtered-list.stories.tsx` gets `PossibleDuplicates` (G1); `detail-view.stories.tsx` gets `PossibleDuplicates` (G3 to G11: two rows, mixed content, one missing) and `PossibleDuplicatesOverflow` (more than 20 rows); `detail-view.mdx` gets one rule: "An item that shares its name with other items lists them in a card under its occurrences, with where each one is and whether its content is the same; the card is not shown when there are none (SPEC-126)." All in both themes by `pnpm test:storybook` |
 | G17 | Playwright coverage | `identity.spec.ts` adds a same-named, different skill (both rows badged, both cards linking each other by slug, "Different content", no note) and a seeded GitHub or legacy pair for "Same latest content" and the note; `artifacts-full-hd.spec.ts` seeds a duplicate pair (one a long snake_case rule name): one line box, no container or document scroll at 1920, the Name header width equal to the run without the pair; no document scroll at 320px on both pages; `text-contrast.spec.ts` covers both pages with duplicates in both themes; seeds removed in `afterAll` |
 | G18 | Noticed, not changed | Out of Phase 2: the `/artifacts` Table's missing `aria-label` (PR #158 follow-up) and the list's "—" placeholders (issue #123) |
+
+### 11.5 Phase 3 UI decisions (approved 2026-11-13)
+
+Refinements of §11.1 (UD-1, UD-7), FR-126-15 and FR-126-18 for Phase 3, prepared with throwaway
+Storybook stories and screenshots and approved by the maintainer on 2026-11-13 with every
+recommended default (comment on issue #20), including the points that differ from the text first
+written: H1 (placement of "N moved", left open by UD-1), H2 (what `ambiguousMoves` counts, a gap in
+FR-126-15), H3 (the `done` kind, against SPEC-103 FR-103-09's "sync warning"), H4 and H6 (not in
+the spec). The spec text above is corrected to match. None needs a new component, variant, token
+or story. Contrast (WCAG 2.x, rendered pixels in the built Storybook): every changed text is
+`text-success-foreground` on `card` (7.02 light, 7.66 dark) or `muted-foreground` on `card` (6.01
+/ 6.94), the same tokens Phases 1 and 2 measured.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| H1 | UD-1 "N moved" | Inside the parentheses, right after "N new" and before "N matched an existing artifact" (rule order), only when `movedOccurrences > 0`: "9 artifacts found (0 new, 1 moved, 0 new versions)"; a renamed rule reads "(0 new, 1 moved, 1 new version)" (A13). Counted with `formatCount`, no plural form, same `done` kind |
+| H2 | `ambiguousMoves` (FR-126-15) | The number of **new paths** that matched at least one unseen occurrence (same format and match hash) and were not moved; `matchMoves` returns it as `ambiguous`. Two identical skills moved at once: 2; x moved to y and copied to z: 2; x and y deleted, one identical z added: 1 |
+| H3 | Ambiguous-move sentence | "1 possible move was not applied because several files matched." / "2 possible moves were not applied because several files matched.", only when `ambiguousMoves > 0`, right after the counts sentence and before the F2 sentence, then the SPEC-125 clauses. The kind stays `done` (green): no separate sync warning (SPEC-103 FR-103-09 is aligned) |
+| H4 | Scan explanation on `/repositories` | After "A file that a later scan does not find is marked missing; its history is kept." and before F3's sentence: "A skill, rule or instruction moved or renamed inside the repository between two scans keeps its artifact and history when its content is unchanged and nothing else added or removed in that scan has the same content. A renamed rule file gets a new version, because a rule is named after its file." |
+| H5 | Artifact page after a move | Nothing new: the Occurrences row keeps its id and shows the new path, `active`, a fresh "Last seen" and the same version (directory skill) or the next one (renamed single file, A13). No "moved from" note |
+| H6 | Version history description | "Versions are immutable; a new version is created only when the content or a file name changes. The content hash is the SHA-256 over the sorted file manifest." |
+| H7 | SPEC-125 Missing note | Unchanged (a missing occurrence never moves) |
+| H8 | G11 note, removal panel, possible-duplicates card | Unchanged |
+| H9 | Name and slug after a move | No UI change: a moved nameless skill or a renamed rule gets its new name from FR-126-07; the slug stays (FR-105-13), so "Run with the CLI" keeps the old slug |
+| H10 | UD-7 words | Phase 3 shows "moved", "possible move(s) ... not applied because several files matched", "moved or renamed", "a file name"; never "linked" or "merged"; no en or em dash |
+| H11 | Stories | No permanent story: the scan line is copy inside the existing `role="status"` paragraph (`Patterns/Job progress`), H4 and H6 are text in existing `CardDescription`s; the throwaway pass was the Storybook approval (as F1 to F3) |
+| H12 | Playwright (AC-3) | `identity.spec.ts`: between two scans of one fixture repository, rename a `.cursor/rules/*.mdc` file and move a skill directory without a frontmatter `name`; assert "(0 new, 2 moved, 1 new version)", the same artifact URL, one Occurrences row with the new path and no missing row; then move two identical nameless skills at once and assert "2 possible moves were not applied because several files matched." and "2 no longer found (marked missing)"; the contrast scan on `/repositories` with the move line in both themes; the H6 text asserted once; fixtures restored in `afterAll` |
 
 ## 12. Security considerations
 
@@ -708,6 +735,9 @@ in an npm release without the UD-6 text change (it is in Phase 1). The PR of Pha
 4. SPEC-101 FR-101-10 note and §20.
 
 ### Phase 3: moves (rule 2)
+
+No Storybook step: the Phase 3 UI points (§11.5) change copy only in existing components, and the
+throwaway stories of the decision pass were the approval (H11).
 
 1. Core: `matchMoves` and tests.
 2. Database: the move step before rule 3 (FR-126-14 to FR-126-17), counts; tests.
