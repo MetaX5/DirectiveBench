@@ -3,7 +3,7 @@ id: SPEC-124
 title: Create, rename and archive categories and assign them to artifacts (E03-S01)
 status: implemented
 created: 2026-11-04
-updated: 2026-11-10
+updated: 2026-11-13
 category: feature
 related: [SPEC-106, SPEC-101, SPEC-006, SPEC-007, SPEC-014, SPEC-122, SPEC-108]
 ---
@@ -385,7 +385,7 @@ confirmation.
 
 **`/artifacts/[id]` (changed).** Categories move from the Metadata card into a "Categories"
 card using "Lists edited in place": each assigned category as a `secondary` Badge (archived:
-`muted`, "Name (archived)") with an `outline` `sm` "Remove" named "Remove category Name"; under
+`muted`, "Name (archived)") with an `outline` `sm` "Remove" named "Remove category Name, slug name"; under
 the list a NativeSelect of active, unassigned categories and an "Assign" button. When none are
 left: "Every active category is assigned. Create more on the Categories page." (link). Empty
 list: "No categories yet."
@@ -454,7 +454,7 @@ maintainer on 2026-11-05. None needs a new component, variant or token.
 | D1 | New category form | One wrapping row: Name, "Description (optional)", Create (`h-control`, same height as the inputs) |
 | D2 | Row actions in the Active table | None; the name links to `/categories/<slug>`; CardDescription "Open a category to rename or archive it." |
 | D3 | Empty Description cell | Empty cell (no dash placeholder) |
-| D4 | Artifacts count cell | A link only when the count is above 0, `aria-label` "3 artifacts with CI and Ops" |
+| D4 | Artifacts count cell | A link only when the count is above 0, `aria-label` "3 artifacts with CI and Ops, slug ci-and-ops"; in the Archived table "with Python (archived), slug python" (issue 220) |
 | D5 | Archived categories card | Same columns as the Active table, no row actions, no per-row badge; Unarchive lives on the category page |
 | D6 | Empty Active table | `EmptyState` replaces the Active card (no card in a card); "Create one above." when nothing is archived, "Create one above, or unarchive one below." otherwise |
 | D7 | `/categories/[slug]` card order | Details, Artifacts, Status (risky action last) |
@@ -500,7 +500,7 @@ existing ones (lowest: archived chip, 5.50 light, 5.83 dark).
 | # | Point | Decision |
 | --- | --- | --- |
 | D16 | Card position | Right column, directly after Metadata and before Tags; Metadata keeps only Compatibility |
-| D17 | Chips and Remove | Same layout as Tags: a wrapping list (`aria-label` "Categories"), each item a Badge plus an `outline` `sm` "Remove" whose accessible name is "Remove category " plus the chip text ("Remove category Python (archived)") |
+| D17 | Chips and Remove | Same layout as Tags: a wrapping list (`aria-label` "Categories"), each item a Badge plus an `outline` `sm` "Remove" whose accessible name is "Remove category " plus the chip text, a comma and the slug ("Remove category Python (archived), slug python"; issue 220) |
 | D18 | Link from a chip | None; the Badge stays non-clickable |
 | D19 | Card description | "Groups for filtering the Artifacts list. A rescan keeps them." |
 | D20 | Picker | Like the Suites picker: label "Category", first option preselected, no placeholder, `default` "Assign" button (`h-control`, same height as the select) |
@@ -653,6 +653,8 @@ output does not depend on the server's locale.
 - "日本語 2" contains a digit, so its slug is derived (`2`), not generated; a later "2" is
   refused as slug-taken.
 - Archive or bulk confirmation open, then Cancel: nothing is written and no status line appears.
+- Two archived categories with the same name (a rename is checked against active names only):
+  the chips look alike; Remove and the count links stay distinct by the slug (issue 220).
 
 ## 15. Testing strategy
 
@@ -812,7 +814,8 @@ parsed filter and is posted by the bulk form automatically (§11.4 implementer n
   removable without confirmation); FR-124-16 for both actions (every submit revalidates the
   artifact page and both layouts, D26); the §8.2 contract change (the outcomes name the category
   read after the write; `ArtifactCategory.id`); the Categories card of §11 and §11.3 (D16 to
-  D26: position after Metadata, chips with Remove named "Remove category <chip text>", no chip
+  D26: position after Metadata, chips with Remove named "Remove category <chip text>, slug <slug>"
+  (the slug added on 2026-11-13 by issue 220), no chip
   links, the picker of active unassigned categories with the first option preselected, the D21
   and D22 sentences with the Categories page link, the D24 copy and pending lines, the D25 focus
   map, keyboard only, 320px with a 64-character name, contrast of chips, status line and error in
