@@ -599,8 +599,10 @@ interface PreparedArtifact {
  *
  * Identity (SPEC-101 §8.3, SPEC-126 FR-126-01, FR-126-24) is resolved in an order independent of
  * the discovery order: first every path with an occurrence row of this repository (rule 1: same
- * artifact, a `removed` row becomes `active` again, FR-125-05), then the new paths in ascending
- * code-unit order. A new path of a linkable format (`isLinkable`) in a local repository is added
+ * artifact, a `removed` row becomes `active` again, FR-125-05), then the moves (rule 2,
+ * `resolveMoves`: a new path whose content matches exactly one active occurrence this scan did not
+ * find moves that occurrence in place, FR-126-14 to FR-126-16), then the remaining new paths in
+ * ascending code-unit order. A new path of a linkable format (`isLinkable`) in a local repository is added
  * to the oldest existing artifact that has a version with the same content hash and format and
  * occurs only in local repositories (rule 3, A7: counted in `ambiguousLinks` when there were
  * several), pointing at that version without creating one; otherwise it becomes a new artifact
@@ -614,7 +616,7 @@ interface PreparedArtifact {
  * commit and `last_seen_at` stay. Occurrences covered by an `unobserved` path are kept
  * (FR-125-03), and a scan that found no artifact at all marks nothing (the empty-scan guard, A7):
  * its result counts the active occurrences it kept. Nothing is deleted. Last, the name and
- * description of every artifact the scan wrote, linked or marked follow its active occurrences
+ * description of every artifact the scan wrote, moved, linked or marked follow its active occurrences
  * (`refreshSourceFields`, FR-126-07).
  *
  * The job is re-checked inside the transaction: a scan whose signal was aborted, or that was
