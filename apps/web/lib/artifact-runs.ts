@@ -22,7 +22,10 @@ import { runDisplayStatus } from './run-status';
  * inside one group (FR-111-45).
  */
 
-/** How a version compares with the previous tested version in the same group (FR-111-50/51). */
+/**
+ * How a version compares with its nearest tested ancestor in the same group (FR-111-50/51 along
+ * the version lineage, SPEC-126 FR-126-21). `previousVersion` is that ancestor's number.
+ */
 export type VersionComparison =
   | { kind: 'regression'; previousVersion: number; versionDelta: number | null; reasons: string[] }
   | { kind: 'no-regression'; previousVersion: number; versionDelta: number }
@@ -65,6 +68,34 @@ export interface VersionResults {
   regressed: boolean;
   /** Every flagged regression of this version comes from mock-agent runs (label them so). */
   regressionMockOnly: boolean;
+  /**
+   * The version this one was edited from when that is not the version numbered one lower (a
+   * diverged copy, SPEC-126 §11.3 F11); null otherwise.
+   */
+  editedFrom: number | null;
+}
+
+/** An artifact version with its recorded parent (SPEC-126 FR-126-19). */
+export interface VersionLineage {
+  id: string;
+  version: number;
+  parentVersionId: string | null;
+}
+
+/**
+ * Each version number's effective parent number (SPEC-126 FR-126-20): the recorded parent when it
+ * is set and older, otherwise the version numbered one lower (every version stored before lineage
+ * existed belongs to one line); v1 has none. Parents are always older, so every chain ends.
+ */
+export function effectiveParents(versions: readonly VersionLineage[]): Map<number, number> {
+  const numberOf = new Map(versions.map((v) => [v.id, v.version]));
+  const parents = new Map<number, number>();
+  for (const { version, parentVersionId } of versions) {
+    const recorded = parentVersionId === null ? undefined : numberOf.get(parentVersionId);
+    if (recorded !== undefined && recorded < version) parents.set(version, recorded);
+    else if (version > 1) parents.set(version, version - 1);
+  }
+  return parents;
 }
 
 /** The fields of a representative run a version comparison reads (FR-111-50/51). */
@@ -100,26 +131,48 @@ export function compareVersions(previous: ComparedRun, next: ComparedRun): Versi
 
 /**
  * Version comparisons keyed by the representative run they belong to: within each comparability
- * key, each version's representative is compared with that of the previous tested version.
- * Linear in the number of representatives apart from one sort per key.
+ * key, each version's representative is compared with that of its nearest tested ancestor along
+ * `parents` (creation ancestry, SPEC-126 FR-126-21), so a diverged copy is never compared with a
+ * parallel edit. Ancestors are always older, and a truncated list of representatives drops the
+ * oldest versions, so a walk never skips a dropped ancestor for an older loaded one. Linear in the
+ * representatives and the versions a walk passes: each key remembers the answer for every version
+ * it walked through.
  */
 export function versionComparisons(
   representatives: readonly VersionComparisonRun[],
+  parents: ReadonlyMap<number, number>,
 ): Map<string, { run: VersionComparisonRun; comparison: VersionComparison }> {
-  const byKey = new Map<string, VersionComparisonRun[]>();
+  const byKey = new Map<string, Map<number, VersionComparisonRun>>();
   for (const run of representatives) {
-    const runs = byKey.get(run.comparabilityKey);
-    if (runs) runs.push(run);
-    else byKey.set(run.comparabilityKey, [run]);
+    const runs = byKey.get(run.comparabilityKey) ?? new Map<number, VersionComparisonRun>();
+    byKey.set(run.comparabilityKey, runs);
+    runs.set(run.version, run);
   }
   const result = new Map<string, { run: VersionComparisonRun; comparison: VersionComparison }>();
   for (const runs of byKey.values()) {
-    runs.sort((a, b) => a.version - b.version);
-    runs.forEach((next, index) => {
-      const previous = runs[index - 1];
-      if (previous)
-        result.set(next.runId, { run: next, comparison: compareVersions(previous, next) });
-    });
+    /** Per untested version walked through: the nearest tested ancestor, or null for none. */
+    const nearest = new Map<number, VersionComparisonRun | null>();
+    for (const next of runs.values()) {
+      const walked: number[] = [];
+      let ancestor = parents.get(next.version);
+      let found: VersionComparisonRun | null = null;
+      while (ancestor !== undefined) {
+        const tested = runs.get(ancestor);
+        if (tested) {
+          found = tested;
+          break;
+        }
+        const known = nearest.get(ancestor);
+        if (known !== undefined) {
+          found = known;
+          break;
+        }
+        walked.push(ancestor);
+        ancestor = parents.get(ancestor);
+      }
+      for (const version of walked) nearest.set(version, found);
+      if (found) result.set(next.runId, { run: next, comparison: compareVersions(found, next) });
+    }
   }
   return result;
 }
@@ -148,31 +201,37 @@ function toRow(item: ArtifactRunItem, summary: StoredSummary): VersionRunRow {
 }
 
 /**
- * Builds the results by version. `versions` are the artifact's versions newest first; `items`
- * come from `listArtifactRuns` (the page window: newest version first, then newest run first);
- * `representatives` from `listVersionComparisonRuns`, so regressions do not depend on the window.
- * Linear in the number of runs: groups are found through a map, never by a search per run.
+ * Builds the results by version. `versions` are the artifact's versions newest first, with their
+ * recorded parents; `items` come from `listArtifactRuns` (the page window: newest version first,
+ * then newest run first); `representatives` from `listVersionComparisonRuns`, so regressions do
+ * not depend on the window. Linear in the number of runs: groups are found through a map, never by a
+ * search per run.
  */
 export function resultsByVersion(
-  versions: readonly { id: string; version: number }[],
+  versions: readonly VersionLineage[],
   items: readonly ArtifactRunItem[],
   representatives: readonly VersionComparisonRun[],
 ): VersionResults[] {
+  const parents = effectiveParents(versions);
   const blocks = new Map<string, VersionResults>(
-    versions.map((v) => [
-      v.id,
-      {
-        versionId: v.id,
-        version: v.version,
-        groups: [],
-        otherRuns: [],
-        regressed: false,
-        regressionMockOnly: false,
-      },
-    ]),
+    versions.map((v) => {
+      const parent = parents.get(v.version);
+      return [
+        v.id,
+        {
+          versionId: v.id,
+          version: v.version,
+          groups: [],
+          otherRuns: [],
+          regressed: false,
+          regressionMockOnly: false,
+          editedFrom: parent !== undefined && parent !== v.version - 1 ? parent : null,
+        },
+      ];
+    }),
   );
   const keyedGroups = new Map<string, Map<string, ComparabilityGroup>>();
-  const comparisons = versionComparisons(representatives);
+  const comparisons = versionComparisons(representatives, parents);
   for (const item of items) {
     const block = blocks.get(item.artifactVersion.id);
     if (!block) continue;
@@ -240,7 +299,7 @@ export function historyNotices(
   }
   if (comparisonsTruncated) {
     notices.push(
-      `Version regressions cover the newest ${ARTIFACT_VERSION_COMPARISON_LIMIT} version-and-group pairs; older versions show no comparison.`,
+      `Version regressions cover the newest ${ARTIFACT_VERSION_COMPARISON_LIMIT} version-and-group pairs; a version whose compared version is older shows no comparison.`,
     );
   }
   return notices;

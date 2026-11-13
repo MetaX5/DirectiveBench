@@ -291,6 +291,24 @@ function occurrenceChanges(result: {
   return clauses.length === 0 ? '' : ` ${clauses.join(', ')}.`;
 }
 
+/**
+ * The rule-3 clause inside the counts' parentheses (SPEC-126 FR-126-10, §11.3 F1): paths added to
+ * an existing artifact instead of becoming new ones; empty when there were none.
+ */
+function matchedClause(linked: number): string {
+  return linked > 0 ? `${formatCount(linked)} matched an existing artifact, ` : '';
+}
+
+/**
+ * The sentence for links that chose the oldest of several artifacts (A7, §11.3 F2); empty when
+ * there were none.
+ */
+function ambiguousLinksSentence(ambiguous: number): string {
+  if (ambiguous === 0) return '';
+  const verb = ambiguous === 1 ? 'was' : 'were';
+  return ` ${formatCount(ambiguous)} matched several existing artifacts and ${verb} added to the oldest one.`;
+}
+
 export function describeScan(scan: RepositoryScan): ScanNotice {
   const name = scan.repository?.name ?? 'the repository';
   const notice = (kind: ScanNotice['kind'], message: string): ScanNotice => ({
@@ -337,7 +355,9 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
       `Scanned ${name}${result.commitSha ? ` at commit ${result.commitSha.slice(0, 12)}` : ''}: ` +
       `${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
       `${plural(result.discovered, 'artifact')} found (${formatCount(result.createdArtifacts)} new, ` +
+      matchedClause(result.linkedOccurrences) +
       `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.` +
+      ambiguousLinksSentence(result.ambiguousLinks) +
       occurrenceChanges(result),
     errors: result.errors,
     errorCount: result.errorCount,
@@ -424,15 +444,16 @@ export function parseRemovalParams(params: {
 }
 
 /**
- * The reasons of the removal panel (SPEC-125 FR-125-15, §11.3 D15), each one sentence, in order:
- * what is deleted, what becomes missing, what is not touched, and what registering it again does.
+ * The reasons of the removal panel (SPEC-125 FR-125-15, §11.3 D15), each one sentence (the last
+ * two for a local repository, SPEC-126 §11.3 F8), in order: what is deleted, what becomes
+ * missing, what is not touched, and what registering it again does.
  * A repository without occurrences shows only the first and the location reason.
  */
 export function removalReasons(impact: RepositoryRemovalImpact): string[] {
-  const location =
-    impact.provider === 'github' || impact.provider === 'gitlab'
-      ? `The copy downloaded from ${providerLabel(impact.provider)} stays in DirectiveBench's cache. Deleting it is planned.`
-      : `Nothing in ${impact.location} is changed.`;
+  const hosted = impact.provider === 'github' || impact.provider === 'gitlab';
+  const location = hosted
+    ? `The copy downloaded from ${providerLabel(impact.provider)} stays in DirectiveBench's cache. Deleting it is planned.`
+    : `Nothing in ${impact.location} is changed.`;
   if (impact.occurrences === 0) return ['It has no occurrences.', location];
   const missing = impact.artifactsLeftMissing;
   return [
@@ -445,7 +466,11 @@ export function removalReasons(impact: RepositoryRemovalImpact): string[] {
         ? '1 artifact is then missing from every repository. Its versions, categories, notes and benchmark results are kept.'
         : `${formatCount(missing)} artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept.`,
     location,
-    'Registering it again later creates new artifacts instead of reusing these ones.',
+    // Hosted copies never link (SPEC-126 A16), so only a local repository's files can match an
+    // artifact still recorded elsewhere (§11.3 F8).
+    hosted
+      ? 'Registering it again later creates new artifacts instead of reusing these ones.'
+      : 'Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead.',
   ];
 }
 

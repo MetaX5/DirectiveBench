@@ -19,6 +19,7 @@ import {
   rawViewNotice,
   missingNote,
   occurrenceStatusLabel,
+  occurrenceVersionLabel,
   repositoriesLabel,
   repositoryOptions,
   selectContent,
@@ -142,6 +143,21 @@ describe('occurrenceStatusLabel (SPEC-125 FR-125-10)', () => {
   it('shows a removed occurrence as missing and never the raw value', () => {
     expect(occurrenceStatusLabel('active')).toBe('active');
     expect(occurrenceStatusLabel('removed')).toBe('missing');
+  });
+});
+
+describe('occurrenceVersionLabel (SPEC-126 UD-3, F4, F5)', () => {
+  it('names the version each occurrence holds and marks one older than the latest', () => {
+    expect(occurrenceVersionLabel(3, 3, 'review')).toEqual({
+      label: 'v3',
+      accessibleName: 'v3 of review',
+      older: false,
+    });
+    expect(occurrenceVersionLabel(1, 3, 'review')).toEqual({
+      label: 'v1',
+      accessibleName: 'v1 of review',
+      older: true,
+    });
   });
 });
 
