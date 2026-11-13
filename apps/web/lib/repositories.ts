@@ -466,13 +466,14 @@ export function parseRemovalParams(params: {
 /**
  * The reasons of the removal panel (SPEC-125 FR-125-15, §11.3 D15), each one sentence (the last
  * two for a local repository, SPEC-126 §11.3 F8), in order: what is deleted, what becomes
- * missing, what is not touched, and what registering it again does.
+ * missing, what is not touched, and what registering it again does. A hosted download is deleted
+ * by the runner's sweep of orphaned caches (issue 59, SPEC-105 FR-105-19), not here.
  * A repository without occurrences shows only the first and the location reason.
  */
 export function removalReasons(impact: RepositoryRemovalImpact): string[] {
   const hosted = impact.provider === 'github' || impact.provider === 'gitlab';
   const location = hosted
-    ? `The copy downloaded from ${providerLabel(impact.provider)} stays in DirectiveBench's cache. Deleting it is planned.`
+    ? `The copy downloaded from ${providerLabel(impact.provider)} is deleted from DirectiveBench's cache. Nothing on ${providerLabel(impact.provider)} is changed.`
     : `Nothing in ${impact.location} is changed.`;
   if (impact.occurrences === 0) return ['It has no occurrences.', location];
   const missing = impact.artifactsLeftMissing;
