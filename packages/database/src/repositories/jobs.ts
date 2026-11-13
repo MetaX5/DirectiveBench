@@ -382,6 +382,38 @@ export class UnsupportedRepositoryError extends Error {
 }
 
 /**
+ * The ids among `repositoryIds` whose hosted cache is orphaned (SPEC-105 FR-105-19, issue 59): no
+ * `repositories` row has the id and no `repository-scan` job in `pending` or `running` names it.
+ * Both are read in one transaction, so they see one snapshot. A scan job whose payload does not
+ * parse names no repository. The runner deletes only the caches of the ids returned; the
+ * condition never becomes false again once true (ids are never reused and no scan can be queued
+ * for a missing row, `enqueueRepositoryScanJob`), so the deletion may follow the check.
+ */
+export async function listOrphanedRepositoryCaches(
+  handle: DatabaseHandle,
+  repositoryIds: readonly string[],
+): Promise<string[]> {
+  if (repositoryIds.length === 0) return [];
+  return withTransaction(handle, async (db) => {
+    const registered = await db
+      .select({ id: repositories.id })
+      .from(repositories)
+      .where(inArray(repositories.id, [...repositoryIds]));
+    const scans = await db
+      .select({ payload: jobs.payload })
+      .from(jobs)
+      .where(and(eq(jobs.type, 'repository-scan'), inArray(jobs.status, ['pending', 'running'])));
+    const kept = new Set<string | undefined>([
+      ...registered.map(({ id }) => id),
+      ...scans.map(
+        ({ payload }) => repositoryScanPayloadSchema.safeParse(payload).data?.repositoryId,
+      ),
+    ]);
+    return repositoryIds.filter((id) => !kept.has(id));
+  });
+}
+
+/**
  * Enqueues a scan of a registered local repository, or returns the scan already pending or
  * running for it (SPEC-105 FR-105-03). The check and the insert run in one transaction, so two
  * clicks cannot queue two scans. The web process only enqueues; the runner reads the files.
