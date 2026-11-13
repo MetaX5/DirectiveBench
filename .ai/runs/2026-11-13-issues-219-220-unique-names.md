@@ -167,3 +167,7 @@ None: nothing non-obvious came up.
 
 - #227: visible disambiguation of same-named suites and categories (I8.1).
 - #228: per-row buttons named only by their verb (I8.2).
+- Not filed (needs the maintainer): `packages/runner/test/hosted-repository.test.ts:173`
+  (SPEC-126) timed out at the default 5 s (5365 ms) in the Linux unit job of PR 229's first CI
+  attempt; this PR does not touch `packages/runner`; the re-run passed. It needs a named
+  timeout per lesson 2026-10-21.
