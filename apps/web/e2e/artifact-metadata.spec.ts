@@ -124,6 +124,98 @@ test('a benchmark suite is unassigned and assigned again on the Benchmarks tab',
   await expect(suites.getByRole('button', { name: `Unassign suite ${DEMO_SUITE}` })).toBeFocused();
 });
 
+// Issue 219: only a suite's ID (its slug) is unique, so a copy of the demo suite with a new
+// `id:` has the same name. The CLI imports no mock suite (FR-118-05), so the copy is seeded as
+// a row copy of the demo suite and its latest version, then removed (versions and assignments
+// cascade).
+const DEMO_SUITE_SLUG = 'mock-input-validation';
+const COPY_SUITE_SLUG = 'mock-input-validation-e2e-copy';
+
+function seedSuiteCopy(): Promise<void> {
+  return withDatabase((db) => {
+    const now = new Date().toISOString();
+    db.prepare(
+      `insert into benchmark_suites (id, slug, name, description, created_at, updated_at)
+       select 'suite_e2e_copy', ?, name, description, ?, ? from benchmark_suites where slug = ?`,
+    ).run(COPY_SUITE_SLUG, now, now, DEMO_SUITE_SLUG);
+    db.prepare(
+      `insert into benchmark_suite_versions
+         (id, suite_id, version, content_hash, schema_version, definition, fixtures, source_path,
+          execution_approved_at, execution_approval_source, created_at)
+       select 'suitev_e2e_copy', 'suite_e2e_copy', 1, v.content_hash, v.schema_version,
+              v.definition, v.fixtures, v.source_path, v.execution_approved_at,
+              v.execution_approval_source, ?
+         from benchmark_suite_versions v join benchmark_suites s on s.id = v.suite_id
+        where s.slug = ? order by v.version desc limit 1`,
+    ).run(now, DEMO_SUITE_SLUG);
+  });
+}
+
+function removeSuiteCopy(): Promise<void> {
+  return withDatabase((db) => {
+    db.prepare('delete from benchmark_suites where slug = ?').run(COPY_SUITE_SLUG);
+  });
+}
+
+test('two suites with one name get unique option labels and Unassign names (issue 219)', async ({
+  page,
+}) => {
+  await removeSuiteCopy();
+  await seedSuiteCopy();
+  try {
+    await page.goto(`/artifacts/${await demoArtifactId()}?tab=benchmarks`);
+    const suites = card(page, 'Assigned benchmarks');
+    const demoName = `${DEMO_SUITE}, ID ${DEMO_SUITE_SLUG}`;
+    const copyName = `${DEMO_SUITE}, ID ${COPY_SUITE_SLUG}`;
+
+    // One suite of the name is listed: its option is the name alone.
+    const select = suites.getByRole('combobox', { name: 'Benchmark suite' });
+    await expect(select.getByRole('option', { name: DEMO_SUITE, exact: true })).toHaveCount(1);
+
+    // Both unassigned: the options add the ID and no two read alike (decision I2).
+    await suites.getByRole('button', { name: `Unassign suite ${demoName}`, exact: true }).click();
+    await expect(suites.getByRole('status')).toHaveText(
+      `Unassigned ${DEMO_SUITE}. Its results stay in Results by version.`,
+    );
+    const options = await select.getByRole('option').allTextContents();
+    expect(new Set(options).size).toBe(options.length);
+    expect(options).toEqual(expect.arrayContaining([demoName, copyName]));
+    expect(options).not.toContain(DEMO_SUITE);
+
+    // Assign both through the form. Once the copy is assigned, the demo suite is the only
+    // listed suite of the name, so its option is the name alone again.
+    for (const label of [copyName, DEMO_SUITE]) {
+      await select.selectOption({ label });
+      await suites.getByRole('button', { name: 'Assign', exact: true }).click();
+      await expect(suites.getByRole('status')).toHaveText(
+        `Assigned ${DEMO_SUITE}. Run it from its suite page.`,
+      );
+    }
+
+    // Each Unassign names its own suite; the visible text stays "Unassign" (decision I1).
+    const list = suites.getByRole('list', { name: 'Assigned suites' });
+    const buttons = list.getByRole('button');
+    await expect(buttons).toHaveCount(2);
+    await expect(buttons).toHaveText(['Unassign', 'Unassign']);
+    const names = await buttons.evaluateAll((all) => all.map((b) => b.getAttribute('aria-label')));
+    expect(new Set(names).size).toBe(2);
+    for (const name of [demoName, copyName]) {
+      await expect(
+        list.getByRole('button', { name: `Unassign suite ${name}`, exact: true }),
+      ).toHaveCount(1);
+    }
+
+    // The copy goes; the demo suite stays assigned, as other spec files expect.
+    await list.getByRole('button', { name: `Unassign suite ${copyName}`, exact: true }).click();
+    await expect(suites.getByRole('status')).toHaveText(
+      `Unassigned ${DEMO_SUITE}. Its results stay in Results by version.`,
+    );
+    await expect(list.getByRole('button')).toHaveCount(1);
+  } finally {
+    await removeSuiteCopy();
+  }
+});
+
 test('at the tag limit the field is disabled with its reason and focus stays on the list', async ({
   page,
 }) => {

@@ -1306,3 +1306,106 @@ test('an archived category without artifacts says no artifact has it, without su
   await page.reload();
   await expect(artifactsCard.locator('p')).toHaveText('No artifact has this category.');
 });
+
+// Issue 220: names are unique only among active categories, so a rename (checked against active
+// names) lets an archived and an active category, or two archived ones, share a name. Every
+// control named from a category adds its slug (decisions I4, I5).
+
+/** Archives a category through its page and the Risky-action panel. */
+async function archiveThroughUi(page: Page, slug: string, name: string): Promise<void> {
+  await page.goto(`/categories/${slug}`);
+  const status = card(page, 'Status');
+  await status.getByRole('button', { name: 'Archive', exact: true }).click();
+  await status.getByRole('button', { name: `Archive ${name}` }).click();
+  await expect(status.getByRole('status')).toHaveText(`Archived ${name}. It stays on 1 artifact.`);
+}
+
+/** The accessible names of the `/categories` count links. */
+async function countLinkNames(page: Page): Promise<(string | null)[]> {
+  return page
+    .locator('a[href^="/artifacts?category="]')
+    .evaluateAll((links) => links.map((link) => link.getAttribute('aria-label')));
+}
+
+test('same-named categories get unique Remove and count link names (issue 220)', async ({
+  page,
+}) => {
+  const first = await createCategory(page, 'Same Name E2E');
+  const second = await createCategory(page, 'Same Name E2E 2');
+  await assignToDemoArtifact(first);
+  await assignToDemoArtifact(second);
+  await archiveThroughUi(page, first, 'Same Name E2E');
+  await page.goto(`/categories/${second}`);
+  const details = card(page, 'Details');
+  await details.getByRole('textbox', { name: 'Name' }).fill('Same Name E2E');
+  await details.getByRole('button', { name: 'Save' }).click();
+  await expect(details.getByRole('status')).toHaveText(/^Renamed to Same Name E2E\./);
+
+  // State A, one active and one archived "Same Name E2E": the count links differ.
+  await page.goto('/categories');
+  await expect(
+    table(page, 'Active categories').getByRole('link', {
+      name: `1 artifact with Same Name E2E, slug ${second}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    table(page, 'Archived categories').getByRole('link', {
+      name: `1 artifact with Same Name E2E (archived), slug ${first}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  let names = await countLinkNames(page);
+  expect(new Set(names).size).toBe(names.length);
+
+  // State B, both archived: the chips look alike, Remove and the count links do not.
+  await archiveThroughUi(page, second, 'Same Name E2E');
+  await page.goto('/categories');
+  for (const slug of [first, second]) {
+    await expect(
+      table(page, 'Archived categories').getByRole('link', {
+        name: `1 artifact with Same Name E2E (archived), slug ${slug}`,
+        exact: true,
+      }),
+    ).toHaveText('1');
+  }
+  names = await countLinkNames(page);
+  expect(new Set(names).size).toBe(names.length);
+
+  await page.goto(`/artifacts/${await demoArtifactId()}`);
+  const box = categoriesCard(page);
+  await expect(box.getByText('Same Name E2E (archived)', { exact: true })).toHaveCount(2);
+  const removeFirst = box.getByRole('button', {
+    name: `Remove category Same Name E2E (archived), slug ${first}`,
+    exact: true,
+  });
+  const removeSecond = box.getByRole('button', {
+    name: `Remove category Same Name E2E (archived), slug ${second}`,
+    exact: true,
+  });
+  await expect(removeFirst).toHaveText('Remove');
+  await expect(removeSecond).toHaveText('Remove');
+  const removeNames = await box
+    .getByRole('button', { name: /^Remove category / })
+    .evaluateAll((all) => all.map((b) => b.getAttribute('aria-label')));
+  expect(new Set(removeNames).size).toBe(removeNames.length);
+
+  // The named button removes that category and no other.
+  await removeSecond.click();
+  await expect(box.getByRole('status')).toHaveText(
+    'Removed Same Name E2E. To assign it again, unarchive it on its page first.',
+  );
+  await expect(removeSecond).toHaveCount(0);
+  await expect(removeFirst).toBeVisible();
+  const assigned = await withDatabase(
+    (db) =>
+      db
+        .prepare(
+          `select c.slug from artifact_categories ac join categories c on c.id = ac.category_id
+             join artifacts a on a.id = ac.artifact_id
+            where a.slug = ? and c.slug in (?, ?)`,
+        )
+        .all(DEMO_ARTIFACT, first, second) as { slug: string }[],
+  );
+  expect(assigned.map((row) => row.slug)).toEqual([first]);
+});
