@@ -1,6 +1,7 @@
 import { ARTIFACT_TYPES, CATEGORY_SLUG_MAX_LENGTH } from '@directivebench/core';
 import type { ArtifactListFilter, StoredArtifactFile } from '@directivebench/database';
 import { z } from 'zod';
+import { repositorySubject, type RepositoryProvider } from './repositories';
 import { formatDate } from './utils';
 
 /** Next.js page search params: a repeated parameter arrives as an array. */
@@ -106,6 +107,51 @@ export function invalidParamsNotice(invalid: readonly string[]): string | null {
   return `Ignored invalid ${invalid.length === 1 ? 'value' : 'values'} in the URL: ${invalid.join(', ')}.`;
 }
 
+/** A list filter that can name a record which does not exist (issue 216, decisions E2 and E5). */
+export type UnknownFilter = 'category' | 'repository';
+
+const UNKNOWN_FILTER_SENTENCES: Record<UnknownFilter, string> = {
+  category: 'Ignored the category in the URL: it does not exist.',
+  repository: 'Ignored the repository in the URL: it is not registered.',
+};
+
+/**
+ * Drops a well-formed `repository` or `category` that names nothing (a removed repository, a
+ * mistyped slug) from the filter, so the page lists everything instead of an empty list under a
+ * select that shows "All" (SPEC-101 §13). `unknown` follows `ARTIFACT_LIST_PARAMS` order.
+ */
+export function dropUnknownFilters(
+  filter: ArtifactListFilter,
+  known: { repositoryIds: readonly string[]; categorySlugs: readonly string[] },
+): { value: ArtifactListFilter; unknown: UnknownFilter[] } {
+  const value = { ...filter };
+  const unknown: UnknownFilter[] = [];
+  if (value.category !== undefined && !known.categorySlugs.includes(value.category)) {
+    delete value.category;
+    unknown.push('category');
+  }
+  if (value.repository !== undefined && !known.repositoryIds.includes(value.repository)) {
+    delete value.repository;
+    unknown.push('repository');
+  }
+  return { value, unknown };
+}
+
+/**
+ * The `/artifacts` filter notice: the invalid-value sentence, then one sentence per unknown
+ * filter (decision E3), or null when nothing was ignored.
+ */
+export function filterNotice(
+  invalid: readonly string[],
+  unknown: readonly UnknownFilter[],
+): string | null {
+  const sentences = [
+    ...(invalid.length > 0 ? [invalidParamsNotice(invalid)] : []),
+    ...unknown.map((name) => UNKNOWN_FILTER_SENTENCES[name]),
+  ];
+  return sentences.length === 0 ? null : sentences.join(' ');
+}
+
 /** The "Repository" cell (FR-101-10): the first repository and "+N" for the others. */
 /**
  * The note under a missing artifact's header (SPEC-125 FR-125-09, §11.2 D2 and D3): when it was
@@ -130,15 +176,23 @@ export function repositoriesLabel(repositories: readonly { name: string }[]): st
   return rest.length ? `${first.name} +${rest.length}` : first.name;
 }
 
-/** Options of the repository filter; a name two repositories share gets its location appended. */
+/**
+ * Options of the repository filter; a name two repositories share gets its provider and
+ * location appended (`repositorySubject`, decision E4), which the database keeps unique.
+ */
 export function repositoryOptions(
-  repositories: readonly { id: string; name: string; location: string }[],
+  repositories: readonly {
+    id: string;
+    name: string;
+    provider: RepositoryProvider;
+    location: string;
+  }[],
 ): { value: string; label: string }[] {
   const counts = new Map<string, number>();
   for (const r of repositories) counts.set(r.name, (counts.get(r.name) ?? 0) + 1);
   return repositories.map((r) => ({
     value: r.id,
-    label: (counts.get(r.name) as number) > 1 ? `${r.name} (${r.location})` : r.name,
+    label: (counts.get(r.name) as number) > 1 ? repositorySubject(r) : r.name,
   }));
 }
 

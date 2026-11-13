@@ -31,6 +31,19 @@ export function providerLabel(provider: RepositoryProvider): string {
   return PROVIDER_LABELS[provider];
 }
 
+/**
+ * How the UI names one repository: name, provider and location (issue 215, decision E1). Only
+ * provider plus location is unique (`repositories_provider_location_unique`); a name repeats for
+ * two folders called `skills`, and one directory can be a local directory and a local Git
+ * repository at once. The registration result, the removal question, the row buttons and a
+ * shared name in the `/artifacts` repository filter all use this one format.
+ */
+export function repositorySubject(
+  repository: Pick<RepositoryRecord, 'name' | 'provider' | 'location'>,
+): string {
+  return `${repository.name} (${providerLabel(repository.provider)}, ${repository.location})`;
+}
+
 /** Providers that track a branch (SPEC-104 FR-104-07); directories and examples have none. */
 const BRANCHED_PROVIDERS: ReadonlySet<RepositoryProvider> = new Set([
   'github',
@@ -210,7 +223,7 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
   if (!repository) {
     return { kind: 'fieldError', path, message: 'The registered repository no longer exists.' };
   }
-  const subject = `${repository.name} (${providerLabel(repository.provider)}, ${repository.location})`;
+  const subject = repositorySubject(repository);
   return {
     kind: 'done',
     path,

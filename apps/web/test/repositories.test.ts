@@ -20,6 +20,7 @@ import {
   providerLabel,
   removalReasons,
   removalResult,
+  repositorySubject,
   scanRequestError,
   urlFieldError,
 } from '../lib/repositories';
@@ -60,6 +61,24 @@ describe('providerLabel', () => {
         providerLabel,
       ),
     ).toEqual(['GitHub', 'GitLab', 'Local Git', 'Local directory', 'Bundled examples']);
+  });
+});
+
+describe('repositorySubject (issue 215, E1)', () => {
+  it('names a repository by name, provider and location, unique like the database key', () => {
+    const subjects = (
+      ['github', 'gitlab', 'local-git', 'local-directory', 'bundled-examples'] as const
+    ).map((provider) =>
+      repositorySubject({ name: 'skills', provider, location: '/home/dev/skills' }),
+    );
+    expect(subjects).toEqual([
+      'skills (GitHub, /home/dev/skills)',
+      'skills (GitLab, /home/dev/skills)',
+      'skills (Local Git, /home/dev/skills)',
+      'skills (Local directory, /home/dev/skills)',
+      'skills (Bundled examples, /home/dev/skills)',
+    ]);
+    expect(new Set(subjects).size).toBe(subjects.length);
   });
 });
 
