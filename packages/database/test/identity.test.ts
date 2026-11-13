@@ -870,6 +870,38 @@ describe('rule 2: moves keep identity (SPEC-126 FR-126-14 to FR-126-18, AC-3)', 
     ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
   });
 
+  it('never decides a move by slug or name, also next to the bundled example (AC-4)', async () => {
+    const handle = getHandle();
+    const demo = skillMd('review');
+    await importArtifactVersion(
+      handle,
+      artifactInput(demo, {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/examples' },
+        path: 'examples/skills/review',
+      }),
+    );
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review', 'Own text.'))]);
+    // Same name and slug base, other content: not a move; the bundled copy stays apart too.
+    expect(
+      await scan(handle, a, [skill('.agents/skills/review', skillMd('review', 'Rewritten.'))]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
+    // Content equal to the bundled example's: moves never reach another repository.
+    expect(await scan(handle, a, [skill('skills/demo-copy', demo)])).toMatchObject({
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
+      linkedOccurrences: 0,
+      createdArtifacts: 1,
+    });
+    expect((await snapshot(handle)).map((row) => [row.slug, row.occurrences])).toEqual([
+      ['review', ['a:skills/review@v1:removed']],
+      ['review-2', ['a:.agents/skills/review@v1:removed']],
+      ['review-3', ['a:skills/demo-copy@v1:active']],
+      // The fixture imports the bundled example under its own slug.
+      ['validate', ['Bundled:examples/skills/review@v1:active']],
+    ]);
+  });
+
   it('never moves an occurrence under an unobserved path, and moves nothing in an empty scan', async () => {
     const handle = getHandle();
     const a = await local(handle, 'a');
