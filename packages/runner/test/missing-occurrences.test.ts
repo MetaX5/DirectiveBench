@@ -345,6 +345,8 @@ describe('local scans link exact copies (SPEC-126 Phase 1)', () => {
       createdVersions: 1,
       linkedOccurrences: 1,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     expect(occurrences()).toEqual([
       ['first:AGENTS.md', 'agents-md', '1'],
@@ -377,4 +379,82 @@ describe('local scans link exact copies (SPEC-126 Phase 1)', () => {
     if (outcome.status !== 'registered') throw new Error('not registered');
     return outcome.repository.id;
   }
+});
+
+describe('local scans keep identity across moves (SPEC-126 Phase 3)', () => {
+  const NAMELESS = (text: string) => `---\ndescription: ${text}\n---\n# ${text}\n`;
+  const RULE = '---\nglobs: "*.ts"\n---\nUse named exports.\n';
+
+  function rows(): Map<string, { id: string; status: string; version: number }> {
+    return new Map(
+      handle.sqlite
+        .prepare(
+          `select o.path, o.id, o.status, v.version
+             from artifact_occurrences o
+             join artifact_versions v on v.id = o.latest_version_id`,
+        )
+        .all()
+        .map((row) => [
+          String(row.path),
+          { id: String(row.id), status: String(row.status), version: Number(row.version) },
+        ]),
+    );
+  }
+
+  function move(root: string, from: string, to: string): void {
+    mkdirSync(dirname(join(root, to)), { recursive: true });
+    renameSync(join(root, from), join(root, to));
+  }
+
+  it.each(['local-git', 'local-directory'] as const)(
+    'moves a skill directory and renames a rule, and leaves two identical moved skills apart (%s)',
+    async (provider) => {
+      const repo = join(sources, provider);
+      write(repo, {
+        'AGENTS.md': '# Rules\n',
+        'skills/review/SKILL.md': NAMELESS('Review'),
+        '.cursor/rules/no-default-export.mdc': RULE,
+        'pair/x/SKILL.md': NAMELESS('Twin'),
+        'pair/y/SKILL.md': NAMELESS('Twin'),
+      });
+      if (provider === 'local-git') {
+        execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, env: FIXTURE_GIT_ENV });
+      }
+      const id = await register(repo, provider);
+      await scan(id);
+      const before = rows();
+
+      move(repo, 'skills/review', '.agents/skills/code-review');
+      move(repo, '.cursor/rules/no-default-export.mdc', '.cursor/rules/no-default-exports.mdc');
+      expect((await scan(id)).result).toMatchObject({
+        ok: true,
+        createdArtifacts: 0,
+        createdVersions: 1,
+        movedOccurrences: 2,
+        ambiguousMoves: 0,
+        removedOccurrences: 0,
+      });
+      const moved = rows();
+      expect(moved.get('.agents/skills/code-review')).toEqual({
+        ...before.get('skills/review'),
+        version: 1,
+      });
+      expect(moved.get('.cursor/rules/no-default-exports.mdc')).toEqual({
+        ...before.get('.cursor/rules/no-default-export.mdc'),
+        version: 2,
+      });
+      expect(moved.has('skills/review')).toBe(false);
+
+      move(repo, 'pair/x', 'moved/x');
+      move(repo, 'pair/y', 'moved/y');
+      expect((await scan(id)).result).toMatchObject({
+        ok: true,
+        createdArtifacts: 2,
+        movedOccurrences: 0,
+        ambiguousMoves: 2,
+        removedOccurrences: 2,
+      });
+      expect(rows().get('pair/x')?.status).toBe('removed');
+    },
+  );
 });

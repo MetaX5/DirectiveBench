@@ -93,7 +93,7 @@ Applies to every milestone:
 **Acceptance criteria:**
 - Registering a local directory containing `.agents/skills/*/SKILL.md`, `AGENTS.md`, `.cursor/rules/*.mdc` and `.github/copilot-instructions.md` discovers each as an artifact with the correct type/format and an occurrence path.
 - Re-scanning an unchanged repository creates 0 new versions; editing one file creates exactly 1 new version of that artifact.
-- Identical content in two repositories is one artifact version with two occurrences, for skills with a frontmatter `name` and rules named after their file, in local repositories ([SPEC-126](2026-11-12-cross-repository-artifact-identity.md) A3, A16).
+- Identical content in two repositories is one artifact version with two occurrences, for skills with a frontmatter `name` and rules named after their file, in local repositories ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) A3, A16).
 - Removed files mark the occurrence as missing; history is retained.
 - A public GitHub repository can be added by URL and scanned without credentials; occurrences record the commit SHA (moved from M2, D06).
 - An end-to-end test registers a fixture repository, scans it, finds the expected artifacts in the list and opens a raw preview matching the source file.

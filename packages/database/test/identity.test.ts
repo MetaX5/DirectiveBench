@@ -121,6 +121,7 @@ async function scan(
   repositoryId: string,
   artifacts: ScannedArtifactInput[],
   commitSha: string | null = null,
+  unobserved: string[] = [],
 ) {
   tick();
   const { job } = await enqueueRepositoryScanJob(handle, { repositoryId });
@@ -130,7 +131,7 @@ async function scan(
       repositoryId,
       jobId: job.id,
       artifacts,
-      unobserved: [],
+      unobserved,
       signal,
       commitSha,
     });
@@ -193,6 +194,8 @@ const none = {
   emptyScanKeptOccurrences: 0,
   linkedOccurrences: 0,
   ambiguousLinks: 0,
+  movedOccurrences: 0,
+  ambiguousMoves: 0,
 };
 
 describe('rule 3: exact copies link (SPEC-126 FR-126-01 to FR-126-06)', () => {
@@ -651,6 +654,436 @@ describe('rule 3: exact copies link (SPEC-126 FR-126-01 to FR-126-06)', () => {
   );
 });
 
+describe('rule 2: moves keep identity (SPEC-126 FR-126-14 to FR-126-18, AC-3)', () => {
+  /** Every occurrence of a repository: id, path, status and the version number it holds. */
+  async function occurrencesOf(handle: DatabaseHandle, repositoryId: string) {
+    const rows = await handle.db
+      .select({
+        id: schema.artifactOccurrences.id,
+        artifactId: schema.artifactOccurrences.artifactId,
+        path: schema.artifactOccurrences.path,
+        status: schema.artifactOccurrences.status,
+        version: schema.artifactVersions.version,
+      })
+      .from(schema.artifactOccurrences)
+      .innerJoin(
+        schema.artifactVersions,
+        eq(schema.artifactVersions.id, schema.artifactOccurrences.latestVersionId),
+      )
+      .where(eq(schema.artifactOccurrences.repositoryId, repositoryId));
+    return rows.sort((x, y) => (x.path < y.path ? -1 : 1));
+  }
+
+  it('moves a skill directory without a frontmatter name: same occurrence, artifact and version, new path and name', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a', 'local-git');
+    await scan(handle, a, [
+      skill('.claude/skills/review', skillMd(null)),
+      skill('.claude/skills/lint', skillMd(null, 'Lint it.')),
+    ]);
+    const [, before] = await occurrencesOf(handle, a);
+    if (!before) throw new Error('no occurrence');
+    await setArtifactNotes(handle.db, before.artifactId, 'kept notes');
+    await addArtifactTag(handle, before.artifactId, 'kept-tag');
+
+    expect(
+      await scan(handle, a, [
+        skill('.agents/skills/code-review', skillMd(null)),
+        skill('.claude/skills/lint', skillMd(null, 'Lint it.')),
+      ]),
+    ).toEqual({ ...none, movedOccurrences: 1 });
+
+    const after = await occurrencesOf(handle, a);
+    expect(after).toEqual([
+      {
+        id: before.id,
+        artifactId: before.artifactId,
+        path: '.agents/skills/code-review',
+        status: 'active',
+        version: 1,
+      },
+      expect.objectContaining({ path: '.claude/skills/lint', status: 'active' }),
+    ]);
+    const detail = await getArtifactDetail(handle.db, before.artifactId);
+    // The name follows the new directory (FR-126-07, H9); the slug never changes (FR-105-13).
+    expect(detail?.artifact).toMatchObject({
+      name: 'code-review',
+      slug: 'review',
+      notes: 'kept notes',
+      tags: ['kept-tag'],
+    });
+    expect(await versionsOf(handle, before.artifactId)).toHaveLength(1);
+  });
+
+  it('renames a single-file rule: same occurrence, the next version with the old one as parent (A13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const rule = '---\ndescription: No default exports\nglobs: "*.ts"\n---\nUse named exports.\n';
+    await scan(handle, a, [single('.cursor/rules/no-default-export.mdc', rule)]);
+    const [before] = await occurrencesOf(handle, a);
+    if (!before) throw new Error('no occurrence');
+
+    expect(await scan(handle, a, [single('.cursor/rules/no-default-exports.mdc', rule)])).toEqual({
+      ...none,
+      movedOccurrences: 1,
+      createdVersions: 1,
+    });
+    expect(await occurrencesOf(handle, a)).toEqual([
+      { ...before, path: '.cursor/rules/no-default-exports.mdc', version: 2 },
+    ]);
+    const [v1, v2] = await versionsOf(handle, before.artifactId);
+    expect(v2).toMatchObject({
+      parentVersionId: v1?.id,
+      sourcePath: '.cursor/rules/no-default-exports.mdc',
+    });
+    expect((await onlyArtifact(handle)).name).toBe('no-default-exports');
+  });
+
+  it('moves an instruction file and keeps its version when the file name stays', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [single('docs/AGENTS.md', '# Agents\n')]);
+    expect(await scan(handle, a, [single('packages/app/AGENTS.md', '# Agents\n')])).toEqual({
+      ...none,
+      movedOccurrences: 1,
+    });
+    expect(await snapshot(handle)).toEqual([
+      expect.objectContaining({ occurrences: ['a:packages/app/AGENTS.md@v1:active'] }),
+    ]);
+  });
+
+  it('does not move two identical skills moved at once; both old rows go missing (§11.5 H2)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/x', skillMd(null)), skill('skills/y', skillMd(null))]);
+    expect(
+      await scan(handle, a, [skill('moved/x', skillMd(null)), skill('moved/y', skillMd(null))]),
+    ).toEqual({
+      ...none,
+      ambiguousMoves: 2,
+      removedOccurrences: 2,
+      // Skills without a frontmatter name never link (A2): two new artifacts.
+      createdArtifacts: 2,
+      createdVersions: 2,
+    });
+    expect((await occurrencesOf(handle, a)).map((o) => [o.path, o.status])).toEqual([
+      ['moved/x', 'active'],
+      ['moved/y', 'active'],
+      ['skills/x', 'removed'],
+      ['skills/y', 'removed'],
+    ]);
+  });
+
+  it('links identical named skills moved at once to their artifact through rule 3 (A12)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [
+      skill('skills/x', skillMd('review')),
+      skill('skills/y', skillMd('review')),
+    ]);
+    expect(
+      await scan(handle, a, [
+        skill('moved/x', skillMd('review')),
+        skill('moved/y', skillMd('review')),
+      ]),
+    ).toEqual({ ...none, ambiguousMoves: 2, removedOccurrences: 2, linkedOccurrences: 2 });
+    expect(await snapshot(handle)).toEqual([
+      expect.objectContaining({
+        slug: 'review',
+        occurrences: [
+          'a:moved/x@v1:active',
+          'a:moved/y@v1:active',
+          'a:skills/x@v1:removed',
+          'a:skills/y@v1:removed',
+        ],
+      }),
+    ]);
+  });
+
+  it('counts the new paths of a move plus a copy, and of two deletions with one addition', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('x', skillMd(null)), skill('keep', skillMd(null, 'Keep.'))]);
+    expect(
+      await scan(handle, a, [
+        skill('y', skillMd(null)),
+        skill('z', skillMd(null)),
+        skill('keep', skillMd(null, 'Keep.')),
+      ]),
+    ).toMatchObject({ ambiguousMoves: 2, movedOccurrences: 0, removedOccurrences: 1 });
+
+    const b = await local(handle, 'b');
+    await scan(handle, b, [skill('p', skillMd(null)), skill('q', skillMd(null))]);
+    expect(await scan(handle, b, [skill('r', skillMd(null))])).toMatchObject({
+      ambiguousMoves: 1,
+      movedOccurrences: 0,
+      removedOccurrences: 2,
+    });
+  });
+
+  it('applies the one-to-one pairs and leaves an ambiguous group apart in the same scan', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [
+      skill('x', skillMd(null)),
+      skill('y', skillMd(null)),
+      single('.cursor/rules/a.mdc', 'Rule A.\n'),
+    ]);
+    expect(
+      await scan(handle, a, [
+        skill('x2', skillMd(null)),
+        skill('y2', skillMd(null)),
+        single('.cursor/rules/b.mdc', 'Rule A.\n'),
+      ]),
+    ).toEqual({
+      ...none,
+      movedOccurrences: 1,
+      createdVersions: 3,
+      ambiguousMoves: 2,
+      createdArtifacts: 2,
+      removedOccurrences: 2,
+    });
+  });
+
+  it('never matches a different format, a different content or a missing occurrence', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [
+      single('.cursor/rules/a.mdc', 'Same text.\n'),
+      skill('skills/x', skillMd(null)),
+      skill('skills/keep', skillMd(null, 'Keep.')),
+    ]);
+    // The rule becomes a Claude rule with the same bytes, the skill changes content.
+    expect(
+      await scan(handle, a, [
+        single('.claude/rules/a.md', 'Same text.\n'),
+        skill('skills/x2', skillMd(null, 'Changed.')),
+        skill('skills/keep', skillMd(null, 'Keep.')),
+      ]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, removedOccurrences: 2 });
+    // A missing occurrence never moves (FR-126-14: active unseen occurrences only, §11.5 H7).
+    expect(
+      await scan(handle, a, [
+        skill('skills/x3', skillMd(null)),
+        skill('skills/keep', skillMd(null, 'Keep.')),
+      ]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
+  });
+
+  it('never decides a move by slug or name, also next to the bundled example (AC-4)', async () => {
+    const handle = getHandle();
+    const demo = skillMd('review');
+    await importArtifactVersion(
+      handle,
+      artifactInput(demo, {
+        repository: { provider: 'bundled-examples', name: 'Bundled', location: '/opt/examples' },
+        path: 'examples/skills/review',
+      }),
+    );
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review', 'Own text.'))]);
+    // Same name and slug base, other content: not a move; the bundled copy stays apart too.
+    expect(
+      await scan(handle, a, [skill('.agents/skills/review', skillMd('review', 'Rewritten.'))]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
+    // Content equal to the bundled example's: moves never reach another repository.
+    expect(await scan(handle, a, [skill('skills/demo-copy', demo)])).toMatchObject({
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
+      linkedOccurrences: 0,
+      createdArtifacts: 1,
+    });
+    expect((await snapshot(handle)).map((row) => [row.slug, row.occurrences])).toEqual([
+      ['review', ['a:skills/review@v1:removed']],
+      ['review-2', ['a:.agents/skills/review@v1:removed']],
+      ['review-3', ['a:skills/demo-copy@v1:active']],
+      // The fixture imports the bundled example under its own slug.
+      ['validate', ['Bundled:examples/skills/review@v1:active']],
+    ]);
+  });
+
+  it('never moves an occurrence under an unobserved path, and moves nothing in an empty scan', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/x', skillMd(null)), skill('keep', skillMd(null, 'K.'))]);
+    expect(
+      await scan(
+        handle,
+        a,
+        [skill('moved/x', skillMd(null)), skill('keep', skillMd(null, 'K.'))],
+        null,
+        ['skills'],
+      ),
+    ).toMatchObject({ movedOccurrences: 0, createdArtifacts: 1, removedOccurrences: 0 });
+    expect(await scan(handle, a, [])).toEqual({ ...none, emptyScanKeptOccurrences: 3 });
+  });
+
+  it('reactivates a missing row at the target path instead of moving (rule 1 first, §14)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('old', skillMd(null)), skill('keep', skillMd(null, 'K.'))]);
+    await scan(handle, a, [skill('keep', skillMd(null, 'K.'))]);
+    await scan(handle, a, [skill('new', skillMd(null)), skill('keep', skillMd(null, 'K.'))]);
+    // `new` exists now (a new artifact, `old` is missing); move it back over `old`'s row.
+    expect(
+      await scan(handle, a, [skill('old', skillMd(null)), skill('keep', skillMd(null, 'K.'))]),
+    ).toMatchObject({ reactivatedOccurrences: 1, removedOccurrences: 1, movedOccurrences: 0 });
+    expect((await occurrencesOf(handle, a)).map((o) => [o.path, o.status])).toEqual([
+      ['keep', 'active'],
+      ['new', 'removed'],
+      ['old', 'active'],
+    ]);
+  });
+
+  it('moves in a GitHub repository too (rule 2 is not limited to local repositories)', async () => {
+    const handle = getHandle();
+    const g = await hosted(handle, 'g');
+    await scan(handle, g, [skill('skills/review', skillMd('review'))], 'a'.repeat(40));
+    const [before] = await occurrencesOf(handle, g);
+    expect(
+      await scan(handle, g, [skill('.agents/skills/review', skillMd('review'))], 'b'.repeat(40)),
+    ).toEqual({ ...none, movedOccurrences: 1 });
+    const rows = await handle.db.select().from(schema.artifactOccurrences);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: before?.id,
+        path: '.agents/skills/review',
+        commitSha: 'b'.repeat(40),
+      }),
+    ]);
+  });
+
+  it('gives the same identities in any discovery order', async () => {
+    const run = async (reverse: boolean) => {
+      const database = await openTestDatabase();
+      try {
+        const { handle } = database;
+        const a = await local(handle, 'a');
+        await scan(handle, a, [
+          skill('x', skillMd(null)),
+          single('.cursor/rules/a.mdc', 'A.\n'),
+          single('.cursor/rules/c.mdc', 'C.\n'),
+        ]);
+        const input = [
+          skill('x2', skillMd(null)),
+          single('.cursor/rules/b.mdc', 'A.\n'),
+          single('.cursor/rules/c.mdc', 'C.\n'),
+        ];
+        await scan(handle, a, reverse ? input.reverse() : input);
+        return await snapshot(handle);
+      } finally {
+        database.dispose();
+      }
+    };
+    expect(await run(false)).toEqual(await run(true));
+  });
+
+  it('keeps a candidate out when its version lacks its primary file (rows scans never write)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [single('.cursor/rules/a.mdc', 'A.\n'), skill('k', skillMd(null))]);
+    handle.sqlite.exec("update artifact_versions set files = '[]' where format = 'cursor-rule'");
+    expect(
+      await scan(handle, a, [single('.cursor/rules/b.mdc', 'A.\n'), skill('k', skillMd(null))]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
+  });
+
+  it('never moves a discovered artifact whose files lack its primary file', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [single('.cursor/rules/a.mdc', 'A.\n'), skill('k', skillMd(null))]);
+    const renamed = single('.cursor/rules/b.mdc', 'A.\n');
+    expect(
+      await scan(handle, a, [
+        { ...renamed, files: [{ path: 'other.mdc', content: 'A.\n' }] },
+        skill('k', skillMd(null)),
+      ]),
+    ).toMatchObject({ movedOccurrences: 0, ambiguousMoves: 0, createdArtifacts: 1 });
+  });
+
+  it('rolls back the whole scan when a move fails and names the path (§13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('x', skillMd(null)), skill('keep', skillMd(null, 'K.'))]);
+    const before = await snapshot(handle);
+    handle.sqlite.exec(
+      "create trigger fail_move before update on artifact_occurrences when new.path = 'x2' begin select raise(abort, 'move refused'); end",
+    );
+    const failure = await scan(handle, a, [
+      skill('x2', skillMd(null)),
+      skill('keep', skillMd(null, 'Edited.')),
+    ]).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ArtifactStoreError);
+    expect(failure).toMatchObject({ path: 'x2' });
+    expect(await snapshot(handle)).toEqual(before);
+  });
+
+  it(
+    'reads unseen versions only when both sides exist, one statement per IDENTITY_LOOKUP_BATCH_SIZE (NFR-126-03)',
+    async () => {
+      const handle = getHandle();
+      const a = await local(handle, 'a');
+      const count = IDENTITY_LOOKUP_BATCH_SIZE * 2 + 1;
+      const skills = (dir: string) =>
+        Array.from({ length: count }, (_, i) =>
+          skill(`${dir}/s${String(i).padStart(4, '0')}`, skillMd(null, `Body ${i}.`)),
+        );
+      const isUnseenRead = (query: string) =>
+        query.startsWith('select "id", "format", "content_hash", "primary_file", case when') &&
+        query.includes('"artifact_versions"."id" in');
+      await scan(handle, a, skills('old'));
+
+      const prepare = vi.spyOn(handle.sqlite, 'prepare');
+      // A rescan without deletions reads no unseen version.
+      await scan(handle, a, skills('old'));
+      expect(prepare.mock.calls.map(([query]) => query).filter(isUnseenRead)).toEqual([]);
+      prepare.mockClear();
+      const summary = await scan(handle, a, skills('new'));
+      const statements = prepare.mock.calls.map(([query]) => query);
+      prepare.mockRestore();
+      // The seam fired: every path moved.
+      expect(summary).toMatchObject({ movedOccurrences: count, createdArtifacts: 0 });
+      expect(statements.filter(isUnseenRead)).toHaveLength(3);
+    },
+    MANY_ARTIFACTS_TIMEOUT_MS,
+  );
+
+  it(
+    'moves thousands of skills in linear time (NFR-126-03)',
+    async () => {
+      const built: { dispose(): void }[] = [];
+      try {
+        const build = async (size: number) => {
+          const database = await openTestDatabase();
+          built.push(database);
+          const { handle } = database;
+          const a = await local(handle, 'a');
+          const at = (dir: string) =>
+            Array.from({ length: size }, (_, i) => skill(`${dir}/s${i}`, skillMd(null, `B${i}.`)));
+          await scan(handle, a, at('one'));
+          return { handle, a, there: at('two'), back: at('one'), flip: { next: 'there' } };
+        };
+        await expectLinearTime({
+          build,
+          // Move every skill to the other directory, alternating so each call moves them all.
+          run: async (input) => {
+            const next = input.flip.next === 'there' ? input.there : input.back;
+            input.flip.next = input.flip.next === 'there' ? 'back' : 'there';
+            await scan(input.handle, input.a, next);
+          },
+          // A rescan of the current paths through rule 1, known to be linear.
+          baseline: (input) =>
+            scan(input.handle, input.a, input.flip.next === 'there' ? input.back : input.there),
+          size: 3_200,
+        });
+      } finally {
+        for (const database of built) database.dispose();
+      }
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
+});
+
 describe('version lineage (SPEC-126 FR-126-19)', () => {
   it('records the version the writing occurrence held, on insert only', async () => {
     const handle = getHandle();
@@ -778,12 +1211,10 @@ describe('source fields follow the active occurrences (FR-126-07, FR-126-23, A9)
     await scan(handle, b, [skill('tools/check', skillMd('review'))]);
     await scan(handle, b, [skill('tools/check', skillMd(null))]);
     expect((await name(handle))[0]).toBe('check');
-    // The root skill reads SKILL.md at the root and is named "skill".
+    // The root skill reads SKILL.md at the root and is named "skill". Since Phase 3 the same
+    // content moving to the root is a move (rule 2), so the one artifact follows it.
     await scan(handle, b, [skill('', skillMd(null))]);
-    expect((await listArtifacts(handle.db)).map((row) => row.name).sort()).toEqual([
-      'review',
-      'skill',
-    ]);
+    expect((await listArtifacts(handle.db)).map((row) => row.name)).toEqual(['skill']);
   });
 
   it('keeps the name when no active occurrence is left, or the chosen version has no primary file', async () => {
@@ -861,6 +1292,8 @@ describe('occurrence versions and the job result (FR-126-09, UD-3)', () => {
       createdVersions: 1,
       linkedOccurrences: 2,
       ambiguousLinks: 1,
+      movedOccurrences: 3,
+      ambiguousMoves: 4,
       warningCount: 0,
       errorCount: 0,
       errors: [],
@@ -869,7 +1302,12 @@ describe('occurrence versions and the job result (FR-126-09, UD-3)', () => {
     expect(repositoryScanResultSchema.parse(result)).toMatchObject({
       linkedOccurrences: 2,
       ambiguousLinks: 1,
+      movedOccurrences: 3,
+      ambiguousMoves: 4,
     });
+    expect(repositoryScanResultSchema.safeParse({ ...result, ambiguousMoves: -1 }).success).toBe(
+      false,
+    );
     expect(repositoryScanResultSchema.safeParse({ ...result, linkedOccurrences: -1 }).success).toBe(
       false,
     );

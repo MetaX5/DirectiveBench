@@ -143,8 +143,81 @@ describe('hosted copies never link (SPEC-126 A16)', () => {
       createdArtifacts: 1,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     expect(await handle.db.$count(schema.artifacts)).toBe(2);
+  });
+});
+
+describe('hosted scans keep identity across moves (SPEC-126 Phase 3)', () => {
+  const NAMELESS = (text: string) => `---\ndescription: ${text}\n---\n# ${text}\n`;
+  const RULE = '---\nglobs: "*.ts"\n---\nUse named exports.\n';
+
+  function rows(): Map<string, { id: string; status: string; version: number }> {
+    return new Map(
+      handle.sqlite
+        .prepare(
+          `select o.path, o.id, o.status, v.version
+             from artifact_occurrences o
+             join artifact_versions v on v.id = o.latest_version_id`,
+        )
+        .all()
+        .map((row) => [
+          String(row.path),
+          { id: String(row.id), status: String(row.status), version: Number(row.version) },
+        ]),
+    );
+  }
+
+  it('moves a skill directory and renames a rule between commits, and leaves two identical moved skills apart', async () => {
+    const remote = new FixtureRemote(remotes, 'acme', 'moves', {
+      'AGENTS.md': '# Rules\n',
+      'skills/review/SKILL.md': NAMELESS('Review'),
+      '.cursor/rules/no-default-export.mdc': RULE,
+      'pair/x/SKILL.md': NAMELESS('Twin'),
+      'pair/y/SKILL.md': NAMELESS('Twin'),
+    });
+    const repository = await registered(remote);
+    await scan(repository);
+    const before = rows();
+    const move = (from: string, to: string) => {
+      mkdirSync(join(remote.work, to, '..'), { recursive: true });
+      git(remote.work, ['mv', from, to]);
+    };
+
+    move('skills/review', '.agents/skills/code-review');
+    move('.cursor/rules/no-default-export.mdc', '.cursor/rules/no-default-exports.mdc');
+    const head = remote.commit({}, 'move');
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      commitSha: head,
+      createdArtifacts: 0,
+      createdVersions: 1,
+      movedOccurrences: 2,
+      ambiguousMoves: 0,
+      removedOccurrences: 0,
+    });
+    const moved = rows();
+    expect(moved.get('.agents/skills/code-review')).toEqual({
+      ...before.get('skills/review'),
+      version: 1,
+    });
+    expect(moved.get('.cursor/rules/no-default-exports.mdc')).toEqual({
+      ...before.get('.cursor/rules/no-default-export.mdc'),
+      version: 2,
+    });
+
+    move('pair/x', 'moved/x');
+    move('pair/y', 'moved/y');
+    remote.commit({}, 'move twins');
+    expect(await scan(repository)).toMatchObject({
+      ok: true,
+      createdArtifacts: 2,
+      movedOccurrences: 0,
+      ambiguousMoves: 2,
+      removedOccurrences: 2,
+    });
   });
 });
 

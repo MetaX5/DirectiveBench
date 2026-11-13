@@ -831,6 +831,8 @@ const unmarked = {
   emptyScanKeptOccurrences: 0,
   linkedOccurrences: 0,
   ambiguousLinks: 0,
+  movedOccurrences: 0,
+  ambiguousMoves: 0,
 };
 
 describe('applyRepositoryScan', () => {

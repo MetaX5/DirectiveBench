@@ -110,7 +110,7 @@ Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`, for the pos
 | parsed_metadata | json NOT NULL | frontmatter, activation, references, warnings |
 | source_repository_id | text | FK → repositories (set null) |
 | source_path, source_commit_sha | text | where first seen |
-| parent_version_id | text | FK → artifact_versions (set null); the version the writing occurrence held before this version was inserted, null for a new occurrence and for rows stored before migration `0006`; set on insert only ([SPEC-126](2026-11-12-cross-repository-artifact-identity.md) FR-126-19) |
+| parent_version_id | text | FK → artifact_versions (set null); the version the writing occurrence held before this version was inserted, null for a new occurrence and for rows stored before migration `0006`; set on insert only ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) FR-126-19) |
 | created_at | text NOT NULL | no `updated_at` (never updated) |
 
 Index `artifact_versions_content_hash_idx` on `(content_hash)` (migration `0006`) serves the rule-3 lookup by hash across artifacts (the unique index leads with `artifact_id`; SPEC-126 NFR-126-02).

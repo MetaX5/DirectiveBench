@@ -308,6 +308,8 @@ const unchanged = {
   emptyScanKeptOccurrences: 0,
   linkedOccurrences: 0,
   ambiguousLinks: 0,
+  movedOccurrences: 0,
+  ambiguousMoves: 0,
 };
 
 describe('describeScan', () => {
@@ -481,6 +483,62 @@ describe('describeScan', () => {
     expect(done({ linkedOccurrences: 2, ambiguousLinks: 2 })).toMatch(
       / 2 matched several existing artifacts and were added to the oldest one\.$/,
     );
+  });
+
+  it('says how many occurrences moved and which possible moves were not applied (SPEC-126 H1 to H3)', () => {
+    const done = (
+      counts: Partial<typeof unchanged> & { createdArtifacts?: number; createdVersions?: number },
+    ) =>
+      describeScan(
+        scan({
+          result: {
+            ok: true,
+            scannedFiles: 214,
+            discovered: 9,
+            createdArtifacts: 0,
+            createdVersions: 0,
+            ...unchanged,
+            ...counts,
+            warningCount: 0,
+            errorCount: 0,
+            errors: [],
+            skippedUserLevelFolders: [],
+            commitSha: null,
+            durationMs: 1200,
+          },
+        }),
+      );
+    expect(done({ movedOccurrences: 1 })).toMatchObject({
+      kind: 'done',
+      message:
+        'Scanned skills: 214 files in 1.2 s, 9 artifacts found (0 new, 1 moved, 0 new versions), 0 errors.',
+    });
+    expect(done({ movedOccurrences: 1, createdVersions: 1 }).message).toContain(
+      '(0 new, 1 moved, 1 new version)',
+    );
+    expect(done({ movedOccurrences: 1_200 }).message).toContain('(0 new, 1,200 moved, 0 new');
+    // Rule order: moved before matched; ambiguous moves before ambiguous links, then SPEC-125.
+    expect(
+      done({
+        createdArtifacts: 2,
+        createdVersions: 3,
+        movedOccurrences: 2,
+        linkedOccurrences: 1,
+        ambiguousMoves: 1,
+        ambiguousLinks: 1,
+        removedOccurrences: 3,
+        reactivatedOccurrences: 1,
+      }).message,
+    ).toBe(
+      'Scanned skills: 214 files in 1.2 s, 9 artifacts found (2 new, 2 moved, 1 matched an existing artifact, 3 new versions), 0 errors. 1 possible move was not applied because several files matched. 1 matched several existing artifacts and was added to the oldest one. 3 no longer found (marked missing), 1 found again.',
+    );
+    const ambiguous = done({ linkedOccurrences: 2, ambiguousMoves: 2, removedOccurrences: 2 });
+    expect(ambiguous).toMatchObject({
+      kind: 'done',
+      message:
+        'Scanned skills: 214 files in 1.2 s, 9 artifacts found (0 new, 2 matched an existing artifact, 0 new versions), 0 errors. 2 possible moves were not applied because several files matched. 2 no longer found (marked missing).',
+    });
+    expect(ambiguous.message).not.toMatch(/[\u2013\u2014]/);
   });
 
   it('mentions the user-level agent folders a scan skipped, as information (D05)', () => {

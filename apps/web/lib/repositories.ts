@@ -292,6 +292,24 @@ function occurrenceChanges(result: {
 }
 
 /**
+ * The rule-2 clause inside the counts' parentheses (SPEC-126 FR-126-18, §11.5 H1): occurrences
+ * moved to a new path, right after "N new"; empty when there were none.
+ */
+function movedClause(moved: number): string {
+  return moved > 0 ? `${formatCount(moved)} moved, ` : '';
+}
+
+/**
+ * The sentence for new paths that matched a file no longer found but were not moved, because
+ * several matched (§11.5 H2, H3); empty when there were none. The line keeps its `done` kind.
+ */
+function ambiguousMovesSentence(ambiguous: number): string {
+  if (ambiguous === 0) return '';
+  const subject = ambiguous === 1 ? 'possible move was' : 'possible moves were';
+  return ` ${formatCount(ambiguous)} ${subject} not applied because several files matched.`;
+}
+
+/**
  * The rule-3 clause inside the counts' parentheses (SPEC-126 FR-126-10, §11.3 F1): paths added to
  * an existing artifact instead of becoming new ones; empty when there were none.
  */
@@ -355,8 +373,10 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
       `Scanned ${name}${result.commitSha ? ` at commit ${result.commitSha.slice(0, 12)}` : ''}: ` +
       `${plural(result.scannedFiles, 'file')} in ${formatDuration(result.durationMs)}, ` +
       `${plural(result.discovered, 'artifact')} found (${formatCount(result.createdArtifacts)} new, ` +
+      movedClause(result.movedOccurrences) +
       matchedClause(result.linkedOccurrences) +
       `${plural(result.createdVersions, 'new version')}), ${plural(result.errorCount, 'error')}.` +
+      ambiguousMovesSentence(result.ambiguousMoves) +
       ambiguousLinksSentence(result.ambiguousLinks) +
       occurrenceChanges(result),
     errors: result.errors,

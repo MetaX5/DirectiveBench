@@ -319,8 +319,8 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
       <CardHeader>
         <CardTitle>Version history</CardTitle>
         <CardDescription>
-          Versions are immutable; a new version is created only when content changes. The content
-          hash is the {HASH_EXPLANATION}.
+          Versions are immutable; a new version is created only when the content or a file name
+          changes. The content hash is the {HASH_EXPLANATION}.
         </CardDescription>
       </CardHeader>
       <CardContent>
