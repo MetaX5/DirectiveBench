@@ -3,7 +3,7 @@ title: Delete a hosted repository's cache when the repository is removed (issue 
 date: 2026-11-13
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request; issue #59 with decisions J1 to J14 approved on 2026-11-13
-status: in-progress
+status: completed
 branch: feat/issue-59-hosted-cache-deletion
 specs: [SPEC-105, SPEC-104, SPEC-125, SPEC-010, SPEC-009, SPEC-014]
 ---
@@ -36,6 +36,8 @@ a gate file before `fetch`); `doctor` must keep the database read-only.
 
 ## Progress
 
+PR: #230
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Specs
@@ -63,7 +65,7 @@ a gate file before `fetch`); `doctor` must keep the database read-only.
 
 - [x] 6.1 Full quality gate, real CLI run and browser QA
 - [x] 6.2 Codex adversarial review until approve
-- [ ] 6.3 Implementation status, run log and PR
+- [x] 6.3 Implementation status, run log and PR
 
 ## Decisions
 
@@ -143,6 +145,7 @@ Review rounds:
 | Browser QA agent (built app) | pass | No defects in the change |
 | Codex adversarial 1 (`--scope branch --base main`) at e365edc | needs-attention | No material findings; only that its read-only sandbox could not run the gate (run here, all green) |
 | Codex adversarial 2 (`--scope branch --base main`) at 512d052 | approve | No material findings |
+| `om-auto-review-pr 230` (engine `om-code-review`) at 6f7ce51 | approve (posted as a COMMENT review: self-authored) | One minor (a sweep past the shutdown deadline keeps running after `stop()`; harmless, next start retries) and two nits (a second `start()` would add a timer, as the poll loop already does; `doctor` counts a cache whose scan still runs as cached), left as is |
 
 ## Problems and deviations
 
