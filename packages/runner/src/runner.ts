@@ -36,6 +36,7 @@ import {
   type JobRecord,
   type JobType,
 } from '@directivebench/database';
+import { ORPHANED_CACHE_SWEEP_INTERVAL_MS, sweepOrphanedCaches } from './hosted-cache';
 import { GitCancelledError, HTTPS_TRANSPORT, type HostedGitTransport } from './hosted-git';
 import {
   registerHostedUrl,
@@ -106,6 +107,11 @@ export interface LocalRunnerOptions {
   staleAfterMs?: number;
   /** Maximum time graceful shutdown waits for running jobs (FR-114-13, default 10 s). */
   shutdownTimeoutMs?: number;
+  /**
+   * How often a started runner deletes the caches of removed repositories. Default
+   * {@link ORPHANED_CACHE_SWEEP_INTERVAL_MS}; only tests pass another value.
+   */
+  orphanedCacheSweepIntervalMs?: number;
   logger?: RunnerLogger;
 }
 
@@ -171,6 +177,11 @@ export class LocalRunner {
   private stopping = false;
   /** The poll in progress, so `stop()` can wait for a job it is acquiring right now. */
   private polling: Promise<void> | null = null;
+  private sweepTimer: NodeJS.Timeout | null = null;
+  /** The sweep of orphaned caches in progress, so `stop()` can wait for it. */
+  private sweeping: Promise<void> | null = null;
+  /** Ids whose failed cache deletion was logged by this runner (logged once, retried quietly). */
+  private readonly cacheDeleteFailures = new Set<string>();
 
   constructor(options: LocalRunnerOptions) {
     this.options = {
@@ -181,6 +192,7 @@ export class LocalRunner {
       heartbeatIntervalMs: 5000,
       staleAfterMs: 30_000,
       shutdownTimeoutMs: 10_000,
+      orphanedCacheSweepIntervalMs: ORPHANED_CACHE_SWEEP_INTERVAL_MS,
       logger: silentLogger,
       hostedGitTransport: HTTPS_TRANSPORT,
       hostedGitLimits: {},
@@ -201,10 +213,19 @@ export class LocalRunner {
     return recovered;
   }
 
+  /**
+   * Recovers stale jobs, then polls for jobs and deletes the caches of removed repositories: once
+   * now, without delaying the first poll, and every `orphanedCacheSweepIntervalMs` (SPEC-105
+   * FR-105-19). `runUntilIdle` never sweeps.
+   */
   async start(): Promise<void> {
     // Reset before awaiting so a stop() that lands during recovery is not undone.
     this.stopping = false;
     await this.recover();
+    if (!this.stopping) {
+      this.sweep();
+      this.sweepTimer = setInterval(() => this.sweep(), this.options.orphanedCacheSweepIntervalMs);
+    }
     const tick = () => {
       if (this.stopping) return;
       void this.poll().finally(() => {
@@ -212,6 +233,20 @@ export class LocalRunner {
       });
     };
     tick();
+  }
+
+  /** Starts a sweep of orphaned caches unless one is still running (at most one at a time). */
+  private sweep(): void {
+    if (this.sweeping) return;
+    const { handle, cacheDir, logger } = this.options;
+    this.sweeping = sweepOrphanedCaches({
+      handle,
+      cacheDir,
+      logger,
+      reportedFailures: this.cacheDeleteFailures,
+    }).finally(() => {
+      this.sweeping = null;
+    });
   }
 
   /**
@@ -322,11 +357,14 @@ export class LocalRunner {
    * running jobs and waits for them — all within `shutdownTimeoutMs`. Aborted jobs are recorded
    * as `interrupted` (not user-cancelled); jobs that did not stop in time are marked
    * `interrupted` directly, waiting at most {@link SHUTDOWN_INTERRUPT_GRACE_MS} more for that
-   * write, and a job claimed after the deadline is aborted as soon as it is.
+   * write, and a job claimed after the deadline is aborted as soon as it is. No new sweep of
+   * orphaned caches starts, and a sweep in flight is waited for within the same deadline.
    */
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    const sweep = this.sweeping;
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<true>((resolve) => {
       timer = setTimeout(() => resolve(true), this.options.shutdownTimeoutMs);
@@ -346,6 +384,7 @@ export class LocalRunner {
         Promise.allSettled(running.map(([, a]) => a.done)).then(() => false),
         deadline,
       ]));
+    await Promise.race([sweep, deadline]);
     clearTimeout(timer);
     if (timedOut) await this.interruptRemaining();
   }
