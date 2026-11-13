@@ -139,6 +139,11 @@ Screenshots: branch `qa-evidence-pr-229`, folder `pr-229/`. Then `test-env-down.
 Codex adversarial review (`--scope branch --base main`, target "branch diff against main") on
 `6ed5bc4`: approve, no material findings.
 
+`om-auto-review-pr 229 --autofix` (engine `om-code-review`) on `04faeb0`: validation gate
+(format, lint, typecheck, test, build, verify:pack) all pass; approve, posted as a COMMENT review
+(self-authored PR); two nits left as is (a dated SPEC-124 mockup asset keeps the old name; result
+lines per I7). No autofix needed.
+
 Not verified:
 
 - Screen-reader speech of "ID" and of the comma, and voice control.
