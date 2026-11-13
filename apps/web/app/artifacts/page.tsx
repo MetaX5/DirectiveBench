@@ -206,6 +206,19 @@ export default async function ArtifactsPage({
                         <span className="ml-1 text-ui text-muted-foreground">
                           v{a.latestVersion}
                         </span>
+                        {/* Same name and format as another artifact (SPEC-126 §11.4 G1, G2):
+                            on its own line, so it never widens the column (issue 122). */}
+                        {a.possibleDuplicates > 0 ? (
+                          <div className="mt-1">
+                            <Badge
+                              variant="outline"
+                              className="whitespace-nowrap"
+                              data-testid="possible-duplicate"
+                            >
+                              Possible duplicate
+                            </Badge>
+                          </div>
+                        ) : null}
                       </TD>
                       <TD>
                         <Badge variant="outline">{a.type}</Badge>

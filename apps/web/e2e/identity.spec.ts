@@ -281,3 +281,183 @@ test.describe.serial('exact copies and version lineage (SPEC-126 Phase 1)', () =
     await expect(rows.getByTestId('older-version')).toHaveText('older version');
   });
 });
+
+// SPEC-126 Phase 2 (§15, §21 Phase 2 step 3, §11.4 G17): two different skills with the same name
+// in two local repositories stay two artifacts with suffixed slugs, and the list and both artifact
+// pages mark them as possible duplicates of each other (AC-2). A seeded legacy copy with the same
+// content and no occurrence left shows "Same latest content", the "Missing" Badge and the note.
+
+const DUP_A = 'identity-e2e-dup-a';
+const DUP_B = 'identity-e2e-dup-b';
+const DUP = 'identity-e2e-dup';
+const DUP_PATH = `.claude/skills/${DUP}/SKILL.md`;
+const LEGACY = { id: 'art_e2e126legacy', slug: `${DUP}-legacy`, version: 'artv_e2e126legacy' };
+// Its own root (lesson 2026-11-13): never a folder under another spec's registered repository.
+const dupSources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'identity-dup-')));
+
+function dupSkill(body: string): string {
+  return `---\nname: ${DUP}\ndescription: Possible duplicate fixture.\n---\n# Review\n\n${body}\n`;
+}
+
+async function registerAt(page: Page, root: string, repository: string): Promise<void> {
+  await page.goto('/repositories');
+  await page.getByLabel('Path').fill(join(root, repository));
+  await page.getByRole('button', { name: 'Register' }).click();
+  await expect(page.getByTestId('registration-status')).toContainText(`Registered ${repository}`, {
+    timeout: RUNNER_TIMEOUT,
+  });
+}
+
+function dupIds(): Promise<Record<string, string>> {
+  return withDatabase((db) =>
+    Object.fromEntries(
+      (
+        db.prepare('select slug, id from artifacts where name = ?').all(DUP) as {
+          slug: string;
+          id: string;
+        }[]
+      ).map((row) => [row.slug, row.id]),
+    ),
+  );
+}
+
+test.describe.serial('possible duplicates (SPEC-126 Phase 2)', () => {
+  let jobsBefore = new Set<string>();
+
+  test.beforeAll(async () => {
+    jobsBefore = await withDatabase(
+      (db) =>
+        new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+    );
+    for (const [repository, body] of [
+      [DUP_A, 'Review the diff for client A.'],
+      [DUP_B, 'Review the diff for client B.'],
+    ] as const) {
+      const path = join(dupSources, repository, DUP_PATH);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, dupSkill(body));
+    }
+  });
+
+  // Leave the shared database as found (lesson 2026-11-10).
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = (sql: string, id: string) => db.prepare(sql).run(id);
+      for (const name of [DUP_A, DUP_B]) remove('delete from repositories where name = ?', name);
+      remove('delete from artifacts where name = ?', DUP);
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) remove('delete from jobs where id = ?', id);
+      }
+    });
+    rmSync(dupSources, { recursive: true, force: true });
+  });
+
+  test('same-named skills with different content stay apart and point at each other (AC-2)', async ({
+    page,
+  }) => {
+    for (const repository of [DUP_A, DUP_B]) {
+      await registerAt(page, dupSources, repository);
+      await scan(page, repository);
+    }
+    await expect(page.getByTestId('scan-status')).toContainText('(1 new, 1 new version)');
+    const ids = await dupIds();
+    // Not merged: two artifacts whose slugs differ by a suffix.
+    expect(Object.keys(ids).sort()).toEqual([DUP, `${DUP}-2`]);
+
+    await page.goto(`/artifacts?q=${DUP}`);
+    const rows = page.getByRole('row').filter({ hasText: DUP });
+    await expect(rows).toHaveCount(2);
+    for (const row of await rows.all()) {
+      const badge = row.getByTestId('possible-duplicate');
+      await expect(badge).toHaveText('Possible duplicate');
+      await expect(badge).not.toHaveAttribute('title');
+      expect(await badge.evaluate((element) => element.getClientRects().length)).toBe(1);
+    }
+    await expectContrast(page, 'list with possible duplicates');
+
+    for (const [own, other, repository] of [
+      [DUP, `${DUP}-2`, DUP_B],
+      [`${DUP}-2`, DUP, DUP_A],
+    ] as const) {
+      await page.goto(`/artifacts/${ids[own]}`);
+      await expect(page.getByTestId('possible-duplicate')).toHaveText('Possible duplicate');
+      const card = page.getByTestId('possible-duplicates');
+      await expect(card.getByRole('heading', { name: 'Possible duplicates' })).toBeVisible();
+      await expect(card).toContainText(
+        'Other artifacts with the same name and format. Each one keeps its own versions and results.',
+      );
+      const table = card.getByRole('region', { name: 'Possible duplicates' });
+      const row = table.getByTestId('duplicate-row');
+      await expect(row).toHaveCount(1);
+      await expect(row.getByRole('link', { name: other, exact: true })).toHaveAttribute(
+        'href',
+        `/artifacts/${ids[other]}`,
+      );
+      await expect(row.getByRole('cell').nth(1)).toHaveText(repository);
+      await expect(row.getByRole('cell').nth(2)).toHaveText('Different content');
+      await expect(card.getByTestId('duplicates-note')).toHaveCount(0);
+      await expect(card.getByTestId('duplicates-more')).toHaveCount(0);
+    }
+    // The header Badge shows on every tab (G3); the card only on Overview.
+    await page.goto(`/artifacts/${ids[DUP]}?tab=versions`);
+    await expect(page.getByTestId('possible-duplicate')).toBeVisible();
+    await expect(page.getByTestId('possible-duplicates')).toHaveCount(0);
+  });
+
+  test('a same-content copy shows the note and a missing one the Missing Badge; keyboard, 320px, contrast', async ({
+    page,
+  }) => {
+    const ids = await dupIds();
+    // A legacy copy of A's content with no occurrence left (recorded before matching, A6, G13).
+    await withDatabase((db) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `insert into artifacts (id, slug, name, type, created_at, updated_at)
+         values (?, ?, ?, 'skill', ?, ?)`,
+      ).run(LEGACY.id, LEGACY.slug, DUP, now, now);
+      db.prepare(
+        `insert into artifact_versions
+           (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+         select ?, ?, 1, content_hash, format, primary_file, files, parsed_metadata, ?
+           from artifact_versions where artifact_id = ? order by version desc limit 1`,
+      ).run(LEGACY.version, LEGACY.id, now, ids[DUP]!);
+    });
+    await page.goto(`/artifacts/${ids[DUP]}`);
+    const card = page.getByTestId('possible-duplicates');
+    const rows = card.getByTestId('duplicate-row');
+    await expect(rows).toHaveCount(2);
+    const legacy = rows.filter({ hasText: LEGACY.slug });
+    await expect(legacy.getByRole('cell').nth(1)).toHaveText('Missing');
+    await expect(legacy.getByRole('cell').nth(2)).toHaveText('Same latest content');
+    await expect(card.getByTestId('duplicates-note')).toHaveText(
+      'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.',
+    );
+    await expectContrast(page, 'possible duplicates card');
+
+    // B's latest content differs from both: no note.
+    await page.goto(`/artifacts/${ids[`${DUP}-2`]}`);
+    await expect(page.getByTestId('duplicate-row')).toHaveCount(2);
+    await expect(page.getByTestId('duplicates-note')).toHaveCount(0);
+
+    // The missing legacy artifact shows its own card (G13).
+    await page.goto(`/artifacts/${LEGACY.id}`);
+    await expect(page.getByTestId('duplicate-row')).toHaveCount(2);
+    await expect(page.getByTestId('duplicates-note')).toBeVisible();
+
+    // 320px: no document scroll on either page.
+    await page.setViewportSize({ width: 320, height: 800 });
+    for (const path of [`/artifacts/${ids[DUP]}`, `/artifacts?q=${DUP}`]) {
+      await page.goto(path);
+      expect(await horizontalOverflow(page), path).toBeLessThanOrEqual(0);
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // Keyboard: the slug link is reachable and opens that artifact.
+    await page.goto(`/artifacts/${ids[DUP]}`);
+    const link = page.getByRole('link', { name: `${DUP}-2`, exact: true });
+    await link.focus();
+    await expect(link).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/artifacts/${ids[`${DUP}-2`]}$`));
+  });
+});

@@ -1,5 +1,9 @@
-import { ARTIFACT_TYPES, CATEGORY_SLUG_MAX_LENGTH } from '@directivebench/core';
-import type { ArtifactListFilter, StoredArtifactFile } from '@directivebench/database';
+import { ARTIFACT_TYPES, CATEGORY_SLUG_MAX_LENGTH, type ArtifactType } from '@directivebench/core';
+import type {
+  ArtifactListFilter,
+  PossibleDuplicate,
+  StoredArtifactFile,
+} from '@directivebench/database';
 import { z } from 'zod';
 import { repositorySubject, type RepositoryProvider } from './repositories';
 import { formatDate } from './utils';
@@ -193,6 +197,74 @@ export function occurrenceVersionLabel(
     label: `v${version}`,
     accessibleName: `v${version} of ${artifactName}`,
     older: version < latest,
+  };
+}
+
+/** The G11 note under the possible-duplicates table (SPEC-126 §11.4). */
+export const SAME_CONTENT_NOTE =
+  'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
+
+/** One row of the "Possible duplicates" card (SPEC-126 §11.4 G7 to G9). */
+export interface PossibleDuplicateRow {
+  id: string;
+  /** The link text: the slug, which tells same-named rows apart (G7). */
+  slug: string;
+  href: string;
+  /** The repositories with an active occurrence, joined with ", "; null when missing (G8, G13). */
+  repositories: string | null;
+  content: 'Same latest content' | 'Different content';
+}
+
+/** The "Possible duplicates" card on an artifact's Overview (SPEC-126 UD-5, §11.4 G4 to G13). */
+export interface PossibleDuplicatesCard {
+  rows: PossibleDuplicateRow[];
+  /** The line under the table when more exist than are listed (G10). */
+  more: { text: string; linkText: string; href: string } | null;
+  /** The G11 note, when a listed row has the same latest content. */
+  note: string | null;
+}
+
+/**
+ * `name` cut to at most `MAX_SEARCH_LENGTH` UTF-16 units at a code point boundary, so the list
+ * accepts it as `q` (G10). A prefix is still a substring of the name, so every duplicate is found.
+ */
+export function searchPrefix(name: string): string {
+  const cut = name.slice(0, MAX_SEARCH_LENGTH);
+  const last = cut.charCodeAt(cut.length - 1);
+  // A high surrogate cut from its pair would leave half a character.
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
+ * The card model, or null when the artifact has no possible duplicate (no card and no header
+ * Badge, G12). Rows keep the database order (oldest first, FR-126-13).
+ */
+export function possibleDuplicatesCard(
+  artifact: { name: string; type: ArtifactType },
+  duplicates: { items: readonly PossibleDuplicate[]; total: number },
+): PossibleDuplicatesCard | null {
+  if (duplicates.total === 0) return null;
+  const rows = duplicates.items.map((item): PossibleDuplicateRow => ({
+    id: item.id,
+    slug: item.slug,
+    href: artifactHref(item.id),
+    repositories:
+      item.activeOccurrences === 0 ? null : item.repositories.map((r) => r.name).join(', '),
+    content: item.sameLatestContent ? 'Same latest content' : 'Different content',
+  }));
+  const unlisted = duplicates.total - duplicates.items.length;
+  const q = searchPrefix(artifact.name);
+  return {
+    rows,
+    more:
+      unlisted > 0
+        ? {
+            text: unlisted === 1 ? '1 more is not listed.' : `${unlisted} more are not listed.`,
+            linkText: `Search Artifacts for "${q}"`,
+            href: `/artifacts?${new URLSearchParams({ q, type: artifact.type }).toString()}`,
+          }
+        : null,
+    note: duplicates.items.some((item) => item.sameLatestContent) ? SAME_CONTENT_NOTE : null,
   };
 }
 

@@ -16,6 +16,8 @@ import {
   importArtifactVersion,
   importSuiteVersion,
   listArtifacts,
+  MAX_LISTED_DUPLICATES,
+  POSSIBLE_DUPLICATE_FORMATS,
   registerHostedRepository,
   removeRepository,
   repositoryScanResultSchema,
@@ -872,4 +874,240 @@ describe('occurrence versions and the job result (FR-126-09, UD-3)', () => {
       false,
     );
   });
+});
+
+describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
+  const counts = async (handle: DatabaseHandle, filter: Parameters<typeof listArtifacts>[1] = {}) =>
+    Object.fromEntries(
+      (await listArtifacts(handle.db, filter)).map((row) => [row.slug, row.possibleDuplicates]),
+    );
+  const bySlug = async (handle: DatabaseHandle, slug: string) => {
+    const row = await handle.db
+      .select()
+      .from(schema.artifacts)
+      .where(eq(schema.artifacts.slug, slug))
+      .get();
+    if (!row) throw new Error(`no artifact ${slug}`);
+    return row;
+  };
+  const duplicatesOf = async (handle: DatabaseHandle, slug: string) =>
+    (await getArtifactDetail(handle.db, (await bySlug(handle, slug)).id))?.possibleDuplicates;
+
+  it('flags same-named skills with different content in two repositories and lists each other (AC-2)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    await scan(handle, a, [skill('skills/review', skillMd('review', 'Review A.'))]);
+    await scan(handle, b, [skill('skills/review', skillMd('review', 'Review B.'))]);
+    expect(await counts(handle)).toEqual({ review: 1, 'review-2': 1 });
+    const review = await bySlug(handle, 'review');
+    const review2 = await bySlug(handle, 'review-2');
+    expect(await duplicatesOf(handle, 'review')).toEqual({
+      items: [
+        {
+          id: review2.id,
+          slug: 'review-2',
+          name: 'review',
+          activeOccurrences: 1,
+          repositories: [{ id: b, name: 'b' }],
+          sameLatestContent: false,
+        },
+      ],
+      total: 1,
+    });
+    expect(await duplicatesOf(handle, 'review-2')).toMatchObject({
+      items: [{ id: review.id, slug: 'review', repositories: [{ id: a, name: 'a' }] }],
+      total: 1,
+    });
+  });
+
+  it('decides by the format alone: skills named by their directory are flagged, instructions and other formats never (G14, A15)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    await scan(handle, a, [
+      skill('skills/anon', skillMd(null, 'Anon A.')),
+      single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nUse tabs.\n'),
+      single('.claude/rules/style.md', 'Style.\n'),
+      single('.github/instructions/api.instructions.md', '---\napplyTo: "api/**"\n---\nA\n'),
+      single('AGENTS.md', '# A\n'),
+      single('.gitlab/duo/chat-rules.md', '# Duo A\n'),
+    ]);
+    await scan(handle, b, [
+      // Identical, so never linked (A2), and flagged as a possible duplicate (§14).
+      skill('skills/anon', skillMd(null, 'Anon A.')),
+      single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nUse spaces.\n'),
+      single('.github/instructions/api.instructions.md', '---\napplyTo: "api/**"\n---\nB\n'),
+      single('AGENTS.md', '# B\n'),
+      single('.gitlab/duo/chat-rules.md', '# Duo B\n'),
+    ]);
+    const listed = await counts(handle);
+    const flagged = Object.entries(listed).filter(([, n]) => n > 0);
+    expect(flagged.map(([slug]) => slug).sort()).toEqual([
+      'anon',
+      'anon-2',
+      'api',
+      'api-2',
+      'style-2',
+      'style-3',
+    ]);
+    // The claude-rule `style` (first in path order) shares the cursor rules' name and type, not
+    // their format.
+    expect(listed.style).toBe(0);
+    expect(await duplicatesOf(handle, 'style')).toEqual({ items: [], total: 0 });
+    expect(await duplicatesOf(handle, 'anon')).toMatchObject({
+      items: [{ slug: 'anon-2', sameLatestContent: true }],
+    });
+    const agents = (await listArtifacts(handle.db)).filter((row) => row.name === 'AGENTS.md');
+    expect(agents.map((row) => row.possibleDuplicates)).toEqual([0, 0]);
+    expect(await duplicatesOf(handle, agents[0]!.slug)).toEqual({ items: [], total: 0 });
+  });
+
+  it('counts duplicates the list filters out, and missing, hosted and bundled ones (A15, A16, G8, G13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const c = await local(handle, 'c');
+    const gh = await hosted(handle, 'gh');
+    await importArtifactVersion(
+      handle,
+      artifactInput('Bundled review.', { slug: 'review', name: 'review' }),
+    );
+    await scan(handle, a, [skill('skills/review', skillMd('review', 'Shared.'))]);
+    await scan(handle, gh, [skill('skills/review', skillMd('review', 'Shared.'))]);
+    await scan(handle, c, [skill('skills/review', skillMd('review', 'C.'))]);
+    // The copy in c disappears (marked removed): its artifact is missing.
+    await scan(handle, c, [single('AGENTS.md', '# C\n')]);
+    expect(await counts(handle, { repository: a })).toEqual({ 'review-2': 3 });
+    expect(await counts(handle, { type: 'skill' })).toEqual({
+      review: 3,
+      'review-2': 3,
+      'review-3': 3,
+      'review-4': 3,
+    });
+    const listed = await duplicatesOf(handle, 'review-2');
+    expect(listed?.total).toBe(3);
+    expect(
+      listed?.items.map((item) => [
+        item.slug,
+        item.repositories.map((r) => r.id),
+        item.activeOccurrences,
+        item.sameLatestContent,
+      ]),
+    ).toEqual([
+      ['review', [expect.any(String)], 1, false],
+      ['review-3', [gh], 1, true],
+      ['review-4', [], 0, false],
+    ]);
+    // A missing artifact shows its own card too (G13).
+    expect((await duplicatesOf(handle, 'review-4'))?.total).toBe(3);
+  });
+
+  it('lists at most MAX_LISTED_DUPLICATES, oldest first then by id, with the total (FR-126-13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    await scan(handle, a, [skill('skills/review', skillMd('review', 'First.'))]);
+    await scan(
+      handle,
+      b,
+      Array.from({ length: MAX_LISTED_DUPLICATES + 4 }, (_, i) =>
+        skill(`skills/r${String(i).padStart(2, '0')}`, skillMd('review', `Copy ${i}.`)),
+      ),
+    );
+    const others = (await handle.db.select().from(schema.artifacts))
+      .filter((row) => row.slug !== 'review')
+      .map((row) => row.slug);
+    const listed = await duplicatesOf(handle, 'review');
+    expect(listed?.total).toBe(MAX_LISTED_DUPLICATES + 4);
+    expect(listed?.items).toHaveLength(MAX_LISTED_DUPLICATES);
+    const ids = new Map(
+      (await handle.db.select().from(schema.artifacts)).map((row) => [row.slug, row.id]),
+    );
+    // Same `created_at` (one scan): ordered by id.
+    const expected = [...others]
+      .sort((x, y) => (ids.get(x)! < ids.get(y)! ? -1 : 1))
+      .slice(0, MAX_LISTED_DUPLICATES);
+    expect(listed?.items.map((item) => item.slug)).toEqual(expected);
+    // The older artifact comes first on a younger one's card.
+    expect((await duplicatesOf(handle, expected[0]!))?.items[0]?.slug).toBe('review');
+    expect((await counts(handle)).review).toBe(MAX_LISTED_DUPLICATES + 4);
+  });
+
+  it('has no duplicates for an artifact without a version', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review'))]);
+    handle.sqlite
+      .prepare(
+        `insert into artifacts (id, slug, name, type, created_at, updated_at)
+         values ('art_bare', 'bare', 'review', 'skill', 't', 't')`,
+      )
+      .run();
+    expect(await counts(handle)).toEqual({ review: 0, bare: 0 });
+    expect(await duplicatesOf(handle, 'bare')).toEqual({ items: [], total: 0 });
+  });
+
+  it('reads the groups in one grouped statement on artifacts_type_name_idx (NFR-126-02)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review'))]);
+    const prepare = vi.spyOn(handle.sqlite, 'prepare');
+    await listArtifacts(handle.db);
+    const statements = prepare.mock.calls.map(([query]) => query);
+    prepare.mockRestore();
+    const grouped = statements.filter((query) => query.includes('group by'));
+    expect(grouped).toHaveLength(1);
+    const plan = handle.sqlite
+      .prepare(`explain query plan ${grouped[0]!}`)
+      .all(...POSSIBLE_DUPLICATE_FORMATS, 1)
+      .map((row) => String((row as { detail: string }).detail));
+    expect(plan.join('\n')).toContain('artifacts_type_name_idx');
+  });
+
+  it(
+    'counts duplicates of 10,016 artifacts in linear time (§21 Phase 2)',
+    async () => {
+      const built: { dispose(): void }[] = [];
+      /** `size` skills in pairs of the same name, written with raw SQL so building stays fast. */
+      const build = async (size: number) => {
+        const database = await openTestDatabase();
+        built.push(database);
+        const { sqlite } = database.handle;
+        const artifact = sqlite.prepare(
+          `insert into artifacts (id, slug, name, type, created_at, updated_at)
+           values (?, ?, ?, 'skill', 't', 't')`,
+        );
+        const version = sqlite.prepare(
+          `insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+           values (?, ?, 1, ?, 'skill-md', 'SKILL.md', '[]', '{}', 't')`,
+        );
+        sqlite.exec('BEGIN');
+        for (let i = 0; i < size; i += 1) {
+          artifact.run(`art_${i}`, `s${i}`, `skill-${Math.floor(i / 2)}`);
+          version.run(`ver_${i}`, `art_${i}`, `h${i}`);
+        }
+        sqlite.exec('COMMIT');
+        return database.handle;
+      };
+      try {
+        const small = await build(4);
+        expect((await listArtifacts(small.db)).map((row) => row.possibleDuplicates)).toEqual([
+          1, 1, 1, 1,
+        ]);
+        await expectLinearTime({
+          build,
+          run: (database) => listArtifacts(database.db),
+          // Reading every artifact and version row once is linear in the same data.
+          baseline: async (database) => {
+            await database.db.select().from(schema.artifacts);
+            await database.db.select().from(schema.artifactVersions);
+          },
+          size: 10_016,
+        });
+      } finally {
+        for (const database of built) database.dispose();
+      }
+    },
+    LINEAR_TIME_TEST_TIMEOUT_MS,
+  );
 });

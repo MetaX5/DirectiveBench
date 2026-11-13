@@ -12,7 +12,7 @@ related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, 
 
 ## 1. Summary
 
-**Phase 1 implemented (exact copies, lineage, §20); Phases 2 and 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
+**Phases 1 (exact copies, lineage) and 2 (possible-duplicate hints) implemented (§20); Phase 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
 §8.3 rule 1: same repository and path) and otherwise creates a new artifact (rule 4). A skill
 copied unchanged into a second repository therefore becomes a second artifact (`review`,
 `review-2`) with its own versions, categories and history, and a skill directory moved inside one
@@ -145,7 +145,7 @@ implementation has not started.
 | A12 | An ambiguous move | Not applied (counted in the result line). The new path then goes through rule 3, so a directory skill whose candidates all belong to one artifact still links to it | New artifacts with a warning (FR-103-09 as written) | Rule 3 already guarantees an exact copy is never a false merge; FR-103-09's last sentence is updated to "rules 3 and 4 decide" |
 | A13 | Do moves and links change the version or provenance? | A link reuses the version (no new version, FR-103-07); a move of a directory skill reuses its version; a single-file rename adds the next version because the manifest path (basename) changes (SPEC-103 §14). Provenance stays the first observation (FR-103-15) | Record every observation (OQ-103-03) | No contract change |
 | A14 | OQ-104-05: one directory registered as `local-git` and as `local-directory` | Keep both rows (no block). Each row's skills and rules link to the same artifacts through rule 3, so the artifact shows two occurrences with the same path in two repositories of the same location. Registration does not warn today (FR-104-18 treats the same location under the other provider as no overlap). A notice "also registered as a plain folder" stays a follow-up | Block the second registration, or a notice in this story | The maintainer deferred OQ-104-05 to "a notice rather than a block"; rule 3 makes the double row harmless for identity (one artifact, not two), which removes the urgency. Out of this story's scope |
-| A15 | Possible duplicates: definition | Two or more artifacts whose latest versions have the same linkable format (A3) and whose names are exactly equal, whatever their occurrences and providers (bundled examples included: a user's modified copy of the demo skill is worth flagging) | Case-insensitive or slug-base matching; all formats | Exact match is deterministic and indexable; a slug-base match is the rejected slug rule (lesson 2026-10-19); repository-level files (A3) would flag every repository's `AGENTS.md` |
+| A15 | Possible duplicates: definition | Two or more artifacts whose latest versions have the same linkable format (A3; the format alone decides, frontmatter `name` not required, §11.4 G14) and whose names are exactly equal, whatever their occurrences and providers (bundled examples included: a user's modified copy of the demo skill is worth flagging) | Case-insensitive or slug-base matching; all formats | Exact match is deterministic and indexable; a slug-base match is the rejected slug rule (lesson 2026-10-19); repository-level files (A3) would flag every repository's `AGENTS.md` |
 | A16 | Which repositories may link (write authority)? | Only **local** repositories (`local-git`, `local-directory`): a local copy links only to artifacts whose occurrences are all in local repositories. Hosted repositories (`github`, later `gitlab`) never link, neither to local ones nor to each other; their same-named copies show as possible duplicates with "Same latest content" | Link across every scannable provider; or links between hosted repositories of the same provider | After a link, an edit in any copy adds the next version of the shared artifact, which becomes its latest version: the default of "Run benchmark" and `benchmark run --artifact <slug>`, handed to a real agent CLI. A registered public repository is someone else's, so linking it to anything would let its owner advance another repository's default version (Codex review). Local repositories are working copies the user put on disk and registered; they are the D04 premise (skills read from the user's project repositories) and already run as benchmark subjects. A local clone of a third-party repository is the user's trust decision, as it is today. Widening later only affects new occurrences, so this is the reversible default. A user-approved link between hosted copies is the future manual link action |
 | A17 | Words | UI: "linked" is not shown; the scan result line says "matched an existing artifact"; "possible duplicate" as in SPEC-101 | "merged" | Nothing is merged; the occurrence is added to an existing artifact |
 | A18 | ADR | None: no new dependency or pattern; the identity rules live in SPEC-101 §8.3 and this spec | ADR for rule 3 | AGENTS.md asks ADRs for significant design decisions only; this implements an existing spec rule |
@@ -190,9 +190,9 @@ implementation has not started.
 
 | ID | Requirement |
 | --- | --- |
-| FR-126-11 | **Definition.** An artifact is a possible duplicate when its latest version has a linkable format (A3) and at least one other artifact whose latest version has the same format has exactly the same name (A15). Computed on read, nothing stored. |
-| FR-126-12 | **List.** `ArtifactListItem` gains `possibleDuplicates: number` (the count of the others). The Name cell shows a "Possible duplicate" Badge when it is greater than 0 (UD-4). Counts, filters, the SPEC-124 bulk action and its fingerprint are unchanged. |
-| FR-126-13 | **Artifact page.** `getArtifactDetail` gains `possibleDuplicates`: each other artifact's id, slug, name, active occurrence count, repositories (names) and whether its latest version's `content_hash` equals this artifact's latest (`sameLatestContent`), ordered by `created_at`, `id`, at most `MAX_LISTED_DUPLICATES = 20` plus the total. The Overview shows them in a "Possible duplicates" card (UD-5). |
+| FR-126-11 | **Definition.** An artifact is a possible duplicate when its latest version has a linkable format (A3: `skill-md`, `cursor-rule`, `claude-rule` or `copilot-path-instructions`; the format alone decides, so a skill without a frontmatter `name` is flagged too, as §14 says, §11.4 G14) and at least one other artifact whose latest version has the same format has exactly the same name (A15). Computed on read from `artifact_versions.format` and `artifacts.name`, nothing stored and no content parsed. |
+| FR-126-12 | **List.** `ArtifactListItem` gains `possibleDuplicates: number` (the count of the others). The Name cell shows an `outline` "Possible duplicate" Badge on its own line under the name when it is greater than 0, with no `title` (UD-4, §11.4 G1, G2). Counts, filters, the SPEC-124 bulk action and its fingerprint are unchanged. |
+| FR-126-13 | **Artifact page.** `getArtifactDetail` gains `possibleDuplicates`: each other artifact's id, slug, name, active occurrence count, the repositories holding an **active** occurrence (id and name, ordered by name, as FR-101-10; §11.4 G8) and whether its latest version's `content_hash` equals this artifact's latest (`sameLatestContent`), ordered by `created_at`, `id`, at most `MAX_LISTED_DUPLICATES = 20` plus the total. The Overview shows them in a "Possible duplicates" card and the page header shows the "Possible duplicate" Badge on every tab (UD-5, §11.4 G3 to G13). |
 
 ### 6.3 Moves (rule 2, Phase 3)
 
@@ -342,16 +342,16 @@ maintainer approves them, then the page code follows (the SPEC-125 §11.2 / §11
 | UD-1 | Scan result line on `/repositories` | Phase 1 (refined by §11.3 F1, F2): "3 matched an existing artifact" inside the parentheses after "N new" ("9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions)"), and, when links chose between several artifacts, "1 matched several existing artifacts and was added to the oldest one." after the counts sentence. Phase 3: "1 moved", "1 possible move was not applied because several files matched" (placement decided then). Plain text in the existing line; no new kind |
 | UD-2 | Artifacts list for a linked artifact | No change: the Repository cell already shows the first repository plus "+N" and Occurrences counts active occurrences across repositories, which is AC-1 visible |
 | UD-3 | Occurrences table on the artifact page (Phase 1) | New column "Version" after Path: "v3"; when it is not the artifact's latest version, a `muted` Badge "older version" next to it, so a diverged copy is visible (US-126-02). The column is a link to `?tab=content&version=3` |
-| UD-4 | List Name cell (Phase 2) | Under the name, an `outline` Badge "Possible duplicate" with `title` "N other artifacts have the same name"; no icon; keeps the issue #122 widths (the badge wraps under the name, never widens the column) |
-| UD-5 | Artifact page (Phase 2) | Overview, after Occurrences: Card "Possible duplicates", description "Other artifacts with the same name and format. DirectiveBench links only identical copies in local repositories; these are kept apart." Table: Artifact (link, slug in `font-mono`), Repositories, Content ("Same latest content" / "Different content"). When more than 20: "and N more" with a link to `/artifacts?q=<name>`. A note under the card when any row has the same latest content: "Identical copies are kept apart when they were registered before this version, or are in a GitHub repository." |
+| UD-4 | List Name cell (Phase 2) | Refined by §11.4 G1, G2: under the name, on its own line, an `outline` Badge "Possible duplicate" (`whitespace-nowrap`), no `title` and no icon; keeps the issue #122 widths (the badge wraps under the name, never widens the column) |
+| UD-5 | Artifact page (Phase 2) | Refined by §11.4 G3 to G13: a "Possible duplicate" Badge in the page header; Overview, directly under Occurrences: Card "Possible duplicates", description "Other artifacts with the same name and format. Each one keeps its own versions and results." Table (`aria-label="Possible duplicates"`): Artifact (link, slug in `font-mono`), Repositories (active ones, or a muted "Missing" Badge), Content ("Same latest content" / "Different content"). When more than 20: "5 more are not listed." and a link "Search Artifacts for "review"" to `/artifacts?q=review&type=skill` (G10). The G11 note under the table when a listed row has the same latest content. No card and no header Badge without duplicates |
 | UD-6 | SPEC-125 removal panel reason (Phase 1) | For a local repository (refined by §11.3 F8), replace "Registering it again later creates new artifacts instead of reusing these ones." with "Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead." (A4). For a GitHub repository the SPEC-125 sentence stays, because hosted copies never link (A16) |
-| UD-7 | Words | "possible duplicate", "matched an existing artifact", "moved", "older version"; no "merged" (A17); no en or em dash in any of it |
+| UD-7 | Words | "possible duplicate" (Phase 2 capitalises it as a Badge: "Possible duplicate", card "Possible duplicates", §11.4 G15), "Same latest content", "Different content", "matched an existing artifact", "moved", "older version"; no "linked" or "merged" in UI copy (A17, F15); no en or em dash in any of it |
 
 ### 11.2 Accessibility
 
 Badges carry text, not colour alone; the Version link has an accessible name ("v3 of <name>",
-§11.3 F5: the visible text "v3" starts the name, WCAG 2.5.3); the duplicates table is a normal table with a caption for screen readers; keyboard
-order unchanged except the new links; contrast of `outline` and `muted` Badges is already
+§11.3 F5: the visible text "v3" starts the name, WCAG 2.5.3); the duplicates table is a normal table with an accessible name; keyboard
+order unchanged except the new links; the duplicates table is named by `aria-label="Possible duplicates"` with no `<caption>` (§11.4 G6, as the Occurrences table, F6), so its name is not announced twice; contrast of `outline` and `muted` Badges is already
 verified (SPEC-125) but is re-checked on the new cells in both themes (`text-contrast.spec.ts`).
 
 ### 11.3 Phase 1 UI decisions (approved 2026-11-13)
@@ -387,6 +387,41 @@ Badge, `muted-foreground` on `muted`, 5.51 light and 5.86 dark.
 | F17 | Playwright contrast coverage | `identity.spec.ts` registers two fixture repositories with one identical skill, edits one copy and rescans, asserts "older version", the link name "v1 of <name>" and its `href`, the "matched" scan line, and runs the contrast scan on the artifact page in both themes; the F8 sentence through `missing-occurrences.spec.ts`; "edited from" through a seeded diverged version pair with mock runs, restored afterwards; fixtures and jobs removed in `afterAll` |
 | F18 | Spec status | Resolved: the maintainer set `approved` |
 
+### 11.4 Phase 2 UI decisions (approved 2026-11-13)
+
+Refinements of §11.1 (UD-4, UD-5, UD-7), §11.2 and FR-126-11 to FR-126-13 for Phase 2, prepared
+with throwaway Storybook stories and screenshots and approved by the maintainer on 2026-11-13
+with every recommended default (comment on issue #20), including the points that differ from
+the text first written: G2 (no `title` on the list Badge), G3 (a header Badge, not in the spec),
+G5 (the card description), G6 (an `aria-label` instead of a caption), G8 (repositories of active
+occurrences only, a gap in FR-126-13), G10 (the overflow line and link), G11 (the note) and G14
+(the format alone decides, a contradiction between FR-126-11 and §14). The spec text above is
+corrected to match. None needs a new component, variant or token. Contrast (WCAG 2.x, rendered
+pixels in the built Storybook): the lowest new pair is the "Missing" Badge in the card,
+`muted-foreground` on `muted`, 5.51 light and 5.86 dark; every other new text is 6.01 / 6.94
+(`muted-foreground` on `card`) or higher.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| G1 | UD-4 list Badge | After the name link and its "v3", on its own line: `<div className="mt-1"><Badge variant="outline" className="whitespace-nowrap">Possible duplicate</Badge></div>`, only when `possibleDuplicates > 0`; no icon. The cell keeps `min-w-40 font-medium wrap-anywhere`; the Badge (119 x 22px, one line box) never sets the column floor, so the issue #122 widths hold |
+| G2 | UD-4 `title` | No `title` and no visually hidden text: the visible "Possible duplicate" is the whole message; the count and the list are on the artifact page (design system: no information only in a tooltip) |
+| G3 | Artifact page header | `<Badge variant="outline">Possible duplicate</Badge>` in the `PageHeader` actions after type, format and "Missing", when `possibleDuplicates.total > 0`, so every tab shows the hint (AC-2) |
+| G4 | Card placement | Overview, directly under Occurrences in the left column (`flex min-w-0 flex-col gap-grid lg:col-span-2` holding both cards); below `lg`: Occurrences, Possible duplicates, then the right-column cards |
+| G5 | Card title and description | Title "Possible duplicates"; description "Other artifacts with the same name and format. Each one keeps its own versions and results." |
+| G6 | Table name | `<Table aria-label="Possible duplicates">`, no `<caption>`; columns Artifact, Repositories, Content |
+| G7 | Artifact cell | Link text = the slug, `font-mono text-ui underline`, cell `whitespace-nowrap`, `href` = the artifact page; the accessible name is the slug, unique per row |
+| G8 | Repositories cell | The names of the repositories with an active occurrence, all of them, joined with ", ", `text-ui wrap-anywhere`; with no active occurrence a `muted` Badge "Missing". No occurrence-count column. FR-126-13's `repositories` are active ones only |
+| G9 | Content cell | Plain `text-ui` text "Same latest content" / "Different content" |
+| G10 | More than `MAX_LISTED_DUPLICATES` (20) | Under the table, `text-ui text-muted-foreground`: "5 more are not listed." / "1 more is not listed.", then an `underline` link "Search Artifacts for "review"" to `/artifacts?q=review&type=skill`; `q` is the name cut to at most `MAX_SEARCH_LENGTH` (200) UTF-16 units at a code point boundary, `type` the artifact's type |
+| G11 | Note | Inside the card, under the table and the G10 line, `text-ui text-muted-foreground`, only when a **listed** row has `sameLatestContent`: "Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate." |
+| G12 | Empty state | No duplicates: no card and no header Badge |
+| G13 | Missing duplicates | Counted and listed (A15); their Repositories cell shows the "Missing" Badge (G8); a missing artifact shows its own card too |
+| G14 | FR-126-11 vs §14 | The format alone decides (`skill-md`, `cursor-rule`, `claude-rule`, `copilot-path-instructions`), whatever the frontmatter; computed from `artifact_versions.format`, no content parse |
+| G15 | UD-7 words | "Possible duplicate" (list, header), "Possible duplicates" (card), "Same latest content", "Different content", "matched" (note); never "linked" or "merged"; no en or em dash |
+| G16 | Stories and design-system docs | No new component, variant or token. `filtered-list.stories.tsx` gets `PossibleDuplicates` (G1); `detail-view.stories.tsx` gets `PossibleDuplicates` (G3 to G11: two rows, mixed content, one missing) and `PossibleDuplicatesOverflow` (more than 20 rows); `detail-view.mdx` gets one rule: "An item that shares its name with other items lists them in a card under its occurrences, with where each one is and whether its content is the same; the card is not shown when there are none (SPEC-126)." All in both themes by `pnpm test:storybook` |
+| G17 | Playwright coverage | `identity.spec.ts` adds a same-named, different skill (both rows badged, both cards linking each other by slug, "Different content", no note) and a seeded GitHub or legacy pair for "Same latest content" and the note; `artifacts-full-hd.spec.ts` seeds a duplicate pair (one a long snake_case rule name): one line box, no container or document scroll at 1920, the Name header width equal to the run without the pair; no document scroll at 320px on both pages; `text-contrast.spec.ts` covers both pages with duplicates in both themes; seeds removed in `afterAll` |
+| G18 | Noticed, not changed | Out of Phase 2: the `/artifacts` Table's missing `aria-label` (PR #158 follow-up) and the list's "—" placeholders (issue #123) |
+
 ## 12. Security considerations
 
 - No new input: names, hashes and paths come from discovery and reach queries only as
@@ -413,6 +448,10 @@ Badge, `muted-foreground` on `muted`, 5.51 light and 5.86 dark.
   store failure does.
 - The cancellation, removed-repository and job checks of `applyRepositoryScan` run before the new
   reads, unchanged.
+- Possible duplicates (Phase 2) are read-only and computed on read: a failed read fails the page
+  as any other read does; there is no Phase 2 error message. A name longer than
+  `MAX_SEARCH_LENGTH` is cut at a code point boundary in the G10 search link, never sent whole,
+  so the list never reports "Ignored invalid value in the URL: q" for that link (§11.4 G10).
 
 ## 14. Edge cases
 
@@ -586,7 +625,7 @@ and A21 (an edit copied before its source is rescanned splits).
 ## 20. Implementation status
 
 **Phase 1 implemented (issue #20, branch `feat/spec-126-phase-1-exact-copies`, run log
-`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phases 2 and 3 not implemented.** Verified on
+`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phase 2 below; Phase 3 not implemented.** Verified on
 2026-11-13 by the full gate (format, lint, typecheck, unit tests with 100% coverage, build,
 `verify:pack`, Playwright, Storybook) and a run of the built app:
 
@@ -615,9 +654,29 @@ and A21 (an edit copied before its source is rescanned splits).
   (3,200 linked skills against 100).
 
 Acceptance criteria verified for Phase 1: AC-1, AC-5, AC-6, AC-7, AC-9, AC-10, and AC-8 for the
-Phase 1 UI points. Not implemented: possible-duplicate hints (Phase 2: FR-126-11 to FR-126-13,
-UD-4, UD-5, AC-2), moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example
-tests of Phase 1; its full check closes with Phase 3.
+Phase 1 UI points.
+
+**Phase 2 implemented (issue #20, branch `feat/spec-126-phase-2-possible-duplicates`, run log
+`.ai/runs/2026-11-13-spec-126-phase-2.md`).** Verified on 2026-11-13 by the full gate and a run
+of the built app:
+
+- FR-126-11, FR-126-12 (§11.4 G1, G2, G14): `ArtifactListItem.possibleDuplicates` from one
+  grouped statement on `artifacts_type_name_idx` (type, exact name, latest format among
+  `POSSIBLE_DUPLICATE_FORMATS`; the format alone decides); the Name cell's `outline` Badge on its
+  own line, no `title` (`identity.test.ts` "possible duplicates", incl. the query plan and a
+  linear-time test with 10,016 artifacts; `apps/web/e2e/identity.spec.ts`,
+  `artifacts-full-hd.spec.ts`: one line box and an unchanged Name column at 1920).
+- FR-126-13 (§11.4 G3 to G13): `getArtifactDetail().possibleDuplicates` (at most
+  `MAX_LISTED_DUPLICATES`, oldest first, total, active repositories, `sameLatestContent`); the
+  header Badge on every tab, the Overview card under Occurrences with the slug link, the
+  repositories or "Missing", the content, the overflow line with a search link cut at a code
+  point boundary, and the G11 note (`apps/web/test/artifacts.test.ts` `possibleDuplicatesCard`,
+  `searchPrefix`; e2e incl. 320px, keyboard and contrast in both themes, `text-contrast.spec.ts`).
+- G16 stories (`filtered-list`, `detail-view`), in both themes by `pnpm test:storybook`.
+
+Acceptance criteria verified for Phase 2: AC-2, and AC-8 for the Phase 2 UI points. Not
+implemented: moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example tests of
+Phase 1; its full check closes with Phase 3.
 
 ## 21. Phasing and implementation plan
 

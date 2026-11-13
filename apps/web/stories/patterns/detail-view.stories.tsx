@@ -24,7 +24,16 @@ type Detail = {
   missingNote?: string;
   /** Where the item was found and the version each place holds (rule 6). */
   occurrences?: { repository: string; path: string; version: number; status: string }[];
+  /** Other items with the same name and format (rule 7, SPEC-126 §11.4 G3 to G11). */
+  duplicates?: {
+    rows: { slug: string; repositories: string | null; content: string }[];
+    more?: { text: string; linkText: string; href: string };
+    note?: string;
+  };
 };
+
+const SAME_CONTENT_NOTE =
+  'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
 
 const skill: Detail = {
   name: 'validate-external-input',
@@ -69,6 +78,7 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
             <Badge variant="outline">{artifact.type}</Badge>
             <Badge variant="outline">v{artifact.version}</Badge>
             {artifact.missingNote ? <Badge variant="muted">Missing</Badge> : null}
+            {artifact.duplicates ? <Badge variant="outline">Possible duplicate</Badge> : null}
             <Button>
               <Play aria-hidden data-icon="inline-start" />
               Run benchmark
@@ -160,6 +170,54 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
             </CardContent>
           </Card>
         ) : null}
+        {artifact.duplicates ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Possible duplicates</CardTitle>
+              <CardDescription>
+                Other artifacts with the same name and format. Each one keeps its own versions and
+                results.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-stack">
+              <Table aria-label="Possible duplicates">
+                <THead>
+                  <TR>
+                    <TH>Artifact</TH>
+                    <TH>Repositories</TH>
+                    <TH>Content</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {artifact.duplicates.rows.map((row) => (
+                    <TR key={row.slug}>
+                      <TD className="whitespace-nowrap">
+                        <Link className="font-mono text-ui underline" href={`#${row.slug}`}>
+                          {row.slug}
+                        </Link>
+                      </TD>
+                      <TD className="text-ui wrap-anywhere">
+                        {row.repositories ?? <Badge variant="muted">Missing</Badge>}
+                      </TD>
+                      <TD className="text-ui">{row.content}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+              {artifact.duplicates.more ? (
+                <p className="text-ui text-muted-foreground">
+                  {artifact.duplicates.more.text}{' '}
+                  <Link className="underline" href={artifact.duplicates.more.href}>
+                    {artifact.duplicates.more.linkText}
+                  </Link>
+                </p>
+              ) : null}
+              {artifact.duplicates.note ? (
+                <p className="text-ui text-muted-foreground">{artifact.duplicates.note}</p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </div>
   );
@@ -244,6 +302,82 @@ export const SharedAcrossRepositories: Story = {
     );
     await expect(canvas.getAllByText('older version')).toHaveLength(2);
     await expect(canvas.getByRole('link', { name: 'v3 of review' })).toBeVisible();
+  },
+};
+
+/**
+ * Shares its name with other items (rule 7, SPEC-126 §11.4 G3 to G11): a header Badge on every
+ * tab, and a card under the occurrences with each one's slug, where it is (or "Missing") and
+ * whether its latest content is the same; the note explains why identical copies stay apart.
+ */
+export const PossibleDuplicates: Story = {
+  args: {
+    artifact: {
+      ...skill,
+      name: 'review',
+      occurrences: [
+        { repository: 'client-a', path: '.claude/skills/review', version: 3, status: 'active' },
+      ],
+      duplicates: {
+        rows: [
+          {
+            slug: 'review-2',
+            repositories: 'acme/agent-skills, client-b',
+            content: 'Same latest content',
+          },
+          { slug: 'review-3', repositories: null, content: 'Different content' },
+        ],
+        note: SAME_CONTENT_NOTE,
+      },
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getAllByText('Possible duplicate')).toHaveLength(1);
+    const table = canvas.getByRole('region', { name: 'Possible duplicates' });
+    await expect(table).toBeVisible();
+    await expect(canvas.getByRole('link', { name: 'review-2' })).toHaveAttribute(
+      'href',
+      '#review-2',
+    );
+    await expect(canvas.getByText('Missing', { exact: true })).toBeVisible();
+    await expect(
+      canvas.getByText(/^Same latest content does not make them one artifact/),
+    ).toBeVisible();
+  },
+};
+
+/** More than 20 (G10): the first 20, how many are not listed and a search narrowed by type. */
+export const PossibleDuplicatesOverflow: Story = {
+  args: {
+    artifact: {
+      ...skill,
+      name: 'review',
+      duplicates: {
+        rows: Array.from({ length: 20 }, (_, i) => ({
+          slug: `review-${i + 2}`,
+          repositories:
+            i === 3
+              ? 'acme/agent-skills-for-every-client-project, client-b-monorepo-with-long-name, team/claude-skills'
+              : i === 7
+                ? null
+                : `client-${i + 2}`,
+          content: i === 0 ? 'Same latest content' : 'Different content',
+        })),
+        more: {
+          text: '5 more are not listed.',
+          linkText: 'Search Artifacts for "review"',
+          href: '/artifacts?q=review&type=skill',
+        },
+        note: SAME_CONTENT_NOTE,
+      },
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getAllByRole('link', { name: /^review-\d+$/ })).toHaveLength(20);
+    await expect(canvas.getByText(/^5 more are not listed\./)).toBeVisible();
+    await expect(
+      canvas.getByRole('link', { name: 'Search Artifacts for "review"' }),
+    ).toHaveAttribute('href', '/artifacts?q=review&type=skill');
   },
 };
 

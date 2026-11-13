@@ -111,6 +111,33 @@ for (const theme of ['light', 'dark'] as const) {
           .run(artifactId),
       );
     }
+    // Possible duplicates (SPEC-126 §11.4 G17): a seeded copy of the demo artifact's latest
+    // version with no occurrence, so the list Badge, the header Badge, the card with "Same latest
+    // content", the muted "Missing" Badge and the note are all on screen. Nothing in the demo
+    // data has a duplicate.
+    const duplicate = 'art_e2e126contrast';
+    await withDatabase((db) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `insert into artifacts (id, slug, name, type, created_at, updated_at)
+         select ?, ?, name, type, ?, ? from artifacts where id = ?`,
+      ).run(duplicate, `${DEMO_ARTIFACT}-e2e-duplicate`, now, now, artifactId);
+      db.prepare(
+        `insert into artifact_versions
+           (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+         select ?, ?, 1, content_hash, format, primary_file, files, parsed_metadata, ?
+           from artifact_versions where artifact_id = ? order by version desc limit 1`,
+      ).run(`${duplicate}v`, duplicate, now, artifactId);
+    });
+    try {
+      for (const path of [`/artifacts/${artifactId}`, `/artifacts/${duplicate}`, '/artifacts']) {
+        await page.goto(path);
+        await expect(page.getByText('Possible duplicate', { exact: true }).first()).toBeVisible();
+        await scan(`${path} (possible duplicates)`);
+      }
+    } finally {
+      await withDatabase((db) => db.prepare('delete from artifacts where id = ?').run(duplicate));
+    }
     // The repository removal lines (SPEC-125 §11.3 D18, D26) through crafted URLs, which write
     // nothing: the green result, the alerts and the status line for an unknown panel target.
     for (const query of [

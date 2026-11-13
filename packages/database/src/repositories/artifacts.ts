@@ -1,5 +1,6 @@
 import {
   and,
+  count,
   desc,
   eq,
   exists,
@@ -9,6 +10,7 @@ import {
   isNull,
   lt,
   max,
+  ne,
   notExists,
   notInArray,
   or,
@@ -28,6 +30,7 @@ import {
   slugify,
   unseenOccurrencePaths,
 } from '@directivebench/core';
+import { alias } from 'drizzle-orm/sqlite-core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import type { CategoryRef } from './catalog';
 import { JobNoLongerRunningError, LOCAL_PROVIDERS, NotFoundError } from './jobs';
@@ -1280,6 +1283,162 @@ export interface ArtifactListItem {
   missing: boolean;
   benchmarkCount: number;
   latestEvaluation: LatestEvaluation | null;
+  /**
+   * Other artifacts whose latest version has the same format and exactly the same name, for a
+   * format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11, FR-126-12); 0 otherwise.
+   */
+  possibleDuplicates: number;
+}
+
+/**
+ * Formats whose same-named artifacts are possible duplicates (SPEC-126 FR-126-11, A3, §11.4 G14):
+ * the formats rule 3 can link. The format alone decides, so a skill without a frontmatter `name`
+ * (named after its directory) is flagged too, and nothing is parsed on read.
+ */
+export const POSSIBLE_DUPLICATE_FORMATS: readonly ArtifactFormat[] = [
+  'skill-md',
+  'cursor-rule',
+  'claude-rule',
+  'copilot-path-instructions',
+];
+
+/** At most this many possible duplicates are listed on an artifact page (SPEC-126 FR-126-13). */
+export const MAX_LISTED_DUPLICATES = 20;
+
+/** Another artifact with the same name and format (SPEC-126 FR-126-13, §8.3). */
+export interface PossibleDuplicate {
+  id: string;
+  slug: string;
+  name: string;
+  /** Active occurrences across all repositories; 0 when it is missing (§11.4 G13). */
+  activeOccurrences: number;
+  /** Repositories with at least one active occurrence, ordered by name (§11.4 G8, FR-101-10). */
+  repositories: { id: string; name: string }[];
+  /** Its latest version's `content_hash` equals this artifact's latest one. */
+  sameLatestContent: boolean;
+}
+
+/** Each artifact's latest version, joined as `latest` (the highest number, SPEC-101 §8.2). */
+const latestVersionRow = alias(artifactVersions, 'latest');
+const isLatestVersion = and(
+  eq(latestVersionRow.artifactId, artifacts.id),
+  eq(
+    latestVersionRow.version,
+    sql`(select max(${artifactVersions.version}) from ${artifactVersions} where ${artifactVersions.artifactId} = ${artifacts.id})`,
+  ),
+);
+
+/** The key of a possible-duplicate group: type, exact name and the latest version's format. */
+function duplicateKey(type: string, name: string, format: string): string {
+  return `${type}\u0000${name}\u0000${format}`;
+}
+
+/** The others in an artifact's possible-duplicate group (FR-126-12); 0 outside any group. */
+function otherDuplicates(
+  groups: ReadonlyMap<string, number>,
+  artifact: { type: string; name: string },
+  format: string | undefined,
+): number {
+  const size =
+    format === undefined
+      ? undefined
+      : groups.get(duplicateKey(artifact.type, artifact.name, format));
+  return size === undefined ? 0 : size - 1;
+}
+
+/**
+ * The size of every group of two or more artifacts with the same type, name and latest format
+ * among `POSSIBLE_DUPLICATE_FORMATS` (FR-126-11), keyed by `duplicateKey`. One grouped statement
+ * over all artifacts, walking `artifacts_type_name_idx` (NFR-126-02), whatever the list's filters:
+ * a duplicate may be filtered out of the list and still count.
+ */
+async function possibleDuplicateGroups(db: Database): Promise<Map<string, number>> {
+  const groups = await db
+    .select({
+      type: artifacts.type,
+      name: artifacts.name,
+      format: latestVersionRow.format,
+      size: count(),
+    })
+    .from(artifacts)
+    .innerJoin(latestVersionRow, isLatestVersion)
+    .where(inArray(latestVersionRow.format, [...POSSIBLE_DUPLICATE_FORMATS]))
+    .groupBy(artifacts.type, artifacts.name, latestVersionRow.format)
+    .having(gt(count(), 1));
+  return new Map(groups.map((g) => [duplicateKey(g.type, g.name, g.format), g.size]));
+}
+
+/**
+ * The other artifacts of `artifact`'s possible-duplicate group (FR-126-13): at most
+ * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A latest
+ * format outside `POSSIBLE_DUPLICATE_FORMATS`, or no version, has none.
+ */
+async function readPossibleDuplicates(
+  db: Database,
+  artifact: { id: string; type: ArtifactType; name: string },
+  latest: { format: string; contentHash: string } | undefined,
+): Promise<{ items: PossibleDuplicate[]; total: number }> {
+  if (!latest || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(latest.format)) {
+    return { items: [], total: 0 };
+  }
+  // The type keeps `artifacts_type_name_idx` usable; the same format implies the same type.
+  const sameGroup = and(
+    eq(artifacts.type, artifact.type),
+    eq(artifacts.name, artifact.name),
+    ne(artifacts.id, artifact.id),
+    eq(latestVersionRow.format, latest.format),
+  );
+  const listed = await db
+    .select({
+      id: artifacts.id,
+      slug: artifacts.slug,
+      name: artifacts.name,
+      contentHash: latestVersionRow.contentHash,
+      total: sql<number>`count(*) over ()`,
+    })
+    .from(artifacts)
+    .innerJoin(latestVersionRow, isLatestVersion)
+    .where(sameGroup)
+    .orderBy(artifacts.createdAt, artifacts.id)
+    .limit(MAX_LISTED_DUPLICATES);
+  const [first] = listed;
+  if (!first) return { items: [], total: 0 };
+  // Every listed row carries the size of the whole group (a window over the unlimited result).
+  const total = first.total;
+  const active = await db
+    .select({
+      artifactId: artifactOccurrences.artifactId,
+      repositoryId: repositories.id,
+      repositoryName: repositories.name,
+    })
+    .from(artifactOccurrences)
+    .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
+    .where(
+      and(
+        inArray(
+          artifactOccurrences.artifactId,
+          listed.map((row) => row.id),
+        ),
+        eq(artifactOccurrences.status, 'active'),
+      ),
+    )
+    .orderBy(repositories.name, repositories.id);
+  const items = listed.map((row) => {
+    const found = active.filter((occurrence) => occurrence.artifactId === row.id);
+    return {
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      activeOccurrences: found.length,
+      repositories: [
+        ...new Map(
+          found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.repositoryName }]),
+        ).values(),
+      ],
+      sameLatestContent: row.contentHash === latest.contentHash,
+    };
+  });
+  return { items, total };
 }
 
 /**
@@ -1448,6 +1607,7 @@ export async function listArtifacts(
     .from(artifactBenchmarkAssignments)
     .where(inArray(artifactBenchmarkAssignments.artifactId, ids));
   const latest = await latestRunsByArtifact(db, ids);
+  const duplicateGroups = await possibleDuplicateGroups(db);
 
   // Grouped once, so building the rows is linear in the number of related rows (NFR-101-01).
   const byArtifact = <T extends { artifactId: string }>(items: T[]) => {
@@ -1485,6 +1645,7 @@ export async function listArtifacts(
       missing: found.length === 0,
       benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
+      possibleDuplicates: otherDuplicates(duplicateGroups, row, latestVersion?.format),
     };
   });
 }
@@ -1749,10 +1910,12 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
       }
     }
   }
+  const possibleDuplicates = await readPossibleDuplicates(db, artifact, versions[0]);
   return {
     artifact,
     missing,
     lastFoundAt,
+    possibleDuplicates,
     versions,
     sourceRepositories,
     occurrences,

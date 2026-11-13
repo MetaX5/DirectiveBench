@@ -538,6 +538,7 @@ describe('listArtifacts', () => {
       missing: true,
       benchmarkCount: 0,
       latestEvaluation: null,
+      possibleDuplicates: 0,
     });
     expect(list[1]).toMatchObject({ format: 'skill-md', latestVersion: 1, missing: false });
 
