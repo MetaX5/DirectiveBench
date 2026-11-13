@@ -53,7 +53,11 @@ paths in `font-mono`.
 
 - A table has a name: `aria-label`, or the card title it sits under.
 - Header cells are `<th>`. A per-row action names its row ("Scan acme/agent-rules"), because
-  "Scan" repeated is ambiguous out of context. Source: WCAG 2.4.6, `app/repositories/page.tsx`.
+  "Scan" repeated is ambiguous out of context. The name must be unique on the page: when the
+  visible name is not unique, add what is (`Scan skills (GitHub, https://github.com/acme/skills)`,
+  the provider and location of a repository). Start the name with the visible text, so voice
+  control still finds "Scan". Source: WCAG 2.4.6 and 2.5.3, `app/repositories/page.tsx`
+  (issue 215).
 - The scroll container is a tab stop with the focus ring, so a keyboard user can scroll a
   table wider than the screen. When the table has an `aria-label`, the container is a region
   with the same name. Source: axe `scrollable-region-focusable`, SPEC-122 P13.
@@ -86,12 +90,13 @@ Each part takes the props of its element.
 
 ## 12. Do and don't
 
-| Do                                         | Don't                                    |
-| ------------------------------------------ | ---------------------------------------- |
-| `StatusBadge` in a status column           | A coloured cell background for status    |
-| Numbers right-aligned with `tabular-nums`  | Centred numbers                          |
-| "Scan acme/agent-rules" as the button name | Five buttons all named "Scan"            |
-| `<Table>`                                  | A raw `<table>` (ESLint fails, SPEC-121) |
+| Do                                                              | Don't                                       |
+| --------------------------------------------------------------- | ------------------------------------------- |
+| `StatusBadge` in a status column                                | A coloured cell background for status       |
+| Numbers right-aligned with `tabular-nums`                       | Centred numbers                             |
+| "Scan acme/agent-rules" as the button name                      | Five buttons all named "Scan"               |
+| "Scan skills (Local Git, /home/dev/skills)" for a repeated name | Two buttons named "Scan skills" in two rows |
+| `<Table>`                                                       | A raw `<table>` (ESLint fails, SPEC-121)    |
 
 ## 13. Related
 

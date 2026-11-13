@@ -44,6 +44,7 @@ import {
   providerLabel,
   removalReasons,
   removalResult,
+  repositorySubject,
   scanRequestError,
   urlFieldError,
   type RegistrationNotice,
@@ -393,7 +394,7 @@ export default async function RepositoriesPage({
                                 type="submit"
                                 size="sm"
                                 variant="outline"
-                                aria-label={`Scan ${repository.name}`}
+                                aria-label={`Scan ${repositorySubject(repository)}`}
                               >
                                 Scan
                               </Button>
@@ -406,7 +407,7 @@ export default async function RepositoriesPage({
                                 type="submit"
                                 size="sm"
                                 variant="outline"
-                                aria-label={`Remove ${repository.name}`}
+                                aria-label={`Remove ${repositorySubject(repository)}`}
                               >
                                 Remove
                               </Button>

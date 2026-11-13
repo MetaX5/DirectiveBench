@@ -24,8 +24,11 @@ first, an outline Filter button) > the result count and active filters > the `Ta
    text and actions. Source: `app/artifacts/page.tsx`, EmptyState page.
 4. Results are a `Table` with a name; the status column uses `StatusBadge`, plus `MockBadge`
    for mock results (AGENTS.md §7).
-5. Invalid filter values in the URL are dropped with a `role="status"` notice
-   (`invalidParamsNotice`, `lib/artifacts.ts`).
+5. Invalid filter values in the URL are dropped with a `role="status"` notice, and so is a
+   well-formed value that names nothing (a removed repository, a category slug that does not
+   exist), with its own sentence: "Ignored the repository in the URL: it is not registered."
+   A dropped value counts as invalid for "Clear filters" and the bulk row (`filterNotice` and
+   `dropUnknownFilters`, `lib/artifacts.ts`; issue 216).
 6. An action on every listed item sits under the filters, in the same Card, separated by a
    border; it names the count ("for the 14 listed artifacts") and asks first (Risky-action
    pattern). Source: SPEC-124 §11.4 D29, D39, the bulk category row on `/artifacts`.

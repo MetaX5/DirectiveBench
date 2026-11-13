@@ -87,6 +87,8 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
   let jobsBefore = new Set<string>();
   /** The fixture's artifacts, which outlive the repository once it is removed (Phase 2). */
   let fixtureArtifacts: string[] = [];
+  /** The fixture repository's id, kept for the issue 216 check after it is removed. */
+  let removedRepositoryId: string | undefined;
 
   test.beforeAll(async ({ browser }) => {
     jobsBefore = await withDatabase(
@@ -354,6 +356,7 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     page,
   }) => {
     const id = (await repositoryIdOf()) as string;
+    removedRepositoryId = id;
     const gone = await artifactIdOf(GONE);
     // At 320px the result line is below the Register card, so the redirect's fragment matters.
     await page.setViewportSize({ width: 320, height: 640 });
@@ -410,5 +413,30 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     await expect(page.getByTestId('remove-result')).toHaveText(
       'That repository is no longer registered.',
     );
+  });
+
+  test('a bookmark that filters by the removed repository lists everything and says why (issue 216)', async ({
+    page,
+  }) => {
+    // The previous test removed the fixture repository; its id is still a well-formed filter.
+    const id = removedRepositoryId as string;
+    expect(id).toMatch(/^repo_/);
+    await page.goto(`/artifacts?repository=${id}`);
+    await expect(page.getByTestId('filter-notice')).toHaveText(
+      'Ignored the repository in the URL: it is not registered.',
+    );
+    await expect(page.getByTestId('filter-notice')).toHaveAttribute('role', 'status');
+    // The select shows "All", which is now true: the whole registry is listed.
+    await expect(page.locator('select[name="repository"]')).toHaveValue('');
+    await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toBeVisible();
+    await expect(page.getByText('No artifacts match the filters')).toHaveCount(0);
+    // The ignored filter gates the bulk row like an invalid value (E2).
+    await expect(page.getByTestId('bulk-category')).toHaveText(
+      'Fix or clear the filters in the URL before changing categories for the whole list.',
+    );
+    await expect(page.getByTestId('bulk-category').getByRole('button')).toHaveCount(0);
+    await page.getByRole('link', { name: 'Clear filters' }).click();
+    await expect(page).toHaveURL(/\/artifacts$/);
+    await expect(page.getByTestId('filter-notice')).toHaveCount(0);
   });
 });

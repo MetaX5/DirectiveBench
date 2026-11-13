@@ -8,6 +8,8 @@ import {
   artifactHref,
   artifactListFields,
   buildFileTree,
+  dropUnknownFilters,
+  filterNotice,
   formatBytes,
   invalidParamsNotice,
   parseArtifactDetailParams,
@@ -152,18 +154,96 @@ describe('repositoriesLabel', () => {
 });
 
 describe('repositoryOptions', () => {
-  it('adds the location only to names two repositories share', () => {
+  it('adds the provider and location only to names two repositories share', () => {
     expect(
       repositoryOptions([
-        { id: 'repo_1', name: 'skills', location: '/a/skills' },
-        { id: 'repo_2', name: 'skills', location: '/b/skills' },
-        { id: 'repo_3', name: 'rules', location: '/c/rules' },
+        { id: 'repo_1', name: 'skills', provider: 'local-directory', location: '/a/skills' },
+        {
+          id: 'repo_2',
+          name: 'skills',
+          provider: 'github',
+          location: 'https://github.com/b/skills',
+        },
+        { id: 'repo_3', name: 'rules', provider: 'local-git', location: '/c/rules' },
       ]),
     ).toEqual([
-      { value: 'repo_1', label: 'skills (/a/skills)' },
-      { value: 'repo_2', label: 'skills (/b/skills)' },
+      { value: 'repo_1', label: 'skills (Local directory, /a/skills)' },
+      { value: 'repo_2', label: 'skills (GitHub, https://github.com/b/skills)' },
       { value: 'repo_3', label: 'rules' },
     ]);
+  });
+
+  it('tells apart one directory registered as a local directory and as local Git (E4)', () => {
+    const labels = repositoryOptions([
+      { id: 'repo_1', name: 'skills', provider: 'local-directory', location: '/a/skills' },
+      { id: 'repo_2', name: 'skills', provider: 'local-git', location: '/a/skills' },
+    ]).map((option) => option.label);
+    expect(labels).toEqual([
+      'skills (Local directory, /a/skills)',
+      'skills (Local Git, /a/skills)',
+    ]);
+  });
+});
+
+describe('dropUnknownFilters (issue 216, E2 and E5)', () => {
+  const known = { repositoryIds: ['repo_known'], categorySlugs: ['security'] };
+
+  it('keeps a filter that names a registered repository and an existing category', () => {
+    expect(
+      dropUnknownFilters({ q: 'x', repository: 'repo_known', category: 'security' }, known),
+    ).toEqual({
+      value: { q: 'x', repository: 'repo_known', category: 'security' },
+      unknown: [],
+    });
+  });
+
+  it('drops a repository that is not registered', () => {
+    expect(dropUnknownFilters({ type: 'skill', repository: 'repo_gone' }, known)).toEqual({
+      value: { type: 'skill' },
+      unknown: ['repository'],
+    });
+  });
+
+  it('drops a category that does not exist', () => {
+    expect(dropUnknownFilters({ category: 'no-such-category' }, known)).toEqual({
+      value: {},
+      unknown: ['category'],
+    });
+  });
+
+  it('drops both, in the fixed parameter order', () => {
+    expect(
+      dropUnknownFilters({ category: 'nope', repository: 'repo_gone' }, known).unknown,
+    ).toEqual(['category', 'repository']);
+  });
+
+  it('leaves an empty filter alone', () => {
+    expect(dropUnknownFilters({}, known)).toEqual({ value: {}, unknown: [] });
+  });
+});
+
+describe('filterNotice (issue 216, E3 and E5)', () => {
+  it('is null when nothing was ignored', () => {
+    expect(filterNotice([], [])).toBeNull();
+  });
+
+  it('keeps the invalid-value sentence', () => {
+    expect(filterNotice(['type'], [])).toBe('Ignored invalid value in the URL: type.');
+  });
+
+  it('says why an unknown repository or category was ignored', () => {
+    expect(filterNotice([], ['repository'])).toBe(
+      'Ignored the repository in the URL: it is not registered.',
+    );
+    expect(filterNotice([], ['category'])).toBe(
+      'Ignored the category in the URL: it does not exist.',
+    );
+  });
+
+  it('puts the sentences one after another', () => {
+    expect(filterNotice(['type'], ['category', 'repository'])).toBe(
+      'Ignored invalid value in the URL: type. Ignored the category in the URL: it does not exist. Ignored the repository in the URL: it is not registered.',
+    );
   });
 });
 

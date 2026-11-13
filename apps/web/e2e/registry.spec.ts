@@ -160,6 +160,37 @@ test.describe.serial('artifact registry', () => {
     await expect(page).toHaveURL(/\/artifacts$/);
   });
 
+  test('a well-formed repository or category that names nothing is ignored with its reason (issue 216)', async ({
+    page,
+  }) => {
+    await page.goto('/artifacts?repository=repo_never');
+    await expect(page.getByTestId('filter-notice')).toHaveText(
+      'Ignored the repository in the URL: it is not registered.',
+    );
+    await expect(page.locator('select[name="repository"]')).toHaveValue('');
+    await expect(page.getByRole('link', { name: 'e2e-safe-preview' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Clear filters' })).toBeVisible();
+
+    // E5: an unknown category slug, together with an invalid value and an unknown repository.
+    await page.goto('/artifacts?type=script&category=no-such-category&repository=repo_never');
+    await expect(page.getByTestId('filter-notice')).toHaveText(
+      'Ignored invalid value in the URL: type. Ignored the category in the URL: it does not exist. Ignored the repository in the URL: it is not registered.',
+    );
+    await expect(page.locator('select[name="category"]')).toHaveValue('');
+    await expect(page.getByRole('link', { name: 'e2e-safe-preview' })).toBeVisible();
+    await expect(page.getByTestId('bulk-category')).toHaveText(
+      'Fix or clear the filters in the URL before changing categories for the whole list.',
+    );
+
+    // A known filter next to an unknown one still applies.
+    await page.goto('/artifacts?type=rule&category=no-such-category');
+    await expect(page.getByTestId('filter-notice')).toHaveText(
+      'Ignored the category in the URL: it does not exist.',
+    );
+    await expect(page.locator('select[name="type"]')).toHaveValue('rule');
+    await expect(page.getByRole('link', { name: 'e2e-safe-preview' })).toHaveCount(0);
+  });
+
   test('the Overview lists occurrences and the Content tab shows rendered and raw content', async ({
     page,
   }) => {
