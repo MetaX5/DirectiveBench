@@ -29,6 +29,9 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 6. An item found in several places shows each place's version; a place that holds an older one
    gets a muted "older version" Badge. Source: SPEC-126 §11.3 F4, F16 (the Occurrences table on
    `/artifacts/[id]`).
+7. An item that shares its name with other items lists them in a card under its occurrences,
+   with where each one is and whether its content is the same; the card is not shown when there
+   are none. Source: SPEC-126 §11.4 G3 to G12 (the Possible duplicates card on `/artifacts/[id]`).
 
 ## States
 
@@ -37,4 +40,6 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 <Canvas of={Stories.NotFound} />
 <Canvas of={Stories.MissingItem} />
 <Canvas of={Stories.SharedAcrossRepositories} />
+<Canvas of={Stories.PossibleDuplicates} />
+<Canvas of={Stories.PossibleDuplicatesOverflow} />
 <Canvas of={Stories.LongTextNarrowScreen} />

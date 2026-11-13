@@ -26,6 +26,8 @@ type Artifact = {
   description: string;
   status: 'passed' | 'regression' | 'not-tested';
   mock: boolean;
+  /** Another artifact has the same name and format (SPEC-126 §11.4 G1). */
+  possibleDuplicate?: boolean;
 };
 
 const artifacts: Artifact[] = [
@@ -148,6 +150,13 @@ function ArtifactList({
                         <a href="#artifact" className="font-medium hover:underline">
                           {artifact.name}
                         </a>
+                        {artifact.possibleDuplicate ? (
+                          <div className="mt-1">
+                            <Badge variant="outline" className="whitespace-nowrap">
+                              Possible duplicate
+                            </Badge>
+                          </div>
+                        ) : null}
                         <p className="text-muted-foreground">{artifact.description}</p>
                       </TableCell>
                       <TableCell>
@@ -324,5 +333,38 @@ export const BulkAction: Story = {
     await expect(assign!.getBoundingClientRect().height).toBe(
       select!.getBoundingClientRect().height,
     );
+  },
+};
+
+/**
+ * Same-named items (SPEC-126 §11.4 G1, G2): an `outline` "Possible duplicate" Badge on its own
+ * line under the name, one line box, no `title`; who the others are is on the item's page.
+ */
+export const PossibleDuplicates: Story = {
+  args: {
+    items: [
+      ...['acme/agent-skills', 'client-b', 'team/claude-skills'].map((repository, i) => ({
+        ...artifacts[0]!,
+        name: 'review',
+        repository,
+        description: `Reviews a diff (copy ${i + 1}).`,
+        possibleDuplicate: true,
+      })),
+      {
+        ...artifacts[1]!,
+        name: 'commit_message_style_for_monorepo_services',
+        possibleDuplicate: true,
+      },
+      { ...artifacts[2]!, possibleDuplicate: false },
+    ],
+    total: 5,
+  },
+  play: async ({ canvas }) => {
+    const badges = canvas.getAllByText('Possible duplicate');
+    await expect(badges).toHaveLength(4);
+    for (const badge of badges) {
+      await expect(badge.getClientRects()).toHaveLength(1);
+      await expect(badge).not.toHaveAttribute('title');
+    }
   },
 };
