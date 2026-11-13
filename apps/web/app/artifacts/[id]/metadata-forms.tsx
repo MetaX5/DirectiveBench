@@ -508,7 +508,7 @@ export function CategoriesCard({
                   variant="outline"
                   size="sm"
                   disabled={pending}
-                  aria-label={`Remove category ${chip.label}`}
+                  aria-label={chip.removeName}
                 >
                   Remove
                 </Button>

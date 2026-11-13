@@ -14,6 +14,7 @@ import {
   bulkCategoryState,
   categoriesCardModel,
   categoryChipLabel,
+  categorySubject,
   categoryDescriptionSchema,
   categoryFilterOptions,
   categoryNameSchema,
@@ -292,6 +293,17 @@ describe('categoryChipLabel (FR-124-14)', () => {
   });
 });
 
+describe('categorySubject (issue 220, D4, D17)', () => {
+  it('names a category by its chip text and slug, after a comma', () => {
+    expect(categorySubject({ name: 'Platform', slug: 'platform', archived: true })).toBe(
+      'Platform (archived), slug platform',
+    );
+    expect(categorySubject({ name: 'Code Quality', slug: 'code-quality', archived: false })).toBe(
+      'Code Quality, slug code-quality',
+    );
+  });
+});
+
 describe('categoryFilterOptions (FR-124-15, D12)', () => {
   const categories = [
     { slug: 'devops', name: 'CI and Ops', archivedAt: null },
@@ -396,12 +408,33 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
   it('labels the chips and offers the active, unassigned categories in the given order', () => {
     expect(categoriesCardModel([testing, archivedPython], all)).toEqual({
       chips: [
-        { id: 'cat_test', label: 'Testing', archived: false },
-        { id: 'cat_py', label: 'Python (archived)', archived: true },
+        {
+          id: 'cat_test',
+          label: 'Testing',
+          archived: false,
+          removeName: 'Remove category Testing, slug testing',
+        },
+        {
+          id: 'cat_py',
+          label: 'Python (archived)',
+          archived: true,
+          removeName: 'Remove category Python (archived), slug python',
+        },
       ],
       available: [{ id: 'cat_doc', name: 'Documentation' }],
       noPicker: null,
     });
+  });
+
+  it('gives two archived chips with one name different Remove names (issue 220)', () => {
+    const platform = { id: 'cat_p1', slug: 'platform', name: 'Platform', archived: true };
+    const platform2 = { id: 'cat_p2', slug: 'platform-2', name: 'Platform', archived: true };
+    const { chips } = categoriesCardModel([platform, platform2], []);
+    expect(chips.map((c) => c.label)).toEqual(['Platform (archived)', 'Platform (archived)']);
+    expect(chips.map((c) => c.removeName)).toEqual([
+      'Remove category Platform (archived), slug platform',
+      'Remove category Platform (archived), slug platform-2',
+    ]);
   });
 
   it('replaces the picker when every active category is assigned (D21)', () => {
