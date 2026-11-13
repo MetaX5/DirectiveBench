@@ -3,7 +3,7 @@ id: SPEC-009
 title: CLI Architecture
 status: draft
 created: 2026-10-14
-updated: 2026-11-12
+updated: 2026-11-13
 category: foundation
 related: [SPEC-118, SPEC-003, SPEC-006, SPEC-007, SPEC-008, SPEC-010, SPEC-012, SPEC-114, SPEC-115, ADR-0001, ADR-0004, ADR-0007]
 ---
@@ -52,7 +52,7 @@ Precedence: command-line option > environment variable > `config.json` > built-i
 
 ## 4. `doctor` checks
 
-Node.js version against the supported range; `node:sqlite` availability; data directory resolvable and writable; `config.json` valid; database opens and migrations are up to date (reported, not applied); port availability on the configured host/port; bundled web build present (`dist/web/.next`); agent CLI detection (`claude`, `codex`, `cursor-agent`: on PATH + `--version`, informational only). git for hosted repositories (issue #60): `git` prints the path and version of the git the hosted steps would run and `hosted repositories: yes` or `no` (git 2.44 or newer, [SPEC-104](2026-10-14-repository-management.md) NFR-104-03); `git:ca-bundle` applies the hosted steps' `GIT_SSL_CAINFO` check (unset, or an absolute path that resolves to a readable regular file) and names only the variable, never its path or the file's contents. Both `warn` (never `fail`) when hosted repositories would be refused, because hosted repositories are optional. Each check prints `ok`, `warn` or `fail` with a remediation hint. Output never includes secrets.
+Node.js version against the supported range; `node:sqlite` availability; data directory resolvable and writable; `config.json` valid; database opens and migrations are up to date (reported, not applied); port availability on the configured host/port; bundled web build present (`dist/web/.next`); agent CLI detection (`claude`, `codex`, `cursor-agent`: on PATH + `--version`, informational only). git for hosted repositories (issue #60): `git` prints the path and version of the git the hosted steps would run and `hosted repositories: yes` or `no` (git 2.44 or newer, [SPEC-104](2026-10-14-repository-management.md) NFR-104-03); `git:ca-bundle` applies the hosted steps' `GIT_SSL_CAINFO` check (unset, or an absolute path that resolves to a readable regular file) and names only the variable, never its path or the file's contents. Both `warn` (never `fail`) when hosted repositories would be refused, because hosted repositories are optional. `hosted-cache` (issue #59) classifies `<dataDir>/cache/repos` like the runner's sweep ([SPEC-105](2026-10-14-repository-synchronization.md) FR-105-19) without deleting anything, reading the database read-only: no database yet → `ok` "not checked: no database yet"; no `cache/repos` → `ok` "no GitHub downloads cached"; only caches of registered repositories → `ok` "N GitHub downloads cached"; caches of removed repositories → `warn` "N cached downloads belong to removed repositories" (hint: DirectiveBench deletes them within a minute while it runs, or at its next start; if the warning stays, check `runner.log` for `cache-delete-failed`); other entries (other names, files, symlinks) → `warn` naming up to 5 of them, JSON-quoted, which are never deleted automatically (hint: remove them yourself); an unreadable `cache/repos` or database → `warn` with the error code. It only warns, so the exit code is unchanged. Each check prints `ok`, `warn` or `fail` with a remediation hint. Output never includes secrets.
 
 ## 5. Startup sequence (`serve`)
 

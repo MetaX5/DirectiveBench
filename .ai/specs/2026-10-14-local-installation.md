@@ -3,7 +3,7 @@ id: SPEC-010
 title: Local Installation
 status: draft
 created: 2026-10-14
-updated: 2026-10-22
+updated: 2026-11-13
 category: foundation
 related: [SPEC-004, SPEC-006, SPEC-007, SPEC-009, SPEC-115, ADR-0001, ADR-0002, ADR-0004, ADR-0008]
 ---
@@ -61,7 +61,7 @@ Override with `--data-dir` or `DIRECTIVEBENCH_DATA_DIR`.
 | `directivebench.db` (+ `-wal`, `-shm`) | SQLite database |
 | `fixtures/<sha256>/` | Content-addressed, immutable fixture snapshots |
 | `logs/` | `web.log` — output of the Next.js child process (appended; not redacted); `runner.log` — runner lifecycle events as redacted JSON lines (mode `0600`; also printed to stderr by `serve`, written by `benchmark run` and `demo` without printing). Other CLI messages go to the terminal. |
-| `cache/` | Future: git clones |
+| `cache/` | `repos/<repositoryId>.git`: hosted repository caches ([SPEC-105](2026-10-14-repository-synchronization.md) FR-105-05; the runner deletes the cache of a removed repository, FR-105-19); `git-home/`: git's empty `HOME` |
 | `backups/` | Future: database backups |
 
 Temporary benchmark workspaces live outside the data directory in `<os tmpdir>/directivebench/workspaces/<benchmarkRunId>/<caseId>/<variant>-<rep>/{workspace,home}` and are removed after each run unless `runner.keepWorkspaces` is enabled.
@@ -89,7 +89,7 @@ DirectiveBench writes nothing outside the data directory, the temp workspace dir
 
 ## 9. Troubleshooting
 
-Run `directivebench doctor` first; it checks Node version, `node:sqlite`, data directory existence and writability, config validity, migration state, port availability, the bundled web build and agent CLI detection, and prints a remediation hint for every check that is not `ok` ([SPEC-009 §4](2026-10-14-cli-architecture.md#4-doctor-checks)).
+Run `directivebench doctor` first; it checks Node version, `node:sqlite`, data directory existence and writability, config validity, migration state, port availability, the bundled web build, git for hosted repositories, cached downloads of removed repositories (`hosted-cache`) and agent CLI detection, and prints a remediation hint for every check that is not `ok` ([SPEC-009 §4](2026-10-14-cli-architecture.md#4-doctor-checks)).
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
