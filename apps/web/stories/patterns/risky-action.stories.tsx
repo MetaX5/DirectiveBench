@@ -136,7 +136,11 @@ export const FromTableRow: Story = {
           <TableRow id="repository-client-a">
             <TableCell className="font-medium">client-a</TableCell>
             <TableCell className="text-right">
-              <Button size="sm" variant="outline" aria-label="Remove client-a">
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label="Remove client-a (Local Git, /home/dev/client-a)"
+              >
                 Remove
               </Button>
             </TableCell>
