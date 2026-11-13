@@ -215,6 +215,11 @@ implementation has not started.
 - NFR-126-02: Migration `0006` adds `artifact_versions_content_hash_idx` on
   `artifact_versions(content_hash)` (the unique index leads with `artifact_id` and cannot serve a
   hash lookup) and `artifacts_type_name_idx` on `artifacts(type, name)` (the possible-duplicate lookup by name; the type keeps the index usable for type-filtered lists), and the nullable column `artifact_versions.parent_version_id` (FR-126-19).
+  Added during the Phase 1 implementation: `artifact_occurrences_artifact_idx` on
+  `artifact_occurrences(artifact_id)`. No index led from an artifact to its occurrences, and both
+  the rule-3 check "every occurrence of the candidate is local" and the FR-126-07 read look
+  occurrences up by artifact inside the scan transaction; without it each batch scans every
+  occurrence row (the SPEC-125 removal counts were rewritten for the same reason).
   Plain DDL, portable to the planned PostgreSQL backend (SPEC-117). Up and down tested
   (lesson 2026-10-22 "pin each migration's up/down test").
 - NFR-126-03: Move matching reads the latest version of unseen occurrences only (their `files`
@@ -232,7 +237,7 @@ implementation has not started.
 
 ### 8.1 Data model
 
-Migration `0006_artifact_identity.sql`: the two indexes of NFR-126-02, the nullable column
+Migration `0006_artifact_identity.sql`: the indexes of NFR-126-02, the nullable column
 `artifact_versions.parent_version_id` (FR-126-19, references `artifact_versions.id`, `ON DELETE
 SET NULL`), set only on insert. No new table.
 Existing columns carry the feature: `artifact_occurrences.artifact_id` (a link inserts an
