@@ -145,6 +145,7 @@ unknown filter next to a valid archived category on a non-empty list (the demo d
 | --- | --- | --- | --- |
 | Browser QA agent (agent-browser) | 19172e8, built app | pass | No defects |
 | Codex adversarial 1 (`--scope branch --base main`, target "branch diff against main") | 19172e8 | approve | No material findings |
+| `om-auto-review-pr 222 --autofix` (engine `om-code-review`) | 8479976 | approve (posted as a COMMENT: self-review) | Two nits left as is: the `repositorySubject` comment says the removal question "uses" the format (it builds the same text inline for `font-mono`); an orphan JSDoc above `missingNote` from `main` |
 
 ## Problems and deviations
 
