@@ -164,7 +164,7 @@ Phase 1 UI details are decided in §11.2, the Phase 2 ones in §11.3.
 | --- | --- |
 | FR-125-13 | **Impact.** `getRepositoryRemovalImpact(db, id)` returns, for a removable repository: its name, provider and location, `occurrences` (all its occurrence rows), `activeOccurrences`, and `artifactsLeftMissing`: artifacts with an active occurrence in this repository and no active occurrence in any other. Null for an unknown id or the `bundled-examples` repository (A15). |
 | FR-125-14 | **Remove.** `removeRepository(handle, id)` runs in one `withTransaction`: it reads the same counts, then deletes the repository row with one conditional statement (`DELETE … WHERE id = ? AND provider <> 'bundled-examples'`), which cascades to its occurrences and sets `artifact_versions.source_repository_id` to null (existing foreign keys). Artifacts, versions, categories, tags, notes, benchmark assignments and runs are not touched (FR-104-15). Outcomes: `{ status: 'removed', occurrences, artifactsLeftMissing }`, `{ status: 'not-found' }` (unknown or removed meanwhile), `{ status: 'not-removable' }` (`bundled-examples`). Any error rolls everything back. |
-| FR-125-15 | **Confirmation.** Every removable repository row on `/repositories` has an `outline` `sm` "Remove" button named "Remove <name>". It writes nothing: it opens the Risky-action panel for that repository (§11, UD-5) with the question (naming the repository's name, provider and location, §11.3 D14), the counts from FR-125-13, what is kept, that files in the location are not touched, that a hosted download stays in the cache (A14), and that registering it again creates new artifacts instead of reusing these ones (A17, §11.3 D15). Only the `destructive` "Remove repository" button submits; Cancel writes nothing and returns to the row (§11.3 D19). |
+| FR-125-15 | **Confirmation.** Every removable repository row on `/repositories` has an `outline` `sm` "Remove" button named "Remove <name> (<Provider>, <location>)" (the subject of the question, unique by the database constraint; §11.3 D12, issue 215). It writes nothing: it opens the Risky-action panel for that repository (§11, UD-5) with the question (naming the repository's name, provider and location, §11.3 D14), the counts from FR-125-13, what is kept, that files in the location are not touched, that a hosted download stays in the cache (A14), and that registering it again creates new artifacts instead of reusing these ones (A17, §11.3 D15). Only the `destructive` "Remove repository" button submits; Cancel writes nothing and returns to the row (§11.3 D19). |
 | FR-125-16 | **Action.** `removeRepositoryAction` parses `FormData` with a Zod schema (`repositoryId`), calls `removeRepository` only, revalidates the `/repositories` page and the `/artifacts` and `/categories` layouts and `/`, and returns to `/repositories` with the outcome (§10). It never touches the file system and never runs a process (SPEC-003 §2.1, SPEC-014). |
 | FR-125-17 | **After removal.** The removed repository's artifacts that had no other active occurrence are missing (FR-125-08) with `lastFoundAt = null` and their own note text (§11); the Versions tab's First seen column already reads "Unknown repository" for versions whose source repository is gone (issue #65). An artifact with no occurrence left shows a sentence in its Occurrences card instead of an empty table (§11.3 D21). |
 
@@ -398,8 +398,9 @@ contains no en or em dash.
   `text-warning-foreground` (data-state `warning`) instead of the `text-success-foreground` of
   every other completed scan, because it asks the user to check something (§11.2 D6b); nothing
   else on the page changes.
-- Each removable row: after Scan, an `outline` `sm` "Remove" Button named "Remove <name>" in a
-  `GET` form. The actions cell wraps (`flex-wrap`) at narrow widths.
+- Each removable row: after Scan, an `outline` `sm` "Remove" Button named
+  "Remove <name> (<Provider>, <location>)" in a `GET` form (issue 215: names are not unique).
+  The actions cell wraps (`flex-wrap`) at narrow widths.
 - With `?remove=<id>`, the Registered repositories Card shows, above the table, the Risky-action
   panel (unchanged pattern: `role="alert"`, `warning` fill and border, reasons as a list). The
   pattern puts the panel under the form that asked; here the asking control is a table row, and a
@@ -504,9 +505,9 @@ text pair is at least 5.5:1, focus indicators at least 5.7:1.
 
 | # | Point | Decision |
 | --- | --- | --- |
-| D12 | Entry point (UD-5, FR-125-15) | Each removable row: after Scan, an `outline` `sm` Button "Remove", `aria-label="Remove <name>"`, in a `GET` `<form action="/repositories#remove-panel">` with a hidden `remove` field. The actions cell holds both forms in `<div className="flex flex-wrap justify-end gap-inline">`. The `bundled-examples` row has neither button. `canRemove(repository)` in `lib/repositories.ts` decides; a `gitlab` row would get Remove but no Scan. The `GET` form leaves out `scan` and `registration`, so the panel page has no `AutoRefresh` |
+| D12 | Entry point (UD-5, FR-125-15) | Each removable row: after Scan, an `outline` `sm` Button "Remove", `aria-label="Remove client-a (Local Git, /home/dev/client-a)"` (`Remove ${repositorySubject(repository)}`; Scan is named the same way, issue 215, decided 2026-11-12 as E1), in a `GET` `<form action="/repositories#remove-panel">` with a hidden `remove` field. The actions cell holds both forms in `<div className="flex flex-wrap justify-end gap-inline">`. The `bundled-examples` row has neither button. `canRemove(repository)` in `lib/repositories.ts` decides; a `gitlab` row would get Remove but no Scan. The `GET` form leaves out `scan` and `registration`, so the panel page has no `AutoRefresh` |
 | D13 | Where the panel sits | At the top of the Registered repositories `CardContent`, before the table, `id="remove-panel"`, `tabIndex={-1}`, `role="alert"`, the "Register anyway" classes plus `mb-4 min-w-0 outline-none`; `wrap-anywhere` on the question and reasons so a long URL does not widen it at 320px |
-| D14 | Question (Risky rule 1) | "Remove client-a (Local Git, /home/dev/client-a)?", the location in `font-mono`, the format of `describeRegistration`. **Differs from §11 as first written** ("Remove client-a?"): names are not unique (only provider plus location is), and the hosted reasons never show the location. Row buttons keep "Remove <name>" (issue 215) |
+| D14 | Question (Risky rule 1) | "Remove client-a (Local Git, /home/dev/client-a)?", the location in `font-mono`, the format of `describeRegistration`. **Differs from §11 as first written** ("Remove client-a?"): names are not unique (only provider plus location is), and the hosted reasons never show the location. Row buttons use the same subject (issue 215) |
 | D15 | Reasons (FR-125-15, UD-7) | In order, counts with `formatCount`: (1) "Its 14 occurrences are deleted from DirectiveBench." / "Its 1 occurrence is deleted from DirectiveBench." / "It has no occurrences." (2) "9 artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept." / "1 artifact is then missing from every repository. Its versions, …" / "Every artifact found here is also found in another repository, or is already missing." (3) local: "Nothing in /home/dev/client-a is changed." / hosted: "The copy downloaded from GitHub stays in DirectiveBench's cache. Deleting it is planned." (4) "Registering it again later creates new artifacts instead of reusing these ones." With 0 occurrences only (1) and (3). Built by `removalReasons(impact)`. **Differs from §11 as first written** in (4) ("…; these ones stay missing." is false for an artifact also found elsewhere) and in the 0-occurrence omission |
 | D16 | Buttons in the panel (Risky rules 3, 4) | `destructive` `sm` `type="submit"` "Remove repository" in a POST form with a hidden `repositoryId` and `action={removeRepositoryAction}`, then a Cancel `Link` (`text-ui underline`); the form has `flex flex-wrap items-center gap-inline` |
 | D17 | Disabled and pending states | None. Remove stays enabled while a scan runs (A16); no pending text (no client component). A double submit gets `not-found` on the second post, whose alert is true |
@@ -787,8 +788,14 @@ confirm or change before approving the spec.
   - AC-7: the example import never marks (Phase 1) and the bundled examples cannot be removed.
   - AC-9: the full gate passed (run log `.ai/runs/2026-11-12-repository-removal.md`).
 - **Not implemented (out of scope, §4):** repository disable and edit, deleting a hosted cache on
-  removal (issue #59), a CLI `repo remove`; identical accessible names for same-named
-  repositories (issue #215) and `/artifacts?repository=<removed id>` (issue #216) are follow-ups.
+  removal (issue #59), a CLI `repo remove`.
+- **Follow-ups done (issues #215 and #216, decisions E1 to E8 of 2026-11-12, verified on
+  2026-11-13 by `apps/web/test/repositories.test.ts`, `apps/web/test/artifacts.test.ts`,
+  `apps/web/e2e/repositories.spec.ts` "row button names (issue 215)", `registry.spec.ts` and
+  `missing-occurrences.spec.ts` "a bookmark that filters by the removed repository"):** the row
+  Scan and Remove buttons carry the repository's provider and location, and
+  `/artifacts?repository=<removed id>` lists everything with "Ignored the repository in the URL:
+  it is not registered." (SPEC-101 §11, §13).
 
 ## 21. Phasing and implementation plan
 
