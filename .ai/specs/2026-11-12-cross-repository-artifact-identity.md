@@ -226,8 +226,10 @@ implementation has not started.
   for the primary `sha256`), so a rescan without deletions reads no extra file content; matching
   is O(n log n) in new plus unseen paths (maps keyed by hash).
 - NFR-126-04: The identity step's cost grows linearly with the scan: a database test asserts the
-  statement count (one candidate read per 500 new paths, one FR-126-07 read per 500 written
-  artifacts) and linear growth with `expectLinearTime` (3,000 linked skills against 300); no
+  statement count (one candidate read per 500 new paths, two FR-126-07 reads per 500 written
+  artifacts: the active occurrences with their version numbers, then only the chosen versions'
+  files, so no other version's content is loaded) and linear growth with `expectLinearTime`
+  (implemented as 3,200 linked skills against 100, the shared `LINEAR_SIZE_STEP` of 32); no
   wall-clock bound.
 - NFR-126-05: Every changed page works by keyboard alone, has no page scroll at 320px, keeps the
   issue #122 full-HD list width, and meets contrast in both themes (AGENTS.md §7).
