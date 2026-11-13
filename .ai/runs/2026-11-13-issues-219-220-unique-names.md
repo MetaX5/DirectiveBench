@@ -51,23 +51,23 @@ computed on the server; e2e seeds must leave the shared database as found.
 
 ### Phase 1: Suites (issue 219)
 
-- [ ] 1.1 listSuiteNames returns slug, ordered by name then slug
-- [ ] 1.2 suiteSubject and suiteOptions helpers with unit tests
-- [ ] 1.3 Artifact page passes server-computed suite names to SuitesCard
+- [x] 1.1 listSuiteNames returns slug, ordered by name then slug — e5600d4
+- [x] 1.2 suiteSubject and suiteOptions helpers with unit tests — e609196
+- [x] 1.3 Artifact page passes server-computed suite names to SuitesCard — e609196
 
 ### Phase 2: Categories (issue 220)
 
-- [ ] 2.1 categorySubject and chip removeName with unit tests
-- [ ] 2.2 Artifact chip Remove and /categories count links use the subject
+- [x] 2.1 categorySubject and chip removeName with unit tests — cd81741
+- [x] 2.2 Artifact chip Remove and /categories count links use the subject — cd81741
 
 ### Phase 3: End-to-end tests
 
-- [ ] 3.1 Playwright test for same-named suites
-- [ ] 3.2 Playwright test for same-named categories (states A and B)
+- [x] 3.1 Playwright test for same-named suites — 43081ca
+- [x] 3.2 Playwright test for same-named categories (states A and B) — 43081ca
 
 ### Phase 4: Specs and docs
 
-- [ ] 4.1 SPEC-124, SPEC-101 and patterns/form.mdx text
+- [x] 4.1 SPEC-124, SPEC-101 and patterns/form.mdx text — a79eaa3
 
 ### Phase 5: Verification and review
 
