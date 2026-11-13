@@ -61,7 +61,7 @@ import {
   type ArtifactTab,
   type SearchParams,
 } from '@/lib/artifacts';
-import { metadataLimits } from '@/lib/artifact-metadata';
+import { metadataLimits, suiteOptions, suiteSubject } from '@/lib/artifact-metadata';
 import { categoriesCardModel, type CategoriesCardModel } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
@@ -385,13 +385,22 @@ function VersionsTab({ detail }: { detail: ArtifactDetail }) {
   );
 }
 
+/**
+ * The Assigned benchmarks card. Suite names can repeat, so the Unassign names and the picker's
+ * option labels add the suite ID; they are built here because the client card imports no core
+ * values (issue 219, SPEC-101 §11).
+ */
 function BenchmarksTab({ detail, suites }: { detail: ArtifactDetail; suites: SuiteOption[] }) {
   const assigned = new Set(detail.suites.map((s) => s.id));
   return (
     <SuitesCard
       artifactId={detail.artifact.id}
-      assigned={detail.suites.map((s) => ({ id: s.id, name: s.name }))}
-      available={suites.filter((s) => !assigned.has(s.id))}
+      assigned={detail.suites.map((s) => ({
+        id: s.id,
+        name: s.name,
+        unassignName: `Unassign suite ${suiteSubject(s)}`,
+      }))}
+      available={suiteOptions(suites.filter((s) => !assigned.has(s.id)))}
     />
   );
 }

@@ -307,8 +307,10 @@ export function SuitesCard({
   available,
 }: {
   artifactId: string;
-  assigned: Array<{ id: string; name: string }>;
-  available: Array<{ id: string; name: string }>;
+  /** `unassignName` is the Unassign button's accessible name, unique on the page (issue 219). */
+  assigned: Array<{ id: string; name: string; unassignName: string }>;
+  /** The picker's options; a label adds the suite ID when two suites share a name. */
+  available: Array<{ id: string; label: string }>;
 }) {
   const submitted = useRef<FormDataEntryValue | null>(null);
   const [state, dispatch, pending] = useActionState(
@@ -359,7 +361,7 @@ export function SuitesCard({
                   variant="outline"
                   size="sm"
                   disabled={pending}
-                  aria-label={`Unassign suite ${suite.name}`}
+                  aria-label={suite.unassignName}
                 >
                   Unassign
                 </Button>
@@ -378,7 +380,7 @@ export function SuitesCard({
             <NativeSelect ref={field} name="suiteId" disabled={pending} className="max-w-full">
               {available.map((suite) => (
                 <NativeSelectOption key={suite.id} value={suite.id}>
-                  {suite.name}
+                  {suite.label}
                 </NativeSelectOption>
               ))}
             </NativeSelect>

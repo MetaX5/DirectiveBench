@@ -96,3 +96,27 @@ export function refused(error: z.ZodError, field: string, value: string): Metada
 export function fieldText(value: FormDataEntryValue | null): string {
   return typeof value === 'string' ? value : '';
 }
+
+/**
+ * How a benchmark suite is named in an accessible name: its name, then its definition ID (the
+ * `id:` of `benchmark.yaml`, stored as the slug). Names can repeat, the ID cannot (issue 219,
+ * SPEC-101 §11). A comma, not parentheses, since names often end in parentheses already.
+ */
+export function suiteSubject(suite: { name: string; slug: string }): string {
+  return `${suite.name}, ID ${suite.slug}`;
+}
+
+/**
+ * The suite picker's options in the given order: the name alone, or the full `suiteSubject`
+ * when another listed suite has the same name, so no two options read alike.
+ */
+export function suiteOptions(
+  suites: readonly { id: string; slug: string; name: string }[],
+): { id: string; label: string }[] {
+  const counts = new Map<string, number>();
+  for (const s of suites) counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
+  return suites.map((s) => ({
+    id: s.id,
+    label: (counts.get(s.name) as number) > 1 ? suiteSubject(s) : s.name,
+  }));
+}
