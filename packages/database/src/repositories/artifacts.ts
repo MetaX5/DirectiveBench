@@ -9,23 +9,28 @@ import {
   isNull,
   lt,
   max,
+  notExists,
+  notInArray,
   or,
   sql,
   type SQL,
 } from 'drizzle-orm';
 import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
 import {
+  classifyArtifactPath,
   createId,
   hashManifest,
   idListFingerprint,
   nowIso,
+  parseArtifactFile,
+  parseFrontmatter,
   sha256,
   slugify,
   unseenOccurrencePaths,
 } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import type { CategoryRef } from './catalog';
-import { JobNoLongerRunningError, NotFoundError } from './jobs';
+import { JobNoLongerRunningError, LOCAL_PROVIDERS, NotFoundError } from './jobs';
 import {
   artifactBenchmarkAssignments,
   artifactCategories,
@@ -102,19 +107,6 @@ export async function upsertRepository(db: Database, ref: RepositoryRef): Promis
   return id;
 }
 
-/**
- * How a version finds its logical artifact (SPEC-101 §8.3).
- * - `slug` — the bootstrap rule for bundled examples, whose location changes between installs:
- *   an artifact that already occurs in a repository of the same provider and has the same slug
- *   (or, when its slug got a suffix, the same name and type).
- * - `location` — repository content: the artifact of the occurrence at the same repository and
- *   path (rule 1), never a slug match, so same-named artifacts stay separate (rules 2–3 are
- *   issue #20).
- * A new artifact takes the first free slug, suffixed `-2`, `-3`… when taken (rule 4, SPEC-105
- * FR-105-16 c), so a scanned skill never attaches to the bundled demo skill and vice versa.
- */
-type ArtifactIdentity = 'slug' | 'location';
-
 /** The fields of a version write that do not depend on where the artifact is stored. */
 type VersionContent = Omit<ImportArtifactInput, 'repository' | 'slug' | 'commitSha'>;
 
@@ -184,95 +176,67 @@ function slugAllocator(db: Database): SlugAllocator {
   };
 }
 
-interface VersionTarget {
+/** Where a version write happens: the repository and the commit read (null for a working tree). */
+interface WriteTarget {
   repositoryId: string;
-  provider: RepositoryProvider;
-  identity: ArtifactIdentity;
-  slug: string;
   commitSha: string | null;
 }
 
-/** Finds the logical artifact of a version write, without creating it. */
-async function findArtifact(
+/** The occurrence row at the written path, read before the write. */
+interface OccurrenceRow {
+  id: string;
+  artifactId: string;
+  status: 'active' | 'removed';
+  latestVersionId: string;
+}
+
+/** Rule 4: a new artifact with the first free slug of `slugBase` (SPEC-105 FR-105-16 c). */
+async function insertArtifact(
   db: Database,
-  target: VersionTarget,
-  { path, name, type }: Pick<VersionContent, 'path' | 'name' | 'type'>,
-): Promise<{ id: string } | undefined> {
-  if (target.identity === 'location') {
-    return db
-      .select({ id: artifactOccurrences.artifactId })
-      .from(artifactOccurrences)
-      .where(
-        and(
-          eq(artifactOccurrences.repositoryId, target.repositoryId),
-          eq(artifactOccurrences.path, path),
-        ),
-      )
-      .get();
-  }
-  return db
-    .select({ id: artifacts.id })
-    .from(artifacts)
-    .innerJoin(artifactOccurrences, eq(artifactOccurrences.artifactId, artifacts.id))
-    .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
-    .where(
-      and(
-        eq(repositories.provider, target.provider),
-        // The slug, or — when that slug was taken and the artifact got a suffix — name and type.
-        or(
-          eq(artifacts.slug, target.slug),
-          and(eq(artifacts.name, name), eq(artifacts.type, type)),
-        ),
-      ),
-    )
-    .orderBy(artifacts.createdAt, artifacts.id)
-    .get();
+  allocateSlug: SlugAllocator,
+  slugBase: string,
+  input: Pick<VersionContent, 'name' | 'type' | 'description'>,
+): Promise<{ id: string; createdAt: string }> {
+  const now = nowIso();
+  const id = createId('art');
+  await db.insert(artifacts).values({
+    id,
+    slug: await allocateSlug(slugBase),
+    name: input.name,
+    type: input.type,
+    description: input.description,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id, createdAt: now };
 }
 
 /**
- * Writes one observed artifact inside the caller's transaction: creates the logical artifact on
- * first sight, adds an immutable version only when the content hash is new for that artifact,
- * and points the occurrence at it. User-managed metadata (notes, tags, categories, benchmark
+ * Writes one observed artifact version inside the caller's transaction, for an artifact the
+ * caller already identified: adds an immutable version only when the content hash is new for that
+ * artifact, and points the occurrence at it (inserted, or the given row updated). A new version
+ * records the version the occurrence held before when it belongs to the same artifact (SPEC-126
+ * FR-126-19); it is never updated later. User-managed metadata (notes, tags, categories, benchmark
  * assignments) is never touched.
  */
-async function writeArtifactVersion(
+async function writeVersionAndOccurrence(
   db: Database,
-  allocateSlug: SlugAllocator,
-  target: VersionTarget,
+  target: WriteTarget,
+  artifactId: string,
+  occurrence: OccurrenceRow | undefined,
   input: VersionContent,
   recomputed: { files: StoredArtifactFile[]; contentHash: string },
-): Promise<ImportArtifactResult & { createdArtifact: boolean; reactivatedOccurrence: boolean }> {
+): Promise<ImportArtifactResult & { reactivatedOccurrence: boolean }> {
   const now = nowIso();
   const { repositoryId, commitSha } = target;
   const { files, contentHash } = recomputed;
-
-  let artifact = await findArtifact(db, target, input);
-  const createdArtifact = !artifact;
-  if (!artifact) {
-    artifact = { id: createId('art') };
-    await db.insert(artifacts).values({
-      id: artifact.id,
-      slug: await allocateSlug(target.slug),
-      name: input.name,
-      type: input.type,
-      description: input.description,
-      createdAt: now,
-      updatedAt: now,
-    });
-  } else {
-    // Source-derived fields follow the source; user-managed fields are left untouched.
-    await db
-      .update(artifacts)
-      .set({ name: input.name, description: input.description, updatedAt: now })
-      .where(eq(artifacts.id, artifact.id));
-  }
 
   let version = await db
     .select({ id: artifactVersions.id, version: artifactVersions.version })
     .from(artifactVersions)
     .where(
       and(
-        eq(artifactVersions.artifactId, artifact.id),
+        eq(artifactVersions.artifactId, artifactId),
         eq(artifactVersions.contentHash, contentHash),
       ),
     )
@@ -282,12 +246,12 @@ async function writeArtifactVersion(
     const current = await db
       .select({ value: max(artifactVersions.version) })
       .from(artifactVersions)
-      .where(eq(artifactVersions.artifactId, artifact.id))
+      .where(eq(artifactVersions.artifactId, artifactId))
       .get();
     version = { id: createId('artv'), version: (current?.value ?? 0) + 1 };
     await db.insert(artifactVersions).values({
       id: version.id,
-      artifactId: artifact.id,
+      artifactId,
       version: version.version,
       contentHash,
       format: input.format,
@@ -297,26 +261,17 @@ async function writeArtifactVersion(
       sourceRepositoryId: repositoryId,
       sourcePath: input.path,
       sourceCommitSha: commitSha,
+      parentVersionId: occurrence?.artifactId === artifactId ? occurrence.latestVersionId : null,
       createdAt: now,
     });
     createdVersion = true;
   }
 
-  const occurrence = await db
-    .select({ id: artifactOccurrences.id, status: artifactOccurrences.status })
-    .from(artifactOccurrences)
-    .where(
-      and(
-        eq(artifactOccurrences.repositoryId, repositoryId),
-        eq(artifactOccurrences.path, input.path),
-      ),
-    )
-    .get();
   if (occurrence) {
     await db
       .update(artifactOccurrences)
       .set({
-        artifactId: artifact.id,
+        artifactId,
         latestVersionId: version.id,
         commitSha,
         status: 'active',
@@ -325,35 +280,49 @@ async function writeArtifactVersion(
       })
       .where(eq(artifactOccurrences.id, occurrence.id));
   } else {
-    await db.insert(artifactOccurrences).values({
-      id: createId('occ'),
-      artifactId: artifact.id,
-      repositoryId,
-      path: input.path,
-      latestVersionId: version.id,
-      commitSha,
-      lastSeenAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await insertOccurrence(db, target, artifactId, input.path, version.id);
   }
 
   return {
-    artifactId: artifact.id,
+    artifactId,
     versionId: version.id,
     version: version.version,
     createdVersion,
-    createdArtifact,
     // A missing occurrence found again (SPEC-125 FR-125-05): same occurrence, same artifact.
     reactivatedOccurrence: occurrence?.status === 'removed',
   };
 }
 
+async function insertOccurrence(
+  db: Database,
+  { repositoryId, commitSha }: WriteTarget,
+  artifactId: string,
+  path: string,
+  versionId: string,
+): Promise<void> {
+  const now = nowIso();
+  await db.insert(artifactOccurrences).values({
+    id: createId('occ'),
+    artifactId,
+    repositoryId,
+    path,
+    latestVersionId: versionId,
+    commitSha,
+    lastSeenAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 /**
- * Records an artifact found in a source (bundled examples). Creates the logical artifact on first
- * sight (matched by slug), adds an immutable version only when the content hash is new, and
- * points the occurrence at it. Hashes are recomputed from the content (see `recomputeFiles`).
- * User-managed metadata (notes, tags, categories, benchmark assignments) is never touched.
+ * Records an artifact found in a source (bundled examples). Its identity is the bootstrap rule
+ * for bundled examples, whose location changes between installs (SPEC-101 §8.3): an artifact that
+ * already occurs in a repository of the same provider and has the same slug (or, when its slug got
+ * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
+ * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
+ * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
+ * the occurrence at it, and sets the source fields (name, description) from this write. Hashes are
+ * recomputed from the content (see `recomputeFiles`). User-managed metadata is never touched.
  */
 export async function importArtifactVersion(
   handle: DatabaseHandle,
@@ -362,20 +331,54 @@ export async function importArtifactVersion(
   const recomputed = recomputeFiles(input);
   return withTransaction(handle, async (db) => {
     const repositoryId = await upsertRepository(db, input.repository);
-    const {
-      createdArtifact: _created,
-      reactivatedOccurrence: _reactivated,
-      ...result
-    } = await writeArtifactVersion(
+    const found = await db
+      .select({ id: artifacts.id })
+      .from(artifacts)
+      .innerJoin(artifactOccurrences, eq(artifactOccurrences.artifactId, artifacts.id))
+      .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
+      .where(
+        and(
+          eq(repositories.provider, input.repository.provider),
+          // The slug, or — when that slug was taken and the artifact got a suffix — name and type.
+          or(
+            eq(artifacts.slug, input.slug),
+            and(eq(artifacts.name, input.name), eq(artifacts.type, input.type)),
+          ),
+        ),
+      )
+      .orderBy(artifacts.createdAt, artifacts.id)
+      .get();
+    let artifactId: string;
+    if (found) {
+      artifactId = found.id;
+      // Source-derived fields follow the source; user-managed fields are left untouched.
+      await db
+        .update(artifacts)
+        .set({ name: input.name, description: input.description, updatedAt: nowIso() })
+        .where(eq(artifacts.id, artifactId));
+    } else {
+      artifactId = (await insertArtifact(db, slugAllocator(db), input.slug, input)).id;
+    }
+    const occurrence = await db
+      .select({
+        id: artifactOccurrences.id,
+        artifactId: artifactOccurrences.artifactId,
+        status: artifactOccurrences.status,
+        latestVersionId: artifactOccurrences.latestVersionId,
+      })
+      .from(artifactOccurrences)
+      .where(
+        and(
+          eq(artifactOccurrences.repositoryId, repositoryId),
+          eq(artifactOccurrences.path, input.path),
+        ),
+      )
+      .get();
+    const { reactivatedOccurrence: _reactivated, ...result } = await writeVersionAndOccurrence(
       db,
-      slugAllocator(db),
-      {
-        repositoryId,
-        provider: input.repository.provider,
-        identity: 'slug',
-        slug: input.slug,
-        commitSha: input.commitSha ?? null,
-      },
+      { repositoryId, commitSha: input.commitSha ?? null },
+      artifactId,
+      occurrence,
       input,
       recomputed,
     );
@@ -405,6 +408,7 @@ export class ArtifactStoreError extends Error {
 }
 
 export interface RepositoryScanSummary {
+  /** Rule-4 artifacts this scan created; occurrences linked to an existing artifact are not counted. */
   createdArtifacts: number;
   createdVersions: number;
   /** Active occurrences this scan did not find and marked `removed` (SPEC-125 FR-125-06). */
@@ -413,10 +417,20 @@ export interface RepositoryScanSummary {
   reactivatedOccurrences: number;
   /** Active occurrences kept by the empty-scan guard (A7, FR-125-04); 0 otherwise. */
   emptyScanKeptOccurrences: number;
+  /** New paths added to an existing artifact by rule 3, ambiguous ones included (SPEC-126 FR-126-09). */
+  linkedOccurrences: number;
+  /** Rule-3 links that had several candidate artifacts and took the oldest (FR-126-03, A7). */
+  ambiguousLinks: number;
 }
 
 /** Most occurrence ids marked `removed` by one statement: well under SQLite's parameter limit. */
 export const REMOVED_OCCURRENCE_BATCH_SIZE = 500;
+
+/**
+ * Most content hashes or artifact ids per identity read inside a scan transaction (SPEC-126
+ * NFR-126-01): the rule-3 candidate read and the source-field refresh read in batches of this size.
+ */
+export const IDENTITY_LOOKUP_BATCH_SIZE = 500;
 
 export interface RepositoryScanApplication {
   repositoryId: string;
@@ -442,35 +456,165 @@ export interface RepositoryScanApplication {
   unobserved: readonly string[];
 }
 
+/** Providers whose occurrences may link and be linked to by rule 3 (SPEC-126 A16). */
+const LINKING_PROVIDERS: readonly RepositoryProvider[] = LOCAL_PROVIDERS;
+
+/** Single-file formats named after their file, so the name is part of the hashed manifest (A2). */
+const FILE_NAMED_FORMATS: ReadonlySet<string> = new Set<ArtifactFormat>([
+  'cursor-rule',
+  'claude-rule',
+  'copilot-path-instructions',
+]);
+
+/**
+ * Whether rule 3 may link this content (SPEC-126 A2, A3, FR-126-06): a rule format named after its
+ * file, or a skill whose `SKILL.md` has a frontmatter `name` (read from the stored content, never
+ * from caller metadata). Equal content hashes therefore imply equal names. Instructions, GitLab Duo
+ * chat rules and skills named only by their directory are identified by location only.
+ */
+function isLinkable(
+  input: Pick<VersionContent, 'format' | 'primaryFile'>,
+  files: readonly StoredArtifactFile[],
+): boolean {
+  if (FILE_NAMED_FORMATS.has(input.format)) return true;
+  if (input.format !== 'skill-md') return false;
+  const primary = files.find((file) => file.path === input.primaryFile);
+  const name: unknown = primary ? parseFrontmatter(primary.content).frontmatter.name : undefined;
+  return typeof name === 'string' && name.trim() !== '';
+}
+
+/** The rule-3 key: equal content hash and equal format (A2). */
+function linkKey(contentHash: string, format: string): string {
+  return `${contentHash}\u0000${format}`;
+}
+
+/** A version an exact copy can be linked to, with its artifact's age for the A7 choice. */
+interface LinkCandidate {
+  artifactId: string;
+  versionId: string;
+  artifactCreatedAt: string;
+}
+
+/** Code-unit order (SPEC-126 FR-126-24), independent of the locale. */
+function compareCodeUnits(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/** Oldest artifact first (`created_at`, then id), the A7 choice among several candidates. */
+function compareCandidates(a: LinkCandidate, b: LinkCandidate): number {
+  return (
+    compareCodeUnits(a.artifactCreatedAt, b.artifactCreatedAt) ||
+    compareCodeUnits(a.artifactId, b.artifactId)
+  );
+}
+
+/**
+ * Reads the rule-3 candidates for the given keys in batches of `IDENTITY_LOOKUP_BATCH_SIZE` hashes
+ * (NFR-126-01): versions with an equal content hash and format whose artifact has at least one
+ * occurrence (any status, A4) and no occurrence outside local repositories (A16; bundled examples
+ * included, A5). Both conditions use the occurrences' artifact index, so each batch is one
+ * statement. Candidates per key are sorted oldest artifact first.
+ */
+async function readLinkCandidates(
+  db: Database,
+  keys: ReadonlyMap<string, { contentHash: string; format: string }>,
+): Promise<Map<string, LinkCandidate[]>> {
+  const hashes = [...new Set([...keys.values()].map(({ contentHash }) => contentHash))];
+  const candidates = new Map<string, LinkCandidate[]>();
+  const nonLocal = db
+    .select({ one: sql`1` })
+    .from(artifactOccurrences)
+    .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
+    .where(
+      and(
+        eq(artifactOccurrences.artifactId, artifactVersions.artifactId),
+        notInArray(repositories.provider, [...LINKING_PROVIDERS]),
+      ),
+    );
+  const anyOccurrence = db
+    .select({ one: sql`1` })
+    .from(artifactOccurrences)
+    .where(eq(artifactOccurrences.artifactId, artifactVersions.artifactId));
+  for (let start = 0; start < hashes.length; start += IDENTITY_LOOKUP_BATCH_SIZE) {
+    const rows = await db
+      .select({
+        artifactId: artifactVersions.artifactId,
+        versionId: artifactVersions.id,
+        contentHash: artifactVersions.contentHash,
+        format: artifactVersions.format,
+        artifactCreatedAt: artifacts.createdAt,
+      })
+      .from(artifactVersions)
+      .innerJoin(artifacts, eq(artifacts.id, artifactVersions.artifactId))
+      .where(
+        and(
+          inArray(
+            artifactVersions.contentHash,
+            hashes.slice(start, start + IDENTITY_LOOKUP_BATCH_SIZE),
+          ),
+          exists(anyOccurrence),
+          notExists(nonLocal),
+        ),
+      );
+    for (const { contentHash, format, ...candidate } of rows) {
+      const key = linkKey(contentHash, format);
+      if (!keys.has(key)) continue;
+      const list = candidates.get(key);
+      if (list) list.push(candidate);
+      else candidates.set(key, [candidate]);
+    }
+  }
+  for (const list of candidates.values()) list.sort(compareCandidates);
+  return candidates;
+}
+
+/** One discovered artifact of a scan with its recomputed files and content hash. */
+interface PreparedArtifact {
+  input: ScannedArtifactInput;
+  recomputed: { files: StoredArtifactFile[]; contentHash: string };
+}
+
 /**
  * Stores the artifacts a scan of a registered repository discovered, in one transaction
- * (SPEC-105 FR-105-09 subset): every version goes through the same writer as
- * `importArtifactVersion` (hashes recomputed from content, dedup by content hash) with location
- * identity, and the repository records a successful scan (`last_sync_at`, `sync_status = 'ok'`,
- * `sync_error = null`) with the commit read (`last_commit_sha`; null for a working-tree scan, which
- * reads no commit).
+ * (SPEC-105 FR-105-09 subset): hashes are recomputed from content and versions dedup by content
+ * hash within their artifact, and the repository records a successful scan (`last_sync_at`,
+ * `sync_status = 'ok'`, `sync_error = null`) with the commit read (`last_commit_sha`; null for a
+ * working-tree scan, which reads no commit).
+ *
+ * Identity (SPEC-101 §8.3, SPEC-126 FR-126-01, FR-126-24) is resolved in an order independent of
+ * the discovery order: first every path with an occurrence row of this repository (rule 1: same
+ * artifact, a `removed` row becomes `active` again, FR-125-05), then the new paths in ascending
+ * code-unit order. A new path of a linkable format (`isLinkable`) in a local repository is added
+ * to the oldest existing artifact that has a version with the same content hash and format and
+ * occurs only in local repositories (rule 3, A7: counted in `ambiguousLinks` when there were
+ * several), pointing at that version without creating one; otherwise it becomes a new artifact
+ * with the first free slug (rule 4). The candidate map is read in batches after the rule-1 writes
+ * and updated with this scan's own new artifacts, so identical new paths of one scan share one
+ * artifact (FR-126-04).
  *
  * The scan observed the whole snapshot (every failure path returns before this call), so in the
  * same transaction every other active occurrence of this repository that it did not find is marked
  * `removed`, shown as missing (SPEC-125 FR-125-04): `status` and `updated_at` change, its version,
  * commit and `last_seen_at` stay. Occurrences covered by an `unobserved` path are kept
  * (FR-125-03), and a scan that found no artifact at all marks nothing (the empty-scan guard, A7):
- * its result counts the active occurrences it kept. A `removed` occurrence found again becomes
- * `active` with the same artifact (FR-125-05). Nothing is deleted. The job is re-checked
- * inside the transaction: a scan whose signal was aborted, or that was cancelled or interrupted
- * meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and a repository removed
- * meanwhile is a `NotFoundError`. A failure while one artifact is written rolls everything back
- * and is an `ArtifactStoreError` carrying the path where it happened.
+ * its result counts the active occurrences it kept. Nothing is deleted. Last, the name and
+ * description of every artifact the scan wrote, linked or marked follow its active occurrences
+ * (`refreshSourceFields`, FR-126-07).
+ *
+ * The job is re-checked inside the transaction: a scan whose signal was aborted, or that was
+ * cancelled or interrupted meanwhile, writes nothing (a `JobNoLongerRunningError`, FR-105-17), and
+ * a repository removed meanwhile is a `NotFoundError`. A failure while one artifact is written
+ * rolls everything back and is an `ArtifactStoreError` carrying the path where it happened.
  */
 export async function applyRepositoryScan(
   handle: DatabaseHandle,
   application: RepositoryScanApplication,
 ): Promise<RepositoryScanSummary> {
   const { repositoryId, jobId } = application;
-  const prepared = application.artifacts.map((input) => ({
-    input,
-    recomputed: recomputeFiles(input),
-  }));
+  const prepared: PreparedArtifact[] = application.artifacts
+    .map((input) => ({ input, recomputed: recomputeFiles(input) }))
+    .sort((a, b) => compareCodeUnits(a.input.path, b.input.path));
   return withTransaction(handle, async (db) => {
     if (application.signal.aborted) {
       throw new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`);
@@ -495,29 +639,106 @@ export async function applyRepositoryScan(
       removedOccurrences: 0,
       reactivatedOccurrences: 0,
       emptyScanKeptOccurrences: 0,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     };
-    const allocateSlug = slugAllocator(db);
-    for (const { input, recomputed } of prepared) {
-      const result = await writeArtifactVersion(
-        db,
-        allocateSlug,
-        {
-          repositoryId,
-          provider: repository.provider,
-          identity: 'location',
-          slug: slugify(input.name),
-          commitSha: application.commitSha,
-        },
-        input,
-        recomputed,
-      ).catch((error: unknown) => {
-        throw new ArtifactStoreError(input.path, { cause: error });
+    const target: WriteTarget = { repositoryId, commitSha: application.commitSha };
+    /** Artifacts whose source fields are refreshed at the end (FR-126-07). */
+    const touched = new Set<string>();
+    const write = async (path: string, step: () => Promise<void>) => {
+      await step().catch((error: unknown) => {
+        throw new ArtifactStoreError(path, { cause: error });
       });
-      summary.createdArtifacts += Number(result.createdArtifact);
-      summary.createdVersions += Number(result.createdVersion);
-      summary.reactivatedOccurrences += Number(result.reactivatedOccurrence);
+    };
+
+    // Rule 1: every path this repository already has an occurrence row for, active or removed.
+    const rows = await db
+      .select({
+        id: artifactOccurrences.id,
+        path: artifactOccurrences.path,
+        artifactId: artifactOccurrences.artifactId,
+        status: artifactOccurrences.status,
+        latestVersionId: artifactOccurrences.latestVersionId,
+      })
+      .from(artifactOccurrences)
+      .where(eq(artifactOccurrences.repositoryId, repositoryId));
+    const rowByPath = new Map(rows.map((row) => [row.path, row]));
+    const added: PreparedArtifact[] = [];
+    for (const item of prepared) {
+      const occurrence = rowByPath.get(item.input.path);
+      if (!occurrence) {
+        added.push(item);
+        continue;
+      }
+      await write(item.input.path, async () => {
+        const result = await writeVersionAndOccurrence(
+          db,
+          target,
+          occurrence.artifactId,
+          occurrence,
+          item.input,
+          item.recomputed,
+        );
+        touched.add(occurrence.artifactId);
+        summary.createdVersions += Number(result.createdVersion);
+        summary.reactivatedOccurrences += Number(result.reactivatedOccurrence);
+      });
     }
-    await markUnseenOccurrences(db, application, summary);
+
+    // Rules 3 and 4 for the new paths, in path order.
+    const linking = LINKING_PROVIDERS.includes(repository.provider);
+    const linkable = new Map<string, { contentHash: string; format: string }>();
+    if (linking) {
+      for (const { input, recomputed } of added) {
+        if (isLinkable(input, recomputed.files)) {
+          linkable.set(linkKey(recomputed.contentHash, input.format), {
+            contentHash: recomputed.contentHash,
+            format: input.format,
+          });
+        }
+      }
+    }
+    const candidates = await readLinkCandidates(db, linkable);
+    const allocateSlug = slugAllocator(db);
+    for (const { input, recomputed } of added) {
+      const key = linkKey(recomputed.contentHash, input.format);
+      const [chosen, ...others] = linkable.has(key) ? (candidates.get(key) ?? []) : [];
+      await write(input.path, async () => {
+        if (chosen) {
+          await insertOccurrence(db, target, chosen.artifactId, input.path, chosen.versionId);
+          touched.add(chosen.artifactId);
+          summary.linkedOccurrences += 1;
+          summary.ambiguousLinks += Number(others.length > 0);
+          return;
+        }
+        const artifact = await insertArtifact(db, allocateSlug, slugify(input.name), input);
+        const result = await writeVersionAndOccurrence(
+          db,
+          target,
+          artifact.id,
+          undefined,
+          input,
+          recomputed,
+        );
+        touched.add(artifact.id);
+        summary.createdArtifacts += 1;
+        summary.createdVersions += Number(result.createdVersion);
+        if (linkable.has(key)) {
+          candidates.set(key, [
+            {
+              artifactId: artifact.id,
+              versionId: result.versionId,
+              artifactCreatedAt: artifact.createdAt,
+            },
+          ]);
+        }
+      });
+    }
+
+    for (const artifactId of await markUnseenOccurrences(db, application, summary)) {
+      touched.add(artifactId);
+    }
+    await refreshSourceFields(db, [...touched]);
     const now = nowIso();
     await db
       .update(repositories)
@@ -536,16 +757,21 @@ export async function applyRepositoryScan(
 /**
  * The marking step of {@link applyRepositoryScan} (SPEC-125 FR-125-04), inside its transaction,
  * after the scan's own writes: with no artifact discovered it only counts the active occurrences
- * it keeps (A7); otherwise it marks the unseen ones `removed`, in batches by id.
+ * it keeps (A7); otherwise it marks the unseen ones `removed`, in batches by id. Returns the
+ * artifacts of the occurrences it marked.
  */
 async function markUnseenOccurrences(
   db: Database,
   application: RepositoryScanApplication,
   summary: RepositoryScanSummary,
-): Promise<void> {
+): Promise<string[]> {
   const { repositoryId } = application;
   const active = await db
-    .select({ id: artifactOccurrences.id, path: artifactOccurrences.path })
+    .select({
+      id: artifactOccurrences.id,
+      path: artifactOccurrences.path,
+      artifactId: artifactOccurrences.artifactId,
+    })
     .from(artifactOccurrences)
     .where(
       and(
@@ -555,7 +781,7 @@ async function markUnseenOccurrences(
     );
   if (application.artifacts.length === 0) {
     summary.emptyScanKeptOccurrences = active.length;
-    return;
+    return [];
   }
   const unseen = new Set(
     unseenOccurrencePaths({
@@ -564,7 +790,8 @@ async function markUnseenOccurrences(
       unobserved: application.unobserved,
     }),
   );
-  const ids = active.filter((occurrence) => unseen.has(occurrence.path)).map(({ id }) => id);
+  const marked = active.filter((occurrence) => unseen.has(occurrence.path));
+  const ids = marked.map(({ id }) => id);
   const now = nowIso();
   for (let start = 0; start < ids.length; start += REMOVED_OCCURRENCE_BATCH_SIZE) {
     await db
@@ -579,6 +806,104 @@ async function markUnseenOccurrences(
       );
   }
   summary.removedOccurrences = ids.length;
+  return marked.map(({ artifactId }) => artifactId);
+}
+
+/** Where discovery reads an occurrence's primary file, relative to the repository root. */
+function primaryPathOf(format: string, occurrencePath: string): string {
+  if (format !== 'skill-md') return occurrencePath;
+  return occurrencePath === '' ? 'SKILL.md' : `${occurrencePath}/SKILL.md`;
+}
+
+/**
+ * Sets each artifact's name and description from its active occurrences (SPEC-126 FR-126-07, A9),
+ * inside the caller's transaction: the active occurrence holding the highest version number (ties:
+ * oldest occurrence `created_at`, then id) names it, parsed with core's `parseArtifactFile` from
+ * that version's primary file at the path discovery would read. Only changed fields are written;
+ * an artifact with no active occurrence keeps them, and so does one whose chosen version lacks its
+ * primary file or whose occurrence path does not classify as the version's format (rows
+ * DirectiveBench's scans never write: kept rather than guessed). The result depends only on the
+ * active occurrences and their version numbers, never on which scan ran last. Two reads per
+ * `IDENTITY_LOOKUP_BATCH_SIZE` artifacts: the occurrences with their versions' numbers, then the
+ * chosen versions' files. `slug` never changes (FR-105-13).
+ */
+export async function refreshSourceFields(
+  db: Database,
+  artifactIds: readonly string[],
+): Promise<void> {
+  for (let start = 0; start < artifactIds.length; start += IDENTITY_LOOKUP_BATCH_SIZE) {
+    const rows = await db
+      .select({
+        occurrenceId: artifactOccurrences.id,
+        occurrenceCreatedAt: artifactOccurrences.createdAt,
+        artifactId: artifactOccurrences.artifactId,
+        path: artifactOccurrences.path,
+        versionId: artifactVersions.id,
+        version: artifactVersions.version,
+        format: artifactVersions.format,
+        name: artifacts.name,
+        description: artifacts.description,
+      })
+      .from(artifactOccurrences)
+      .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
+      .innerJoin(artifacts, eq(artifacts.id, artifactOccurrences.artifactId))
+      .where(
+        and(
+          inArray(
+            artifactOccurrences.artifactId,
+            artifactIds.slice(start, start + IDENTITY_LOOKUP_BATCH_SIZE),
+          ),
+          eq(artifactOccurrences.status, 'active'),
+        ),
+      );
+    const chosen = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const best = chosen.get(row.artifactId);
+      if (
+        !best ||
+        row.version > best.version ||
+        (row.version === best.version &&
+          (compareCodeUnits(row.occurrenceCreatedAt, best.occurrenceCreatedAt) ||
+            compareCodeUnits(row.occurrenceId, best.occurrenceId)) < 0)
+      ) {
+        chosen.set(row.artifactId, row);
+      }
+    }
+    if (chosen.size === 0) continue;
+    const contents = await db
+      .select({
+        id: artifactVersions.id,
+        primaryFile: artifactVersions.primaryFile,
+        files: artifactVersions.files,
+      })
+      .from(artifactVersions)
+      .where(
+        inArray(
+          artifactVersions.id,
+          [...chosen.values()].map(({ versionId }) => versionId),
+        ),
+      );
+    const primaryContent = new Map(
+      contents.map(({ id, primaryFile, files }) => [
+        id,
+        files.find((file) => file.path === primaryFile)?.content,
+      ]),
+    );
+    for (const row of chosen.values()) {
+      const content = primaryContent.get(row.versionId);
+      const primaryPath = primaryPathOf(row.format, row.path);
+      // Only a path discovery would have read as this format can be parsed as it.
+      if (content === undefined || classifyArtifactPath(primaryPath)?.format !== row.format) {
+        continue;
+      }
+      const parsed = parseArtifactFile(primaryPath, content);
+      if (parsed.name === row.name && parsed.description === row.description) continue;
+      await db
+        .update(artifacts)
+        .set({ name: parsed.name, description: parsed.description, updatedAt: nowIso() })
+        .where(eq(artifacts.id, row.artifactId));
+    }
+  }
 }
 
 /**
@@ -1372,10 +1697,16 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
     .innerJoin(repositories, eq(artifactVersions.sourceRepositoryId, repositories.id))
     .where(eq(artifactVersions.artifactId, artifactId))
     .orderBy(repositories.name, repositories.id);
+  // Each occurrence with the number of the version it holds (SPEC-126 UD-3): copies diverge.
   const occurrences = await db
-    .select({ occurrence: artifactOccurrences, repository: repositories })
+    .select({
+      occurrence: artifactOccurrences,
+      repository: repositories,
+      version: artifactVersions.version,
+    })
     .from(artifactOccurrences)
     .innerJoin(repositories, eq(artifactOccurrences.repositoryId, repositories.id))
+    .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
     .where(eq(artifactOccurrences.artifactId, artifactId))
     .orderBy(repositories.name, repositories.id, artifactOccurrences.path);
   const cats = await db

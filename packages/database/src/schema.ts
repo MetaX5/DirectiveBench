@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   index,
+  type AnySQLiteColumn,
   integer,
   primaryKey,
   real,
@@ -89,7 +90,11 @@ export const artifacts = sqliteTable(
       .default(sql`'[]'`),
     ...timestamps,
   },
-  (t) => [uniqueIndex('artifacts_slug_unique').on(t.slug)],
+  (t) => [
+    uniqueIndex('artifacts_slug_unique').on(t.slug),
+    // The possible-duplicate lookup by name (SPEC-126 NFR-126-02, used from Phase 2).
+    index('artifacts_type_name_idx').on(t.type, t.name),
+  ],
 );
 
 export interface StoredArtifactFile {
@@ -120,11 +125,22 @@ export const artifactVersions = sqliteTable(
     }),
     sourcePath: text('source_path'),
     sourceCommitSha: text('source_commit_sha'),
+    /**
+     * The version the writing occurrence held before this version was inserted, when it belongs
+     * to the same artifact (SPEC-126 FR-126-19): creation ancestry, set on insert only. Null for a
+     * new occurrence, a new artifact and every row stored before migration 0006.
+     */
+    parentVersionId: text('parent_version_id').references(
+      (): AnySQLiteColumn => artifactVersions.id,
+      { onDelete: 'set null' },
+    ),
     createdAt: text('created_at').notNull(),
   },
   (t) => [
     uniqueIndex('artifact_versions_artifact_hash_unique').on(t.artifactId, t.contentHash),
     uniqueIndex('artifact_versions_artifact_version_unique').on(t.artifactId, t.version),
+    // Rule 3 looks versions up by content hash across artifacts (SPEC-126 NFR-126-02).
+    index('artifact_versions_content_hash_idx').on(t.contentHash),
   ],
 );
 
@@ -150,7 +166,12 @@ export const artifactOccurrences = sqliteTable(
     lastSeenAt: text('last_seen_at').notNull(),
     ...timestamps,
   },
-  (t) => [uniqueIndex('artifact_occurrences_repo_path_unique').on(t.repositoryId, t.path)],
+  (t) => [
+    uniqueIndex('artifact_occurrences_repo_path_unique').on(t.repositoryId, t.path),
+    // An artifact's occurrences: rule 3's local-only check and the source-field refresh read them
+    // by artifact inside the scan transaction (SPEC-126 NFR-126-01, NFR-126-02).
+    index('artifact_occurrences_artifact_idx').on(t.artifactId),
+  ],
 );
 
 export const artifactCategories = sqliteTable(
