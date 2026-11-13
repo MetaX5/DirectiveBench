@@ -95,7 +95,7 @@ async function deleteCache(root: string, repositoryId: string): Promise<void> {
 }
 
 /** The error code of a file-system or database error (Drizzle wraps the SQLite error). */
-function failureCode(error: unknown): string {
+export function cacheErrorCode(error: unknown): string {
   return errnoCode(error instanceof Error && error.cause !== undefined ? error.cause : error);
 }
 
@@ -128,7 +128,7 @@ export async function sweepOrphanedCaches(sweep: OrphanedCacheSweep): Promise<vo
     root = listing.root;
     orphans = await listOrphanedRepositoryCaches(handle, listing.caches);
   } catch (error) {
-    const code = failureCode(error);
+    const code = cacheErrorCode(error);
     logger.error(`The sweep of cached GitHub downloads failed (${code})`, {
       event: 'cache-sweep-failed',
       code,
@@ -141,7 +141,7 @@ export async function sweepOrphanedCaches(sweep: OrphanedCacheSweep): Promise<vo
     } catch (error) {
       if (reportedFailures.has(repositoryId)) continue;
       reportedFailures.add(repositoryId);
-      const code = failureCode(error);
+      const code = cacheErrorCode(error);
       logger.error(
         `The cached download of removed repository ${repositoryId} could not be deleted (${code}); it is retried at the next sweep`,
         { event: 'cache-delete-failed', repositoryId, code },

@@ -8,6 +8,8 @@ import {
   CLAUDE_EXECUTABLE,
   type ClaudeReadinessCode,
 } from '@directivebench/agent-adapters';
+import { createId } from '@directivebench/core';
+import { openDatabase, registerHostedRepository } from '@directivebench/database';
 import { agentReadinessHint, doctorCommand } from '../src/commands';
 import type * as RuntimeModule from '../src/runtime';
 import { ExitCode, checkSqlite, resolveAssets, type Assets } from '../src/runtime';
@@ -186,6 +188,158 @@ describe('doctor', () => {
     expect(lines).toContain(
       "ok    git:ca-bundle      GIT_SSL_CAINFO not set (git's default CA bundle)",
     );
+  });
+
+  describe('hosted-cache (issue 59 J8)', () => {
+    const ORPHAN_HINT =
+      'DirectiveBench deletes them within a minute while it runs, or at its next start. If this warning stays, check runner.log for cache-delete-failed.';
+    const UNKNOWN_HINT = 'Remove them yourself if you do not need them.';
+
+    async function registeredIds(dataDir: string, count: number): Promise<string[]> {
+      const handle = openDatabase(join(dataDir, 'directivebench.db'));
+      const ids: string[] = [];
+      for (let i = 0; i < count; i += 1) {
+        const { repository } = await registerHostedRepository(handle.db, {
+          provider: 'github',
+          name: `rules-${i}`,
+          location: `https://github.com/acme/rules-${i}`,
+          defaultBranch: 'main',
+        });
+        ids.push(repository.id);
+      }
+      handle.close();
+      return ids;
+    }
+
+    function plant(dataDir: string, ...names: string[]): void {
+      for (const name of names) {
+        actualFs.mkdirSync(join(dataDir, 'cache', 'repos', name, 'objects'), { recursive: true });
+      }
+    }
+
+    /** Every path below `cache`, so a test can prove that doctor deleted nothing. */
+    function cacheTree(dataDir: string): string[] {
+      return (actualFs.readdirSync(join(dataDir, 'cache'), { recursive: true }) as string[]).sort();
+    }
+
+    async function hostedCache(dataDir: string): Promise<Check | undefined> {
+      const { code, checks } = await runDoctor(dataDir);
+      expect(code).toBe(ExitCode.Ok);
+      return find(checks, 'hosted-cache');
+    }
+
+    it('is not checked without a database, and reports no cache', async () => {
+      expect(await hostedCache(tempDir())).toEqual({
+        name: 'hosted-cache',
+        status: 'ok',
+        detail: 'not checked: no database yet',
+      });
+      const dataDir = await initialisedDataDir();
+      expect(await hostedCache(dataDir)).toEqual({
+        name: 'hosted-cache',
+        status: 'ok',
+        detail: 'no GitHub downloads cached',
+      });
+      actualFs.mkdirSync(join(dataDir, 'cache', 'repos'), { recursive: true });
+      expect(await hostedCache(dataDir)).toMatchObject({
+        status: 'ok',
+        detail: 'no GitHub downloads cached',
+      });
+    });
+
+    it('counts the caches of registered repositories', async () => {
+      const dataDir = await initialisedDataDir();
+      const [one, two] = await registeredIds(dataDir, 2);
+      plant(dataDir, `${one}.git`);
+      expect(await hostedCache(dataDir)).toMatchObject({
+        status: 'ok',
+        detail: '1 GitHub download cached',
+      });
+      plant(dataDir, `${two}.git`);
+      expect(await hostedCache(dataDir)).toMatchObject({
+        status: 'ok',
+        detail: '2 GitHub downloads cached',
+      });
+    });
+
+    it('warns about caches of removed repositories and deletes nothing', async () => {
+      const dataDir = await initialisedDataDir();
+      const [live] = await registeredIds(dataDir, 1);
+      const orphan = createId('repo');
+      plant(dataDir, `${live}.git`, `${orphan}.git`);
+      const before = cacheTree(dataDir);
+      expect(await hostedCache(dataDir)).toEqual({
+        name: 'hosted-cache',
+        status: 'warn',
+        detail: '1 cached download belongs to a removed repository',
+        hint: ORPHAN_HINT,
+      });
+      expect(cacheTree(dataDir)).toEqual(before);
+      plant(dataDir, `${createId('repo')}.git`);
+      expect(await hostedCache(dataDir)).toMatchObject({
+        detail: '2 cached downloads belong to removed repositories',
+      });
+      expect(actualFs.existsSync(join(dataDir, 'cache', 'repos', `${orphan}.git`))).toBe(true);
+    });
+
+    it('names entries DirectiveBench did not create, a symlink included, up to five', async () => {
+      const dataDir = await initialisedDataDir();
+      const repos = join(dataDir, 'cache', 'repos');
+      plant(dataDir, 'notes');
+      expect(await hostedCache(dataDir)).toEqual({
+        name: 'hosted-cache',
+        status: 'warn',
+        detail: `1 entry in ${repos} was not created by DirectiveBench and is never deleted automatically: "notes"`,
+        hint: UNKNOWN_HINT,
+      });
+      const linked = `${createId('repo')}.git`;
+      actualFs.symlinkSync(tempDir(), join(repos, linked));
+      actualFs.writeFileSync(join(repos, 'a "quoted"\nname'), '');
+      plant(dataDir, 'b', 'c', 'd', `${createId('repo')}.git`);
+      const unknown = ['a "quoted"\nname', 'b', 'c', 'd', linked, 'notes'].sort();
+      expect(await hostedCache(dataDir)).toEqual({
+        name: 'hosted-cache',
+        status: 'warn',
+        detail: `1 cached download belongs to a removed repository; 6 entries in ${repos} were not created by DirectiveBench and are never deleted automatically: ${unknown
+          .slice(0, 5)
+          .map((name) => JSON.stringify(name))
+          .join(', ')}, and 1 more`,
+        hint: `${ORPHAN_HINT} ${UNKNOWN_HINT}`,
+      });
+      expect(actualFs.lstatSync(join(repos, linked)).isSymbolicLink()).toBe(true);
+    });
+
+    it('warns with the error code when the cache or the database cannot be read', async () => {
+      const dataDir = await initialisedDataDir();
+      actualFs.mkdirSync(join(dataDir, 'cache'), { recursive: true });
+      actualFs.writeFileSync(join(dataDir, 'cache', 'repos'), 'a file');
+      expect(await hostedCache(dataDir)).toEqual({
+        name: 'hosted-cache',
+        status: 'warn',
+        detail: `${join(dataDir, 'cache', 'repos')} cannot be read (ENOTDIR)`,
+        hint: 'Check that the data directory and its cache folder are readable and are directories, then run `directivebench doctor` again.',
+      });
+
+      const unmigrated = tempDir();
+      actualFs.writeFileSync(join(unmigrated, 'directivebench.db'), '');
+      plant(unmigrated, `${createId('repo')}.git`);
+      expect(await hostedCache(unmigrated)).toEqual({
+        name: 'hosted-cache',
+        status: 'warn',
+        detail: 'not checked: the database cannot be read (ERR_SQLITE_ERROR)',
+        hint: 'Fix the database check above, then run `directivebench doctor` again.',
+      });
+    });
+
+    it('prints the check in text form', async () => {
+      const dataDir = await initialisedDataDir();
+      plant(dataDir, `${createId('repo')}.git`);
+      const { lines } = await runDoctor(dataDir, false);
+      expect(lines).toContain(
+        'warn  hosted-cache       1 cached download belongs to a removed repository',
+      );
+      expect(lines).toContain(`      → ${ORPHAN_HINT}`);
+    });
   });
 
   describe('git for hosted repositories (issue 60)', () => {
