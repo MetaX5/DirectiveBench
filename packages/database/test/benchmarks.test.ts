@@ -77,14 +77,30 @@ describe('getSuiteVersion', () => {
 });
 
 describe('listSuiteNames', () => {
-  it('lists ids and names by name', async () => {
+  it('lists ids, slugs and names by name', async () => {
     const handle = getHandle();
     expect(await listSuiteNames(handle.db)).toEqual([]);
     const b = await importSuiteVersion(handle, suiteInput('b', { slug: 'b', name: 'Beta' }));
     const a = await importSuiteVersion(handle, suiteInput('a', { slug: 'a', name: 'Alpha' }));
     expect(await listSuiteNames(handle.db)).toEqual([
-      { id: a.suiteId, name: 'Alpha' },
-      { id: b.suiteId, name: 'Beta' },
+      { id: a.suiteId, slug: 'a', name: 'Alpha' },
+      { id: b.suiteId, slug: 'b', name: 'Beta' },
+    ]);
+  });
+
+  it('orders suites that share a name by slug (issue 219)', async () => {
+    const handle = getHandle();
+    const z = await importSuiteVersion(
+      handle,
+      suiteInput('z', { slug: 'safety-z', name: 'Safety' }),
+    );
+    const a = await importSuiteVersion(
+      handle,
+      suiteInput('a', { slug: 'safety-a', name: 'Safety' }),
+    );
+    expect(await listSuiteNames(handle.db)).toEqual([
+      { id: a.suiteId, slug: 'safety-a', name: 'Safety' },
+      { id: z.suiteId, slug: 'safety-z', name: 'Safety' },
     ]);
   });
 });

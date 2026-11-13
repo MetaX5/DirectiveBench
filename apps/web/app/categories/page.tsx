@@ -16,7 +16,7 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
-import { artifactsPhrase } from '@/lib/categories';
+import { artifactsPhrase, categorySubject } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { formatCount } from '@/lib/utils';
 import { NewCategoryCard } from './category-forms';
@@ -55,6 +55,8 @@ function CategoryTable({
           <TBody>
             {categories.map((c) => {
               const count = Number(c.artifactCount);
+              // Names repeat across archived categories; the slug keeps the link's name unique.
+              const subject = categorySubject({ ...c, archived: c.archivedAt !== null });
               return (
                 <TR key={c.id}>
                   <TD className="min-w-40 font-medium wrap-anywhere">
@@ -69,7 +71,7 @@ function CategoryTable({
                     {count > 0 ? (
                       <Link
                         href={`/artifacts?category=${c.slug}`}
-                        aria-label={`${artifactsPhrase(count)} with ${c.name}`}
+                        aria-label={`${artifactsPhrase(count)} with ${subject}`}
                         className="text-primary-text underline"
                       >
                         {formatCount(count)}

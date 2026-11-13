@@ -137,12 +137,17 @@ export async function getSuiteVersion(db: Database, versionId: string) {
 
 export type SuiteVersionRecord = NonNullable<Awaited<ReturnType<typeof getSuiteVersion>>>;
 
-/** Suite ids and names only, by name: for choosing a suite without loading its history. */
-export async function listSuiteNames(db: Database): Promise<Array<{ id: string; name: string }>> {
+/**
+ * Suite ids, slugs and names only, by name: for choosing a suite without loading its history.
+ * Names can repeat (only the slug is unique), so a tie is ordered by slug.
+ */
+export async function listSuiteNames(
+  db: Database,
+): Promise<Array<{ id: string; slug: string; name: string }>> {
   return db
-    .select({ id: benchmarkSuites.id, name: benchmarkSuites.name })
+    .select({ id: benchmarkSuites.id, slug: benchmarkSuites.slug, name: benchmarkSuites.name })
     .from(benchmarkSuites)
-    .orderBy(benchmarkSuites.name);
+    .orderBy(benchmarkSuites.name, benchmarkSuites.slug);
 }
 
 export async function listSuites(db: Database) {

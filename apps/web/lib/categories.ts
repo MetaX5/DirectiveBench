@@ -255,6 +255,19 @@ export function categoryChipLabel(category: { name: string; archived: boolean })
 }
 
 /**
+ * How a category is named in an accessible name: the chip text, then its slug. Names are unique
+ * only among active categories, so an archived and an active category, or two archived ones, can
+ * share one; the slug is unique (issue 220, SPEC-124 D4, D17).
+ */
+export function categorySubject(category: {
+  name: string;
+  slug: string;
+  archived: boolean;
+}): string {
+  return `${categoryChipLabel(category)}, slug ${category.slug}`;
+}
+
+/**
  * Options of the Artifacts category filter (FR-124-15, D12): the active categories in the given
  * order, then the selected category when it is archived, so the form shows the real filter.
  */
@@ -318,7 +331,8 @@ export function unassignCategoryState(outcome: UnassignArtifactCategoryOutcome):
  * category exists).
  */
 export interface CategoriesCardModel {
-  chips: { id: string; label: string; archived: boolean }[];
+  /** `removeName` is the chip's Remove name, unique on the page (D17, issue 220). */
+  chips: { id: string; label: string; archived: boolean; removeName: string }[];
   available: { id: string; name: string }[];
   noPicker: 'all-assigned' | 'none-active' | null;
 }
@@ -332,7 +346,12 @@ export function categoriesCardModel(
     .filter((c) => !assignedIds.has(c.id))
     .map((c) => ({ id: c.id, name: c.name }));
   return {
-    chips: assigned.map((c) => ({ id: c.id, label: categoryChipLabel(c), archived: c.archived })),
+    chips: assigned.map((c) => ({
+      id: c.id,
+      label: categoryChipLabel(c),
+      archived: c.archived,
+      removeName: `Remove category ${categorySubject(c)}`,
+    })),
     available,
     noPicker: available.length > 0 ? null : active.length > 0 ? 'all-assigned' : 'none-active',
   };

@@ -38,8 +38,9 @@ Modelled on Tags and Assigned benchmarks on `/artifacts/[id]` (issue 64).
 
 1. Each item shows its value (a `secondary` Badge for a user label, a link for an item with a
    page) and its own small form with an `outline` `sm` button: "Remove", "Unassign". The
-   button's accessible name names the item ("Remove tag security"). The Badge itself is never
-   the button. Source: Badge page, Content page.
+   button's accessible name names the item ("Remove tag security") with a name unique on the
+   page; when item names can repeat, add the item's unique key after a comma ("Unassign suite
+   Safety, ID safety-v2"). The Badge itself is never the button. Source: Badge page, Content page.
 2. The field and `default` button that add an item sit under the list, in the same card.
 3. The item forms and the add form share one result line and one pending state: one
    `useActionState` per card, so a remove and an add never show two messages at once.
