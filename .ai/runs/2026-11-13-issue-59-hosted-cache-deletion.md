@@ -62,7 +62,7 @@ a gate file before `fetch`); `doctor` must keep the database read-only.
 ### Phase 6: Verification
 
 - [x] 6.1 Full quality gate, real CLI run and browser QA
-- [ ] 6.2 Codex adversarial review until approve
+- [x] 6.2 Codex adversarial review until approve
 - [ ] 6.3 Implementation status, run log and PR
 
 ## Decisions
@@ -135,6 +135,14 @@ failing `claude` first on `PATH`, no network):
 Not verified: Windows and macOS file-system behaviour (J7 retries of `EBUSY`/`EPERM`), a real
 github.com registration, scan and removal (needs network, deliberately not done), the `gitlab`
 panel in the browser (unit-tested only), screen-reader speech.
+
+Review rounds:
+
+| Round | Verdict | Findings |
+| --- | --- | --- |
+| Browser QA agent (built app) | pass | No defects in the change |
+| Codex adversarial 1 (`--scope branch --base main`) at e365edc | needs-attention | No material findings; only that its read-only sandbox could not run the gate (run here, all green) |
+| Codex adversarial 2 (`--scope branch --base main`) at 512d052 | approve | No material findings |
 
 ## Problems and deviations
 
