@@ -184,6 +184,12 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
       removedOccurrences: count.default(0),
       reactivatedOccurrences: count.default(0),
       emptyScanKeptOccurrences: count.default(0),
+      /**
+       * New paths added to an existing artifact by rule 3, and those that chose the oldest of
+       * several candidates (SPEC-126 FR-126-09). Absent in results stored before they existed.
+       */
+      linkedOccurrences: count.default(0),
+      ambiguousLinks: count.default(0),
       warningCount: count,
       errorCount: count,
       errors: z.array(scanDiscoveryErrorSchema).max(MAX_REPORTED_SCAN_ERRORS),

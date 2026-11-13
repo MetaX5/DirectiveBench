@@ -3,7 +3,7 @@ id: SPEC-118
 title: Benchmark own skills with Claude Code against registry artifacts (S1)
 status: draft
 created: 2026-10-22
-updated: 2026-10-29
+updated: 2026-11-13
 category: feature
 related: [SPEC-203, SPEC-107, SPEC-108, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-009, SPEC-013, SPEC-103, ADR-0005, ADR-0006, ADR-0007, ADR-0008, ADR-0013]
 ---
@@ -171,8 +171,8 @@ weights and `required` work as for every assertion (SPEC-111).
 
 | ID | Requirement |
 | --- | --- |
-| FR-118-50 | The artifact detail page SHALL list the artifact's versions, newest first, and per version its completed benchmark runs: suite name and version, baseline ("no artifact" / "vN"), agent and version, auth mode and isolation profile, model, display status, delta, confidence, date, link to the run. |
-| FR-118-51 | Runs SHALL be grouped by comparability key; groups are labelled "not comparable with each other" and no number is compared across groups (SPEC-111 FR-111-45). Within a group, version regressions are highlighted per SPEC-111 FR-111-50…52. |
+| FR-118-50 | The artifact detail page SHALL list the artifact's versions, newest first, and per version its completed benchmark runs: suite name and version, baseline ("no artifact" / "vN"), agent and version, auth mode and isolation profile, model, display status, delta, confidence, date, link to the run. A version whose effective parent is not the version numbered one lower says "edited from vN" in its heading ([SPEC-126](2026-11-12-cross-repository-artifact-identity.md) FR-126-21). |
+| FR-118-51 | Runs SHALL be grouped by comparability key; groups are labelled "not comparable with each other" and no number is compared across groups (SPEC-111 FR-111-45). Within a group, version regressions are highlighted per SPEC-111 FR-111-50…52, comparing a version with its nearest tested ancestor along the effective parent, not the previous tested version number ([SPEC-126](2026-11-12-cross-repository-artifact-identity.md) FR-126-20/21). |
 | FR-118-52 | The run detail page SHALL show the baseline in its header and column labels ("Baseline (no artifact)" / "Baseline (v3)" vs "Candidate (v4)"), the auth mode, isolation profile, permission profile, execution model and other reported models, for a skill the invocation per agent run and rate per variant (FR-118-09), warnings including `ambient-user-config` with the text "may include user-level instructions", tokens and cost as reported (never invented), the new assertions' details, and the Claude Code trace (tool calls, permission denials, retries) as escaped text. |
 | FR-118-53 | For a suite whose agent is not `mock`, the UI SHALL NOT offer "Run"; it shows the CLI command to run instead (running from the UI is S2). |
 
@@ -1077,6 +1077,14 @@ changed before merge.
     "inconclusive" when either run is `unstable` or a score is missing; the row and the version
     header are highlighted. Implementation detail within the FR: a version without an eligible run
     in the group is skipped (v3 compares with v1).
+  - Since SPEC-126 Phase 1 (issue #20, verified on 2026-11-13 by `apps/web/test/artifact-runs.test.ts`
+    "comparisons along the version lineage" and `apps/web/e2e/identity.spec.ts`): "the previous
+    tested version" is the nearest tested ancestor along the effective parent
+    (`effectiveParents`, `versionComparisons`; [SPEC-126](2026-11-12-cross-repository-artifact-identity.md)
+    FR-126-20/21), so diverged copies are never compared with each other; the heading shows
+    "edited from vN" (`editedFrom`) when that parent is not the version numbered one lower, and
+    the comparison-limit notice says "a version whose compared version is older shows no
+    comparison" (SPEC-126 §11.3 F10, F11, F13).
   - FR-118-52: run detail header "Baseline (vN|no artifact) vs Candidate (vM)", the same labels on
     the variant cards and agent-run badges; "Agent profile" card (auth mode, isolation,
     permission profile, requested and execution model, other reported models from the

@@ -5,7 +5,9 @@ import { expect } from 'storybook/test';
 import { EmptyState, MockBadge, PageHeader, StatusBadge } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/primitives';
 
 // Pattern: a detail view, modelled on /artifacts/[id] and /benchmarks/[id]. The key facts and
 // the main action are in the first screen; everything else follows in cards.
@@ -20,6 +22,8 @@ type Detail = {
   latest?: { status: 'passed' | 'regression'; score: string; mock: boolean };
   /** The note of an item whose source is gone (rule 5). */
   missingNote?: string;
+  /** Where the item was found and the version each place holds (rule 6). */
+  occurrences?: { repository: string; path: string; version: number; status: string }[];
 };
 
 const skill: Detail = {
@@ -104,6 +108,58 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
             </dl>
           </CardContent>
         </Card>
+        {artifact.occurrences ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Occurrences</CardTitle>
+              <CardDescription>
+                Where this artifact was found, per repository and path, and the version each one
+                holds.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table aria-label="Occurrences">
+                <THead>
+                  <TR>
+                    <TH>Repository</TH>
+                    <TH>Path</TH>
+                    <TH>Version</TH>
+                    <TH>Status</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {artifact.occurrences.map((occurrence) => (
+                    <TR key={`${occurrence.repository}:${occurrence.path}`}>
+                      <TD>{occurrence.repository}</TD>
+                      <TD className="font-mono text-ui">{occurrence.path}</TD>
+                      <TD>
+                        <span className="inline-flex flex-wrap items-center gap-inline-tight">
+                          <Link
+                            className="underline"
+                            aria-label={`v${occurrence.version} of ${artifact.name}`}
+                            href={`#content-v${occurrence.version}`}
+                          >
+                            v{occurrence.version}
+                          </Link>
+                          {occurrence.version < artifact.version ? (
+                            <Badge variant="muted" className="whitespace-nowrap">
+                              older version
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </TD>
+                      <TD>
+                        <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
+                          {occurrence.status}
+                        </Badge>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </div>
   );
@@ -159,6 +215,35 @@ export const MissingItem: Story = {
     await expect(canvas.getByText('Missing', { exact: true })).toBeVisible();
     await expect(canvas.getByRole('note')).toHaveTextContent(/kept/);
     await expect(canvas.getByRole('button', { name: 'Run benchmark' })).toBeEnabled();
+  },
+};
+
+/**
+ * Found in several places (rule 6, SPEC-126): each place shows the version it holds, and a place
+ * that holds an older one gets a muted "older version" Badge. The version link's accessible name
+ * starts with its visible text ("v1 of review").
+ */
+export const SharedAcrossRepositories: Story = {
+  args: {
+    artifact: {
+      ...skill,
+      name: 'review',
+      occurrences: [
+        { repository: 'client-a', path: '.claude/skills/review', version: 3, status: 'active' },
+        { repository: 'client-b', path: 'skills/review', version: 1, status: 'active' },
+        { repository: 'client-c', path: '.agents/skills/review', version: 2, status: 'missing' },
+      ],
+    },
+  },
+  play: async ({ canvas }) => {
+    const table = canvas.getByRole('region', { name: 'Occurrences' });
+    await expect(table).toBeVisible();
+    await expect(canvas.getByRole('link', { name: 'v1 of review' })).toHaveAttribute(
+      'href',
+      '#content-v1',
+    );
+    await expect(canvas.getAllByText('older version')).toHaveLength(2);
+    await expect(canvas.getByRole('link', { name: 'v3 of review' })).toBeVisible();
   },
 };
 

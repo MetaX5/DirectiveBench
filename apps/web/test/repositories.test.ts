@@ -302,7 +302,13 @@ describe('canScan and lastScanLabel', () => {
 });
 
 /** A scan result's SPEC-125 counts when nothing went missing, came back or was kept. */
-const unchanged = { removedOccurrences: 0, reactivatedOccurrences: 0, emptyScanKeptOccurrences: 0 };
+const unchanged = {
+  removedOccurrences: 0,
+  reactivatedOccurrences: 0,
+  emptyScanKeptOccurrences: 0,
+  linkedOccurrences: 0,
+  ambiguousLinks: 0,
+};
 
 describe('describeScan', () => {
   function scan(overrides: Partial<RepositoryScan>): RepositoryScan {
@@ -432,6 +438,48 @@ describe('describeScan', () => {
     });
     expect(done({ emptyScanKeptOccurrences: 1 }, 0).message).toBe(
       `${empty} No artifacts found, so the 1 found before was not marked missing. Check that the location is mounted and has the expected files. If they were deleted on purpose, remove the repository.`,
+    );
+  });
+
+  it('says how many new paths matched an existing artifact, and which chose the oldest (SPEC-126 F1, F2)', () => {
+    const done = (counts: Partial<typeof unchanged>) =>
+      describeScan(
+        scan({
+          result: {
+            ok: true,
+            scannedFiles: 214,
+            discovered: 9,
+            createdArtifacts: 6,
+            createdVersions: 6,
+            ...unchanged,
+            ...counts,
+            warningCount: 0,
+            errorCount: 0,
+            errors: [],
+            skippedUserLevelFolders: [],
+            commitSha: null,
+            durationMs: 1200,
+          },
+        }),
+      ).message;
+    expect(done({ linkedOccurrences: 3 })).toBe(
+      'Scanned skills: 214 files in 1.2 s, 9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions), 0 errors.',
+    );
+    expect(done({ linkedOccurrences: 1_200 })).toContain(
+      '1,200 matched an existing artifact, 6 new',
+    );
+    expect(
+      done({
+        linkedOccurrences: 1,
+        ambiguousLinks: 1,
+        removedOccurrences: 2,
+        reactivatedOccurrences: 1,
+      }),
+    ).toBe(
+      'Scanned skills: 214 files in 1.2 s, 9 artifacts found (6 new, 1 matched an existing artifact, 6 new versions), 0 errors. 1 matched several existing artifacts and was added to the oldest one. 2 no longer found (marked missing), 1 found again.',
+    );
+    expect(done({ linkedOccurrences: 2, ambiguousLinks: 2 })).toMatch(
+      / 2 matched several existing artifacts and were added to the oldest one\.$/,
     );
   });
 
@@ -584,6 +632,8 @@ describe('removalReasons (SPEC-125 FR-125-15, §11.3 D15)', () => {
     ...overrides,
   });
   const reregister =
+    'Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead.';
+  const reregisterHosted =
     'Registering it again later creates new artifacts instead of reusing these ones.';
 
   it('says what is deleted, what goes missing, what is kept and what registering again does', () => {
@@ -619,6 +669,11 @@ describe('removalReasons (SPEC-125 FR-125-15, §11.3 D15)', () => {
     expect(
       removalReasons(impact({ provider: 'github', location: 'https://github.com/o/r' }))[2],
     ).toBe(hosted);
+    // Hosted copies never link (SPEC-126 A16): the SPEC-125 sentence stays (§11.3 F8).
+    expect(
+      removalReasons(impact({ provider: 'github', location: 'https://github.com/o/r' }))[3],
+    ).toBe(reregisterHosted);
+    expect(removalReasons(impact({ provider: 'local-directory' }))[3]).toBe(reregister);
     expect(removalReasons(impact({ provider: 'gitlab' }))[2]).toBe(
       "The copy downloaded from GitLab stays in DirectiveBench's cache. Deleting it is planned.",
     );

@@ -93,6 +93,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       removedOccurrences: 1,
       reactivatedOccurrences: 0,
       emptyScanKeptOccurrences: 0,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     const [, after] = await occurrencesOf(handle, a.repositoryId);
     expect(after).toEqual({
@@ -123,6 +125,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       removedOccurrences: 0,
       reactivatedOccurrences: 0,
       emptyScanKeptOccurrences: 2,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     expect(await statusByPath(handle, scan.repositoryId)).toEqual([
       ['AGENTS.md', 'active'],
@@ -138,6 +142,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
     expect(await apply([scanned('AGENTS.md', 'v1')])).toMatchObject({
       removedOccurrences: 1,
       emptyScanKeptOccurrences: 0,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     expect(await statusByPath(handle, scan.repositoryId)).toEqual([
       ['AGENTS.md', 'active'],
@@ -225,6 +231,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       removedOccurrences: 0,
       reactivatedOccurrences: 1,
       emptyScanKeptOccurrences: 0,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     const [, back] = await occurrencesOf(handle, scan.repositoryId);
     expect(back).toMatchObject({
@@ -399,6 +407,8 @@ describe('repositoryScanResultSchema SPEC-125 counts', () => {
       removedOccurrences: 0,
       reactivatedOccurrences: 0,
       emptyScanKeptOccurrences: 0,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     expect(
       repositoryScanResultSchema.parse({
@@ -406,6 +416,8 @@ describe('repositoryScanResultSchema SPEC-125 counts', () => {
         removedOccurrences: 2,
         reactivatedOccurrences: 1,
         emptyScanKeptOccurrences: 0,
+        linkedOccurrences: 0,
+        ambiguousLinks: 0,
       }),
     ).toMatchObject({ removedOccurrences: 2, reactivatedOccurrences: 1 });
     expect(() => repositoryScanResultSchema.parse({ ...stored, removedOccurrences: -1 })).toThrow();

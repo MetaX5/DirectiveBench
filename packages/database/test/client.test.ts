@@ -61,7 +61,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(6);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(7);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -725,7 +725,7 @@ describe('additive migrations', () => {
       `);
 
       // Up: every row gets its key, nothing keeps the column default, rows and links survive.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 6))).applied).toBe(1);
       expect(
         handle.sqlite
           .prepare('select id, name, name_key, archived_at from categories order by id')
@@ -773,10 +773,95 @@ describe('additive migrations', () => {
           .all()
           .map((row) => String(row.name)),
       ).not.toContain('name_key');
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 6))).applied).toBe(1);
       expect(
         handle.sqlite.prepare("select name_key from categories where id = 'cat_sec'").get(),
       ).toEqual({ name_key: 'security' });
+    } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds artifact_versions.parent_version_id and the identity indexes on a 0005 database, and can be rolled back (SPEC-126 §8.1)', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const indexNames = () =>
+      handle.sqlite
+        .prepare(
+          "select name from sqlite_master where type = 'index' and name like '%_idx' order by name",
+        )
+        .all()
+        .map((row) => String(row.name));
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 6));
+      const before = indexNames();
+      handle.sqlite.exec(`
+        insert into repositories (id, provider, name, location, created_at, updated_at)
+          values ('repo_1', 'local-directory', 'r', '/r', 't', 't');
+        insert into artifacts (id, slug, name, type, created_at, updated_at)
+          values ('art_1', 'a', 'A', 'skill', 't', 't');
+        insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
+          values ('artv_1', 'art_1', 1, 'h1', 'skill-md', 'SKILL.md', '[]', '{}', 't'),
+                 ('artv_2', 'art_1', 2, 'h2', 'skill-md', 'SKILL.md', '[]', '{}', 't');
+      `);
+
+      // Up: existing versions keep a null parent; the three indexes exist.
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(
+        handle.sqlite
+          .prepare('select id, parent_version_id from artifact_versions order by id')
+          .all(),
+      ).toEqual([
+        { id: 'artv_1', parent_version_id: null },
+        { id: 'artv_2', parent_version_id: null },
+      ]);
+      expect(indexNames()).toEqual(
+        [
+          ...before,
+          'artifact_occurrences_artifact_idx',
+          'artifact_versions_content_hash_idx',
+          'artifacts_type_name_idx',
+        ].sort(),
+      );
+      // The parent is a foreign key that becomes null when its version is deleted.
+      handle.sqlite.exec(
+        "insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, parent_version_id, created_at) values ('artv_3', 'art_1', 3, 'h3', 'skill-md', 'SKILL.md', '[]', '{}', 'artv_2', 't')",
+      );
+      expect(() =>
+        handle.sqlite.exec(
+          "insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, parent_version_id, created_at) values ('artv_4', 'art_1', 4, 'h4', 'skill-md', 'SKILL.md', '[]', '{}', 'artv_none', 't')",
+        ),
+      ).toThrow(/FOREIGN KEY constraint failed/);
+      handle.sqlite.exec("delete from artifact_versions where id = 'artv_2'");
+      expect(
+        handle.sqlite
+          .prepare("select parent_version_id from artifact_versions where id = 'artv_3'")
+          .get(),
+      ).toEqual({ parent_version_id: null });
+
+      // Down (the rollback plan in the PR): drop the indexes, then the column (a REFERENCES
+      // column), and forget the migration; it re-applies.
+      handle.sqlite.exec('drop index artifact_versions_content_hash_idx');
+      handle.sqlite.exec('drop index artifact_occurrences_artifact_idx');
+      handle.sqlite.exec('drop index artifacts_type_name_idx');
+      handle.sqlite.exec('alter table artifact_versions drop column parent_version_id');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(indexNames()).toEqual(before);
+      expect(
+        handle.sqlite
+          .prepare('pragma table_info(artifact_versions)')
+          .all()
+          .map((row) => String(row.name)),
+      ).not.toContain('parent_version_id');
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect(
+        handle.sqlite
+          .prepare("select parent_version_id from artifact_versions where id = 'artv_3'")
+          .get(),
+      ).toEqual({ parent_version_id: null });
     } finally {
       handle.close();
       temp.dispose();

@@ -183,7 +183,7 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     await expect(note).toHaveText(
       /^Missing: no registered repository contained this artifact in its last scan\. Last found on \d{2} \w{3} \d{4}, \d{2}:\d{2} UTC\. Its versions, categories, notes and benchmark results are kept, and it becomes active again when a scan finds it at the same path\.$/,
     );
-    await expect(page.getByTestId('occurrences').getByRole('cell').nth(3)).toHaveText('missing');
+    await expect(page.getByTestId('occurrences').getByRole('cell').nth(4)).toHaveText('missing');
     for (const tab of ['versions', 'metadata', 'evaluations']) {
       await page.goto(`/artifacts/${id}?tab=${tab}`);
       await expect(page.getByTestId('missing-note')).toBeVisible();
@@ -203,7 +203,7 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     expect((await statusesOf()).every((o) => o.status === 'active')).toBe(true);
     await page.goto(`/artifacts/${id}`);
     await expect(page.getByTestId('missing-note')).toHaveCount(0);
-    await expect(page.getByTestId('occurrences').getByRole('cell').nth(3)).toHaveText('active');
+    await expect(page.getByTestId('occurrences').getByRole('cell').nth(4)).toHaveText('active');
     await page.goto(`/artifacts?q=${GONE}`);
     await expect(
       page.getByRole('row').filter({ hasText: GONE }).getByRole('cell').nth(4),
@@ -281,7 +281,7 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
       'Its 3 occurrences are deleted from DirectiveBench.',
       '3 artifacts are then missing from every repository. Their versions, categories, notes and benchmark results are kept.',
       `Nothing in ${root} is changed.`,
-      'Registering it again later creates new artifacts instead of reusing these ones.',
+      'Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead.',
     ]);
     // Keyboard navigation starts at the panel after the fragment: Tab reaches the confirm, then
     // Cancel (D19, D24).

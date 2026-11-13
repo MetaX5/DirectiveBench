@@ -43,6 +43,13 @@
       "when": 1793880834219,
       "tag": "0005_category_name_key",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794561434719,
+      "tag": "0006_artifact_identity",
+      "breakpoints": true
     }
   ]
 }

@@ -311,3 +311,70 @@ describe('scans that fail or cannot observe a path mark nothing (SPEC-125 AC-4)'
     expect(statuses().every(([, status]) => status === 'active')).toBe(true);
   });
 });
+
+describe('local scans link exact copies (SPEC-126 Phase 1)', () => {
+  function occurrences(): string[][] {
+    return handle.sqlite
+      .prepare(
+        `select r.name || ':' || o.path as place, a.slug, v.version
+           from artifact_occurrences o
+           join repositories r on r.id = o.repository_id
+           join artifacts a on a.id = o.artifact_id
+           join artifact_versions v on v.id = o.latest_version_id
+          order by place`,
+      )
+      .all()
+      .map((row) => [String(row.place), String(row.slug), String(row.version)]);
+  }
+
+  it('links a skill copied between a local-directory and a local-git repository, then follows an edit', async () => {
+    const first = join(sources, 'first');
+    const second = join(sources, 'second');
+    write(first, { 'skills/review/SKILL.md': SKILL('review'), 'AGENTS.md': '# Rules\n' });
+    write(second, { '.agents/skills/review/SKILL.md': SKILL('review'), 'AGENTS.md': '# Rules\n' });
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: second, env: FIXTURE_GIT_ENV });
+    const a = await registerNamed(first, 'local-directory', 'first');
+    const b = await registerNamed(second, 'local-git', 'second');
+
+    expect((await scan(a)).result).toMatchObject({ ok: true, createdArtifacts: 2 });
+    expect((await scan(b)).result).toMatchObject({
+      ok: true,
+      discovered: 2,
+      // The skill matched; the repository-level AGENTS.md never links (A3).
+      createdArtifacts: 1,
+      createdVersions: 1,
+      linkedOccurrences: 1,
+      ambiguousLinks: 0,
+    });
+    expect(occurrences()).toEqual([
+      ['first:AGENTS.md', 'agents-md', '1'],
+      ['first:skills/review', 'review', '1'],
+      ['second:.agents/skills/review', 'review', '1'],
+      ['second:AGENTS.md', 'agents-md-2', '1'],
+    ]);
+
+    // An edit in one copy adds the next version of the shared artifact (A8).
+    write(second, { '.agents/skills/review/SKILL.md': `${SKILL('review')}\nMore.\n` });
+    expect((await scan(b)).result).toMatchObject({
+      ok: true,
+      createdVersions: 1,
+      linkedOccurrences: 0,
+    });
+    expect(occurrences()).toContainEqual(['second:.agents/skills/review', 'review', '2']);
+    expect(occurrences()).toContainEqual(['first:skills/review', 'review', '1']);
+  });
+
+  async function registerNamed(
+    location: string,
+    provider: 'local-git' | 'local-directory',
+    name: string,
+  ) {
+    const outcome = await registerLocalRepository(
+      handle,
+      { provider, name, location, defaultBranch: null },
+      { homeDirectory: join(sources, 'home'), confirmedLocation: location },
+    );
+    if (outcome.status !== 'registered') throw new Error('not registered');
+    return outcome.repository.id;
+  }
+});

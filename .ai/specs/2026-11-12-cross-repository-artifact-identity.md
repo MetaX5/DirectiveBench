@@ -12,7 +12,7 @@ related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, 
 
 ## 1. Summary
 
-**Proposed, not implemented.** Today a scan identifies an artifact only by its location (SPEC-101
+**Phase 1 implemented (exact copies, lineage, §20); Phases 2 and 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
 §8.3 rule 1: same repository and path) and otherwise creates a new artifact (rule 4). A skill
 copied unchanged into a second repository therefore becomes a second artifact (`review`,
 `review-2`) with its own versions, categories and history, and a skill directory moved inside one
@@ -168,7 +168,7 @@ implementation has not started.
 | FR-126-07 | **Source fields.** At the end of the apply transaction, after the writes and SPEC-125's marking, for every artifact this scan wrote, linked, moved or marked an occurrence of: take its `active` occurrences, pick the one holding the highest version number (ties: oldest occurrence `created_at`, then `id`), parse that version's primary file with `parseArtifactFile` (core) at the path discovery would use: `<occurrence path>/SKILL.md` for a skill (`SKILL.md` for the root skill, path `''`), the occurrence path for a single file, and set `artifacts.name` and `description` when they differ. An artifact with no active occurrence keeps them. Reads are grouped and batched by `IDENTITY_LOOKUP_BATCH_SIZE` (NFR-126-01). The result depends only on the active occurrences and their version numbers (A9), so it is the same after any sequence of scans that leaves the same occurrences at the same version numbers. `slug` never changes (FR-105-13). |
 | FR-126-08 | **User data.** Linking, like every scan write, never changes notes, tags, categories, suite assignments, versions or runs (FR-105-13, FR-103-01). The linked occurrence shares the artifact's user metadata. A missing artifact (SPEC-125 A8) that gains an active linked occurrence is no longer missing. |
 | FR-126-09 | **Summary.** `RepositoryScanSummary` and the job result (`repositoryScanResultSchema`, `ok` branch, `.strict()`) gain `linkedOccurrences` (rule 3 links, ambiguous ones included) and `ambiguousLinks`, counts with `.default(0)` so stored results still parse. `createdArtifacts` no longer counts linked occurrences. |
-| FR-126-10 | **Scan result line.** `describeScan` adds "N matched an existing artifact" when `linkedOccurrences > 0` (§11.1 UD-1). |
+| FR-126-10 | **Scan result line.** `describeScan` adds "N matched an existing artifact" inside the parentheses after "N new" when `linkedOccurrences > 0`, and, when `ambiguousLinks > 0`, the sentence "N matched several existing artifacts and was (were) added to the oldest one." (§11.1 UD-1, §11.3 F1, F2). |
 
 ### 6.1a Version lineage (Phase 1)
 
@@ -176,7 +176,7 @@ implementation has not started.
 | --- | --- |
 | FR-126-19 | **Parent.** `artifact_versions.parent_version_id` (nullable, references `artifact_versions.id`, `ON DELETE SET NULL`) is set when a version is inserted, never updated (FR-103-01): the `latest_version_id` the writing occurrence held before this write when that version belongs to the same artifact, else null (a new occurrence, a new artifact). Rows inserted before migration 0006 keep null. |
 | FR-126-20 | **Effective parent.** `effectiveParent(version)` = `parent_version_id` when set; otherwise, for `version > 1`, the version numbered `version - 1` of the same artifact (all versions before this spec form one line, since nothing was linked); otherwise none. |
-| FR-126-21 | **Comparisons.** "Results by version" (SPEC-118 FR-118-50/51, SPEC-111 FR-111-50/51, `apps/web/lib/artifact-runs.ts`) compares a version with its nearest ancestor along `effectiveParent` that has a comparable run in the same group, instead of the previous tested version number, and names it ("compared with v1, the version it was edited from"). The chain is **creation ancestry**: what the content was edited from when the version first appeared. Later transitions that reuse an existing version (a revert, or a copy adopting another copy's content, FR-103-07) add no edge, so a comparison can skip a version a copy held in between but never compares two parallel edits. For an artifact with one line the result is unchanged. A/B runs with an explicit baseline version (SPEC-118 FR-118-13) are unchanged: the user chose the pair. |
+| FR-126-21 | **Comparisons.** "Results by version" (SPEC-118 FR-118-50/51, SPEC-111 FR-111-50/51, `apps/web/lib/artifact-runs.ts`) compares a version with its nearest ancestor along `effectiveParent` that has a comparable run in the same group, instead of the previous tested version number, and names it: the version heading shows "edited from vN" when the effective parent is not the version numbered one lower (§11.3 F10, F11). The chain is **creation ancestry**: what the content was edited from when the version first appeared. Later transitions that reuse an existing version (a revert, or a copy adopting another copy's content, FR-103-07) add no edge, so a comparison can skip a version a copy held in between but never compares two parallel edits. For an artifact with one line the result is unchanged. A/B runs with an explicit baseline version (SPEC-118 FR-118-13) are unchanged: the user chose the pair. |
 
 ### 6.1b Consistency of source fields and order (Phase 1)
 
@@ -215,14 +215,21 @@ implementation has not started.
 - NFR-126-02: Migration `0006` adds `artifact_versions_content_hash_idx` on
   `artifact_versions(content_hash)` (the unique index leads with `artifact_id` and cannot serve a
   hash lookup) and `artifacts_type_name_idx` on `artifacts(type, name)` (the possible-duplicate lookup by name; the type keeps the index usable for type-filtered lists), and the nullable column `artifact_versions.parent_version_id` (FR-126-19).
+  Added during the Phase 1 implementation: `artifact_occurrences_artifact_idx` on
+  `artifact_occurrences(artifact_id)`. No index led from an artifact to its occurrences, and both
+  the rule-3 check "every occurrence of the candidate is local" and the FR-126-07 read look
+  occurrences up by artifact inside the scan transaction; without it each batch scans every
+  occurrence row (the SPEC-125 removal counts were rewritten for the same reason).
   Plain DDL, portable to the planned PostgreSQL backend (SPEC-117). Up and down tested
   (lesson 2026-10-22 "pin each migration's up/down test").
 - NFR-126-03: Move matching reads the latest version of unseen occurrences only (their `files`
   for the primary `sha256`), so a rescan without deletions reads no extra file content; matching
   is O(n log n) in new plus unseen paths (maps keyed by hash).
 - NFR-126-04: The identity step's cost grows linearly with the scan: a database test asserts the
-  statement count (one candidate read per 500 new paths, one FR-126-07 read per 500 written
-  artifacts) and linear growth with `expectLinearTime` (3,000 linked skills against 300); no
+  statement count (one candidate read per 500 new paths, two FR-126-07 reads per 500 written
+  artifacts: the active occurrences with their version numbers, then only the chosen versions'
+  files, so no other version's content is loaded) and linear growth with `expectLinearTime`
+  (implemented as 3,200 linked skills against 100, the shared `LINEAR_SIZE_STEP` of 32); no
   wall-clock bound.
 - NFR-126-05: Every changed page works by keyboard alone, has no page scroll at 320px, keeps the
   issue #122 full-HD list width, and meets contrast in both themes (AGENTS.md §7).
@@ -232,7 +239,7 @@ implementation has not started.
 
 ### 8.1 Data model
 
-Migration `0006_artifact_identity.sql`: the two indexes of NFR-126-02, the nullable column
+Migration `0006_artifact_identity.sql`: the indexes of NFR-126-02, the nullable column
 `artifact_versions.parent_version_id` (FR-126-19, references `artifact_versions.id`, `ON DELETE
 SET NULL`), set only on insert. No new table.
 Existing columns carry the feature: `artifact_occurrences.artifact_id` (a link inserts an
@@ -332,20 +339,53 @@ maintainer approves them, then the page code follows (the SPEC-125 §11.2 / §11
 
 | # | Point | Proposed default |
 | --- | --- | --- |
-| UD-1 | Scan result line on `/repositories` | Clauses after the existing ones: "2 matched an existing artifact" (Phase 1); "1 moved", "1 possible move was not applied because several files matched" (Phase 3). Plain text in the existing line; no new kind |
+| UD-1 | Scan result line on `/repositories` | Phase 1 (refined by §11.3 F1, F2): "3 matched an existing artifact" inside the parentheses after "N new" ("9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions)"), and, when links chose between several artifacts, "1 matched several existing artifacts and was added to the oldest one." after the counts sentence. Phase 3: "1 moved", "1 possible move was not applied because several files matched" (placement decided then). Plain text in the existing line; no new kind |
 | UD-2 | Artifacts list for a linked artifact | No change: the Repository cell already shows the first repository plus "+N" and Occurrences counts active occurrences across repositories, which is AC-1 visible |
 | UD-3 | Occurrences table on the artifact page (Phase 1) | New column "Version" after Path: "v3"; when it is not the artifact's latest version, a `muted` Badge "older version" next to it, so a diverged copy is visible (US-126-02). The column is a link to `?tab=content&version=3` |
 | UD-4 | List Name cell (Phase 2) | Under the name, an `outline` Badge "Possible duplicate" with `title` "N other artifacts have the same name"; no icon; keeps the issue #122 widths (the badge wraps under the name, never widens the column) |
 | UD-5 | Artifact page (Phase 2) | Overview, after Occurrences: Card "Possible duplicates", description "Other artifacts with the same name and format. DirectiveBench links only identical copies in local repositories; these are kept apart." Table: Artifact (link, slug in `font-mono`), Repositories, Content ("Same latest content" / "Different content"). When more than 20: "and N more" with a link to `/artifacts?q=<name>`. A note under the card when any row has the same latest content: "Identical copies are kept apart when they were registered before this version, or are in a GitHub repository." |
-| UD-6 | SPEC-125 removal panel reason (Phase 1) | Replace "Registering it again later creates new artifacts instead of reusing these ones." with "Registering it again later creates new artifacts for these ones. Unchanged skills and rules still recorded in another repository are matched to their existing artifact." (A4) |
+| UD-6 | SPEC-125 removal panel reason (Phase 1) | For a local repository (refined by §11.3 F8), replace "Registering it again later creates new artifacts instead of reusing these ones." with "Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead." (A4). For a GitHub repository the SPEC-125 sentence stays, because hosted copies never link (A16) |
 | UD-7 | Words | "possible duplicate", "matched an existing artifact", "moved", "older version"; no "merged" (A17); no en or em dash in any of it |
 
 ### 11.2 Accessibility
 
-Badges carry text, not colour alone; the Version link has an accessible name ("Version 3 of
-<name>"); the duplicates table is a normal table with a caption for screen readers; keyboard
+Badges carry text, not colour alone; the Version link has an accessible name ("v3 of <name>",
+§11.3 F5: the visible text "v3" starts the name, WCAG 2.5.3); the duplicates table is a normal table with a caption for screen readers; keyboard
 order unchanged except the new links; contrast of `outline` and `muted` Badges is already
 verified (SPEC-125) but is re-checked on the new cells in both themes (`text-contrast.spec.ts`).
+
+### 11.3 Phase 1 UI decisions (approved 2026-11-13)
+
+Refinements of §11 and §11.1 (UD-1, UD-3, UD-6, UD-7) and §11.2 for Phase 1, prepared with
+throwaway Storybook stories and screenshots and approved by the maintainer on 2026-11-13 with
+every recommended default (comment on issue #20), including the points that differ from the
+text first written: F1 (placement of the UD-1 clause), F2 (the ambiguous-links sentence, a gap
+in FR-126-10), F3 (not in the spec), F5 (the accessible name in §11.2), F8 (UD-6 for local
+repositories only), F10 (the results description instead of FR-126-21's example phrase). The
+spec text above is corrected to match. None needs a new component, variant or token. Contrast
+(WCAG 2.x, rendered pixels in the built Storybook): the lowest new pair is the "older version"
+Badge, `muted-foreground` on `muted`, 5.51 light and 5.86 dark.
+
+| # | Point | Decision |
+| --- | --- | --- |
+| F1 | UD-1 "matched" clause | Inside the existing parentheses, after "N new", only when `linkedOccurrences > 0`: "9 artifacts found (6 new, 3 matched an existing artifact, 6 new versions)". Counted with `formatCount`, no plural form, same `done` kind; the SPEC-125 clauses keep their place after the counts sentence |
+| F2 | `ambiguousLinks` (A7, FR-126-03) | When above 0, one sentence right after the counts sentence and before the SPEC-125 clauses: "1 matched several existing artifacts and was added to the oldest one." / "2 matched several existing artifacts and were added to the oldest one." |
+| F3 | Scan explanation on `/repositories` | Append "A skill or rule identical to one already found in another local repository is added to that artifact instead of becoming a new one." |
+| F4 | UD-3 Version cell | Column "Version" after Path; a `Link` "v3" with `underline` to `?tab=content&version=3`, then, when the occurrence's version is not the artifact's latest, `<Badge variant="muted" className="whitespace-nowrap">older version</Badge>`. The label comes from `occurrenceVersionLabel` in `lib/artifacts.ts`. Shown for missing rows too; the latest version gets no Badge |
+| F5 | Version link accessible name (§11.2) | `aria-label="v3 of <name>"` instead of "Version 3 of <name>" (WCAG 2.5.3 Label in Name); the Badge after it is read as text |
+| F6 | Occurrences card | Description "Where this artifact was found, per repository and path, and the version each one holds."; the table gets `aria-label="Occurrences"`; the SPEC-125 "No occurrences left" sentence is unchanged |
+| F7 | 320px | No layout change: the table scrolls inside its container, no page scroll |
+| F8 | UD-6 removal reason | Local repository: "Registering it again later creates new artifacts. A skill or rule whose exact content is still recorded in another local repository is matched to its existing artifact instead." GitHub (GitLab later): the SPEC-125 text "Registering it again later creates new artifacts instead of reusing these ones." Chosen in `removalReasons` by provider; left out with 0 occurrences (SPEC-125 D15) |
+| F9 | FR-126-23 in the removal panel | No new reason |
+| F10 | "Benchmark results by version" description (FR-126-21) | Second sentence: "A version regression compares the latest run of a version with the latest run of the nearest tested version before it in its edit history, in the same group." The comparison Badges keep their text ("vs v1") |
+| F11 | Lineage next to the version | In the version heading after "v3", a muted "edited from v1" only when the effective parent (FR-126-20) exists and is not the version numbered one lower; computed in `lib/artifact-runs.ts` (`editedFrom`) |
+| F12 | Em dash in the same heading | "Version regression (mock agent — not an AI evaluation)" becomes "Version regression (mock agent, not an AI evaluation)" |
+| F13 | Comparison-limit notice | "…older versions show no comparison." becomes "…a version whose compared version is older shows no comparison." |
+| F14 | SPEC-125 Missing note | Unchanged |
+| F15 | UD-7 words | Phase 1 shows "matched an existing artifact", "matched several existing artifacts and was added to the oldest one", "matched to its existing artifact", "is added to that artifact", "older version", "edited from v1"; never "linked" or "merged"; no en or em dash |
+| F16 | Design-system docs and stories (§21 step 1) | No new component, variant or token. `detail-view.stories.tsx` gets `SharedAcrossRepositories` and `detail-view.mdx` one rule ("An item found in several places shows each place's version; a place that holds an older one gets a muted 'older version' Badge"); `risky-action.stories.tsx` gets `FromTableRowLocal` (F8); `red-green-result.stories.tsx` gets `DivergedVersions` (F10, F11); all in both themes by `pnpm test:storybook` |
+| F17 | Playwright contrast coverage | `identity.spec.ts` registers two fixture repositories with one identical skill, edits one copy and rescans, asserts "older version", the link name "v1 of <name>" and its `href`, the "matched" scan line, and runs the contrast scan on the artifact page in both themes; the F8 sentence through `missing-occurrences.spec.ts`; "edited from" through a seeded diverged version pair with mock runs, restored afterwards; fixtures and jobs removed in `afterAll` |
+| F18 | Spec status | Resolved: the maintainer set `approved` |
 
 ## 12. Security considerations
 
@@ -545,9 +585,39 @@ and A21 (an edit copied before its source is rescanned splits).
 
 ## 20. Implementation status
 
-Not implemented. Today (`packages/database/src/repositories/artifacts.ts`, `findArtifact` with
-`identity: 'location'`): rule 1 and rule 4 only; no rule 2 or 3; name and description follow the
-last write; no possible-duplicate hint.
+**Phase 1 implemented (issue #20, branch `feat/spec-126-phase-1-exact-copies`, run log
+`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phases 2 and 3 not implemented.** Verified on
+2026-11-13 by the full gate (format, lint, typecheck, unit tests with 100% coverage, build,
+`verify:pack`, Playwright, Storybook) and a run of the built app:
+
+- Rule 3 (FR-126-01 to FR-126-06, FR-126-24): `applyRepositoryScan` resolves rule 1 first, then
+  the new paths in code-unit order through rule 3 or rule 4; linkable formats only (skills with a
+  frontmatter `name` read from the stored `SKILL.md`, `cursor-rule`, `claude-rule`,
+  `copilot-path-instructions`); local repositories only, candidates with an occurrence and none
+  outside local repositories (bundled examples and GitHub excluded); the oldest of several
+  candidates, counted in `ambiguousLinks`; identical new paths of one scan share one artifact
+  (`packages/database/test/identity.test.ts` "rule 3", runner tests for `local-directory`,
+  `local-git` and `github`, `apps/web/e2e/identity.spec.ts`).
+- Counts and line (FR-126-09, FR-126-10, F1, F2): `linkedOccurrences`, `ambiguousLinks` in the
+  summary and the job result (`.default(0)`), `describeScan` clauses (`apps/web/test/repositories.test.ts`,
+  e2e).
+- Lineage (FR-126-19 to FR-126-21, F10, F11, F13): migration 0006 with up/down test,
+  `parent_version_id` written on insert only, comparisons along `effectiveParents`, "edited from
+  vN" (`identity.test.ts` "version lineage", `apps/web/test/artifact-runs.test.ts`, e2e with
+  seeded mock runs).
+- Source fields (FR-126-07, FR-126-23, A9): refreshed from the active occurrences at the end of a
+  scan and in `removeRepository` (`identity.test.ts`, both scan orders, removal before and after a
+  rescan, e2e).
+- UD-3 / F4 to F6 Version column and older version Badge, UD-6 / F8 removal reason, F3 scan
+  explanation, F12 heading text, F16 stories (`detail-view`, `risky-action`, `red-green-result`).
+- NFR-126-01, NFR-126-04: one candidate read and two source-field reads per
+  `IDENTITY_LOOKUP_BATCH_SIZE` (statement count test), linear growth with `expectLinearTime`
+  (3,200 linked skills against 100).
+
+Acceptance criteria verified for Phase 1: AC-1, AC-5, AC-6, AC-7, AC-9, AC-10, and AC-8 for the
+Phase 1 UI points. Not implemented: possible-duplicate hints (Phase 2: FR-126-11 to FR-126-13,
+UD-4, UD-5, AC-2), moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example
+tests of Phase 1; its full check closes with Phase 3.
 
 ## 21. Phasing and implementation plan
 

@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-11-12
+updated: 2026-11-13
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -95,6 +95,8 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | tags | json `string[]` NOT NULL default `'[]'` | user-managed (normalized table planned, §7) |
 | created_at, updated_at | text | |
 
+Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`, for the possible-duplicate lookup planned in SPEC-126 Phase 2).
+
 ### 3.4 `artifact_versions` (immutable)
 | Column | Type | Notes |
 |---|---|---|
@@ -108,7 +110,10 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | parsed_metadata | json NOT NULL | frontmatter, activation, references, warnings |
 | source_repository_id | text | FK → repositories (set null) |
 | source_path, source_commit_sha | text | where first seen |
+| parent_version_id | text | FK → artifact_versions (set null); the version the writing occurrence held before this version was inserted, null for a new occurrence and for rows stored before migration `0006`; set on insert only ([SPEC-126](2026-11-12-cross-repository-artifact-identity.md) FR-126-19) |
 | created_at | text NOT NULL | no `updated_at` (never updated) |
+
+Index `artifact_versions_content_hash_idx` on `(content_hash)` (migration `0006`) serves the rule-3 lookup by hash across artifacts (the unique index leads with `artifact_id`; SPEC-126 NFR-126-02).
 
 ### 3.5 `artifact_occurrences`
 | Column | Type | Notes |
@@ -122,6 +127,8 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | status | text NOT NULL default `active` | `active` \| `removed`; `removed` (shown as "missing") is set only by a complete scan that did not find the path, and a scan that finds it again sets `active` (SPEC-125 FR-125-04, FR-125-05); removing the repository deletes the row (cascade, SPEC-125 FR-125-14) |
 | last_seen_at | text NOT NULL | |
 | created_at, updated_at | text | |
+
+Index `artifact_occurrences_artifact_idx` on `(artifact_id)` (migration `0006`): rule 3's local-only check and the source-field refresh read occurrences by artifact inside the scan transaction (SPEC-126 FR-126-02, FR-126-07).
 
 ### 3.6 `artifact_categories`
 PK (artifact_id, category_id); both FK cascade; `created_at`.
@@ -321,5 +328,6 @@ Each lands with its feature spec ([SPEC-105](2026-10-14-repository-synchronizati
 - **Implemented (SPEC-123 Phase 5, verified by `packages/database/test/{client,blind-reviews}.test.ts` on 2026-10-30):** `blind_reviews` and `blind_review_pairs` (§3.16, §3.17, migration `0004_blind_reviews`; a test applies it to a database migrated to `0003`, checks the unique indexes, both CHECKs, the foreign keys and the cascades, and rehearses the rollback to the `0003` shape) and the blind-review repository functions of SPEC-123 §8.3.
 - **Implemented (SPEC-123 Phase 1, verified by `packages/database/test/{client,runs}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-29):** `agent_runs.output_files_kept`/`output_files_reason` and `agent_run_files` (§3.15, migration `0003_agent_run_output_files`; a test applies it to a database migrated to `0002` with an existing agent run, which reads as not kept with no reason, and rehearses the rollback back to the `0002` shape); `insertAgentRun` stores the files in the agent run's transaction; `listAgentRunFiles` (metadata only) and `getAgentRunFile` (scoped to the benchmark run); cascade removal with the benchmark run.
 - **Implemented (SPEC-124 Phase 1, verified by `packages/database/test/{client,catalog,category-lifecycle,category-assignment,artifacts}.test.ts` on 2026-11-05):** `categories.name_key` and the partial unique index `categories_active_name_key_unique` (§3.1, migration `0005_category_name_key`; a test applies it to a database migrated to `0004` with predefined rows, one archived, and an assignment, checks the `lower(trim(name))` backfill leaves no `''`, that the index refuses a second active row and an unarchive into a clash but not an archived duplicate, and rehearses the rollback to the `0004` shape); seeding writes `name_key`; the category lifecycle and assignment functions of SPEC-124 §8.2 except the bulk ones.
+- **Implemented (SPEC-126 Phase 1, verified by `packages/database/test/{client,identity}.test.ts` on 2026-11-13):** migration `0006_artifact_identity`: the nullable `artifact_versions.parent_version_id` (FK, `ON DELETE SET NULL`, hand-edited because drizzle-kit drops the action of a column added with `ALTER TABLE`) and the indexes `artifact_versions_content_hash_idx`, `artifacts_type_name_idx` and `artifact_occurrences_artifact_idx` (§3.3 to §3.5; a test applies it to a database migrated to `0005`, checks existing versions read a null parent, the set-null action and the indexes, and rehearses the rollback). The last index was added during implementation, beyond SPEC-126 NFR-126-02, because rule 3's local-only check and the source-field refresh read occurrences by artifact inside the scan transaction.
 - **Partially:** deletion guards in §4 rely on FK constraints only (no explicit repository checks or domain errors; no delete operations are exposed yet).
 - **Not implemented:** pre-migration backups, downgrade detection, `(comparability_key, started_at)` index, orphan fixture cleanup, all planned tables in §7, PostgreSQL backend.

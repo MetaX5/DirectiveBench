@@ -204,6 +204,7 @@ test.describe.serial('artifact registry', () => {
       'registry-team',
       'Local directory',
       skillDir,
+      'v1',
       'active',
       /UTC$/,
     ]);

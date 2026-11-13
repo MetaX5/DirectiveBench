@@ -18,6 +18,7 @@ import {
 } from '../schema';
 import { LOCAL_PROVIDERS, type RepositoryOverlap } from './jobs';
 import { countRunsByVerdict, listBenchmarkRuns } from './runs';
+import { refreshSourceFields } from './artifacts';
 
 /**
  * Inserts predefined categories that do not exist yet. Renamed or archived ones are kept as-is,
@@ -468,8 +469,10 @@ export type RemoveRepositoryOutcome =
  * Removes a registered repository (SPEC-125 FR-125-14, SPEC-104 FR-104-15) in one transaction:
  * the counts are read, then one conditional `DELETE` that refuses `bundled-examples` removes the
  * row. Its occurrences cascade and its versions' `source_repository_id` becomes null (foreign
- * keys); artifacts, versions, categories, tags, notes, suites and runs are not touched. Files and
- * caches are never touched either. Any error rolls everything back.
+ * keys); versions, categories, tags, notes, suites and runs are not touched, and an artifact's
+ * name and description are refreshed from its remaining active occurrences (SPEC-126 FR-126-23,
+ * kept when none is left). Files and caches are never touched either. Any error rolls everything
+ * back.
  */
 export async function removeRepository(
   handle: DatabaseHandle,
@@ -477,6 +480,10 @@ export async function removeRepository(
 ): Promise<RemoveRepositoryOutcome> {
   return withTransaction(handle, async (db) => {
     const counts = await removalCounts(db, repositoryId);
+    const affected = await db
+      .selectDistinct({ artifactId: artifactOccurrences.artifactId })
+      .from(artifactOccurrences)
+      .where(eq(artifactOccurrences.repositoryId, repositoryId));
     const deleted = await db
       .delete(repositories)
       .where(
@@ -487,6 +494,11 @@ export async function removeRepository(
       const existing = await getRepository(db, repositoryId);
       return existing ? { status: 'not-removable' } : { status: 'not-found' };
     }
+    // The surviving copies name the artifacts now (SPEC-126 FR-126-23), as a rescan would.
+    await refreshSourceFields(
+      db,
+      affected.map(({ artifactId }) => artifactId),
+    );
     return {
       status: 'removed',
       occurrences: counts.occurrences,

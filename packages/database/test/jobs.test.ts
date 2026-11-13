@@ -669,6 +669,9 @@ describe('getRepositoryScan', () => {
       removedOccurrences: 0,
       reactivatedOccurrences: 0,
       emptyScanKeptOccurrences: 0,
+      // Stored before the SPEC-126 counts existed: read as 0.
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
     });
     // A hosted scan names the commit it read; anything but a full hex object ID is rejected.
     const commitSha = 'a'.repeat(40);

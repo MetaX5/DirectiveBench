@@ -824,7 +824,13 @@ async function slugsByPath(handle: DatabaseHandle): Promise<string[][]> {
 }
 
 /** A scan summary's SPEC-125 counts when nothing was marked, found again or kept. */
-const unmarked = { removedOccurrences: 0, reactivatedOccurrences: 0, emptyScanKeptOccurrences: 0 };
+const unmarked = {
+  removedOccurrences: 0,
+  reactivatedOccurrences: 0,
+  emptyScanKeptOccurrences: 0,
+  linkedOccurrences: 0,
+  ambiguousLinks: 0,
+};
 
 describe('applyRepositoryScan', () => {
   it('stores discovered artifacts with recomputed hashes and records a successful scan', async () => {
@@ -1085,8 +1091,10 @@ describe('applyRepositoryScan', () => {
       prepare.mockRestore();
       expect(summary).toEqual({ ...unmarked, createdArtifacts: count, createdVersions: count });
       const slugs = new Map((await slugsByPath(handle)).map(([, path, slug]) => [path, slug]));
-      expect(paths.map((path) => slugs.get(path))).toEqual(
-        paths.map((_, i) => (i === 0 ? 'review' : `review-${i + 1}`)),
+      // New paths take their slugs in code-unit path order (SPEC-126 FR-126-24).
+      const ordered = [...paths].sort();
+      expect(ordered.map((path) => slugs.get(path))).toEqual(
+        ordered.map((_, i) => (i === 0 ? 'review' : `review-${i + 1}`)),
       );
       // One read of the occupied slugs for the one base; the old loop issued about 4.5 million.
       expect(statements.filter((query) => query.includes('"artifacts"."slug"'))).toHaveLength(1);

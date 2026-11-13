@@ -304,7 +304,9 @@ export default async function RepositoriesPage({
                 records that commit. Either way it skips .git and node_modules, never follows
                 symbolic links and never runs anything from the repository. Rescanning keeps one
                 artifact per path and adds a version only when its content changed. A file that a
-                later scan does not find is marked missing; its history is kept.
+                later scan does not find is marked missing; its history is kept. A skill or rule
+                identical to one already found in another local repository is added to that artifact
+                instead of becoming a new one.
               </CardDescription>
             </CardHeader>
             <CardContent>

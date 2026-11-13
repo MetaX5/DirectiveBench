@@ -170,6 +170,32 @@ export function occurrenceStatusLabel(status: 'active' | 'removed'): 'active' | 
   return status === 'removed' ? 'missing' : 'active';
 }
 
+/** The Occurrences table's Version cell (SPEC-126 UD-3, §11.3 F4, F5). */
+export interface OccurrenceVersionLabel {
+  /** The visible link text, "v3". */
+  label: string;
+  /** The link's accessible name, "v3 of review": it starts with the visible text (F5). */
+  accessibleName: string;
+  /** The occurrence holds a version older than the artifact's latest (a diverged copy). */
+  older: boolean;
+}
+
+/**
+ * The Version cell of one occurrence: the version it holds and whether that is older than the
+ * artifact's latest (the highest number, SPEC-126 A10), so a diverged copy is visible.
+ */
+export function occurrenceVersionLabel(
+  version: number,
+  latest: number,
+  artifactName: string,
+): OccurrenceVersionLabel {
+  return {
+    label: `v${version}`,
+    accessibleName: `v${version} of ${artifactName}`,
+    older: version < latest,
+  };
+}
+
 export function repositoriesLabel(repositories: readonly { name: string }[]): string {
   const [first, ...rest] = repositories;
   if (!first) return '—';

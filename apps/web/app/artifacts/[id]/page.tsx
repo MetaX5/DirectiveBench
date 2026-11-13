@@ -42,6 +42,7 @@ import {
   resultsByVersion,
   type ComparabilityGroup,
   type VersionComparison,
+  type VersionLineage,
   type VersionResults,
 } from '@/lib/artifact-runs';
 import { HASH_EXPLANATION, firstSeenLabel, shortHash } from '@/lib/artifact-versions';
@@ -52,6 +53,7 @@ import {
   invalidParamsNotice,
   missingNote,
   occurrenceStatusLabel,
+  occurrenceVersionLabel,
   parseArtifactDetailParams,
   parseArtifactId,
   selectContent,
@@ -100,12 +102,15 @@ function OverviewTab({
 }) {
   const { artifact, occurrences, evaluations } = detail;
   const latestEval = evaluations[0];
+  const latestVersion = detail.versions[0]?.version ?? 0;
   return (
     <div className="grid gap-grid lg:grid-cols-3">
       <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle>Occurrences</CardTitle>
-          <CardDescription>Where this artifact was found, per repository and path.</CardDescription>
+          <CardDescription>
+            Where this artifact was found, per repository and path, and the version each one holds.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {occurrences.length === 0 ? (
@@ -113,32 +118,57 @@ function OverviewTab({
               No occurrences left: the repositories it was found in were removed.
             </p>
           ) : (
-            <Table data-testid="occurrences">
+            <Table data-testid="occurrences" aria-label="Occurrences">
               <THead>
                 <TR>
                   <TH>Repository</TH>
                   <TH>Provider</TH>
                   <TH>Path</TH>
+                  <TH>Version</TH>
                   <TH>Status</TH>
                   <TH>Last seen</TH>
                 </TR>
               </THead>
               <TBody>
-                {occurrences.map(({ occurrence, repository }) => (
-                  <TR key={occurrence.id}>
-                    <TD title={repository.location}>{repository.name}</TD>
-                    <TD className="text-ui">{providerLabel(repository.provider)}</TD>
-                    <TD className="font-mono text-ui">{occurrence.path}</TD>
-                    <TD>
-                      <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
-                        {occurrenceStatusLabel(occurrence.status)}
-                      </Badge>
-                    </TD>
-                    <TD className="text-ui text-muted-foreground">
-                      {formatDate(occurrence.lastSeenAt)}
-                    </TD>
-                  </TR>
-                ))}
+                {occurrences.map(({ occurrence, repository, version }) => {
+                  const held = occurrenceVersionLabel(version, latestVersion, artifact.name);
+                  return (
+                    <TR key={occurrence.id} data-testid="occurrence-row">
+                      <TD title={repository.location}>{repository.name}</TD>
+                      <TD className="text-ui">{providerLabel(repository.provider)}</TD>
+                      <TD className="font-mono text-ui">{occurrence.path}</TD>
+                      <TD>
+                        <span className="inline-flex flex-wrap items-center gap-inline-tight">
+                          <Link
+                            className="underline"
+                            aria-label={held.accessibleName}
+                            data-testid="occurrence-version"
+                            href={artifactHref(artifact.id, { tab: 'content', version })}
+                          >
+                            {held.label}
+                          </Link>
+                          {held.older ? (
+                            <Badge
+                              variant="muted"
+                              className="whitespace-nowrap"
+                              data-testid="older-version"
+                            >
+                              older version
+                            </Badge>
+                          ) : null}
+                        </span>
+                      </TD>
+                      <TD>
+                        <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
+                          {occurrenceStatusLabel(occurrence.status)}
+                        </Badge>
+                      </TD>
+                      <TD className="text-ui text-muted-foreground">
+                        {formatDate(occurrence.lastSeenAt)}
+                      </TD>
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           )}
@@ -431,7 +461,7 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
 async function loadRunHistory(
   db: Database,
   artifactId: string,
-  versions: readonly { id: string; version: number }[],
+  versions: readonly VersionLineage[],
 ): Promise<{ results: VersionResults[]; notices: string[] }> {
   const [items, total, comparisons] = await Promise.all([
     listArtifactRuns(db, artifactId),
@@ -461,8 +491,8 @@ function ResultsByVersionTab({
         <CardTitle>Benchmark results by version</CardTitle>
         <CardDescription>
           Completed runs per artifact version, newest first, grouped by comparability key. A version
-          regression compares the latest run of a version with the latest run of the previous tested
-          version in the same group.
+          regression compares the latest run of a version with the latest run of the nearest tested
+          version before it in its edit history, in the same group.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -498,10 +528,18 @@ function ResultsByVersionTab({
               >
                 <h3 className="flex flex-wrap items-center gap-2 text-body font-semibold">
                   v{block.version}
+                  {block.editedFrom === null ? null : (
+                    <span
+                      className="text-ui font-normal text-muted-foreground"
+                      data-testid="edited-from"
+                    >
+                      edited from v{block.editedFrom}
+                    </span>
+                  )}
                   {block.regressed ? (
                     <Badge variant="destructive">
                       {block.regressionMockOnly
-                        ? 'Version regression (mock agent — not an AI evaluation)'
+                        ? 'Version regression (mock agent, not an AI evaluation)'
                         : 'Version regression'}
                     </Badge>
                   ) : null}

@@ -7,6 +7,7 @@ import {
   groupCount,
   groupLabel,
   historyNotices,
+  effectiveParents,
   resultsByVersion,
   versionComparisons,
   type ComparedRun,
@@ -24,9 +25,9 @@ const profile: AgentProfile = {
 };
 
 const versions = [
-  { id: 'v3', version: 3 },
-  { id: 'v2', version: 2 },
-  { id: 'v1', version: 1 },
+  { id: 'v3', version: 3, parentVersionId: null },
+  { id: 'v2', version: 2, parentVersionId: null },
+  { id: 'v1', version: 1, parentVersionId: null },
 ];
 
 let sequence = 0;
@@ -318,12 +319,15 @@ describe('version regressions within a comparability group (SPEC-111 FR-111-50â€
   });
 
   it('compares each version with the previous tested one and never across keys', () => {
-    const comparisons = versionComparisons([
-      rep({ id: 'a3', version: 3 }, { candidateMeanScore: 0.7 }),
-      rep({ id: 'b2', version: 2, key: 'b' }, { candidateMeanScore: 0 }),
-      rep({ id: 'a1', version: 1 }, { candidateMeanScore: 0.5 }),
-      rep({ id: 'c1', version: 1, key: 'c' }, { candidateMeanScore: 1 }),
-    ]);
+    const comparisons = versionComparisons(
+      [
+        rep({ id: 'a3', version: 3 }, { candidateMeanScore: 0.7 }),
+        rep({ id: 'b2', version: 2, key: 'b' }, { candidateMeanScore: 0 }),
+        rep({ id: 'a1', version: 1 }, { candidateMeanScore: 0.5 }),
+        rep({ id: 'c1', version: 1, key: 'c' }, { candidateMeanScore: 1 }),
+      ],
+      effectiveParents(versions),
+    );
     expect([...comparisons.keys()]).toEqual(['a3']);
     expect(comparisons.get('a3')?.comparison).toEqual({
       kind: 'no-regression',
@@ -390,7 +394,7 @@ describe('historyNotices (Codex review of PR #112)', () => {
     expect(historyNotices(5, 5, false)).toEqual([]);
     expect(historyNotices(200, 1234, true)).toEqual([
       'Showing the latest 200 of 1234 runs (newest versions first). Older runs are not listed; version regressions still compare the latest run of every version and group.',
-      `Version regressions cover the newest ${ARTIFACT_VERSION_COMPARISON_LIMIT} version-and-group pairs; older versions show no comparison.`,
+      `Version regressions cover the newest ${ARTIFACT_VERSION_COMPARISON_LIMIT} version-and-group pairs; a version whose compared version is older shows no comparison.`,
     ]);
   });
 });
@@ -399,5 +403,97 @@ describe('groupLabel', () => {
   it('shows a short stable key, or that none was recorded', () => {
     expect(groupLabel('0123456789abcdef')).toBe('Comparability group 0123456789ab');
     expect(groupLabel(null)).toBe('No comparability key recorded');
+  });
+});
+
+describe('comparisons along the version lineage (SPEC-126 FR-126-20, FR-126-21, AC-9)', () => {
+  /** Versions newest first, each with its recorded parent number (null: legacy, no record). */
+  function lineage(parents: Record<number, number | null>) {
+    return Object.entries(parents)
+      .map(([version, parent]) => ({
+        id: `v${version}`,
+        version: Number(version),
+        parentVersionId: parent === null ? null : `v${parent}`,
+      }))
+      .sort((a, b) => b.version - a.version);
+  }
+  const tested = (...numbers: number[]) =>
+    numbers.map((version) =>
+      rep({ id: `r${version}`, version }, { candidateMeanScore: version / 10 }),
+    );
+  function compared(parents: Record<number, number | null>, runs: number[]) {
+    const results = resultsByVersion(lineage(parents), [], tested(...runs));
+    const comparisons = versionComparisons(tested(...runs), effectiveParents(lineage(parents)));
+    return {
+      pairs: Object.fromEntries(
+        [...comparisons.entries()].map(([runId, { comparison }]) => [
+          runId,
+          comparison.previousVersion,
+        ]),
+      ),
+      editedFrom: Object.fromEntries(results.map((b) => [b.version, b.editedFrom])),
+    };
+  }
+
+  it('derives the effective parent: recorded, else the number one lower (legacy rows)', () => {
+    expect(
+      effectiveParents([
+        { id: 'a', version: 1, parentVersionId: null },
+        { id: 'b', version: 2, parentVersionId: null },
+        { id: 'c', version: 3, parentVersionId: 'a' },
+        // A recorded parent that is not older, or not listed, is ignored.
+        { id: 'd', version: 4, parentVersionId: 'e' },
+        { id: 'e', version: 5, parentVersionId: 'gone' },
+      ]),
+    ).toEqual(
+      new Map([
+        [2, 1],
+        [3, 1],
+        [4, 3],
+        [5, 4],
+      ]),
+    );
+  });
+
+  it('keeps the comparisons of an artifact with one line', () => {
+    expect(compared({ 1: null, 2: 1, 3: 2 }, [1, 2, 3])).toEqual({
+      pairs: { r2: 1, r3: 2 },
+      editedFrom: { 1: null, 2: null, 3: null },
+    });
+    expect(compared({ 1: null, 2: null, 3: null }, [1, 3])).toEqual({
+      pairs: { r3: 1 },
+      editedFrom: { 1: null, 2: null, 3: null },
+    });
+  });
+
+  it('compares two diverged copies each with its own ancestor, never with each other', () => {
+    // A: v1 -> v2; B: v1 -> v3.
+    expect(compared({ 1: null, 2: 1, 3: 1 }, [1, 2, 3])).toEqual({
+      pairs: { r2: 1, r3: 1 },
+      editedFrom: { 1: null, 2: null, 3: 1 },
+    });
+  });
+
+  it('follows creation ancestry after the copies converge and diverge again, and after a revert', () => {
+    // B adopts v2 and edits it into v4: v4 was edited from v2 (B's v3 is skipped).
+    expect(compared({ 1: null, 2: 1, 3: 1, 4: 2 }, [1, 2, 3, 4]).pairs).toEqual({
+      r2: 1,
+      r3: 1,
+      r4: 2,
+    });
+    // v2 untested: v4 is compared with v1, its nearest tested ancestor.
+    expect(compared({ 1: null, 2: 1, 3: 1, 4: 2 }, [1, 3, 4])).toEqual({
+      pairs: { r3: 1, r4: 1 },
+      editedFrom: { 1: null, 2: null, 3: 1, 4: 2 },
+    });
+    // A reverts v2 to v1 and edits into v3: compared with v1.
+    expect(compared({ 1: null, 2: 1, 3: 1 }, [1, 2, 3]).pairs.r3).toBe(1);
+  });
+
+  it('skips untested ancestors once per group and shows nothing without a tested one', () => {
+    // v3 and v4 both come from the untested v2: the second walk reuses the first.
+    expect(compared({ 1: null, 2: 1, 3: 2, 4: 2 }, [1, 3, 4]).pairs).toEqual({ r3: 1, r4: 1 });
+    // No tested ancestor at all (v1 untested): no comparison, also through the remembered walk.
+    expect(compared({ 1: null, 2: 1, 3: 2, 4: 2 }, [3, 4]).pairs).toEqual({});
   });
 });
