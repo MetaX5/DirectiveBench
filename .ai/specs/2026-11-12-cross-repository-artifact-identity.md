@@ -12,7 +12,7 @@ related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, 
 
 ## 1. Summary
 
-**Proposed, not implemented.** Today a scan identifies an artifact only by its location (SPEC-101
+**Phase 1 implemented (exact copies, lineage, §20); Phases 2 and 3 proposed.** Before this spec a scan identified an artifact only by its location (SPEC-101
 §8.3 rule 1: same repository and path) and otherwise creates a new artifact (rule 4). A skill
 copied unchanged into a second repository therefore becomes a second artifact (`review`,
 `review-2`) with its own versions, categories and history, and a skill directory moved inside one
@@ -583,9 +583,39 @@ and A21 (an edit copied before its source is rescanned splits).
 
 ## 20. Implementation status
 
-Not implemented. Today (`packages/database/src/repositories/artifacts.ts`, `findArtifact` with
-`identity: 'location'`): rule 1 and rule 4 only; no rule 2 or 3; name and description follow the
-last write; no possible-duplicate hint.
+**Phase 1 implemented (issue #20, branch `feat/spec-126-phase-1-exact-copies`, run log
+`.ai/runs/2026-11-13-spec-126-phase-1.md`); Phases 2 and 3 not implemented.** Verified on
+2026-11-13 by the full gate (format, lint, typecheck, unit tests with 100% coverage, build,
+`verify:pack`, Playwright, Storybook) and a run of the built app:
+
+- Rule 3 (FR-126-01 to FR-126-06, FR-126-24): `applyRepositoryScan` resolves rule 1 first, then
+  the new paths in code-unit order through rule 3 or rule 4; linkable formats only (skills with a
+  frontmatter `name` read from the stored `SKILL.md`, `cursor-rule`, `claude-rule`,
+  `copilot-path-instructions`); local repositories only, candidates with an occurrence and none
+  outside local repositories (bundled examples and GitHub excluded); the oldest of several
+  candidates, counted in `ambiguousLinks`; identical new paths of one scan share one artifact
+  (`packages/database/test/identity.test.ts` "rule 3", runner tests for `local-directory`,
+  `local-git` and `github`, `apps/web/e2e/identity.spec.ts`).
+- Counts and line (FR-126-09, FR-126-10, F1, F2): `linkedOccurrences`, `ambiguousLinks` in the
+  summary and the job result (`.default(0)`), `describeScan` clauses (`apps/web/test/repositories.test.ts`,
+  e2e).
+- Lineage (FR-126-19 to FR-126-21, F10, F11, F13): migration 0006 with up/down test,
+  `parent_version_id` written on insert only, comparisons along `effectiveParents`, "edited from
+  vN" (`identity.test.ts` "version lineage", `apps/web/test/artifact-runs.test.ts`, e2e with
+  seeded mock runs).
+- Source fields (FR-126-07, FR-126-23, A9): refreshed from the active occurrences at the end of a
+  scan and in `removeRepository` (`identity.test.ts`, both scan orders, removal before and after a
+  rescan, e2e).
+- UD-3 / F4 to F6 Version column and older version Badge, UD-6 / F8 removal reason, F3 scan
+  explanation, F12 heading text, F16 stories (`detail-view`, `risky-action`, `red-green-result`).
+- NFR-126-01, NFR-126-04: one candidate read and two source-field reads per
+  `IDENTITY_LOOKUP_BATCH_SIZE` (statement count test), linear growth with `expectLinearTime`
+  (3,200 linked skills against 100).
+
+Acceptance criteria verified for Phase 1: AC-1, AC-5, AC-6, AC-7, AC-9, AC-10, and AC-8 for the
+Phase 1 UI points. Not implemented: possible-duplicate hints (Phase 2: FR-126-11 to FR-126-13,
+UD-4, UD-5, AC-2), moves (Phase 3: FR-126-14 to FR-126-18, AC-3). AC-4 has the bundled-example
+tests of Phase 1; its full check closes with Phase 3.
 
 ## 21. Phasing and implementation plan
 
