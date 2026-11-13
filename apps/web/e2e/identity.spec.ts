@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { scanTextContrast } from './contrast';
@@ -459,5 +459,138 @@ test.describe.serial('possible duplicates (SPEC-126 Phase 2)', () => {
     await expect(link).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/artifacts/${ids[`${DUP}-2`]}$`));
+  });
+});
+
+// SPEC-126 Phase 3 (§11.5 H12): between two scans of one repository, a renamed rule and a moved
+// skill without a frontmatter name (neither explainable by rule 3) keep their artifact and
+// occurrence (AC-3); two identical skills moved at once are not moved.
+const MOVES = 'identity-e2e-moves';
+const RULE_FROM = '.cursor/rules/identity-e2e-no-default-export.mdc';
+const RULE_TO = '.cursor/rules/identity-e2e-no-default-exports.mdc';
+const MOVER_FROM = '.claude/skills/identity-e2e-mover';
+const MOVER_TO = '.agents/skills/identity-e2e-mover-moved';
+const TWINS = ['identity-e2e-twin-x', 'identity-e2e-twin-y'];
+// Its own root (lesson 2026-11-13).
+const movesSources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'identity-moves-')));
+
+function moveInFixture(from: string, to: string): void {
+  const target = join(movesSources, MOVES, to);
+  mkdirSync(dirname(target), { recursive: true });
+  renameSync(join(movesSources, MOVES, from), target);
+}
+
+function occurrenceAt(path: string): Promise<{ id: string; artifactId: string; status: string }> {
+  return withDatabase(
+    (db) =>
+      db
+        .prepare(
+          `select o.id, o.artifact_id as artifactId, o.status from artifact_occurrences o
+             join repositories r on r.id = o.repository_id where r.name = ? and o.path = ?`,
+        )
+        .get(MOVES, path) as { id: string; artifactId: string; status: string },
+  );
+}
+
+test.describe.serial('moves keep identity (SPEC-126 Phase 3)', () => {
+  let jobsBefore = new Set<string>();
+  let artifactsBefore = new Set<string>();
+
+  test.beforeAll(async () => {
+    [jobsBefore, artifactsBefore] = await withDatabase((db) => [
+      new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+      new Set((db.prepare('select id from artifacts').all() as { id: string }[]).map((a) => a.id)),
+    ]);
+    const files: Record<string, string> = {
+      'AGENTS.md': '# Moves fixture\n',
+      [RULE_FROM]: '---\ndescription: No default exports\nglobs: "*.ts"\n---\nUse named exports.\n',
+      [`${MOVER_FROM}/SKILL.md`]: '---\ndescription: Move fixture.\n---\n# Mover\n',
+    };
+    for (const twin of TWINS)
+      files[`pair/${twin}/SKILL.md`] = '---\ndescription: Twin.\n---\n# Twin\n';
+    for (const [relPath, content] of Object.entries(files)) {
+      const path = join(movesSources, MOVES, relPath);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content);
+    }
+  });
+
+  // Leave the shared database as found (lesson 2026-11-10).
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = (sql: string, id: string) => db.prepare(sql).run(id);
+      remove('delete from repositories where name = ?', MOVES);
+      for (const { id } of db.prepare('select id from artifacts').all() as { id: string }[]) {
+        if (!artifactsBefore.has(id)) remove('delete from artifacts where id = ?', id);
+      }
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) remove('delete from jobs where id = ?', id);
+      }
+    });
+    rmSync(movesSources, { recursive: true, force: true });
+  });
+
+  test('a renamed rule and a moved skill without a name keep their artifact and occurrence (AC-3)', async ({
+    page,
+  }) => {
+    await registerAt(page, movesSources, MOVES);
+    await scan(page, MOVES);
+    const rule = await occurrenceAt(RULE_FROM);
+    const mover = await occurrenceAt(MOVER_FROM);
+
+    moveInFixture(RULE_FROM, RULE_TO);
+    moveInFixture(MOVER_FROM, MOVER_TO);
+    await scan(page, MOVES);
+    const status = page.getByTestId('scan-status');
+    await expect(status).toHaveText(
+      /^Scanned identity-e2e-moves: \d+ files? in [\d.]+ (ms|s), 5 artifacts found \(0 new, 2 moved, 1 new version\), 0 errors\.$/,
+    );
+    await expect(status).toHaveAttribute('data-state', 'done');
+    await expect(page.getByTestId('scan-explanation')).toContainText(
+      'A skill, rule or instruction moved or renamed inside the repository between two scans keeps its artifact and history when its content is unchanged and nothing else added or removed in that scan has the same content. A renamed rule file gets a new version, because a rule is named after its file.',
+    );
+    await expectContrast(page, 'scan line with moves');
+
+    expect(await occurrenceAt(RULE_TO)).toEqual({ ...rule, status: 'active' });
+    expect(await occurrenceAt(MOVER_TO)).toEqual({ ...mover, status: 'active' });
+
+    // The skill: same URL, one row with the new path, same version, no missing row (H5).
+    await page.goto(`/artifacts/${mover.artifactId}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('identity-e2e-mover-moved');
+    let table = page.getByRole('region', { name: 'Occurrences' });
+    await expect(table.getByTestId('occurrence-row')).toHaveCount(1);
+    await expect(table.getByTestId('occurrence-row')).toContainText(MOVER_TO);
+    await expect(table.getByTestId('occurrence-row')).toContainText('active');
+    await expect(table.getByTestId('occurrence-version')).toHaveText('v1');
+
+    // The rule: same URL, the next version (A13), and the Version history says why (H6).
+    await page.goto(`/artifacts/${rule.artifactId}`);
+    table = page.getByRole('region', { name: 'Occurrences' });
+    await expect(table.getByTestId('occurrence-row')).toHaveCount(1);
+    await expect(table.getByTestId('occurrence-row')).toContainText(RULE_TO);
+    await expect(table.getByTestId('occurrence-version')).toHaveText('v2');
+    await expect(table.getByTestId('older-version')).toHaveCount(0);
+    await page.goto(`/artifacts/${rule.artifactId}?tab=versions`);
+    await expect(
+      page.getByText(
+        'Versions are immutable; a new version is created only when the content or a file name changes.',
+      ),
+    ).toBeVisible();
+  });
+
+  test('two identical skills moved at once are not moved; 320px and contrast', async ({ page }) => {
+    for (const twin of TWINS) moveInFixture(`pair/${twin}`, `moved/${twin}`);
+    await scan(page, MOVES);
+    const status = page.getByTestId('scan-status');
+    await expect(status).toContainText(
+      '(2 new, 2 new versions), 0 errors. 2 possible moves were not applied because several files matched. 2 no longer found (marked missing).',
+    );
+    await expect(status).toHaveAttribute('data-state', 'done');
+    for (const twin of TWINS) expect((await occurrenceAt(`pair/${twin}`)).status).toBe('removed');
+    await expectContrast(page, 'scan line with ambiguous moves');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.reload();
+    await expect(status).toBeVisible();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 });
