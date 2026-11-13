@@ -24,6 +24,8 @@ for (const theme of ['light', 'dark'] as const) {
       '/',
       '/repositories',
       '/artifacts',
+      // The filter notice for a repository that is not registered (issue 216).
+      '/artifacts?repository=repo_never',
       '/categories',
       '/benchmarks',
       '/builder',

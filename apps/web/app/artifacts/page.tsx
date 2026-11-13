@@ -32,7 +32,8 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import {
   MAX_SEARCH_LENGTH,
-  invalidParamsNotice,
+  dropUnknownFilters,
+  filterNotice,
   parseArtifactListParams,
   repositoriesLabel,
   repositoryOptions,
@@ -59,21 +60,30 @@ export default async function ArtifactsPage({
         <NotInitialized />
       </>
     );
-  const { value: filter, invalid } = parseArtifactListParams(await searchParams);
+  const { value: requested, invalid } = parseArtifactListParams(await searchParams);
+  // Listed before the artifacts: a well-formed repository id or category slug that names nothing
+  // is dropped and named in the notice, like an invalid value (issue 216, E2 and E5).
+  const registered = await listRepositories(handle.db);
+  const allCategories = await listCategories(handle.db);
+  const { value: filter, unknown } = dropUnknownFilters(requested, {
+    repositoryIds: registered.map((r) => r.id),
+    categorySlugs: allCategories.map((c) => c.slug),
+  });
+  const ignored = [...invalid, ...unknown];
   const filtered = Object.keys(filter).length > 0;
   const artifacts = await listArtifacts(handle.db, filter);
   const registryEmpty = artifacts.length === 0 && (!filtered || !(await hasArtifacts(handle.db)));
-  const repositories = repositoryOptions(await listRepositories(handle.db));
+  const repositories = repositoryOptions(registered);
   // Active categories, plus the filtered one when it is archived (FR-124-15).
-  const categories = categoryFilterOptions(await listCategories(handle.db), filter.category);
-  const notice = invalidParamsNotice(invalid);
+  const categories = categoryFilterOptions(allCategories, filter.category);
+  const notice = filterNotice(invalid, unknown);
   // The bulk row's count and fingerprint come from the one list result the table renders, so
   // they never describe artifacts the user did not see (SPEC-124 FR-124-13). Once the list
   // paginates (issue 53) they must cover every match, not one page (§19).
   const bulk = bulkCategoryModel({
     listedIds: artifacts.map((a) => a.id),
     filter,
-    invalid,
+    invalid: ignored,
     active: await listActiveCategoryNames(handle.db),
   });
 
@@ -133,7 +143,7 @@ export default async function ArtifactsPage({
             <Button type="submit" variant="outline">
               Filter
             </Button>
-            {filtered || invalid.length ? (
+            {filtered || ignored.length ? (
               <Link href="/artifacts" className="h-8 px-2 text-body leading-8 underline">
                 Clear filters
               </Link>
