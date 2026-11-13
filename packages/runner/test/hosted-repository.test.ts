@@ -33,6 +33,7 @@ import {
   HTTPS_TRANSPORT,
   LocalRunner,
   NOT_FOUND_OR_NOT_PUBLIC,
+  REPOSITORY_ID,
   registerHostedUrl,
   scanHostedRepository,
   type HostedRepositoryOptions,
@@ -798,6 +799,27 @@ describe('scanHostedRepository', () => {
       code: 'scan-failed',
       message: 'The stored repository location is invalid.',
     });
+  });
+
+  it('refuses an id DirectiveBench does not create before touching the cache (issue 59 J6)', async () => {
+    const remote = new FixtureRemote(remotes, 'acme', 'ids', { 'AGENTS.md': '# Rules\n' });
+    const repository = await registered(remote);
+    expect(repository.id).toMatch(REPOSITORY_ID);
+    for (const id of ['repo-1', 'repo_1', `${repository.id}x`]) {
+      expect(
+        await scanHostedRepository(
+          handle,
+          { jobId: 'job_x', repository: { ...repository, id } },
+          options(),
+        ),
+      ).toEqual({
+        ok: false,
+        code: 'scan-failed',
+        message: 'The stored repository location is invalid.',
+      });
+    }
+    expect(readdirSync(join(cacheDir(), 'repos'))).toEqual([]);
+    expect(await scan(repository)).toMatchObject({ ok: true });
   });
 
   it('rejects a tree with a path that is not normalised before downloading anything', async () => {

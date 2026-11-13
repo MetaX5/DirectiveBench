@@ -1,3 +1,4 @@
+export * from './hosted-cache';
 export * from './hosted-git';
 export * from './hosted-repository';
 export * from './import';

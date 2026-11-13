@@ -41,6 +41,7 @@ import {
   type HostedGitTransport,
   type SnapshotEntry,
 } from './hosted-git';
+import { REPOSITORY_ID } from './hosted-cache';
 import { findGitExecutable } from './repository-registration';
 import { ScanCancelledError, storeScanResults, toScannedArtifact } from './repository-scan';
 
@@ -162,9 +163,6 @@ export async function registerHostedUrl(
 }
 
 type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
-
-/** IDs DirectiveBench creates (`repo_…`); anything else never becomes part of a cache path. */
-const REPOSITORY_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Most bytes of blobs one `cat-file --batch` of step 5 reads, so at most one batch of git's output
