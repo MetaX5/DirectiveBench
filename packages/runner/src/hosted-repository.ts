@@ -408,6 +408,8 @@ export async function scanHostedRepository(
     removedOccurrences: stored.summary.removedOccurrences,
     reactivatedOccurrences: stored.summary.reactivatedOccurrences,
     emptyScanKeptOccurrences: stored.summary.emptyScanKeptOccurrences,
+    linkedOccurrences: stored.summary.linkedOccurrences,
+    ambiguousLinks: stored.summary.ambiguousLinks,
     warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),

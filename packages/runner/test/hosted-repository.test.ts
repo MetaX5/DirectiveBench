@@ -128,6 +128,26 @@ async function scan(
   return scanHostedRepository(handle, { jobId: job.id, repository: current }, options(overrides));
 }
 
+describe('hosted copies never link (SPEC-126 A16)', () => {
+  it('keeps the same skill in two GitHub repositories as two artifacts', async () => {
+    const files = { 'skills/review/SKILL.md': SKILL };
+    const first = await registered(new FixtureRemote(remotes, 'acme', 'first', files));
+    const second = await registered(new FixtureRemote(remotes, 'acme', 'second', files));
+    expect(await scan(first)).toMatchObject({
+      ok: true,
+      createdArtifacts: 1,
+      linkedOccurrences: 0,
+    });
+    expect(await scan(second)).toMatchObject({
+      ok: true,
+      createdArtifacts: 1,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
+    });
+    expect(await handle.db.$count(schema.artifacts)).toBe(2);
+  });
+});
+
 describe('registerHostedUrl', () => {
   it('registers a public repository with provider github and its default branch, without credentials', async () => {
     const remote = teamSkills();

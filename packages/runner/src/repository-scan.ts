@@ -277,6 +277,8 @@ export async function scanLocalRepository(
     removedOccurrences: summary.removedOccurrences,
     reactivatedOccurrences: summary.reactivatedOccurrences,
     emptyScanKeptOccurrences: summary.emptyScanKeptOccurrences,
+    linkedOccurrences: summary.linkedOccurrences,
+    ambiguousLinks: summary.ambiguousLinks,
     warningCount: discovery.artifacts.reduce((sum, a) => sum + a.warnings.length, 0),
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
