@@ -7,5 +7,6 @@ export * from './frontmatter';
 export * from './hash';
 export * from './hosted-repository';
 export * from './models';
+export * from './moves';
 export * from './redact';
 export * from './repository-path';
