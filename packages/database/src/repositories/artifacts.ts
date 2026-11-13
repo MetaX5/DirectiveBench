@@ -849,14 +849,19 @@ async function resolveMoves(
         format: artifactVersions.format,
         contentHash: artifactVersions.contentHash,
         primaryFile: artifactVersions.primaryFile,
-        files: artifactVersions.files,
+        // A skill matches by its content hash: its files (content included) are not loaded.
+        files: sql<
+          StoredArtifactFile[] | null
+        >`case when ${artifactVersions.format} = 'skill-md' then null else ${artifactVersions.files} end`.mapWith(
+          (value: string) => JSON.parse(value) as StoredArtifactFile[],
+        ),
       })
       .from(artifactVersions)
       .where(
         inArray(artifactVersions.id, versionIds.slice(start, start + IDENTITY_LOOKUP_BATCH_SIZE)),
       );
     for (const version of versions) {
-      const matchHash = matchHashOf(version, version.files);
+      const matchHash = matchHashOf(version, version.files ?? []);
       if (matchHash !== undefined) {
         matchHashByVersion.set(version.id, { format: version.format, matchHash });
       }

@@ -997,10 +997,7 @@ describe('rule 2: moves keep identity (SPEC-126 FR-126-14 to FR-126-18, AC-3)', 
           skill(`${dir}/s${String(i).padStart(4, '0')}`, skillMd(null, `Body ${i}.`)),
         );
       const isUnseenRead = (query: string) =>
-        query.startsWith('select') &&
-        query.startsWith(
-          'select "id", "format", "content_hash", "primary_file", "files" from "artifact_versions"',
-        ) &&
+        query.startsWith('select "id", "format", "content_hash", "primary_file", case when') &&
         query.includes('"artifact_versions"."id" in');
       await scan(handle, a, skills('old'));
 
