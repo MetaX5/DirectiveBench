@@ -56,6 +56,7 @@ import {
   occurrenceVersionLabel,
   parseArtifactDetailParams,
   parseArtifactId,
+  possibleDuplicatesCard,
   selectContent,
   type ArtifactTab,
   type SearchParams,
@@ -103,77 +104,132 @@ function OverviewTab({
   const { artifact, occurrences, evaluations } = detail;
   const latestEval = evaluations[0];
   const latestVersion = detail.versions[0]?.version ?? 0;
+  const duplicates = possibleDuplicatesCard(artifact, detail.possibleDuplicates);
   return (
     <div className="grid gap-grid lg:grid-cols-3">
-      <Card className="lg:col-span-2">
-        <CardHeader>
-          <CardTitle>Occurrences</CardTitle>
-          <CardDescription>
-            Where this artifact was found, per repository and path, and the version each one holds.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {occurrences.length === 0 ? (
-            <p data-testid="no-occurrences" className="text-body text-muted-foreground">
-              No occurrences left: the repositories it was found in were removed.
-            </p>
-          ) : (
-            <Table data-testid="occurrences" aria-label="Occurrences">
-              <THead>
-                <TR>
-                  <TH>Repository</TH>
-                  <TH>Provider</TH>
-                  <TH>Path</TH>
-                  <TH>Version</TH>
-                  <TH>Status</TH>
-                  <TH>Last seen</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {occurrences.map(({ occurrence, repository, version }) => {
-                  const held = occurrenceVersionLabel(version, latestVersion, artifact.name);
-                  return (
-                    <TR key={occurrence.id} data-testid="occurrence-row">
-                      <TD title={repository.location}>{repository.name}</TD>
-                      <TD className="text-ui">{providerLabel(repository.provider)}</TD>
-                      <TD className="font-mono text-ui">{occurrence.path}</TD>
-                      <TD>
-                        <span className="inline-flex flex-wrap items-center gap-inline-tight">
-                          <Link
-                            className="underline"
-                            aria-label={held.accessibleName}
-                            data-testid="occurrence-version"
-                            href={artifactHref(artifact.id, { tab: 'content', version })}
-                          >
-                            {held.label}
-                          </Link>
-                          {held.older ? (
-                            <Badge
-                              variant="muted"
-                              className="whitespace-nowrap"
-                              data-testid="older-version"
+      {/* Where it is and what else has its name, together (SPEC-126 §11.4 G4). */}
+      <div className="flex min-w-0 flex-col gap-grid lg:col-span-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Occurrences</CardTitle>
+            <CardDescription>
+              Where this artifact was found, per repository and path, and the version each one
+              holds.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {occurrences.length === 0 ? (
+              <p data-testid="no-occurrences" className="text-body text-muted-foreground">
+                No occurrences left: the repositories it was found in were removed.
+              </p>
+            ) : (
+              <Table data-testid="occurrences" aria-label="Occurrences">
+                <THead>
+                  <TR>
+                    <TH>Repository</TH>
+                    <TH>Provider</TH>
+                    <TH>Path</TH>
+                    <TH>Version</TH>
+                    <TH>Status</TH>
+                    <TH>Last seen</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {occurrences.map(({ occurrence, repository, version }) => {
+                    const held = occurrenceVersionLabel(version, latestVersion, artifact.name);
+                    return (
+                      <TR key={occurrence.id} data-testid="occurrence-row">
+                        <TD title={repository.location}>{repository.name}</TD>
+                        <TD className="text-ui">{providerLabel(repository.provider)}</TD>
+                        <TD className="font-mono text-ui">{occurrence.path}</TD>
+                        <TD>
+                          <span className="inline-flex flex-wrap items-center gap-inline-tight">
+                            <Link
+                              className="underline"
+                              aria-label={held.accessibleName}
+                              data-testid="occurrence-version"
+                              href={artifactHref(artifact.id, { tab: 'content', version })}
                             >
-                              older version
-                            </Badge>
-                          ) : null}
-                        </span>
+                              {held.label}
+                            </Link>
+                            {held.older ? (
+                              <Badge
+                                variant="muted"
+                                className="whitespace-nowrap"
+                                data-testid="older-version"
+                              >
+                                older version
+                              </Badge>
+                            ) : null}
+                          </span>
+                        </TD>
+                        <TD>
+                          <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
+                            {occurrenceStatusLabel(occurrence.status)}
+                          </Badge>
+                        </TD>
+                        <TD className="text-ui text-muted-foreground">
+                          {formatDate(occurrence.lastSeenAt)}
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+        {duplicates ? (
+          <Card data-testid="possible-duplicates">
+            <CardHeader>
+              <CardTitle>Possible duplicates</CardTitle>
+              <CardDescription>
+                Other artifacts with the same name and format. Each one keeps its own versions and
+                results.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-stack">
+              <Table aria-label="Possible duplicates">
+                <THead>
+                  <TR>
+                    <TH>Artifact</TH>
+                    <TH>Repositories</TH>
+                    <TH>Content</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {duplicates.rows.map((row) => (
+                    <TR key={row.id} data-testid="duplicate-row">
+                      <TD className="whitespace-nowrap">
+                        <Link className="font-mono text-ui underline" href={row.href}>
+                          {row.slug}
+                        </Link>
                       </TD>
-                      <TD>
-                        <Badge variant={occurrence.status === 'active' ? 'outline' : 'muted'}>
-                          {occurrenceStatusLabel(occurrence.status)}
-                        </Badge>
+                      <TD className="text-ui wrap-anywhere">
+                        {row.repositories ?? <Badge variant="muted">Missing</Badge>}
                       </TD>
-                      <TD className="text-ui text-muted-foreground">
-                        {formatDate(occurrence.lastSeenAt)}
-                      </TD>
+                      <TD className="text-ui">{row.content}</TD>
                     </TR>
-                  );
-                })}
-              </TBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                  ))}
+                </TBody>
+              </Table>
+              {duplicates.more ? (
+                <p data-testid="duplicates-more" className="text-ui text-muted-foreground">
+                  {duplicates.more.text}{' '}
+                  <Link className="underline" href={duplicates.more.href}>
+                    {duplicates.more.linkText}
+                  </Link>
+                </p>
+              ) : null}
+              {duplicates.note ? (
+                <p data-testid="duplicates-note" className="text-ui text-muted-foreground">
+                  {duplicates.note}
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
 
       <div className="flex flex-col gap-grid">
         <Card>
@@ -610,6 +666,12 @@ export default async function ArtifactPage({
             <Badge variant="outline">{artifact.type}</Badge>
             {latest ? <Badge variant="secondary">{latest.format}</Badge> : null}
             {detail.missing ? <Badge variant="muted">Missing</Badge> : null}
+            {/* Shown on every tab, not only with the Overview card (SPEC-126 §11.4 G3). */}
+            {detail.possibleDuplicates.total > 0 ? (
+              <Badge variant="outline" data-testid="possible-duplicate">
+                Possible duplicate
+              </Badge>
+            ) : null}
           </>
         }
       />
