@@ -119,8 +119,8 @@ export const FromTableRow: Story = {
             and benchmark results are kept.
           </li>
           <li>
-            The copy downloaded from GitHub stays in DirectiveBench&apos;s cache. Deleting it is
-            planned.
+            The copy downloaded from GitHub is deleted from DirectiveBench&apos;s cache. Nothing on
+            GitHub is changed.
           </li>
           <li>Registering it again later creates new artifacts instead of reusing these ones.</li>
         </ul>

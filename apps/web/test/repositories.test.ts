@@ -721,9 +721,10 @@ describe('removalReasons (SPEC-125 FR-125-15, §11.3 D15)', () => {
     );
   });
 
-  it('says the hosted download stays in the cache, and shows only two reasons without occurrences', () => {
+  it('says the hosted download is deleted from the cache, and shows only two reasons without occurrences', () => {
+    // Issue 59 J9: the runner deletes the cache of a removed repository (SPEC-105 FR-105-19).
     const hosted =
-      "The copy downloaded from GitHub stays in DirectiveBench's cache. Deleting it is planned.";
+      "The copy downloaded from GitHub is deleted from DirectiveBench's cache. Nothing on GitHub is changed.";
     expect(
       removalReasons(impact({ provider: 'github', location: 'https://github.com/o/r' }))[2],
     ).toBe(hosted);
@@ -733,7 +734,7 @@ describe('removalReasons (SPEC-125 FR-125-15, §11.3 D15)', () => {
     ).toBe(reregisterHosted);
     expect(removalReasons(impact({ provider: 'local-directory' }))[3]).toBe(reregister);
     expect(removalReasons(impact({ provider: 'gitlab' }))[2]).toBe(
-      "The copy downloaded from GitLab stays in DirectiveBench's cache. Deleting it is planned.",
+      "The copy downloaded from GitLab is deleted from DirectiveBench's cache. Nothing on GitLab is changed.",
     );
     expect(
       removalReasons(

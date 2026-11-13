@@ -13,15 +13,27 @@ import {
   type AgentModeReadiness,
   type ClaudeReadinessCode,
 } from '@directivebench/agent-adapters';
-import { MIN_KNOWN_SECRET_LENGTH, dataDirLayout, resolveDataDir } from '@directivebench/core';
-import { enqueueBenchmarkJob, getBenchmarkRunDetail, openDatabase } from '@directivebench/database';
+import {
+  MIN_KNOWN_SECRET_LENGTH,
+  dataDirLayout,
+  resolveDataDir,
+  type DataDirLayout,
+} from '@directivebench/core';
+import {
+  enqueueBenchmarkJob,
+  getBenchmarkRunDetail,
+  listOrphanedRepositoryCaches,
+  openDatabase,
+} from '@directivebench/database';
 import {
   CA_BUNDLE_VARIABLE,
   LocalRunner,
   MIN_HOSTED_GIT_VERSION,
   buildGitEnv,
+  cacheErrorCode,
   findGitExecutable,
   importBundledExample,
+  listRepositoryCaches,
   resolveCaBundle,
 } from '@directivebench/runner';
 import { createFileRunnerLogger } from './logger';
@@ -123,6 +135,86 @@ async function caBundleCheck(env: NodeJS.ProcessEnv): Promise<Check> {
       result.caBundle === null
         ? `${CA_BUNDLE_VARIABLE} not set (git's default CA bundle)`
         : `${CA_BUNDLE_VARIABLE} is set and resolves to a readable regular file`,
+  };
+}
+
+/** How many names of entries DirectiveBench did not create the `hosted-cache` check prints. */
+const UNKNOWN_CACHE_ENTRIES_SHOWN = 5;
+
+/**
+ * Cached GitHub downloads of removed repositories and entries DirectiveBench did not create in
+ * `<dataDir>/cache/repos` (SPEC-009 §4, SPEC-105 FR-105-19, issue 59 J8). The same classification
+ * as the runner's sweep, read-only: nothing is deleted and the database is opened read-only.
+ * Only warns, so the exit code never changes.
+ */
+async function hostedCacheCheck(layout: DataDirLayout): Promise<Check> {
+  const name = 'hosted-cache';
+  if (!existsSync(layout.database)) {
+    return { name, status: 'ok', detail: 'not checked: no database yet' };
+  }
+  const reposDir = join(layout.cache, 'repos');
+  let listing;
+  try {
+    listing = await listRepositoryCaches(layout.cache);
+  } catch (error) {
+    return {
+      name,
+      status: 'warn',
+      detail: `${reposDir} cannot be read (${cacheErrorCode(error)})`,
+      hint: 'Check that the data directory and its cache folder are readable and are directories, then run `directivebench doctor` again.',
+    };
+  }
+  if (listing === null) return { name, status: 'ok', detail: 'no GitHub downloads cached' };
+  let orphans: string[];
+  try {
+    const handle = openDatabase(layout.database, { readOnly: true });
+    try {
+      orphans = await listOrphanedRepositoryCaches(handle, listing.caches);
+    } finally {
+      handle.close();
+    }
+  } catch (error) {
+    return {
+      name,
+      status: 'warn',
+      detail: `not checked: the database cannot be read (${cacheErrorCode(error)})`,
+      hint: 'Fix the database check above, then run `directivebench doctor` again.',
+    };
+  }
+  const details: string[] = [];
+  const hints: string[] = [];
+  if (orphans.length > 0) {
+    details.push(
+      orphans.length === 1
+        ? '1 cached download belongs to a removed repository'
+        : `${orphans.length} cached downloads belong to removed repositories`,
+    );
+    hints.push(
+      'DirectiveBench deletes them within a minute while it runs, or at its next start. If this warning stays, check runner.log for cache-delete-failed.',
+    );
+  }
+  const { unknown } = listing;
+  if (unknown.length > 0) {
+    const shown = unknown
+      .slice(0, UNKNOWN_CACHE_ENTRIES_SHOWN)
+      .map((entry) => JSON.stringify(entry));
+    const more = unknown.length - shown.length;
+    details.push(
+      `${unknown.length === 1 ? '1 entry' : `${unknown.length} entries`} in ${reposDir} ${unknown.length === 1 ? 'was' : 'were'} not created by DirectiveBench and ${unknown.length === 1 ? 'is' : 'are'} never deleted automatically: ${shown.join(', ')}${more > 0 ? `, and ${more} more` : ''}`,
+    );
+    hints.push('Remove them yourself if you do not need them.');
+  }
+  if (details.length > 0) {
+    return { name, status: 'warn', detail: details.join('; '), hint: hints.join(' ') };
+  }
+  const cached = listing.caches.length;
+  return {
+    name,
+    status: 'ok',
+    detail:
+      cached === 0
+        ? 'no GitHub downloads cached'
+        : `${cached} GitHub download${cached === 1 ? '' : 's'} cached`,
   };
 }
 
@@ -279,7 +371,11 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
     }
   }
 
-  checks.push(await gitCheck(process.env), await caBundleCheck(process.env));
+  checks.push(
+    await gitCheck(process.env),
+    await caBundleCheck(process.env),
+    await hostedCacheCheck(layout),
+  );
 
   for (const descriptor of CLI_AGENTS) {
     const detection = await detectCliAgent(descriptor);

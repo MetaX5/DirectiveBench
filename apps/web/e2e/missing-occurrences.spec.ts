@@ -352,6 +352,33 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     }
   });
 
+  test('the panel of a GitHub repository says its download is deleted from the cache (issue 59)', async ({
+    page,
+  }) => {
+    // Issue 59 J9: the runner deletes a removed repository's cache. A row seeded for this check;
+    // no network and no registration job.
+    const hosted = 'repo_issue59E2eRows0';
+    await withDatabase((db) =>
+      db
+        .prepare(
+          `insert into repositories (id, provider, name, location, default_branch, created_at, updated_at)
+           values (?, 'github', 'rules-e2e', 'https://github.com/acme/rules-e2e', 'main', 't', 't')`,
+        )
+        .run(hosted),
+    );
+    try {
+      await page.goto(`/repositories?remove=${hosted}#remove-panel`);
+      const panel = page.getByTestId('remove-panel');
+      await expect(panel.getByRole('listitem')).toHaveText([
+        'It has no occurrences.',
+        "The copy downloaded from GitHub is deleted from DirectiveBench's cache. Nothing on GitHub is changed.",
+      ]);
+      await expect(panel).not.toContainText('planned');
+    } finally {
+      await withDatabase((db) => db.prepare('delete from repositories where id = ?').run(hosted));
+    }
+  });
+
   test('confirming removes the repository; its artifacts are missing with their history (AC-3, AC-10)', async ({
     page,
   }) => {
