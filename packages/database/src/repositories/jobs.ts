@@ -190,6 +190,13 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
        */
       linkedOccurrences: count.default(0),
       ambiguousLinks: count.default(0),
+      /**
+       * Occurrences moved to a new path by rule 2, and new paths that matched an unseen occurrence
+       * but did not move (SPEC-126 FR-126-18, §11.5 H2). Absent in results stored before they
+       * existed.
+       */
+      movedOccurrences: count.default(0),
+      ambiguousMoves: count.default(0),
       warningCount: count,
       errorCount: count,
       errors: z.array(scanDiscoveryErrorSchema).max(MAX_REPORTED_SCAN_ERRORS),

@@ -95,6 +95,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       emptyScanKeptOccurrences: 0,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     const [, after] = await occurrencesOf(handle, a.repositoryId);
     expect(after).toEqual({
@@ -127,6 +129,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       emptyScanKeptOccurrences: 2,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     expect(await statusByPath(handle, scan.repositoryId)).toEqual([
       ['AGENTS.md', 'active'],
@@ -144,6 +148,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       emptyScanKeptOccurrences: 0,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     expect(await statusByPath(handle, scan.repositoryId)).toEqual([
       ['AGENTS.md', 'active'],
@@ -233,6 +239,8 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
       emptyScanKeptOccurrences: 0,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     const [, back] = await occurrencesOf(handle, scan.repositoryId);
     expect(back).toMatchObject({
@@ -409,6 +417,8 @@ describe('repositoryScanResultSchema SPEC-125 counts', () => {
       emptyScanKeptOccurrences: 0,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     });
     expect(
       repositoryScanResultSchema.parse({
@@ -418,6 +428,8 @@ describe('repositoryScanResultSchema SPEC-125 counts', () => {
         emptyScanKeptOccurrences: 0,
         linkedOccurrences: 0,
         ambiguousLinks: 0,
+        movedOccurrences: 0,
+        ambiguousMoves: 0,
       }),
     ).toMatchObject({ removedOccurrences: 2, reactivatedOccurrences: 1 });
     expect(() => repositoryScanResultSchema.parse({ ...stored, removedOccurrences: -1 })).toThrow();

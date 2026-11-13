@@ -17,12 +17,18 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
-import type { ArtifactBundle, ArtifactFormat, ArtifactType } from '@directivebench/core';
+import type {
+  ArtifactBundle,
+  ArtifactFormat,
+  ArtifactType,
+  MoveCandidate,
+} from '@directivebench/core';
 import {
   classifyArtifactPath,
   createId,
   hashManifest,
   idListFingerprint,
+  matchMoves,
   nowIso,
   parseArtifactFile,
   parseFrontmatter,
@@ -217,7 +223,8 @@ async function insertArtifact(
 /**
  * Writes one observed artifact version inside the caller's transaction, for an artifact the
  * caller already identified: adds an immutable version only when the content hash is new for that
- * artifact, and points the occurrence at it (inserted, or the given row updated). A new version
+ * artifact, and points the occurrence at it (inserted, or the given row updated, its `path` set to
+ * the written path, which changes it only for a move, SPEC-126 FR-126-16). A new version
  * records the version the occurrence held before when it belongs to the same artifact (SPEC-126
  * FR-126-19); it is never updated later. User-managed metadata (notes, tags, categories, benchmark
  * assignments) is never touched.
@@ -275,6 +282,7 @@ async function writeVersionAndOccurrence(
       .update(artifactOccurrences)
       .set({
         artifactId,
+        path: input.path,
         latestVersionId: version.id,
         commitSha,
         status: 'active',
@@ -424,6 +432,10 @@ export interface RepositoryScanSummary {
   linkedOccurrences: number;
   /** Rule-3 links that had several candidate artifacts and took the oldest (FR-126-03, A7). */
   ambiguousLinks: number;
+  /** Unseen active occurrences moved to a new path by rule 2 (FR-126-16, FR-126-18). */
+  movedOccurrences: number;
+  /** New paths that matched an unseen occurrence but did not move, several matched (§11.5 H2). */
+  ambiguousMoves: number;
 }
 
 /** Most occurrence ids marked `removed` by one statement: well under SQLite's parameter limit. */
@@ -644,6 +656,8 @@ export async function applyRepositoryScan(
       emptyScanKeptOccurrences: 0,
       linkedOccurrences: 0,
       ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
     };
     const target: WriteTarget = { repositoryId, commitSha: application.commitSha };
     /** Artifacts whose source fields are refreshed at the end (FR-126-07). */
@@ -666,7 +680,7 @@ export async function applyRepositoryScan(
       .from(artifactOccurrences)
       .where(eq(artifactOccurrences.repositoryId, repositoryId));
     const rowByPath = new Map(rows.map((row) => [row.path, row]));
-    const added: PreparedArtifact[] = [];
+    let added: PreparedArtifact[] = [];
     for (const item of prepared) {
       const occurrence = rowByPath.get(item.input.path);
       if (!occurrence) {
@@ -687,6 +701,27 @@ export async function applyRepositoryScan(
         summary.reactivatedOccurrences += Number(result.reactivatedOccurrence);
       });
     }
+
+    // Rule 2: one-to-one moves of unseen active occurrences to new paths.
+    const moves = await resolveMoves(db, application, rows, added);
+    summary.ambiguousMoves = moves.ambiguous;
+    for (const { item, occurrence } of moves.moved) {
+      await write(item.input.path, async () => {
+        const result = await writeVersionAndOccurrence(
+          db,
+          target,
+          occurrence.artifactId,
+          occurrence,
+          item.input,
+          item.recomputed,
+        );
+        touched.add(occurrence.artifactId);
+        summary.movedOccurrences += 1;
+        summary.createdVersions += Number(result.createdVersion);
+      });
+    }
+    const movedPaths = new Set(moves.moved.map(({ item }) => item.input.path));
+    added = added.filter(({ input }) => !movedPaths.has(input.path));
 
     // Rules 3 and 4 for the new paths, in path order.
     const linking = LINKING_PROVIDERS.includes(repository.provider);
@@ -755,6 +790,106 @@ export async function applyRepositoryScan(
       .where(eq(repositories.id, repositoryId));
     return summary;
   });
+}
+
+/** The rule-2 match hash of a single-file version: its primary file's `sha256` (FR-126-15). */
+function primarySha256(
+  primaryFile: string,
+  files: readonly Pick<StoredArtifactFile, 'path' | 'content'>[],
+): string | undefined {
+  const primary = files.find((file) => file.path === primaryFile);
+  // Recomputed from the stored content, never taken from a stored hash.
+  return primary && sha256(Buffer.from(primary.content, 'utf8'));
+}
+
+/** The rule-2 match hash (FR-126-15): the content hash for a skill, else the primary file's. */
+function matchHashOf(
+  version: { format: string; contentHash: string; primaryFile: string },
+  files: readonly Pick<StoredArtifactFile, 'path' | 'content'>[],
+): string | undefined {
+  return version.format === 'skill-md'
+    ? version.contentHash
+    : primarySha256(version.primaryFile, files);
+}
+
+/**
+ * Rule 2 of {@link applyRepositoryScan} (SPEC-126 FR-126-14, FR-126-15, A11), inside its
+ * transaction and before any rule-3 or rule-4 write: the unseen active occurrences
+ * (`unseenOccurrencePaths`, from the rows read before the writes) and the new paths are paired by
+ * core's `matchMoves`; only one-to-one pairs move. The unseen occurrences' latest versions are read
+ * in batches of `IDENTITY_LOOKUP_BATCH_SIZE`, and only when both sides are non-empty, so a rescan
+ * without deletions or additions reads nothing more (NFR-126-03). With nothing discovered nothing
+ * moves (SPEC-125 A7). A version without its primary file is no candidate.
+ */
+async function resolveMoves(
+  db: Database,
+  application: RepositoryScanApplication,
+  rows: readonly (OccurrenceRow & { path: string })[],
+  added: readonly PreparedArtifact[],
+): Promise<{
+  moved: { item: PreparedArtifact; occurrence: OccurrenceRow }[];
+  ambiguous: number;
+}> {
+  const active = rows.filter((row) => row.status === 'active');
+  const unseenPaths = new Set(
+    unseenOccurrencePaths({
+      active: active.map((row) => row.path),
+      discovered: application.artifacts.map((artifact) => artifact.path),
+      unobserved: application.unobserved,
+    }),
+  );
+  const unseen = active.filter((row) => unseenPaths.has(row.path));
+  if (unseen.length === 0 || added.length === 0) return { moved: [], ambiguous: 0 };
+  const versionIds = [...new Set(unseen.map((row) => row.latestVersionId))];
+  const matchHashByVersion = new Map<string, { format: string; matchHash: string }>();
+  for (let start = 0; start < versionIds.length; start += IDENTITY_LOOKUP_BATCH_SIZE) {
+    const versions = await db
+      .select({
+        id: artifactVersions.id,
+        format: artifactVersions.format,
+        contentHash: artifactVersions.contentHash,
+        primaryFile: artifactVersions.primaryFile,
+        files: artifactVersions.files,
+      })
+      .from(artifactVersions)
+      .where(
+        inArray(artifactVersions.id, versionIds.slice(start, start + IDENTITY_LOOKUP_BATCH_SIZE)),
+      );
+    for (const version of versions) {
+      const matchHash = matchHashOf(version, version.files);
+      if (matchHash !== undefined) {
+        matchHashByVersion.set(version.id, { format: version.format, matchHash });
+      }
+    }
+  }
+  const unseenCandidates: MoveCandidate[] = [];
+  for (const row of unseen) {
+    const match = matchHashByVersion.get(row.latestVersionId);
+    if (match) unseenCandidates.push({ key: row.id, ...match });
+  }
+  const addedCandidates: MoveCandidate[] = [];
+  for (const { input, recomputed } of added) {
+    const matchHash = matchHashOf(
+      { format: input.format, contentHash: recomputed.contentHash, primaryFile: input.primaryFile },
+      recomputed.files,
+    );
+    if (matchHash !== undefined) {
+      addedCandidates.push({ key: input.path, format: input.format, matchHash });
+    }
+  }
+  const { moves, ambiguous } = matchMoves({ added: addedCandidates, unseen: unseenCandidates });
+  const pathByOccurrence = new Map(moves.map(({ path, occurrenceId }) => [occurrenceId, path]));
+  const occurrenceByPath = new Map<string, OccurrenceRow>();
+  for (const row of unseen) {
+    const path = pathByOccurrence.get(row.id);
+    if (path !== undefined) occurrenceByPath.set(path, row);
+  }
+  // In path order, as `added` is (FR-126-24).
+  const moved = added.flatMap((item) => {
+    const occurrence = occurrenceByPath.get(item.input.path);
+    return occurrence ? [{ item, occurrence }] : [];
+  });
+  return { moved, ambiguous };
 }
 
 /**
