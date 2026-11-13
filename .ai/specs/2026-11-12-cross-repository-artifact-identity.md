@@ -1,9 +1,9 @@
 ---
 id: SPEC-126
 title: The same skill in two repositories is one artifact with two occurrences; moves keep identity (E02-S02)
-status: draft
+status: approved
 created: 2026-11-12
-updated: 2026-11-12
+updated: 2026-11-13
 category: feature
 related: [SPEC-101, SPEC-103, SPEC-105, SPEC-104, SPEC-125, SPEC-124, SPEC-118, SPEC-013, SPEC-006, SPEC-014]
 ---
@@ -125,7 +125,9 @@ Prior art (from the tools' public documentation, not re-checked in this run):
 ## 5a. Resolved assumptions (autonomous defaults)
 
 Written by `om-spec-writing --autonomous` for issue #20. Each row is a decision for the
-maintainer; the default is the recommendation. UI decisions are in §11.1.
+maintainer; the default is the recommendation. UI decisions are in §11.1. The maintainer approved
+the spec on 2026-11-12 with every row of §5a (A1 to A21) and §11.1 (including UD-6) as written;
+implementation has not started.
 
 | # | Question | Default chosen | Alternative | Why this default |
 | --- | --- | --- | --- | --- |
@@ -526,12 +528,11 @@ Per SPEC-012 and the 100% coverage rule; mock agent only, no network.
 
 ## 18. Open questions
 
-None blocking: every question has a recommended default in §5a and §11.1 for the maintainer to
-confirm or change before approval. The most consequential ones are A3 (repository-level files
-excluded), A16 (only local repositories link; hosted copies never do), A19 (version lineage,
-a new column, changing how "Results by version" compares), A6 (no merge of existing duplicates),
-A7 (oldest candidate instead of none) and A21 (an edit copied before its source is rescanned
-splits).
+None: the maintainer approved every recommended default in §5a and §11.1 on 2026-11-12. The
+most consequential ones were A3 (repository-level files excluded), A16 (only local repositories
+link; hosted copies never do), A19 (version lineage, a new column, changing how "Results by
+version" compares), A6 (no merge of existing duplicates), A7 (oldest candidate instead of none)
+and A21 (an edit copied before its source is rescanned splits).
 
 ## 19. Future extensions
 
