@@ -155,3 +155,90 @@ export const NotComparable: Story = {
     },
   },
 };
+
+/**
+ * Results by version after two copies diverged (SPEC-126 §11.3 F10 to F12): v3 was edited from
+ * v1 in another repository, so it is compared with v1 and never with the parallel edit v2; the
+ * heading names the version it was edited from only where that is not the number one lower.
+ */
+export const DivergedVersions: Story = {
+  render: () => {
+    const blocks = [
+      {
+        version: 3,
+        editedFrom: 1,
+        regressed: true,
+        status: 'regression' as const,
+        comparison: 'Version regression vs v1 (-20 pts)',
+      },
+      {
+        version: 2,
+        editedFrom: null,
+        regressed: false,
+        status: 'passed' as const,
+        comparison: 'No regression vs v1 (+10 pts)',
+      },
+      {
+        version: 1,
+        editedFrom: null,
+        regressed: false,
+        status: 'passed' as const,
+        comparison: null,
+      },
+    ];
+    return (
+      <div className="max-w-content">
+        <Card>
+          <CardHeader>
+            <CardTitle>Benchmark results by version</CardTitle>
+            <CardDescription>
+              Completed runs per artifact version, newest first, grouped by comparability key. A
+              version regression compares the latest run of a version with the latest run of the
+              nearest tested version before it in its edit history, in the same group.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {blocks.map((block) => (
+              <section
+                key={block.version}
+                aria-label={`Version ${block.version}`}
+                className="space-y-3"
+              >
+                <h3 className="flex flex-wrap items-center gap-2 text-body font-semibold">
+                  v{block.version}
+                  {block.editedFrom === null ? null : (
+                    <span className="text-ui font-normal text-muted-foreground">
+                      edited from v{block.editedFrom}
+                    </span>
+                  )}
+                  {block.regressed ? (
+                    <Badge variant="destructive">
+                      Version regression (mock agent, not an AI evaluation)
+                    </Badge>
+                  ) : null}
+                </h3>
+                <div className="flex flex-wrap items-center gap-1">
+                  <MockBadge />
+                  <StatusBadge status={block.status} />
+                  {block.comparison === null ? null : (
+                    <Badge variant={block.regressed ? 'destructive' : 'muted'}>
+                      {block.comparison}
+                    </Badge>
+                  )}
+                </div>
+              </section>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  },
+  play: async ({ canvas }) => {
+    const v3 = canvas.getByRole('region', { name: 'Version 3' });
+    await expect(v3).toHaveTextContent('edited from v1');
+    await expect(v3).toHaveTextContent('Version regression vs v1');
+    await expect(canvas.getByRole('region', { name: 'Version 2' })).not.toHaveTextContent(
+      'edited from',
+    );
+  },
+};

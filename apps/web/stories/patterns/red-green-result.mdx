@@ -27,6 +27,10 @@ verdict card with the change and the confidence.
    `formatDelta` ("-16 pts"). Source: `lib/utils.ts`, `app/results/[id]/page.tsx`.
 5. ScoreBar, VariantCard and AssertionDetails are locked in `app/results/[id]/page.tsx`; this
    pattern uses `Card` until they are extracted (on "What is missing").
+6. Results by version compare a version with its nearest tested ancestor in its edit history,
+   never with a parallel edit of another copy; the version heading names the version it was
+   edited from ("edited from v1") only where that is not the number one lower. Source:
+   SPEC-126 §11.3 F10 to F12 (`/artifacts/[id]?tab=results`).
 
 ## States
 
@@ -34,3 +38,4 @@ verdict card with the change and the confidence.
 <Canvas of={Stories.Regression} />
 <Canvas of={Stories.Unstable} />
 <Canvas of={Stories.NotComparable} />
+<Canvas of={Stories.DivergedVersions} />

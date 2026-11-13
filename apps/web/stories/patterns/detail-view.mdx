@@ -26,6 +26,9 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 5. An item whose source is gone keeps its page: a muted Badge in the header and a `role="note"`
    paragraph under it that says what is kept and how the item comes back. Every section stays
    usable. Source: SPEC-125 §11.2 D9 (a missing artifact on `/artifacts/[id]`).
+6. An item found in several places shows each place's version; a place that holds an older one
+   gets a muted "older version" Badge. Source: SPEC-126 §11.3 F4, F16 (the Occurrences table on
+   `/artifacts/[id]`).
 
 ## States
 
@@ -33,4 +36,5 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 <Canvas of={Stories.PartialData} />
 <Canvas of={Stories.NotFound} />
 <Canvas of={Stories.MissingItem} />
+<Canvas of={Stories.SharedAcrossRepositories} />
 <Canvas of={Stories.LongTextNarrowScreen} />
