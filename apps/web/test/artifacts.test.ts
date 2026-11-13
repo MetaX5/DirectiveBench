@@ -20,7 +20,10 @@ import {
   missingNote,
   occurrenceStatusLabel,
   occurrenceVersionLabel,
+  possibleDuplicatesCard,
   repositoriesLabel,
+  SAME_CONTENT_NOTE,
+  searchPrefix,
   repositoryOptions,
   selectContent,
 } from '../lib/artifacts';
@@ -158,6 +161,106 @@ describe('occurrenceVersionLabel (SPEC-126 UD-3, F4, F5)', () => {
       accessibleName: 'v1 of review',
       older: true,
     });
+  });
+});
+
+describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
+  const duplicate = (
+    n: number,
+    overrides: Partial<{ activeOccurrences: number; sameLatestContent: boolean }> = {},
+  ) => ({
+    id: `art_${n}`,
+    slug: `review-${n}`,
+    name: 'review',
+    activeOccurrences: 1,
+    repositories: [
+      { id: 'repo_a', name: 'acme/agent-skills' },
+      { id: 'repo_b', name: 'client-b' },
+    ],
+    sameLatestContent: false,
+    ...overrides,
+  });
+  const review = { name: 'review', type: 'skill' } as const;
+
+  it('is null without duplicates (G12)', () => {
+    expect(possibleDuplicatesCard(review, { items: [], total: 0 })).toBeNull();
+  });
+
+  it('lists the slug, the active repositories or missing, and the content (G7 to G9)', () => {
+    expect(
+      possibleDuplicatesCard(review, {
+        items: [duplicate(2), duplicate(3, { activeOccurrences: 0, sameLatestContent: true })],
+        total: 2,
+      }),
+    ).toEqual({
+      rows: [
+        {
+          id: 'art_2',
+          slug: 'review-2',
+          href: '/artifacts/art_2',
+          repositories: 'acme/agent-skills, client-b',
+          content: 'Different content',
+        },
+        {
+          id: 'art_3',
+          slug: 'review-3',
+          href: '/artifacts/art_3',
+          repositories: null,
+          content: 'Same latest content',
+        },
+      ],
+      more: null,
+      note: SAME_CONTENT_NOTE,
+    });
+  });
+
+  it('shows the note only when a listed row has the same latest content (G11)', () => {
+    expect(possibleDuplicatesCard(review, { items: [duplicate(2)], total: 1 })?.note).toBeNull();
+  });
+
+  it('says how many are not listed and links a search narrowed by type (G10)', () => {
+    const items = Array.from({ length: 20 }, (_, i) => duplicate(i + 2));
+    expect(possibleDuplicatesCard(review, { items, total: 25 })?.more).toEqual({
+      text: '5 more are not listed.',
+      linkText: 'Search Artifacts for "review"',
+      href: '/artifacts?q=review&type=skill',
+    });
+    expect(possibleDuplicatesCard(review, { items, total: 21 })?.more?.text).toBe(
+      '1 more is not listed.',
+    );
+    const rule = { name: 'a b&c', type: 'rule' } as const;
+    expect(possibleDuplicatesCard(rule, { items, total: 21 })?.more).toMatchObject({
+      linkText: 'Search Artifacts for "a b&c"',
+      href: '/artifacts?q=a+b%26c&type=rule',
+    });
+  });
+
+  it('keeps every app string free of en and em dashes (AGENTS.md §7)', () => {
+    const card = possibleDuplicatesCard(review, {
+      items: [duplicate(2, { sameLatestContent: true })],
+      total: 3,
+    });
+    expect(JSON.stringify(card)).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe('searchPrefix (SPEC-126 §11.4 G10)', () => {
+  it('keeps a name within MAX_SEARCH_LENGTH', () => {
+    expect(searchPrefix('review')).toBe('review');
+    expect(searchPrefix('')).toBe('');
+    const exact = 'x'.repeat(MAX_SEARCH_LENGTH);
+    expect(searchPrefix(exact)).toBe(exact);
+  });
+
+  it('cuts a longer name at a code point boundary, so the list accepts it', () => {
+    expect(searchPrefix('y'.repeat(MAX_SEARCH_LENGTH + 5))).toBe('y'.repeat(MAX_SEARCH_LENGTH));
+    // A surrogate pair straddling the limit is dropped whole.
+    const straddling = `${'z'.repeat(MAX_SEARCH_LENGTH - 1)}\u{1F600}tail`;
+    expect(searchPrefix(straddling)).toBe('z'.repeat(MAX_SEARCH_LENGTH - 1));
+    const pairInside = `${'z'.repeat(MAX_SEARCH_LENGTH - 2)}\u{1F600}tail`;
+    expect(searchPrefix(pairInside)).toBe(`${'z'.repeat(MAX_SEARCH_LENGTH - 2)}\u{1F600}`);
+    const cut = searchPrefix(straddling);
+    expect(parseArtifactListParams({ q: cut }).invalid).toEqual([]);
   });
 });
 
