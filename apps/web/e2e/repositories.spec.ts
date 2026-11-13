@@ -427,3 +427,106 @@ test.describe('GitHub repositories by URL', () => {
     );
   });
 });
+
+// Issue 215 (decision E1): two folders called `skills`, and one of them registered again after
+// `git init` (SPEC-104 OQ-104-05), give three rows with one name. Each row's Scan and Remove are
+// named with the provider and location, the only unique key, so no two buttons share a name.
+test.describe.serial('row button names (issue 215)', () => {
+  // Not under `sources`: an earlier test registers `sources` itself, which would make these
+  // folders overlap a registered repository and ask for a confirmation.
+  const twins = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'twins-')));
+  const first = join(twins, 'a', 'skills');
+  const second = join(twins, 'b', 'skills');
+  let jobsBefore = new Set<string>();
+
+  test.beforeAll(async () => {
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+    jobsBefore = await withDatabase(
+      (db) =>
+        new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+    );
+  });
+
+  // Other spec files count repositories and jobs (lesson 2026-11-10): leave the database as found.
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = db.prepare('delete from repositories where location = ?');
+      remove.run(first);
+      remove.run(second);
+      const removeJob = db.prepare('delete from jobs where id = ?');
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) removeJob.run(id);
+      }
+    });
+    rmSync(twins, { recursive: true, force: true });
+  });
+
+  async function buttonNames(page: Page): Promise<string[]> {
+    return page
+      .getByRole('table')
+      .getByRole('button')
+      .evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? ''));
+  }
+
+  test('same-named repositories get unique Scan and Remove names', async ({ page }) => {
+    // Three registrations, each waiting for the runner.
+    test.setTimeout(4 * REGISTRATION_TIMEOUT);
+    for (const path of [first, second]) {
+      await register(page, path);
+      await expect(page.getByTestId('registration-status')).toHaveText(
+        `Registered skills (Local directory, ${path}).`,
+        { timeout: REGISTRATION_TIMEOUT },
+      );
+    }
+    for (const path of [first, second]) {
+      for (const verb of ['Scan', 'Remove']) {
+        // The name starts with the visible text (WCAG 2.5.3) and the visible text is unchanged.
+        await expect(
+          page.getByRole('button', {
+            name: `${verb} skills (Local directory, ${path})`,
+            exact: true,
+          }),
+        ).toHaveText(verb);
+      }
+    }
+    const names = await buttonNames(page);
+    expect(names.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(names).size).toBe(names.length);
+
+    // One directory under two local providers: same name and location, a different provider.
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: first });
+    await register(page, first);
+    await expect(page.getByTestId('registration-status')).toHaveText(
+      `Registered skills (Local Git, ${first}).`,
+      { timeout: REGISTRATION_TIMEOUT },
+    );
+    expect(await rowsAt(first)).toBe(2);
+    await expect(
+      page.getByRole('button', { name: `Scan skills (Local Git, ${first})`, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: `Remove skills (Local Git, ${first})`, exact: true }),
+    ).toBeVisible();
+    const after = await buttonNames(page);
+    expect(after.length).toBe(names.length + 2);
+    expect(new Set(after).size).toBe(after.length);
+  });
+
+  test('the Artifacts repository filter tells the same-named repositories apart (E4)', async ({
+    page,
+  }) => {
+    await page.goto('/artifacts');
+    const labels = await page
+      .locator('select[name="repository"] option')
+      .evaluateAll((options) => options.map((o) => o.textContent ?? ''));
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        `skills (Local directory, ${first})`,
+        `skills (Local Git, ${first})`,
+        `skills (Local directory, ${second})`,
+      ]),
+    );
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+});
