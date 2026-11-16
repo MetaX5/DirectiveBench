@@ -288,6 +288,74 @@ test.describe('repositories', () => {
   });
 });
 
+// Issue 45: a scan result lists at most 50 skipped user-level folders and stores their total.
+// The suite cannot make the server's runner skip more than 50 (they are the agent folders of
+// sibling homes of its HOME), so it seeds completed scan jobs the way the runner stores them.
+test.describe('skipped user-level folders beyond the listed ones (issue 45)', () => {
+  const listed = Array.from({ length: 50 }, (_, i) => `user${i}/.claude`);
+  const jobIds: string[] = [];
+
+  function seedScan(jobId: string, extra: Record<string, unknown>): Promise<void> {
+    jobIds.push(jobId);
+    const now = new Date().toISOString();
+    return withDatabase((db) => {
+      db.prepare(
+        `insert into jobs (id, type, status, payload, result, attempts, created_at, finished_at)
+         values (?, 'repository-scan', 'completed', ?, ?, 1, ?, ?)`,
+      ).run(
+        jobId,
+        JSON.stringify({ repositoryId: 'repo_e2e_issue_45' }),
+        JSON.stringify({
+          ok: true,
+          scannedFiles: 12,
+          discovered: 1,
+          createdArtifacts: 0,
+          createdVersions: 0,
+          warningCount: 0,
+          errorCount: 0,
+          errors: [],
+          skippedUserLevelFolders: listed,
+          commitSha: null,
+          durationMs: 40,
+          ...extra,
+        }),
+        now,
+        now,
+      );
+    });
+  }
+
+  // Other spec files count jobs (lesson 2026-11-10): leave the database as found.
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = db.prepare('delete from jobs where id = ?');
+      for (const id of jobIds) remove.run(id);
+    });
+  });
+
+  test('the line says how many folders the list leaves out, also at 320px', async ({ page }) => {
+    await seedScan('job_e2e_issue_45_capped', { skippedUserLevelFolderCount: 237 });
+    await page.goto('/repositories?scan=job_e2e_issue_45_capped');
+    const info = page.getByTestId('scan-info');
+    await expect(info).toHaveText(
+      `Skipped user-level agent folders, which are never scanned: ${listed.join(', ')} and 187 more.`,
+    );
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(info).toContainText('and 187 more.');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  test('a result stored before the total existed shows the list as before', async ({ page }) => {
+    await seedScan('job_e2e_issue_45_legacy', {});
+    await page.goto('/repositories?scan=job_e2e_issue_45_legacy');
+    await expect(page.getByTestId('scan-info')).toHaveText(
+      `Skipped user-level agent folders, which are never scanned: ${listed.join(', ')}.`,
+    );
+  });
+});
+
 // Public GitHub repositories by URL (issue #18). The suite never reaches the network: it tests
 // the web-side validation, and shows runner outcomes it seeds into the database itself. The
 // runner's git side is covered against a local bare repository in packages/runner.

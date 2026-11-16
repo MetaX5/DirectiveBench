@@ -347,6 +347,9 @@ describe('scanHostedRepository', realGit, () => {
       createdVersions: 4,
       errorCount: 0,
       commitSha: commit,
+      // A hosted scan never skips user-level folders (D05 applies to local paths): 0, not absent.
+      skippedUserLevelFolders: [],
+      skippedUserLevelFolderCount: 0,
     });
 
     // Same rules as E01-S02: the artifacts equal a walk of the same tree on disk.

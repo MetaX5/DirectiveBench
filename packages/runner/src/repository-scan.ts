@@ -285,6 +285,7 @@ export async function scanLocalRepository(
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
     skippedUserLevelFolders: discovery.skippedDirectories.slice(0, MAX_SKIPPED_USER_LEVEL_FOLDERS),
+    skippedUserLevelFolderCount: discovery.skippedDirectories.length,
     commitSha: null,
     durationMs: Math.round(performance.now() - started),
   };

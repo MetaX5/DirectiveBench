@@ -414,6 +414,7 @@ export async function scanHostedRepository(
     errorCount: discovery.errors.length,
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
     skippedUserLevelFolders: [],
+    skippedUserLevelFolderCount: 0,
     commitSha,
     durationMs: Math.round(performance.now() - started),
   };
