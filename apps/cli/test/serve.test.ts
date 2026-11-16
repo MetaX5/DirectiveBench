@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acquireNextJob, enqueueBenchmarkJob } from '@directivebench/database';
-import { importBundledExample } from '@directivebench/runner';
+import { LocalRunner, importBundledExample } from '@directivebench/runner';
+import packageJson from '../package.json' with { type: 'json' };
 import { CliError, ExitCode, resolveAssets, type Assets } from '../src/runtime';
 import { initialize } from '../src/setup';
 import {
@@ -401,6 +402,22 @@ describe('serve', () => {
     expect(harness.spawn).toHaveBeenCalledTimes(1);
     harness.proc.emit('SIGINT');
     expect(await harness.promise).toBe(ExitCode.Ok);
+  });
+
+  it('gives the runner the CLI version, so hosted rescans can skip an unchanged remote (issue 63)', async () => {
+    const start = LocalRunner.prototype.start;
+    const runners: LocalRunner[] = [];
+    vi.spyOn(LocalRunner.prototype, 'start').mockImplementation(function (this: LocalRunner) {
+      runners.push(this);
+      return start.call(this);
+    });
+    const harness = startServe({ port: String(await freePort()) });
+    await whenRunning(harness);
+    harness.proc.emit('SIGINT');
+    expect(await harness.promise).toBe(ExitCode.Ok);
+    expect(runners).toHaveLength(1);
+    const { options } = runners[0] as unknown as { options: { appVersion?: string } };
+    expect(options.appVersion).toBe(packageJson.version);
   });
 
   it('waits for a startup slower than the default vi.waitFor timeout (#38)', async () => {

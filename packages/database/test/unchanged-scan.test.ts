@@ -172,10 +172,14 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
     }
     // One occurrence went missing, one is kept from an older commit (an unobserved path).
     handle.sqlite
-      .prepare(`update artifact_occurrences set status = 'removed' where repository_id = ? and path = ?`)
+      .prepare(
+        `update artifact_occurrences set status = 'removed' where repository_id = ? and path = ?`,
+      )
       .run(repositoryId, 'a/AGENTS.md');
     handle.sqlite
-      .prepare(`update artifact_occurrences set commit_sha = ? where repository_id = ? and path = ?`)
+      .prepare(
+        `update artifact_occurrences set commit_sha = ? where repository_id = ? and path = ?`,
+      )
       .run(OTHER_COMMIT, repositoryId, 'b/AGENTS.md');
     const jobId = await running(handle, repositoryId);
     vi.setSystemTime(new Date('2026-04-02T00:00:00.000Z'));
@@ -202,7 +206,12 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
       .run(repositoryId);
 
     expect(
-      await recordUnchangedRepositoryScan(handle, { repositoryId, jobId, commitSha: COMMIT, signal }),
+      await recordUnchangedRepositoryScan(handle, {
+        repositoryId,
+        jobId,
+        commitSha: COMMIT,
+        signal,
+      }),
     ).toBe(true);
 
     expect(await getRepository(handle.db, repositoryId)).toMatchObject({
@@ -239,7 +248,12 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
       .set({ syncStatus: 'error', syncError: 'failed' })
       .where(eq(schema.repositories.id, repositoryId));
     expect(
-      await recordUnchangedRepositoryScan(handle, { repositoryId, jobId, commitSha: COMMIT, signal }),
+      await recordUnchangedRepositoryScan(handle, {
+        repositoryId,
+        jobId,
+        commitSha: COMMIT,
+        signal,
+      }),
     ).toBe(false);
     expect(await getRepository(handle.db, repositoryId)).toMatchObject({
       lastSyncAt: before?.lastSyncAt,

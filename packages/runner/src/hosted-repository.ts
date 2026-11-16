@@ -2,23 +2,30 @@ import { rm } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
+  ARTIFACT_FORMATS,
   DISCOVERY_LIMITS,
   DiscoveryLimitError,
+  SKIPPED_DIRECTORY_NAMES,
   discoverArtifactsInTree,
   isBinary,
   parseRepositoryUrl,
   redactSecrets,
   selectCandidateFiles,
+  sha256,
   type BinaryTreeFile,
 } from '@directivebench/core';
 import {
   MAX_REPORTED_SCAN_ERRORS,
+  getLastCompletedRepositoryScan,
   markRepositoryScanFailed,
+  recordUnchangedRepositoryScan,
   registerHostedRepository,
+  type Database,
   type DatabaseHandle,
   type RepositoryRecord,
   type RepositoryRegistrationResult,
   type RepositoryScanResult,
+  type RepositoryScanSuccess,
 } from '@directivebench/database';
 import {
   CACHE_SIZE_POLL_INTERVAL_MS,
@@ -35,6 +42,7 @@ import {
   listSnapshot,
   readBlobs,
   resolveCaBundle,
+  resolveRemoteHead,
   type HostedGitContext,
   type HostedGitFailure,
   type HostedGitTimeouts,
@@ -43,7 +51,12 @@ import {
 } from './hosted-git';
 import { REPOSITORY_ID } from './hosted-cache';
 import { findGitExecutable } from './repository-registration';
-import { ScanCancelledError, storeScanResults, toScannedArtifact } from './repository-scan';
+import {
+  ScanCancelledError,
+  scanStoreFailure,
+  storeScanResults,
+  toScannedArtifact,
+} from './repository-scan';
 
 export interface HostedRepositoryOptions {
   /** The runner's environment; hosted git takes only allowlisted variables from it. */
@@ -62,6 +75,32 @@ export interface HostedRepositoryOptions {
   readBatchBytes?: number;
   /** Default {@link HOSTED_READ_TOTAL_BYTES}. */
   readTotalBytes?: number;
+  /**
+   * The DirectiveBench version (the CLI package's), part of {@link hostedScanConfigHash}. Without
+   * it a rescan never skips the fetch (fail closed): an upgrade may change what discovery finds in
+   * the same commit.
+   */
+  appVersion?: string;
+}
+
+/**
+ * The SHA-256 of the effective configuration a hosted scan reads a commit with (SPEC-105
+ * FR-105-10, issue 63): the DirectiveBench version (its parsers and discovery rules), the formats,
+ * the include roots and exclude globs (none can be configured yet, so always the whole tree), the
+ * directories never entered and the discovery limits. A rescan may skip the fetch only when the
+ * last successful scan stored the same hash; any change here reads the commit again.
+ */
+export function hostedScanConfigHash(appVersion: string): string {
+  return sha256(
+    JSON.stringify({
+      appVersion,
+      formats: ARTIFACT_FORMATS,
+      includeRoots: [],
+      excludeGlobs: [],
+      skippedDirectories: SKIPPED_DIRECTORY_NAMES,
+      limits: DISCOVERY_LIMITS,
+    }),
+  );
 }
 
 /**
@@ -246,12 +285,13 @@ async function readCandidateBlobs(
 }
 
 /**
- * Steps 1–5 of SPEC-105 §9.1 for one repository: prepares the cache, fetches the snapshot, lists
+ * Steps 1–5 of SPEC-105 §9.1 for one repository, on a prepared cache: fetches the snapshot, lists
  * and selects the candidate files, downloads exactly their blobs and reads those within the
  * per-file limit. A failure is returned, not recorded: the caller records it once. Errors of the
  * cache itself are thrown (see {@link onCacheError}).
  */
 async function fetchCandidates(
+  prepared: { context: HostedGitContext; reposDir: string },
   options: HostedRepositoryOptions,
   repository: { id: string; location: string; branch: string },
 ): Promise<
@@ -263,8 +303,6 @@ async function fetchCandidates(
     }
   | ScanFailure
 > {
-  const prepared = await prepare(options);
-  if (!('context' in prepared)) return prepared;
   const { context } = prepared;
   const cacheDir = join(prepared.reposDir, `${repository.id}.git`);
   const target = { location: repository.location, branch: repository.branch, cacheDir };
@@ -366,8 +404,62 @@ export async function scanHostedRepository(
         'No default branch was detected for this repository (it may be empty). Register its URL again once it has commits: that detects the default branch again.',
     });
   }
+  const prepared = await onCacheError(options.signal, () => prepare(options));
+  if (!('context' in prepared)) return fail(prepared);
+  const scanConfigHash =
+    options.appVersion === undefined ? undefined : hostedScanConfigHash(options.appVersion);
+  const baseline =
+    scanConfigHash === undefined
+      ? null
+      : await unchangedBaseline(handle.db, repository, scanConfigHash);
+  if (baseline) {
+    // §9.1 step 0: the remote's head, without downloading anything.
+    const head = await onCacheError(options.signal, () =>
+      resolveRemoteHead(prepared.context, { location: repository.location, branch }),
+    );
+    if (!head.ok) return fail(head);
+    if (head.commitSha === baseline.commitSha) {
+      const recorded = await recordUnchanged(handle, {
+        jobId: job.jobId,
+        repositoryId: repository.id,
+        commitSha: head.commitSha,
+        signal: options.signal,
+      });
+      if (!recorded.ok) return recorded;
+      if (recorded.recorded) {
+        return {
+          ok: true,
+          unchanged: true,
+          // The same commit read with the same configuration: discovery would find the same.
+          scannedFiles: baseline.scannedFiles,
+          discovered: baseline.discovered,
+          createdArtifacts: 0,
+          createdVersions: 0,
+          removedOccurrences: 0,
+          reactivatedOccurrences: 0,
+          emptyScanKeptOccurrences: baseline.emptyScanKeptOccurrences,
+          linkedOccurrences: 0,
+          ambiguousLinks: 0,
+          movedOccurrences: 0,
+          ambiguousMoves: 0,
+          warningCount: baseline.warningCount,
+          errorCount: baseline.errorCount,
+          errors: baseline.errors,
+          skippedUserLevelFolders: [],
+          commitSha: head.commitSha,
+          scanConfigHash: baseline.scanConfigHash,
+          durationMs: Math.round(performance.now() - started),
+        };
+      }
+      // The repository's sync state changed since the job started: read the commit in full.
+    }
+  }
   const fetched = await onCacheError(options.signal, () =>
-    fetchCandidates(options, { location: repository.location, branch, id: repository.id }),
+    fetchCandidates(prepared, options, {
+      location: repository.location,
+      branch,
+      id: repository.id,
+    }),
   );
   if (!fetched.ok) return fail(fetched);
   const { commitSha, entries, contents } = fetched;
@@ -415,6 +507,38 @@ export async function scanHostedRepository(
     errors: discovery.errors.slice(0, MAX_REPORTED_SCAN_ERRORS),
     skippedUserLevelFolders: [],
     commitSha,
+    ...(scanConfigHash === undefined ? {} : { scanConfigHash }),
     durationMs: Math.round(performance.now() - started),
   };
+}
+
+/**
+ * The last successful scan a rescan may stand on instead of fetching (SPEC-105 FR-105-10, issue
+ * 63), or null: the repository is synced (`sync_status = 'ok'`) at the commit its latest completed
+ * scan job recorded, and that scan stored the same configuration hash. A result stored before the
+ * hash existed has none, so the repository is read again once.
+ */
+async function unchangedBaseline(
+  db: Database,
+  repository: RepositoryRecord,
+  scanConfigHash: string,
+): Promise<(RepositoryScanSuccess & { commitSha: string; scanConfigHash: string }) | null> {
+  if (repository.syncStatus !== 'ok' || repository.lastCommitSha === null) return null;
+  const last = await getLastCompletedRepositoryScan(db, repository.id);
+  if (last?.commitSha !== repository.lastCommitSha || last.scanConfigHash !== scanConfigHash) {
+    return null;
+  }
+  return { ...last, commitSha: last.commitSha, scanConfigHash: last.scanConfigHash };
+}
+
+/** {@link recordUnchangedRepositoryScan} with the failures of a scan's write (`scanStoreFailure`). */
+async function recordUnchanged(
+  handle: DatabaseHandle,
+  scan: { repositoryId: string; jobId: string; commitSha: string; signal: AbortSignal },
+): Promise<{ ok: true; recorded: boolean } | ScanFailure> {
+  try {
+    return { ok: true, recorded: await recordUnchangedRepositoryScan(handle, scan) };
+  } catch (error) {
+    return scanStoreFailure(handle, scan.repositoryId, error);
+  }
 }
