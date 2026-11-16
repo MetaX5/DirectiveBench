@@ -153,3 +153,20 @@ test transport); Windows and macOS (the logging-git tests are POSIX-only).
 - Development builds share one version (`0.2.0-rc.0`), so changed discovery rules on a branch do
   not force a rescan of an unchanged remote until the version changes.
 - If job history grows large, index the repository id of scan jobs (review nit).
+
+## Merge with main after #241
+
+- `git merge origin/main` (no rebase) brought in #241 (issue 45, `skippedUserLevelFolderCount`).
+- Conflicted: only `.ai/specs/2026-10-14-database-schema.md` §3.11 (`jobs.result`). Resolved to
+  #241's full scan-result shape with `scanConfigHash?` and `unchanged?` added, documenting every
+  field once (hosted scans store `skippedUserLevelFolderCount: 0`; `scanConfigHash` and
+  `unchanged` stay absent in older results).
+- Auto-merged but semantically incomplete: the unchanged-skip result in
+  `packages/runner/src/hosted-repository.ts` did not write `skippedUserLevelFolderCount`. It now
+  writes 0, like the full GitHub scan. The `toEqual` in the "rescans an unchanged remote with
+  ls-remote alone" test now expects it, and the stored-result check asserts it too. Red first:
+  without the runner line that test fails on the missing `skippedUserLevelFolderCount: 0`.
+- Gate on the merge: `pnpm format:check`, `pnpm lint`, `pnpm typecheck` pass; `pnpm test` pass
+  with 100% coverage in every package; `pnpm build` pass; `pnpm verify:pack` (`TMPDIR` under
+  `/var/tmp`, removed) pass; `pnpm test:e2e` (`TMPDIR` under `/var/tmp`) 180 passed, which
+  includes #241's issue-45 repository tests.
