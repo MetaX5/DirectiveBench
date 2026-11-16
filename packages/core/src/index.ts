@@ -5,6 +5,7 @@ export * from './config';
 export * from './discovery';
 export * from './frontmatter';
 export * from './hash';
+export * from './branch-name';
 export * from './hosted-repository';
 export * from './models';
 export * from './moves';

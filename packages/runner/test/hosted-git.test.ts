@@ -28,7 +28,6 @@ import {
   fetchBlobs,
   fetchSnapshot,
   hostedGitArgs,
-  isSafeBranchName,
   listSnapshot,
   readBlobs,
   resolveCaBundle,
@@ -312,27 +311,6 @@ describe('classifyRemoteFailure', () => {
     ],
   ])('maps %j', (stderr, code, message) => {
     expect(classifyRemoteFailure(stderr, 'github.com')).toEqual({ ok: false, code, message });
-  });
-});
-
-describe('isSafeBranchName', () => {
-  it.each(['main', 'release/2.0', 'feature/a_b-c', 'v1.2'])('accepts %s', (name) => {
-    expect(isSafeBranchName(name)).toBe(true);
-  });
-  it.each([
-    '-main',
-    'a..b',
-    'a/.hidden',
-    '.main',
-    'main.lock',
-    'a//b',
-    'a/',
-    'with space',
-    'ünicode',
-    'a~1',
-    'x'.repeat(256),
-  ])('rejects %j', (name) => {
-    expect(isSafeBranchName(name)).toBe(false);
   });
 });
 

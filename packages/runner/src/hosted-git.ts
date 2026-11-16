@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { access, mkdir, chmod, lstat, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { RepositoryTreeEntry } from '@directivebench/core';
+import { isSafeBranchName, type RepositoryTreeEntry } from '@directivebench/core';
 import { errnoCode, runGitProcess, type GitProcessResult } from './git-process';
 import { absolutePathEntries } from './repository-registration';
 
@@ -474,22 +474,6 @@ export async function checkGitVersion(context: HostedGitContext): Promise<Hosted
   return failure(
     'git-too-old',
     `GitHub repositories need git ${major}.${minor} or newer (it can disable implicit downloads); this git reports "${result.stdout.toString('utf8').trim().slice(0, 80)}".`,
-  );
-}
-
-/**
- * A branch name DirectiveBench passes to git: letters, digits, `.`, `_`, `-` and `/` segments,
- * none empty or starting with `.`, no `..`, not starting with `-` (never an option) and not ending
- * in `.lock` — a subset of what `git check-ref-format` accepts.
- */
-export function isSafeBranchName(name: string): boolean {
-  return (
-    name.length <= 255 &&
-    /^[A-Za-z0-9._/-]+$/.test(name) &&
-    !name.startsWith('-') &&
-    !name.endsWith('.lock') &&
-    !name.includes('..') &&
-    name.split('/').every((segment) => segment !== '' && !segment.startsWith('.'))
   );
 }
 
