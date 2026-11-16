@@ -1,4 +1,5 @@
 import {
+  BRANCH_NAME_MESSAGE,
   CREDENTIALS_IN_URL_MESSAGE,
   looksLikeRepositoryUrl,
   parseRepositoryUrl,
@@ -6,7 +7,9 @@ import {
   type RepositoryUrlErrorCode,
 } from '@directivebench/core';
 import {
+  HOSTED_PROVIDERS,
   SCANNABLE_PROVIDERS,
+  type RepositoryBranchChange,
   type RepositoryRecord,
   type RepositoryRemovalImpact,
   type RepositoryRegistration,
@@ -60,6 +63,52 @@ export function branchLabel(
 ): string | null {
   if (!BRANCHED_PROVIDERS.has(repository.provider)) return null;
   return repository.selectedBranch ?? repository.defaultBranch ?? 'not detected';
+}
+
+/** Whether a repository is registered by URL (GitHub so far), so its branch can be chosen. */
+export function isHosted(repository: Pick<RepositoryRecord, 'provider'>): boolean {
+  return (HOSTED_PROVIDERS as readonly string[]).includes(repository.provider);
+}
+
+/**
+ * The caption under the branch in the repository list (FR-104-16, issue 58 B4), so the cell says
+ * whether the branch is the default without colour or a tooltip. Null when there is nothing to
+ * say (no branches, or a hosted repository whose default branch was not detected).
+ */
+export function branchCaption(
+  repository: Pick<RepositoryRecord, 'provider' | 'selectedBranch' | 'defaultBranch'>,
+): string | null {
+  if (repository.provider === 'local-git') return 'Checked out (scans the working tree)';
+  if (!isHosted(repository)) return null;
+  if (repository.selectedBranch !== null) {
+    return `Chosen. Default: ${repository.defaultBranch ?? 'not detected'}`;
+  }
+  return repository.defaultBranch === null ? null : 'Default branch';
+}
+
+/**
+ * The warning after the Last scan time of a hosted repository whose last successful scan read
+ * another branch than the one it uses now (issue 58 B7), or null. An unknown scanned branch (a
+ * row scanned before `scanned_branch` existed, never scanned, or local) and a failed last scan
+ * say nothing here.
+ */
+export function scannedBranchHint(
+  repository: Pick<
+    RepositoryRecord,
+    'provider' | 'selectedBranch' | 'defaultBranch' | 'scannedBranch' | 'syncStatus'
+  >,
+): string | null {
+  const current = repository.selectedBranch ?? repository.defaultBranch;
+  if (
+    !isHosted(repository) ||
+    repository.syncStatus === 'error' ||
+    repository.scannedBranch === null ||
+    current === null ||
+    repository.scannedBranch === current
+  ) {
+    return null;
+  }
+  return `That scan read ${repository.scannedBranch}: scan again to read ${current}.`;
 }
 
 /**
@@ -120,14 +169,44 @@ export function urlFieldError(code: string | undefined): string | null {
     : null;
 }
 
+/** Why the action sent the Branch field back (`?branchError=`, issue 58). */
+const BRANCH_FIELD_ERRORS = new Map<string, string>([
+  ['invalid', BRANCH_NAME_MESSAGE],
+  ['local', 'A local repository is scanned from its working tree; leave Branch empty.'],
+]);
+
+/** The Branch field error for `?branchError=`, or null for no or an unknown value. */
+export function branchFieldError(code: string | undefined): string | null {
+  return code === undefined ? null : (BRANCH_FIELD_ERRORS.get(code) ?? null);
+}
+
+/** Longest branch text put back into a field: one over the limit, so "too long" reproduces. */
+const MAX_ECHOED_BRANCH = 256;
+
+/**
+ * The Branch value the page may put back into a field (issue 58): rejected input that may carry
+ * credentials is never echoed (FR-104-05), and anything longer than a branch name is cut.
+ */
+export function echoedBranch(input: string | undefined): string {
+  if (input === undefined || mayCarryCredentials(input)) return '';
+  return input.slice(0, MAX_ECHOED_BRANCH);
+}
+
 /**
  * What the Repositories page says about a registration job. `active` keeps the page refreshing;
- * `fieldError` is shown under the path field (the path is pre-filled again).
+ * `fieldError` is shown under the path field, or under the Branch field when `field` is
+ * `branch` (issue 58); the path and branch are pre-filled again.
  */
 export type RegistrationNotice =
-  | { kind: 'active'; path: string; message: string }
-  | { kind: 'done'; path: string; message: string }
-  | { kind: 'fieldError'; path: string; message: string }
+  | { kind: 'active'; path: string; branch: string; message: string }
+  | { kind: 'done'; path: string; branch: string; message: string }
+  | {
+      kind: 'fieldError';
+      field: 'path' | 'branch';
+      path: string;
+      branch: string;
+      message: string;
+    }
   | {
       kind: 'confirm';
       path: string;
@@ -171,43 +250,49 @@ export function confirmationReasons(request: ConfirmationRequest): string[] {
 
 export function describeRegistration(registration: RepositoryRegistration): RegistrationNotice {
   const { input: path, status, result } = registration;
+  const branch = registration.branch ?? '';
+  const pathError = (message: string): RegistrationNotice => ({
+    kind: 'fieldError',
+    field: 'path',
+    path,
+    branch,
+    message,
+  });
   switch (status) {
     case 'pending':
       return {
         kind: 'active',
         path,
+        branch,
         message: `Waiting for the runner to check ${path}. It runs inside directivebench serve.`,
       };
     case 'running':
       return {
         kind: 'active',
         path,
+        branch,
         message:
-          registration.source === 'url'
-            ? `Asking GitHub about ${path} (read-only, without credentials; nothing is downloaded yet)…`
-            : `Checking ${path} (read-only)…`,
+          registration.source === 'path'
+            ? `Checking ${path} (read-only)…`
+            : registration.branch === null
+              ? `Asking GitHub about ${path} (read-only, without credentials; nothing is downloaded yet)…`
+              : `Asking GitHub about ${path} and its branch ${registration.branch} (read-only, without credentials; nothing is downloaded yet)…`,
       };
     case 'failed':
-      return {
-        kind: 'fieldError',
-        path,
-        // The runner stores a complete sentence: a fixed message for an unexpected failure
-        // (FR-114-10) or the reason the stored request is invalid.
-        message: registration.error ?? 'The check failed.',
-      };
+      // The runner stores a complete sentence: a fixed message for an unexpected failure
+      // (FR-114-10) or the reason the stored request is invalid.
+      return pathError(registration.error ?? 'The check failed.');
     case 'cancelled':
-      return { kind: 'fieldError', path, message: 'The registration was cancelled.' };
+      return pathError('The registration was cancelled.');
     case 'interrupted':
-      return {
-        kind: 'fieldError',
-        path,
-        message: 'The runner stopped before the check finished. Register it again.',
-      };
+      return pathError('The runner stopped before the check finished. Register it again.');
     case 'completed':
       break;
   }
-  if (!result) {
-    return { kind: 'fieldError', path, message: 'The runner finished without a result.' };
+  if (!result) return pathError('The runner finished without a result.');
+  if (!result.ok && result.code === 'branch-not-found' && registration.branch !== null) {
+    // Shown under the Branch field (issue 58, maintainer correction 1).
+    return { kind: 'fieldError', field: 'branch', path, branch, message: result.message };
   }
   if (!result.ok && result.code === 'confirmation-required') {
     return {
@@ -218,17 +303,34 @@ export function describeRegistration(registration: RepositoryRegistration): Regi
       reasons: confirmationReasons(result),
     };
   }
-  if (!result.ok) return { kind: 'fieldError', path, message: result.message };
+  if (!result.ok) return pathError(result.message);
   const repository = registration.repository;
-  if (!repository) {
-    return { kind: 'fieldError', path, message: 'The registered repository no longer exists.' };
-  }
+  if (!repository) return pathError('The registered repository no longer exists.');
   const subject = repositorySubject(repository);
   return {
     kind: 'done',
     path,
-    message: result.created ? `Registered ${subject}.` : `${subject} is already registered.`,
+    branch,
+    message: result.created
+      ? `Registered ${subject}.`
+      : `${subject} is already registered.${ignoredBranchNote(registration.branch, repository)}`,
   };
+}
+
+/**
+ * The note after "is already registered" when the user named a branch other than the one the
+ * repository uses: registering again never changes the branch (issue 58). The typed name is
+ * normalised like a stored choice (the default branch's own name means "follow the default").
+ */
+function ignoredBranchNote(
+  typed: string | null,
+  repository: Pick<RepositoryRecord, 'selectedBranch' | 'defaultBranch'>,
+): string {
+  if (typed === null) return '';
+  const chosen = typed === repository.defaultBranch ? null : typed;
+  return chosen === repository.selectedBranch
+    ? ''
+    : ' Its branch was not changed: use Change branch in the list.';
 }
 
 /** Whether the Repositories page offers "Scan" for a repository (local and GitHub so far). */
@@ -420,6 +522,111 @@ const SCAN_REQUEST_ERRORS = new Map<string, string>([
 /** The page-level error for `?scanError=`, or null for no or an unknown value. */
 export function scanRequestError(code: string | undefined): string | null {
   return code === undefined ? null : (SCAN_REQUEST_ERRORS.get(code) ?? null);
+}
+
+/** Why the Change branch form could not enqueue a change (`?branchChangeError=`, issue 58). */
+const BRANCH_CHANGE_REQUEST_ERRORS = new Map<string, string>([
+  ['invalid', INCOMPLETE_FORM_MESSAGE],
+  ['not-found', 'That repository no longer exists. It may have been removed; reload the list.'],
+  ['unsupported', 'Only the branch of a GitHub repository can be chosen.'],
+  [
+    'scan-active',
+    'A scan of this repository is waiting or running. Change its branch after the scan finishes.',
+  ],
+  [
+    'branch-change-active',
+    'Another branch change of this repository is waiting or running. Try again after it finishes.',
+  ],
+]);
+
+/** The page-level error for `?branchChangeError=`, or null for no or an unknown value. */
+export function branchChangeRequestError(code: string | undefined): string | null {
+  return code === undefined ? null : (BRANCH_CHANGE_REQUEST_ERRORS.get(code) ?? null);
+}
+
+/** The repository whose Change branch panel to show (`?changeBranch=`), or null. */
+export function parseChangeBranchParam(value: string | string[] | undefined): string | null {
+  return parsed(repositoryIdSchema, value);
+}
+
+/**
+ * What the page shows for a `repository-branch` job (issue 58): `active` keeps the page refreshing
+ * with the panel's field disabled, `done` is the success line, `fieldError` reopens the panel with
+ * the error under the Branch field and the value kept, and `error` is a page-level line.
+ */
+export type BranchChangeNotice =
+  | { kind: 'active'; message: string; value: string }
+  | { kind: 'done'; message: string }
+  | { kind: 'fieldError'; message: string; value: string }
+  | { kind: 'error'; message: string };
+
+export function describeBranchChange(change: RepositoryBranchChange): BranchChangeNotice {
+  const value = change.branch ?? '';
+  const name = change.repository?.name ?? 'the repository';
+  const asking =
+    change.branch === null
+      ? 'Asking GitHub for the default branch (read-only, nothing is downloaded)…'
+      : `Asking GitHub whether ${change.branch} exists (read-only, nothing is downloaded)…`;
+  switch (change.status) {
+    case 'pending':
+      return {
+        kind: 'active',
+        value,
+        message: `Waiting for the runner to check the branch of ${name}. It runs inside directivebench serve.`,
+      };
+    case 'running':
+      return { kind: 'active', value, message: asking };
+    case 'failed':
+      // A complete sentence from the runner (FR-114-10), or the invalid stored request.
+      return { kind: 'error', message: change.error ?? 'The branch change failed.' };
+    case 'cancelled':
+      return { kind: 'error', message: 'The branch change was cancelled. Nothing was changed.' };
+    case 'interrupted':
+      return {
+        kind: 'error',
+        message: 'The runner stopped before the branch change finished. Nothing was changed.',
+      };
+    case 'completed':
+      break;
+  }
+  const result = change.result;
+  if (!result) return { kind: 'error', message: 'The runner finished without a result.' };
+  if (!result.ok) {
+    // A branch that does not exist belongs under the field; anything else is about the page.
+    return result.code === 'branch-not-found'
+      ? { kind: 'fieldError', message: result.message, value }
+      : { kind: 'error', message: result.message };
+  }
+  if (result.branch === null) {
+    const fallback = result.defaultBranch === null ? '' : ` (${result.defaultBranch})`;
+    return {
+      kind: 'done',
+      message: `${name} now follows its default branch${fallback}. Scan it to read that branch.`,
+    };
+  }
+  return {
+    kind: 'done',
+    message: `${name} now uses the branch ${result.branch}. Scan it to read that branch.`,
+  };
+}
+
+/**
+ * The note of the Change branch panel (issue 58 B7): saving does not scan, and what the next
+ * scan does with artifacts found only on the branch the repository uses now.
+ */
+export function branchPanelNote(
+  repository: Pick<RepositoryRecord, 'selectedBranch' | 'defaultBranch'>,
+): string {
+  const current = repository.selectedBranch ?? repository.defaultBranch;
+  const scope = current === null ? 'the current branch' : current;
+  return `Saving does not scan. The next scan reads the new branch: artifacts found only on ${scope} are then marked missing (their history is kept) and return when a later scan finds them again.`;
+}
+
+/** The help under the Branch field of the panel (issue 58 B4). */
+export function branchPanelHelp(repository: Pick<RepositoryRecord, 'defaultBranch'>): string {
+  return repository.defaultBranch === null
+    ? 'Leave empty to follow the default branch.'
+    : `Leave empty to follow the default branch (${repository.defaultBranch}).`;
 }
 
 /**
