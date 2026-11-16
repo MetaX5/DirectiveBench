@@ -9,26 +9,26 @@ describe('suiteSubject (issue 219)', () => {
   });
 });
 
-describe('suiteOptions (issue 219, decision I2)', () => {
-  it('adds the ID only to suites whose name another listed suite shares', () => {
+describe('suiteOptions (issue 235, decision L1)', () => {
+  it('adds the ID to every suite whose name another suite in the database has', () => {
+    // "Safety" (safety-b) alone in the picker: its twin is assigned, so not listed here, but the
+    // database-wide flag still says the name is shared.
     expect(
       suiteOptions([
-        { id: 'suite_a', slug: 'safety-a', name: 'Safety' },
-        { id: 'suite_b', slug: 'style', name: 'Style' },
-        { id: 'suite_c', slug: 'safety-b', name: 'Safety' },
+        { id: 'suite_b', slug: 'safety-b', name: 'Safety', nameShared: true },
+        { id: 'suite_c', slug: 'style', name: 'Style', nameShared: false },
       ]),
     ).toEqual([
-      { id: 'suite_a', label: 'Safety, ID safety-a' },
-      { id: 'suite_b', label: 'Style' },
-      { id: 'suite_c', label: 'Safety, ID safety-b' },
+      { id: 'suite_b', label: 'Safety, ID safety-b' },
+      { id: 'suite_c', label: 'Style' },
     ]);
   });
 
-  it('lists names alone when they are all different', () => {
+  it('lists names alone when no other suite has them', () => {
     expect(
       suiteOptions([
-        { id: 'suite_a', slug: 'safety', name: 'Safety' },
-        { id: 'suite_b', slug: 'style', name: 'Style' },
+        { id: 'suite_a', slug: 'safety', name: 'Safety', nameShared: false },
+        { id: 'suite_b', slug: 'style', name: 'Style', nameShared: false },
       ]),
     ).toEqual([
       { id: 'suite_a', label: 'Safety' },
