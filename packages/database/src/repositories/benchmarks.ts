@@ -10,7 +10,7 @@ import {
   fixtureVersions,
 } from '../schema';
 import { createAcquiredBenchmarkJob, type BenchmarkJobPayload, type JobRecord } from './jobs';
-import { artifactNameShared } from './shared-names';
+import { artifactNameShared, suiteNameShared } from './shared-names';
 
 export interface FixtureVersionInput {
   id: string;
@@ -140,13 +140,19 @@ export type SuiteVersionRecord = NonNullable<Awaited<ReturnType<typeof getSuiteV
 
 /**
  * Suite ids, slugs and names only, by name: for choosing a suite without loading its history.
- * Names can repeat (only the slug is unique), so a tie is ordered by slug.
+ * Names can repeat (only the slug is unique), so a tie is ordered by slug. `nameShared`: another
+ * suite in the database has the name, so the picker adds the ID (issue 235, decision L1).
  */
 export async function listSuiteNames(
   db: Database,
-): Promise<Array<{ id: string; slug: string; name: string }>> {
+): Promise<Array<{ id: string; slug: string; name: string; nameShared: boolean }>> {
   return db
-    .select({ id: benchmarkSuites.id, slug: benchmarkSuites.slug, name: benchmarkSuites.name })
+    .select({
+      id: benchmarkSuites.id,
+      slug: benchmarkSuites.slug,
+      name: benchmarkSuites.name,
+      nameShared: suiteNameShared,
+    })
     .from(benchmarkSuites)
     .orderBy(benchmarkSuites.name, benchmarkSuites.slug);
 }

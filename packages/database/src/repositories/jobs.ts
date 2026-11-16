@@ -10,7 +10,7 @@ import {
 } from '@directivebench/core';
 import { withTransaction, type DatabaseHandle } from '../client';
 import type { Database } from '../client';
-import { suiteNameShared } from './shared-names';
+import { artifactNameShared, suiteNameShared } from './shared-names';
 import {
   artifacts,
   artifactVersions,
@@ -609,6 +609,10 @@ export interface JobListItem {
   /** Another suite has the name, so the list adds the ID (issue 227). */
   suiteNameShared: boolean;
   artifactName: string | null;
+  /** The artifact's slug, null with `artifactName`. */
+  artifactSlug: string | null;
+  /** Another artifact has the name, so the list adds the slug (issue 236). */
+  artifactNameShared: boolean;
   benchmarkRunId: string | null;
 }
 
@@ -627,7 +631,7 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
   for (const job of rows) {
     const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
     let suite: { name: string; slug: string; nameShared: boolean } | undefined;
-    let artifactName: string | null = null;
+    let artifact: { name: string; slug: string; nameShared: boolean } | undefined;
     if (payload.success) {
       suite = await db
         .select({
@@ -639,13 +643,12 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
         .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
         .where(eq(benchmarkSuiteVersions.id, payload.data.suiteVersionId))
         .get();
-      const artifact = await db
-        .select({ name: artifacts.name })
+      artifact = await db
+        .select({ name: artifacts.name, slug: artifacts.slug, nameShared: artifactNameShared })
         .from(artifactVersions)
         .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
         .where(eq(artifactVersions.id, payload.data.artifactVersionId))
         .get();
-      artifactName = artifact?.name ?? null;
     }
     const run = await db
       .select({ id: benchmarkRuns.id })
@@ -657,7 +660,9 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
       suiteName: suite?.name ?? null,
       suiteSlug: suite?.slug ?? null,
       suiteNameShared: suite?.nameShared ?? false,
-      artifactName,
+      artifactName: artifact?.name ?? null,
+      artifactSlug: artifact?.slug ?? null,
+      artifactNameShared: artifact?.nameShared ?? false,
       benchmarkRunId: run?.id ?? null,
     });
   }
