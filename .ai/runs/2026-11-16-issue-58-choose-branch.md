@@ -3,7 +3,7 @@ title: Hosted repositories, choose the branch to scan (issue 58)
 date: 2026-11-16
 agent: Claude Code / claude-opus-5-5
 trigger: issue 58, decisions B1-B11 approved by the maintainer on 2026-11-16 (issue comment)
-status: in-progress
+status: completed
 branch: feat/issue-58-choose-branch
 specs: [SPEC-104, SPEC-105, SPEC-103, SPEC-125, SPEC-014, database schema]
 ---
@@ -224,6 +224,11 @@ round 2 needs-attention (unexpected failure after the commit claimed the same), 
 
 QA evidence: PR #248 comment, screenshots on `qa-evidence-pr-248`.
 
+`om-auto-review-pr 248 --autofix`: validation gate re-run on the final head (format, lint,
+typecheck, test 100 %, build, verify:pack: all pass); verdict approve (comment review, own PR),
+one minor (row actions layout, the open decision) and one nit; manual QA instructions posted;
+labels `feature`, `priority-low`, `risk-medium`, `needs-qa`, `merge-queue`.
+
 Real app: `sh .ai/scripts/test-env-up.sh` (port 4402, built CLI, `directivebench demo`, mock
 agent only), seeded GitHub rows and held jobs (a trigger keeps every `repository-branch` and URL
 registration job pending, so nothing reached github.com); scripted browser flows: local path with
@@ -291,5 +296,5 @@ PR: #248
 - [x] 5.1 Full quality gate
 - [x] 5.2 Real-app run and browser QA with evidence
 - [x] 5.3 Codex adversarial review until approved
-- [ ] 5.4 om-auto-review-pr with autofix
-- [ ] 5.5 Implementation status, lessons and run log finalised
+- [x] 5.4 om-auto-review-pr with autofix
+- [x] 5.5 Implementation status, lessons and run log finalised
