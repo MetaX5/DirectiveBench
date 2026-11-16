@@ -24,6 +24,21 @@ export const ARTIFACT_FORMATS = [
 export const artifactFormatSchema = z.enum(ARTIFACT_FORMATS);
 export type ArtifactFormat = z.infer<typeof artifactFormatSchema>;
 
+/**
+ * The type of each format: one format always has one type, so an artifact's type is the type of
+ * its version's format (SPEC-103 FR-103-16, SPEC-101 §8.2).
+ */
+export const ARTIFACT_FORMAT_TYPES: Readonly<Record<ArtifactFormat, ArtifactType>> = {
+  'skill-md': 'skill',
+  'agents-md': 'instruction',
+  'claude-md': 'instruction',
+  'copilot-instructions': 'instruction',
+  'claude-rule': 'rule',
+  'copilot-path-instructions': 'rule',
+  'cursor-rule': 'rule',
+  'gitlab-duo-chat-rules': 'rule',
+};
+
 export interface ArtifactClassification {
   format: ArtifactFormat;
   type: ArtifactType;
@@ -62,6 +77,11 @@ function normalize(relPath: string): string {
   return posix.normalize(relPath.replaceAll('\\', '/')).replace(/^\.\//, '');
 }
 
+/** A single-file classification of `format`; a skill replaces `rootDir`. */
+function ofFormat(format: ArtifactFormat): ArtifactClassification {
+  return { format, type: ARTIFACT_FORMAT_TYPES[format], rootDir: null };
+}
+
 /** Classifies a repository-relative path. Returns `null` when the path is not a known artifact. */
 export function classifyArtifactPath(relPath: string): ArtifactClassification | null {
   const path = normalize(relPath);
@@ -69,24 +89,24 @@ export function classifyArtifactPath(relPath: string): ArtifactClassification | 
   const dir = posix.dirname(path);
 
   if (base === 'SKILL.md') {
-    return { format: 'skill-md', type: 'skill', rootDir: dir === '.' ? '' : dir };
+    return { ...ofFormat('skill-md'), rootDir: dir === '.' ? '' : dir };
   }
-  if (base === 'AGENTS.md') return { format: 'agents-md', type: 'instruction', rootDir: null };
-  if (base === 'CLAUDE.md') return { format: 'claude-md', type: 'instruction', rootDir: null };
+  if (base === 'AGENTS.md') return ofFormat('agents-md');
+  if (base === 'CLAUDE.md') return ofFormat('claude-md');
   if (path === '.github/copilot-instructions.md') {
-    return { format: 'copilot-instructions', type: 'instruction', rootDir: null };
+    return ofFormat('copilot-instructions');
   }
   if (/^\.github\/instructions\/.+\.instructions\.md$/.test(path)) {
-    return { format: 'copilot-path-instructions', type: 'rule', rootDir: null };
+    return ofFormat('copilot-path-instructions');
   }
   if (/(^|\/)\.cursor\/rules\/.+\.mdc$/.test(path)) {
-    return { format: 'cursor-rule', type: 'rule', rootDir: null };
+    return ofFormat('cursor-rule');
   }
   if (/(^|\/)\.claude\/rules\/.+\.md$/.test(path)) {
-    return { format: 'claude-rule', type: 'rule', rootDir: null };
+    return ofFormat('claude-rule');
   }
   if (path === '.gitlab/duo/chat-rules.md') {
-    return { format: 'gitlab-duo-chat-rules', type: 'rule', rootDir: null };
+    return ofFormat('gitlab-duo-chat-rules');
   }
   return null;
 }
