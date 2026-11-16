@@ -675,6 +675,31 @@ describe('getRepositoryScan', () => {
       movedOccurrences: 0,
       ambiguousMoves: 0,
     });
+    // Stored before the total of skipped folders existed (issue 45): parses without it, and the
+    // reader falls back to the list length.
+    expect((await getRepositoryScan(handle.db, job.id))?.result).not.toHaveProperty(
+      'skippedUserLevelFolderCount',
+    );
+    // The total can exceed the capped list; a negative or fractional one is rejected.
+    const capped = Array.from({ length: 50 }, (_, i) => `user${i}/.claude`);
+    handle.sqlite.prepare('update jobs set result = ? where id = ?').run(
+      JSON.stringify({
+        ...success,
+        skippedUserLevelFolders: capped,
+        skippedUserLevelFolderCount: 237,
+      }),
+      job.id,
+    );
+    expect((await getRepositoryScan(handle.db, job.id))?.result).toMatchObject({
+      skippedUserLevelFolders: capped,
+      skippedUserLevelFolderCount: 237,
+    });
+    for (const skippedUserLevelFolderCount of [-1, 1.5]) {
+      handle.sqlite
+        .prepare('update jobs set result = ? where id = ?')
+        .run(JSON.stringify({ ...success, skippedUserLevelFolderCount }), job.id);
+      expect(await getRepositoryScan(handle.db, job.id)).toBeNull();
+    }
     // A hosted scan names the commit it read; anything but a full hex object ID is rejected.
     const commitSha = 'a'.repeat(40);
     handle.sqlite

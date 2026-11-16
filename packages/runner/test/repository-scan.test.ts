@@ -27,6 +27,7 @@ import {
   getRepository,
   getRepositoryScan,
   importArtifactVersion,
+  MAX_SKIPPED_USER_LEVEL_FOLDERS,
   migrateDatabase,
   openDatabase,
   registerLocalRepository,
@@ -432,6 +433,7 @@ describe('repository-scan jobs', () => {
       discovered: 2,
       errorCount: 0,
       skippedUserLevelFolders: ['.agents', '.claude', '.codex', '.config/cursor', '.cursor'],
+      skippedUserLevelFolderCount: 5,
     });
     expect(storedOccurrences().map((o) => o.path)).toEqual([
       'AGENTS.md',
@@ -506,6 +508,26 @@ describe('repository-scan jobs', () => {
     );
   });
 
+  it('stores the total of skipped user-level folders when the list is cut at the cap (issue 45)', async () => {
+    const home = join(sources, 'home');
+    write(home, { 'AGENTS.md': '# Home rules\n' });
+    // 60 sibling homes, each with a `.claude` folder: 60 skipped folders, more than the cap.
+    const siblings = Array.from({ length: 60 }, (_, i) => `user${String(i).padStart(2, '0')}`);
+    for (const user of siblings) write(join(sources, user), { '.claude/CLAUDE.md': '# Theirs\n' });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('XDG_CONFIG_HOME', '');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+    vi.stubEnv('CODEX_HOME', '');
+    const repository = await register(sources, 'local-directory');
+
+    const result = await scan(repository.id);
+    expect(result).toMatchObject({ ok: true, skippedUserLevelFolderCount: 60 });
+    expect(result.ok && result.skippedUserLevelFolders).toHaveLength(
+      MAX_SKIPPED_USER_LEVEL_FOLDERS,
+    );
+    expect(storedOccurrences().map((o) => o.path)).toEqual(['home/AGENTS.md']);
+  });
+
   it('keeps the project folders of a repository that sits next to the home directory', async () => {
     const home = join(sources, 'home');
     write(home, { '.claude/skills/global/SKILL.md': '---\nname: global\n---\n' });
@@ -514,7 +536,11 @@ describe('repository-scan jobs', () => {
     vi.stubEnv('HOME', home);
     const repository = await register(neighbour, 'local-directory');
 
-    expect(await scan(repository.id)).toMatchObject({ ok: true, skippedUserLevelFolders: [] });
+    expect(await scan(repository.id)).toMatchObject({
+      ok: true,
+      skippedUserLevelFolders: [],
+      skippedUserLevelFolderCount: 0,
+    });
     expect(storedOccurrences().map((o) => o.path)).toEqual(['.claude/skills/team']);
   });
 
@@ -529,6 +555,7 @@ describe('repository-scan jobs', () => {
       scannedFiles: 0,
       discovered: 0,
       skippedUserLevelFolders: ['.'],
+      skippedUserLevelFolderCount: 1,
     });
     expect(storedOccurrences()).toEqual([]);
   });

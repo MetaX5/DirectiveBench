@@ -542,7 +542,7 @@ describe('describeScan', () => {
   });
 
   it('mentions the user-level agent folders a scan skipped, as information (D05)', () => {
-    const done = (skippedUserLevelFolders: string[]) =>
+    const done = (skippedUserLevelFolders: string[], skippedUserLevelFolderCount?: number) =>
       describeScan(
         scan({
           result: {
@@ -556,6 +556,7 @@ describe('describeScan', () => {
             errorCount: 0,
             errors: [],
             skippedUserLevelFolders,
+            ...(skippedUserLevelFolderCount === undefined ? {} : { skippedUserLevelFolderCount }),
             commitSha: null,
             durationMs: 1,
           },
@@ -569,6 +570,44 @@ describe('describeScan', () => {
     expect(done(['.']).info).toBe(
       'This location is a user-level agent folder; those are never scanned, so nothing was read.',
     );
+    expect(done(['.'], 1).info).toBe(
+      'This location is a user-level agent folder; those are never scanned, so nothing was read.',
+    );
+    expect(done([], 0).info).toBeNull();
+  });
+
+  it('says how many skipped user-level folders the capped list leaves out (issue 45)', () => {
+    const info = (listed: number, total?: number) =>
+      describeScan(
+        scan({
+          result: {
+            ok: true,
+            scannedFiles: 0,
+            discovered: 0,
+            createdArtifacts: 0,
+            createdVersions: 0,
+            ...unchanged,
+            warningCount: 0,
+            errorCount: 0,
+            errors: [],
+            skippedUserLevelFolders: Array.from({ length: listed }, (_, i) => `u${i}/.claude`),
+            ...(total === undefined ? {} : { skippedUserLevelFolderCount: total }),
+            commitSha: null,
+            durationMs: 1,
+          },
+        }),
+      ).info;
+    const list = (n: number) => Array.from({ length: n }, (_, i) => `u${i}/.claude`).join(', ');
+    const lead = 'Skipped user-level agent folders, which are never scanned: ';
+    expect(info(3, 3)).toBe(`${lead}${list(3)}.`);
+    expect(info(50, 51)).toBe(`${lead}${list(50)} and 1 more.`);
+    expect(info(50, 237)).toBe(`${lead}${list(50)} and 187 more.`);
+    expect(info(50, 1250)).toBe(`${lead}${list(50)} and 1,200 more.`);
+    // Stored before the total existed: the list is all there is.
+    expect(info(50)).toBe(`${lead}${list(50)}.`);
+    // A total smaller than the list (a corrupt row) never says "and 0 more" or a negative.
+    expect(info(3, 1)).toBe(`${lead}${list(3)}.`);
+    expect(info(50, 1250)).not.toMatch(/[\u2013\u2014\u2026]/);
   });
 
   it('reports failures, cancellation and missing results', () => {
