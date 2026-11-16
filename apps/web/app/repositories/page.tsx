@@ -194,11 +194,8 @@ export default async function RepositoriesPage({
         ? null
         : { kind: 'error' as const, message: requestError };
 
-  // The table has seven columns and up to three row actions (Scan, Change branch, Remove): the
-  // wide layout keeps the actions on one line at 1440px with the sidebar (issue 58, as in the
-  // approved screenshots, whose proposal used the wide container).
   return (
-    <div data-layout="wide">
+    <>
       <AutoRefresh active={checking || scanning || panelPending} />
       <PageHeader
         title="Repositories"
@@ -602,9 +599,7 @@ export default async function RepositoriesPage({
                         {scannedBranchHint(repository) ? `. ${scannedBranchHint(repository)}` : ''}
                       </TD>
                       <TD className="text-right">
-                        {/* One line from 1440px (the wide layout has room for three buttons, as in
-                            the approved screenshots); stacked below, where the table would scroll. */}
-                        <div className="flex flex-wrap justify-end gap-inline min-[90rem]:flex-nowrap">
+                        <div className="flex flex-wrap justify-end gap-inline">
                           {canScan(repository) ? (
                             <form action={scanRepositoryAction}>
                               <input type="hidden" name="repositoryId" value={repository.id} />
@@ -656,6 +651,6 @@ export default async function RepositoriesPage({
           </Card>
         )}
       </div>
-    </div>
+    </>
   );
 }
