@@ -594,3 +594,107 @@ test.describe.serial('moves keep identity (SPEC-126 Phase 3)', () => {
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   });
 });
+
+// Issue 66 (SPEC-103 FR-103-16): an in-place rename and a format change at the same path keep
+// the artifact, so the same `/artifacts/[id]` URL opens it with the new name or type; the type
+// cell, the type filter and the header follow the source.
+const SOURCE_CHANGES = 'identity-e2e-source-changes';
+const RENAMED_SKILL = '.agents/skills/identity-e2e-renamed/SKILL.md';
+const TYPED_PATH = 'docs/AGENTS.md';
+// Its own root (lesson 2026-11-13).
+const sourceChangesRoot = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'identity-source-')));
+
+function writeSourceChange(relPath: string, content: string): void {
+  const path = join(sourceChangesRoot, SOURCE_CHANGES, relPath);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
+
+function sourceChangeArtifact(path: string): Promise<{ id: string; slug: string }> {
+  return withDatabase(
+    (db) =>
+      db
+        .prepare(
+          `select a.id, a.slug from artifact_occurrences o
+             join artifacts a on a.id = o.artifact_id
+             join repositories r on r.id = o.repository_id where r.name = ? and o.path = ?`,
+        )
+        .get(SOURCE_CHANGES, path) as { id: string; slug: string },
+  );
+}
+
+test.describe.serial('renames and type changes keep the URL (issue 66)', () => {
+  let jobsBefore = new Set<string>();
+  let artifactsBefore = new Set<string>();
+
+  test.beforeAll(async () => {
+    [jobsBefore, artifactsBefore] = await withDatabase((db) => [
+      new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+      new Set((db.prepare('select id from artifacts').all() as { id: string }[]).map((a) => a.id)),
+    ]);
+    writeSourceChange(
+      RENAMED_SKILL,
+      '---\nname: identity-e2e-renamed\ndescription: Before the rename.\n---\n# Renamed\n',
+    );
+    writeSourceChange(TYPED_PATH, '# Identity e2e docs\n');
+  });
+
+  // Leave the shared database as found (lesson 2026-11-10).
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = (sql: string, id: string) => db.prepare(sql).run(id);
+      remove('delete from repositories where name = ?', SOURCE_CHANGES);
+      for (const { id } of db.prepare('select id from artifacts').all() as { id: string }[]) {
+        if (!artifactsBefore.has(id)) remove('delete from artifacts where id = ?', id);
+      }
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) remove('delete from jobs where id = ?', id);
+      }
+    });
+    rmSync(sourceChangesRoot, { recursive: true, force: true });
+  });
+
+  test('the same URL opens the artifact after a rename and after a type change', async ({
+    page,
+  }) => {
+    await registerAt(page, sourceChangesRoot, SOURCE_CHANGES);
+    await scan(page, SOURCE_CHANGES);
+    // Captured before the rename: the id is the handle that never changes.
+    const skill = await sourceChangeArtifact('.agents/skills/identity-e2e-renamed');
+    const typed = await sourceChangeArtifact(TYPED_PATH);
+    await page.goto(`/artifacts/${typed.id}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(TYPED_PATH);
+    await expect(page.getByText('agents-md', { exact: true })).toBeVisible();
+
+    // The skill is renamed in place; the file becomes a directory holding a skill.
+    writeSourceChange(
+      RENAMED_SKILL,
+      '---\nname: identity-e2e-renamed-now\ndescription: After the rename.\n---\n# Renamed\n',
+    );
+    rmSync(join(sourceChangesRoot, SOURCE_CHANGES, TYPED_PATH));
+    writeSourceChange(
+      `${TYPED_PATH}/SKILL.md`,
+      '---\nname: identity-e2e-typed\ndescription: Now a skill.\n---\n# Typed\n',
+    );
+    await scan(page, SOURCE_CHANGES);
+    await expect(page.getByTestId('scan-status')).toContainText('(0 new, 2 new versions)');
+
+    await page.goto(`/artifacts/${skill.id}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('identity-e2e-renamed-now');
+    expect(await sourceChangeArtifact('.agents/skills/identity-e2e-renamed')).toEqual(skill);
+
+    await page.goto(`/artifacts/${typed.id}`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('identity-e2e-typed');
+    await expect(page.getByText('skill-md', { exact: true })).toBeVisible();
+    await expect(page.getByText('skill', { exact: true })).toBeVisible();
+    await expect(page.getByText('instruction', { exact: true })).toHaveCount(0);
+    expect(await sourceChangeArtifact(TYPED_PATH)).toEqual(typed);
+
+    // The list's Type cell and the type filter follow the new type.
+    await page.goto('/artifacts?type=skill');
+    const row = page.locator(`tr[data-artifact-id="${typed.id}"]`);
+    await expect(row.getByRole('cell').nth(1)).toHaveText('skill');
+    await page.goto('/artifacts?type=instruction');
+    await expect(page.locator(`tr[data-artifact-id="${typed.id}"]`)).toHaveCount(0);
+  });
+});
