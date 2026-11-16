@@ -45,9 +45,42 @@ order; recovering such jobs differently (the existing `recoverStaleJobs` stays t
 
 ## Decisions
 
+- A job claimed while `stop()` still waits for its poll (before the deadline) is also recorded
+  `interrupted` without running: the approved rule is "claimed after `stop()` began", and
+  running it only to abort it at once gains nothing. The existing test "stop() waits for a job
+  that a poll is claiming" now asserts the scan never starts.
+- `done` still rejects after it is logged, so `runAcquiredJob` (`benchmark run`) and
+  `runUntilIdle` (`demo`) keep reporting the failure to their callers as before.
+- The interrupted job's error is "Runner shut down before the job started", next to the
+  timeout path's "Runner shut down before the job stopped".
+
 ## Work performed
 
+- `3e44638` fix(runner): `track()` calls `interruptClaimed()` instead of `execute()` when
+  `stopping`; every `done` gets a handler that logs `outcome-not-recorded`. Tests: the two
+  existing claim-during-stop tests in `runner-lanes.test.ts` now assert the scan never starts;
+  new tests for a late-claimed job whose interrupt write rejects (no unhandled rejection), for a
+  job that outlives `stop()` on a connection closed afterwards, and (in
+  `runner-lifecycle.test.ts`) for a late-claimed benchmark job (no `detect()`, no benchmark run).
+- SPEC-114 §20: new status entry and the `outcome-not-recorded` event in FR-114-15.
+
 ## Verification
+
+- Red first (tests before the fix, on `origin/main` code): 4 of the new or changed tests failed —
+  the late-claimed scan ran (`status` and error mismatch), the late-claimed benchmark job ran,
+  the outlived job's failure was not logged as `outcome-not-recorded`, and the late-claimed job
+  whose write rejected caused 1 `unhandledRejection` ("expected vi.fn() to not be called at all,
+  but actually been called 1 times").
+- After the fix: `pnpm format:check`, `pnpm lint`, `pnpm typecheck` pass; `pnpm test` passes in
+  every package with 100% statements, branches, functions and lines (runner: 293 tests).
+- `taskset -c 0,1` runs of `runner-lanes`, `runner-lifecycle`, `runner-acquired` and `runner`
+  tests: 5 of 5 passed.
+- `pnpm build` passes; the built CLI's `demo` completed with the mock agent (verdict improved),
+  and `serve` on the same data directory started and shut down on SIGINT with no unhandled
+  rejection or `outcome-not-recorded` line.
+- Not verified: the exact race in a real `serve` shutdown (a claim landing after the deadline,
+  then the database closing) — it needs a transaction held across the deadline, which only the
+  unit tests produce. `pnpm verify:pack` not run yet (no packaging or `apps/cli` change).
 
 ## Problems and deviations
 
@@ -61,8 +94,8 @@ order; recovering such jobs differently (the existing `recoverStaleJobs` stays t
 
 ### Phase 1: Runner fix
 
-- [ ] 1.1 Red-first tests for both cases
-- [ ] 1.2 Interrupt late claims without execute() and log failed outcome writes
+- [x] 1.1 Red-first tests for both cases — 3e44638
+- [x] 1.2 Interrupt late claims without execute() and log failed outcome writes — 3e44638
 - [ ] 1.3 Update SPEC-114 implementation status
 
 ### Phase 2: Verification and review
