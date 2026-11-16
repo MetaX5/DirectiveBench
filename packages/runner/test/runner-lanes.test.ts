@@ -20,10 +20,14 @@ import type * as registrationModule from '../src/repository-registration';
 import type * as scanModule from '../src/repository-scan';
 import { ScanCancelledError } from '../src/repository-scan';
 
-// The real `interruptJobs`, replaceable per test to reject with something that is not an Error.
+// The real `interruptJobs` and `finishJob`, replaceable per test to reject.
 vi.mock('@directivebench/database', async (importOriginal) => {
   const actual = await importOriginal<typeof database>();
-  return { ...actual, interruptJobs: vi.fn(actual.interruptJobs) };
+  return {
+    ...actual,
+    interruptJobs: vi.fn(actual.interruptJobs),
+    finishJob: vi.fn(actual.finishJob),
+  };
 });
 
 /** Scans and registrations that finish only when the test releases them. */
@@ -69,17 +73,6 @@ vi.mock('../src/repository-registration', async (importOriginal) => ({
       }),
   ),
 }));
-
-/**
- * Resolves once the `index`-th held scan has started. It yields to the event loop between checks
- * and fails after a bounded number of turns instead of waiting on a timer.
- */
-async function scanStarted(index: number): Promise<void> {
-  for (let turn = 0; turn < 10_000 && held.scans.length <= index; turn++) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  if (held.scans.length <= index) throw new Error(`Scan ${index} never started`);
-}
 
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 
@@ -197,7 +190,7 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
 
   // Regression (review of PR #44): stop() only aborted the jobs already active, so a job a poll
   // was claiming at that moment started afterwards and ran unsupervised.
-  it('stop() waits for a job that a poll is claiming and interrupts it too', async () => {
+  it('stop() waits for a job that a poll is claiming and interrupts it without running it', async () => {
     const scan = await scanJob('/srv/a');
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
@@ -215,7 +208,8 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     await holding;
     await stopped;
     await polling;
-    expect(held.scans[0]?.signal.aborted).toBe(true);
+    // Claimed after stop() began: recorded as interrupted without starting the scan (issue 46).
+    expect(held.scans).toHaveLength(0);
     expect(await status(scan)).toBe('interrupted');
     expect(runner.activeJobCount).toBe(0);
   });
@@ -240,14 +234,95 @@ describe('runner lanes (SPEC-104 OQ-104-06)', () => {
     release();
     await holding;
     await polling;
-    // Claimed after the deadline: aborted at once, so it never runs unsupervised. The runner
-    // reads the repository's provider before it starts the scan, so wait for the scan to start.
-    const idle = runner.runUntilIdle();
-    await scanStarted(0);
-    expect(held.scans[0]?.signal.aborted).toBe(true);
-    const [late] = await idle;
-    expect(late).toMatchObject({ jobId: scan, status: 'interrupted' });
-    expect(await status(scan)).toBe('interrupted');
+    // Claimed after the deadline (issue 46): interrupted directly, so it never runs at all.
+    const [late] = await runner.runUntilIdle();
+    expect(late).toMatchObject({
+      jobId: scan,
+      status: 'interrupted',
+      benchmarkRunId: null,
+      error: 'Runner shut down before the job started',
+    });
+    expect(await getJob(handle.db, scan)).toMatchObject({
+      status: 'interrupted',
+      error: 'Runner shut down before the job started',
+    });
+    expect(held.scans).toHaveLength(0);
+    expect(runner.activeJobCount).toBe(0);
+  });
+
+  // Issue 46: a job that outlives stop() records its outcome after `serve` closed the database.
+  // Its `done` chain had no rejection handler, so the failed write was an unhandled rejection.
+  it('logs the failed outcome write of a job that outlives stop() instead of rejecting unobserved', async () => {
+    const registration = await enqueueRepositoryRegistrationJob(handle.db, { path: '/srv/a' });
+    // The runner gets its own connection, closed after stop() as `serve` closes its handle.
+    const own = openDatabase(join(dataDir, 'directivebench.db'));
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const runner = createRunner({ handle: own, shutdownTimeoutMs: 20, logger });
+      await runner.poll();
+      // The held registration ignores the abort, so it outlives stop().
+      await runner.stop();
+      expect(await status(registration.id)).toBe('interrupted');
+      own.close();
+      held.registrations[0]?.release();
+      await vi.waitFor(() => expect(runner.activeJobCount).toBe(0));
+      // Unhandled rejections are reported after a macrotask turn.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringMatching(
+          new RegExp(
+            `^Job ${registration.id} outcome could not be recorded: .*database is not open`,
+          ),
+        ),
+        { event: 'outcome-not-recorded', jobId: registration.id },
+      );
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  // Issue 46: a job claimed after the deadline is in no list stop() waits for, so a rejected
+  // write of its outcome (under `serve` the database is closed by then) went unobserved.
+  it('logs the failed interrupt write of a job claimed after the deadline, with no unhandled rejection', async () => {
+    const scan = await scanJob('/srv/a');
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = withTransaction(handle, async () => gate);
+    await new Promise((resolve) => setImmediate(resolve));
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const runner = createRunner({ shutdownTimeoutMs: 20, logger });
+      const polling = runner.poll();
+      await new Promise((resolve) => setImmediate(resolve));
+      await runner.stop();
+      // Every outcome write fails from now on, as on the database `serve` closed after stop().
+      vi.mocked(database.finishJob).mockRejectedValue(new Error('database is not open'));
+      release();
+      await holding;
+      await polling;
+      await vi.waitFor(() => expect(runner.activeJobCount).toBe(0));
+      // Unhandled rejections are reported after a macrotask turn.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        `Job ${scan} outcome could not be recorded: Error: database is not open`,
+        { event: 'outcome-not-recorded', jobId: scan },
+      );
+      expect(held.scans).toHaveLength(0);
+    } finally {
+      vi.mocked(database.finishJob).mockImplementation(
+        (await vi.importActual<typeof database>('@directivebench/database')).finishJob,
+      );
+      process.off('unhandledRejection', unhandled);
+    }
+    expect(await status(scan)).toBe('running');
   });
 
   // Regression (third Codex review of PR #44): past the deadline, stop() awaited the interrupt
