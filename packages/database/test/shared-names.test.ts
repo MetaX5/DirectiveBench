@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   assignArtifactCategory,
   assignBenchmarkSuite,
@@ -150,5 +150,56 @@ describe('category chip shared', () => {
     // An active category literally named "Platform (archived)" reads like both of them.
     await updateCategory(handle, { id: python.id, name: 'Platform (archived)', description: null });
     expect(await chips()).toEqual({ platform: true, 'platform-2': true, python: true });
+  });
+});
+
+describe('shared-name flags at scale (Codex review of PR 234)', () => {
+  /** The query plans of the statements a call prepares that read a flag's table twice. */
+  async function flaggedPlans(handle: DatabaseHandle, call: () => Promise<unknown>) {
+    const prepare = vi.spyOn(handle.sqlite, 'prepare');
+    await call();
+    const statements = prepare.mock.calls
+      .map(([query]) => query)
+      .filter((query) =>
+        ['"benchmark_suites"', '"artifacts"', '"categories"'].some(
+          (table) => (query.match(new RegExp(`(from|join) ${table}(?!\\.)`, 'g')) ?? []).length > 1,
+        ),
+      );
+    prepare.mockRestore();
+    expect(statements.length).toBeGreaterThan(0);
+    return statements.map((query) => {
+      const params = (query.match(/\?/g) ?? []).map(() => 'x');
+      return handle.sqlite
+        .prepare(`explain query plan ${query}`)
+        .all(...params)
+        .map((row) => String((row as { detail: string }).detail))
+        .join('\n');
+    });
+  }
+
+  it('reads each table once per statement, never once per row', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    await assignBenchmarkSuite(handle.db, targets.artifactId, targets.suiteId);
+    const python = await category(handle, 'Python');
+    await assignArtifactCategory(handle, targets.artifactId, python.id);
+    await enqueueBenchmarkJob(handle.db, {
+      suiteVersionId: targets.suiteVersionId,
+      artifactVersionId: targets.artifactVersionId,
+    });
+    const calls = [
+      () => listBenchmarkRuns(handle.db),
+      () => listArtifactRuns(handle.db, targets.artifactId),
+      () => listJobs(handle.db),
+      () => getArtifactDetail(handle.db, targets.artifactId),
+      () => getSuiteDetail(handle.db, targets.suiteId),
+      () => listArtifacts(handle.db),
+    ];
+    for (const call of calls) {
+      for (const plan of await flaggedPlans(handle, call)) {
+        // A correlated subquery would scan the whole table again for every row.
+        expect(plan).not.toMatch(/CORRELATED/);
+      }
+    }
   });
 });
