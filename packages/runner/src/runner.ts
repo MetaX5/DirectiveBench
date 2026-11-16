@@ -31,6 +31,7 @@ import {
   isCancellationRequested,
   recoverStaleJobs,
   repositoryRegistrationPayloadSchema,
+  repositoryBranchPayloadSchema,
   repositoryScanPayloadSchema,
   type DatabaseHandle,
   type JobRecord,
@@ -39,6 +40,7 @@ import {
 import { ORPHANED_CACHE_SWEEP_INTERVAL_MS, sweepOrphanedCaches } from './hosted-cache';
 import { GitCancelledError, HTTPS_TRANSPORT, type HostedGitTransport } from './hosted-git';
 import {
+  changeHostedBranch,
   registerHostedUrl,
   scanHostedRepository,
   type HostedRepositoryOptions,
@@ -54,7 +56,7 @@ import { ScanCancelledError, scanLocalRepository } from './repository-scan';
 type Lane = 'long' | 'short';
 const LANE_JOB_TYPES: Record<Lane, readonly JobType[]> = {
   long: ['benchmark-run', 'repository-scan'],
-  short: ['repository-registration'],
+  short: ['repository-registration', 'repository-branch'],
 };
 /** Slots of the short lane, in addition to `concurrency`. */
 export const SHORT_JOB_SLOTS = 1;
@@ -146,6 +148,8 @@ export const UNEXPECTED_JOB_FAILURE: Readonly<Record<JobType, string>> = {
     'The repository registration failed unexpectedly. Try again, and report the problem if it persists.',
   'repository-scan':
     'The repository scan failed unexpectedly. Try again, and report the problem if it persists.',
+  'repository-branch':
+    'The branch change failed unexpectedly. Nothing was changed. Try again, and report the problem if it persists.',
 };
 
 /**
@@ -161,8 +165,8 @@ const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefin
 
 /**
  * Executes jobs from the SQLite queue with bounded concurrency: benchmark runs, repository
- * registrations (SPEC-104 §9) and repository scans (SPEC-105, local repositories). It runs
- * inside the CLI process; the web UI only enqueues jobs.
+ * registrations (SPEC-104 §9), branch changes (issue 58) and repository scans (SPEC-105). It
+ * runs inside the CLI process; the web UI only enqueues jobs.
  * Remote runners will implement the same lifecycle over an authenticated outbound connection
  * (see .ai/specs/2026-10-14-runner-management.md).
  */
@@ -542,7 +546,7 @@ export class LocalRunner {
           'url' in payload.data
             ? await registerHostedUrl(
                 handle,
-                payload.data.url,
+                { url: payload.data.url, branch: payload.data.branch ?? null },
                 this.hostedOptions(controller.signal),
               )
             : await registerLocalPath(
@@ -553,6 +557,19 @@ export class LocalRunner {
                 },
                 { homeDir: homedir(), env: process.env, signal: controller.signal },
               );
+        return await finishAs('completed', null, result);
+      }
+      if (job.type === 'repository-branch') {
+        const payload = repositoryBranchPayloadSchema.safeParse(job.payload);
+        if (!payload.success) {
+          const reasons = payload.error.issues.map((issue) => issue.message).join(' ');
+          return await finishAs('failed', `The stored branch change is invalid: ${reasons}`);
+        }
+        const result = await changeHostedBranch(
+          handle,
+          { jobId: job.id, payload: payload.data },
+          this.hostedOptions(controller.signal),
+        );
         return await finishAs('completed', null, result);
       }
       if (job.type === 'repository-scan') {

@@ -109,7 +109,7 @@ function skills(): FixtureRemote {
 }
 
 async function registered(remote: FixtureRemote): Promise<RepositoryRecord> {
-  const result = await registerHostedUrl(handle, remote.location, options());
+  const result = await registerHostedUrl(handle, { url: remote.location }, options());
   if (!result.ok) throw new Error(result.message);
   return (await getRepository(handle.db, result.repositoryId)) as RepositoryRecord;
 }
@@ -147,7 +147,7 @@ describe('hosted registration with a cache that cannot be used', () => {
       locked.push(parent);
       const result = await registerHostedUrl(
         handle,
-        remote.location,
+        { url: remote.location },
         options({ cacheDir: join(parent, 'cache') }),
       );
       expect(result).toEqual({ ok: false, code: 'git-failed', message: cacheMessage('EACCES') });
@@ -157,7 +157,7 @@ describe('hosted registration with a cache that cannot be used', () => {
 
   it('reports a failed chmod of the cache the same way', async () => {
     vi.mocked(fsPromises.chmod).mockRejectedValueOnce(errno('EPERM', cacheDir()));
-    expect(await registerHostedUrl(handle, skills().location, options())).toEqual({
+    expect(await registerHostedUrl(handle, { url: skills().location }, options())).toEqual({
       ok: false,
       code: 'git-failed',
       message: cacheMessage('EPERM'),
@@ -171,7 +171,7 @@ describe('hosted registration with a cache that cannot be used', () => {
       throw errno('EACCES', String(path));
     });
     await expect(
-      registerHostedUrl(handle, skills().location, options({ signal: controller.signal })),
+      registerHostedUrl(handle, { url: skills().location }, options({ signal: controller.signal })),
     ).rejects.toThrow(GitCancelledError);
   });
 });
@@ -231,6 +231,7 @@ describe('hosted scan with a cache that cannot be used', () => {
       name: 'acme/slow',
       location: 'https://github.com/acme/slow',
       defaultBranch: 'main',
+      selectedBranch: null,
     });
     vi.mocked(fsPromises.readdir).mockRejectedValueOnce(errno('EACCES', cacheOf(repository.id)));
     const started = Date.now();

@@ -256,12 +256,16 @@ exec "${realGit}" "$@"
       releaseRm = () => writeFileSync(gate, '');
 
       const transport = fileTransport(remotes);
-      const registration = await registerHostedUrl(handle, remote.location, {
-        env: process.env,
-        signal: new AbortController().signal,
-        cacheDir: cacheDir(),
-        transport,
-      });
+      const registration = await registerHostedUrl(
+        handle,
+        { url: remote.location },
+        {
+          env: process.env,
+          signal: new AbortController().signal,
+          cacheDir: cacheDir(),
+          transport,
+        },
+      );
       if (!registration.ok) throw new Error(registration.message);
       const id = registration.repositoryId;
       const runner = createRunner({

@@ -3,6 +3,7 @@ import { delimiter, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   ARTIFACT_FORMATS,
+  BRANCH_NAME_MESSAGE,
   DISCOVERY_LIMITS,
   DiscoveryLimitError,
   SKIPPED_DIRECTORY_NAMES,
@@ -16,13 +17,19 @@ import {
   type BinaryTreeFile,
 } from '@directivebench/core';
 import {
+  HOSTED_PROVIDERS,
+  JobNoLongerRunningError,
   MAX_REPORTED_SCAN_ERRORS,
   getLastCompletedRepositoryScan,
+  getRepository,
   markRepositoryScanFailed,
   recordUnchangedRepositoryScan,
   registerHostedRepository,
+  setRepositoryBranch,
   type Database,
   type DatabaseHandle,
+  type RepositoryBranchPayload,
+  type RepositoryBranchResult,
   type RepositoryRecord,
   type RepositoryRegistrationResult,
   type RepositoryScanResult,
@@ -35,7 +42,7 @@ import {
   GitCancelledError,
   cacheFailure,
   checkGitVersion,
-  detectDefaultBranch,
+  checkRemoteBranch,
   ensurePrivateDirectory,
   fetchBlobs,
   fetchSnapshot,
@@ -87,13 +94,15 @@ export interface HostedRepositoryOptions {
  * The SHA-256 of the effective configuration a hosted scan reads a commit with (SPEC-105
  * FR-105-10, issue 63): the DirectiveBench version (its parsers and discovery rules), the formats,
  * the include roots and exclude globs (none can be configured yet, so always the whole tree), the
- * directories never entered and the discovery limits. A rescan may skip the fetch only when the
- * last successful scan stored the same hash; any change here reads the commit again.
+ * directories never entered, the discovery limits and the branch read (issue 58: a branch change
+ * never reuses a baseline of another branch, even at the same commit). A rescan may skip the fetch
+ * only when the last successful scan stored the same hash; any change here reads the commit again.
  */
-export function hostedScanConfigHash(appVersion: string): string {
+export function hostedScanConfigHash(appVersion: string, branch: string): string {
   return sha256(
     JSON.stringify({
       appVersion,
+      branch,
       formats: ARTIFACT_FORMATS,
       includeRoots: [],
       excludeGlobs: [],
@@ -172,33 +181,146 @@ async function onCacheError<T>(
   }
 }
 
+/** Why a branch the user named is refused (issue 58): shown under the Branch field. */
+function missingBranchMessage(branch: string, name: string, current: string | null): string {
+  return current === null
+    ? `The branch ${branch} does not exist in ${name}. Check the name on GitHub, or leave Branch empty to use the default branch.`
+    : `The branch ${branch} does not exist in ${name}. Nothing was changed: the repository still uses ${current}.`;
+}
+
 /**
  * Executes the `repository-registration` job of a URL (SPEC-104 FR-104-02, FR-104-07): asks the
- * remote for its default branch with `ls-remote` — nothing is downloaded, no credential is used
- * and no prompt can appear — and stores the repository with provider `github`, or returns the one
- * already registered at that URL (FR-104-04). A repository that needs credentials or does not exist
- * is rejected as "not found or not public" and stores nothing (FR-104-12, D06).
+ * remote for its default branch and, when the user named one, whether that branch exists, with
+ * one `ls-remote` — nothing is downloaded, no credential is used and no prompt can appear — and
+ * stores the repository with provider `github` (the chosen branch as `selected_branch`, null when
+ * it is the default), or returns the one already registered at that URL (FR-104-04), whose branch
+ * a re-registration never changes. A repository that needs credentials or does not exist is
+ * rejected as "not found or not public", and a named branch the remote does not have as
+ * `branch-not-found`; both store nothing (FR-104-12, D06, issue 58).
  */
 export async function registerHostedUrl(
   handle: DatabaseHandle,
-  url: string,
+  request: { url: string; branch?: string | null },
   options: HostedRepositoryOptions,
 ): Promise<Exclude<RepositoryRegistrationResult, { code: 'confirmation-required' }>> {
-  const parsed = parseRepositoryUrl(url);
+  const parsed = parseRepositoryUrl(request.url);
   if (!parsed.ok) return { ok: false, code: 'invalid-url', message: parsed.message };
-  const detected = await onCacheError(options.signal, async () => {
+  const branch = request.branch ?? null;
+  if (branch !== null && !isSafeBranchName(branch)) {
+    return { ok: false, code: 'branch-not-found', message: BRANCH_NAME_MESSAGE };
+  }
+  const checked = await onCacheError(options.signal, async () => {
     const prepared = await prepare(options);
     if (!('context' in prepared)) return prepared;
-    return detectDefaultBranch(prepared.context, parsed.location);
+    return checkRemoteBranch(prepared.context, parsed.location, branch);
   });
-  if (!detected.ok) return detected;
+  if (!checked.ok) return checked;
+  if (branch !== null && !checked.branchFound) {
+    return {
+      ok: false,
+      code: 'branch-not-found',
+      message: missingBranchMessage(branch, parsed.name, null),
+    };
+  }
   const { repository, created } = await registerHostedRepository(handle.db, {
     provider: parsed.provider,
     name: parsed.name,
     location: parsed.location,
-    defaultBranch: detected.defaultBranch,
+    defaultBranch: checked.defaultBranch,
+    selectedBranch: branch === checked.defaultBranch ? null : branch,
   });
   return { ok: true, repositoryId: repository.id, created };
+}
+
+/** Whether a stored hosted repository's location and id are what DirectiveBench wrote. */
+function storedLocationIsValid(repository: RepositoryRecord): boolean {
+  const parsed = parseRepositoryUrl(repository.location);
+  return parsed.ok && parsed.location === repository.location && REPOSITORY_ID.test(repository.id);
+}
+
+/**
+ * Executes the `repository-branch` job (SPEC-104 FR-104-07, FR-104-10, FR-104-14, issue 58): the
+ * repository must still exist and be hosted, with the location DirectiveBench stored (fail
+ * closed: nothing else reaches git); one `ls-remote` refreshes the default branch and checks the
+ * chosen one; a branch the remote does not have changes nothing. The branch is then stored by
+ * `setRepositoryBranch`, which re-checks the job (a cancelled or shut-down job writes nothing:
+ * its error is rethrown as a cancellation) and refuses while a scan of the repository is pending
+ * or running. Saving never scans (B7).
+ */
+export async function changeHostedBranch(
+  handle: DatabaseHandle,
+  job: { jobId: string; payload: RepositoryBranchPayload },
+  options: HostedRepositoryOptions,
+): Promise<RepositoryBranchResult> {
+  const { repositoryId, branch } = job.payload;
+  const repository = await getRepository(handle.db, repositoryId);
+  if (!repository) {
+    return {
+      ok: false,
+      code: 'repository-not-found',
+      message: 'That repository is no longer registered. Nothing was changed.',
+    };
+  }
+  if (!(HOSTED_PROVIDERS as readonly string[]).includes(repository.provider)) {
+    return {
+      ok: false,
+      code: 'unsupported-provider',
+      message:
+        'Only the branch of a GitHub repository can be chosen. A local repository is scanned from its working tree.',
+    };
+  }
+  if (!storedLocationIsValid(repository)) {
+    return {
+      ok: false,
+      code: 'invalid-url',
+      message: 'The stored repository location is invalid.',
+    };
+  }
+  const checked = await onCacheError(options.signal, async () => {
+    const prepared = await prepare(options);
+    if (!('context' in prepared)) return prepared;
+    return checkRemoteBranch(prepared.context, repository.location, branch);
+  });
+  if (!checked.ok) return checked;
+  if (branch !== null && !checked.branchFound) {
+    const current = repository.selectedBranch ?? checked.defaultBranch ?? repository.defaultBranch;
+    return {
+      ok: false,
+      code: 'branch-not-found',
+      message: missingBranchMessage(branch, repository.name, current ?? 'its default branch'),
+    };
+  }
+  let stored;
+  try {
+    stored = await setRepositoryBranch(handle, {
+      repositoryId,
+      jobId: job.jobId,
+      signal: options.signal,
+      branch,
+      defaultBranch: checked.defaultBranch,
+    });
+  } catch (error) {
+    if (error instanceof JobNoLongerRunningError) {
+      throw new GitCancelledError('The branch change was cancelled');
+    }
+    throw error;
+  }
+  if (stored.status === 'not-found') {
+    return {
+      ok: false,
+      code: 'repository-not-found',
+      message: 'That repository was removed meanwhile. Nothing was changed.',
+    };
+  }
+  if (stored.status === 'scan-active') {
+    return {
+      ok: false,
+      code: 'scan-active',
+      message:
+        'A scan of this repository is waiting or running. Change its branch after the scan finishes.',
+    };
+  }
+  return { ok: true, branch: stored.branch, defaultBranch: stored.defaultBranch };
 }
 
 type ScanFailure = Extract<RepositoryScanResult, { ok: false }>;
@@ -387,8 +509,7 @@ export async function scanHostedRepository(
     await markRepositoryScanFailed(handle.db, repository.id, result.message);
     return result;
   };
-  const parsed = parseRepositoryUrl(repository.location);
-  if (!parsed.ok || parsed.location !== repository.location || !REPOSITORY_ID.test(repository.id)) {
+  if (!storedLocationIsValid(repository)) {
     return fail({
       ok: false,
       code: 'scan-failed',
@@ -407,7 +528,7 @@ export async function scanHostedRepository(
   const prepared = await onCacheError(options.signal, () => prepare(options));
   if (!('context' in prepared)) return fail(prepared);
   const scanConfigHash =
-    options.appVersion === undefined ? undefined : hostedScanConfigHash(options.appVersion);
+    options.appVersion === undefined ? undefined : hostedScanConfigHash(options.appVersion, branch);
   const baseline =
     scanConfigHash === undefined
       ? null
@@ -423,6 +544,7 @@ export async function scanHostedRepository(
         jobId: job.jobId,
         repositoryId: repository.id,
         commitSha: head.commitSha,
+        branch,
         signal: options.signal,
       });
       if (!recorded.ok) return recorded;
@@ -449,6 +571,7 @@ export async function scanHostedRepository(
           skippedUserLevelFolderCount: 0,
           commitSha: head.commitSha,
           scanConfigHash: baseline.scanConfigHash,
+          branch,
           durationMs: Math.round(performance.now() - started),
         };
       }
@@ -462,7 +585,18 @@ export async function scanHostedRepository(
       id: repository.id,
     }),
   );
-  if (!fetched.ok) return fail(fetched);
+  if (!fetched.ok) {
+    // A branch the user chose and that was deleted upstream (issue 58, SPEC-105 §14): registering
+    // the URL again would not help, changing the branch does.
+    return fail(
+      fetched.code === 'branch-not-found' && repository.selectedBranch !== null
+        ? {
+            ...fetched,
+            message: `The branch ${branch} does not exist in the repository any more. Change the branch, or leave it empty to use the default branch.`,
+          }
+        : fetched,
+    );
+  }
   const { commitSha, entries, contents } = fetched;
 
   let discovery;
@@ -485,6 +619,7 @@ export async function scanHostedRepository(
     repositoryId: repository.id,
     artifacts: discovery.artifacts.map(toScannedArtifact),
     commitSha,
+    branch,
     signal: options.signal,
     // From the full discovery result, never from the truncated `errors` of the job result.
     unobserved: discovery.unobserved,
@@ -510,6 +645,7 @@ export async function scanHostedRepository(
     skippedUserLevelFolderCount: 0,
     commitSha,
     ...(scanConfigHash === undefined ? {} : { scanConfigHash }),
+    branch,
     durationMs: Math.round(performance.now() - started),
   };
 }
@@ -536,7 +672,13 @@ async function unchangedBaseline(
 /** {@link recordUnchangedRepositoryScan} with the failures of a scan's write (`scanStoreFailure`). */
 async function recordUnchanged(
   handle: DatabaseHandle,
-  scan: { repositoryId: string; jobId: string; commitSha: string; signal: AbortSignal },
+  scan: {
+    repositoryId: string;
+    jobId: string;
+    commitSha: string;
+    branch: string;
+    signal: AbortSignal;
+  },
 ): Promise<{ ok: true; recorded: boolean } | ScanFailure> {
   try {
     return { ok: true, recorded: await recordUnchangedRepositoryScan(handle, scan) };

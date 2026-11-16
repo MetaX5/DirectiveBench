@@ -106,9 +106,13 @@ describe('jobs that fail unexpectedly (issue #70)', () => {
   it('names the job type in the fixed message of every job type', () => {
     expect(Object.keys(UNEXPECTED_JOB_FAILURE).sort()).toEqual([
       'benchmark-run',
+      'repository-branch',
       'repository-registration',
       'repository-scan',
     ]);
+    expect(UNEXPECTED_JOB_FAILURE['repository-branch']).toMatch(
+      /^The branch change failed unexpectedly\. Nothing was changed\./,
+    );
     expect(UNEXPECTED_JOB_FAILURE['benchmark-run']).toMatch(/^The benchmark run failed/);
     expect(UNEXPECTED_JOB_FAILURE['repository-registration']).toMatch(
       /^The repository registration failed/,

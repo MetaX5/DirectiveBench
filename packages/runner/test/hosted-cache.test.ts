@@ -85,6 +85,7 @@ async function registered(): Promise<string> {
     name: 'rules',
     location: `https://github.com/acme/rules-${createId('x').slice(2, 8)}`,
     defaultBranch: 'main',
+    selectedBranch: null,
   });
   return repository.id;
 }

@@ -78,8 +78,30 @@ export class FixtureRemote {
     return this.head();
   }
 
-  head(): string {
-    return git(this.bare, ['rev-parse', 'refs/heads/main']).trim();
+  head(branch = 'main'): string {
+    return git(this.bare, ['rev-parse', `refs/heads/${branch}`]).trim();
+  }
+
+  /**
+   * Creates (or moves) `branch` on the remote: from the head of `from`, plus a commit of `files`
+   * when there are any (issue 58). Returns the branch's commit. The work tree stays on `main`.
+   */
+  branch(name: string, files: Record<string, string | Buffer> = {}, from = 'main'): string {
+    git(this.work, ['fetch', '-q', 'origin']);
+    git(this.work, ['checkout', '-q', '-B', name, `origin/${from}`]);
+    if (Object.keys(files).length > 0) {
+      writeFiles(this.work, files);
+      git(this.work, ['add', '-A']);
+      git(this.work, ['commit', '-q', '-m', `on ${name}`]);
+    }
+    git(this.work, ['push', '-q', '-f', 'origin', `HEAD:refs/heads/${name}`]);
+    git(this.work, ['checkout', '-q', 'main']);
+    return this.head(name);
+  }
+
+  /** Deletes `branch` on the remote. */
+  deleteBranch(name: string): void {
+    git(this.bare, ['update-ref', '-d', `refs/heads/${name}`]);
   }
 
   /** The blob ID of a path at the remote's head. */

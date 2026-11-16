@@ -486,19 +486,36 @@ function utf8(bytes: Buffer): string | null {
   }
 }
 
+/** A full object ID: SHA-1 (40) or SHA-256 (64) hex. */
+const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
 /**
- * Asks the remote for its default branch (FR-104-07: `ls-remote --symref <url> HEAD`) without
- * downloading anything. A repository that needs credentials fails with "not found or not public",
- * and no prompt can appear (FR-104-12). An empty repository has no default branch (null); so does
- * a branch name outside {@link isSafeBranchName}.
+ * Asks the remote for its default branch and, when `branch` is given, whether that branch exists
+ * (SPEC-104 FR-104-07, FR-104-10, issue 58), with ONE `ls-remote --symref -- <url> HEAD
+ * [refs/heads/<branch>]` and without downloading anything. The caller passes only a safe branch
+ * name (`isSafeBranchName`), and it reaches git only inside `refs/heads/<branch>` after `--`.
+ * ls-remote matches a pattern against the tail of each ref name, so only a line naming exactly
+ * that ref with a full object ID counts. A repository that needs credentials fails with "not found
+ * or not public", and no prompt can appear (FR-104-12). An empty repository has no default branch
+ * (null); so does a default branch name outside {@link isSafeBranchName}. `branchFound` is always
+ * true without a `branch`.
  */
-export async function detectDefaultBranch(
+export async function checkRemoteBranch(
   context: HostedGitContext,
   location: string,
-): Promise<{ ok: true; defaultBranch: string | null } | HostedGitFailure> {
+  branch: string | null,
+): Promise<{ ok: true; defaultBranch: string | null; branchFound: boolean } | HostedGitFailure> {
+  const ref = branch === null ? null : `refs/heads/${branch}`;
   const result = await runStep(
     context,
-    ['ls-remote', '--symref', '--', context.transport.remoteUrl(location), 'HEAD'],
+    [
+      'ls-remote',
+      '--symref',
+      '--',
+      context.transport.remoteUrl(location),
+      'HEAD',
+      ...(ref === null ? [] : [ref]),
+    ],
     {
       gitDir: null,
       kind: 'network',
@@ -514,14 +531,17 @@ export async function detectDefaultBranch(
   const symref = lines
     .map((line) => /^ref: refs\/heads\/(.+)\tHEAD$/.exec(line)?.[1])
     .find((name) => name !== undefined);
+  const branchFound =
+    ref === null ||
+    lines
+      .map((line) => line.split('\t'))
+      .some(([oid, name]) => name === ref && OBJECT_ID.test(String(oid)));
   return {
     ok: true,
     defaultBranch: symref !== undefined && isSafeBranchName(symref) ? symref : null,
+    branchFound,
   };
 }
-
-/** A full object ID: SHA-1 (40) or SHA-256 (64) hex. */
-const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 /**
  * Step 0 of SPEC-105 §9.1 (issue 63): asks the remote for the commit `refs/heads/<branch>` points
@@ -560,9 +580,34 @@ export async function resolveRemoteHead(
 }
 
 /**
+ * Whether an existing cache holds exactly one ref, `refs/heads/<branch>` (SPEC-105 FR-105-05,
+ * issue 58): `for-each-ref` on the cache, a local step. A cache cloned for another branch, one
+ * holding a second ref (a change made while it was being fetched, a crash) or one whose refs
+ * cannot be listed is not reused: the old snapshot's commit, trees and blobs must never be mixed
+ * into the new one.
+ */
+async function holdsOnlyBranch(
+  context: HostedGitContext,
+  target: { branch: string; cacheDir: string },
+): Promise<boolean> {
+  const result = await runStep(context, ['for-each-ref', '--format=%(refname)', 'refs/'], {
+    gitDir: target.cacheDir,
+    kind: 'local',
+    timeoutMs: context.timeouts.read,
+    maxStdoutBytes: SMALL_OUTPUT_BYTES,
+  });
+  return (
+    abnormal(result, 'git for-each-ref', context) === null &&
+    result.exitCode === 0 &&
+    result.stdout.toString('utf8') === `refs/heads/${target.branch}\n`
+  );
+}
+
+/**
  * Step 1 of SPEC-105 §9.1: the commit and its trees only, into the bare cache — a blob-less,
  * shallow, single-branch clone without tags, templates (so no sample hooks), working tree or
- * checkout; an existing cache is fetched into instead. The snapshot commit is then read from the
+ * checkout; an existing cache that holds exactly this branch is fetched into instead, any other
+ * existing cache is deleted first (issue 58). The snapshot commit is then read from the
  * cache. The cache size is watched during the download. On failure the cache is deleted, so the
  * next scan starts from a fresh clone; a failing fetch into an existing cache is retried once as
  * a fresh clone.
@@ -573,7 +618,9 @@ export async function fetchSnapshot(
 ): Promise<{ ok: true; commitSha: string } | HostedGitFailure> {
   // Absent: clone. Any other error is a cache that cannot be checked (fail closed).
   const exists = await lstat(target.cacheDir).then(() => true, absentAs(false));
-  if (exists) {
+  if (exists && !(await holdsOnlyBranch(context, target))) {
+    await rm(target.cacheDir, { recursive: true, force: true });
+  } else if (exists) {
     const fetched = await fetchInto(context, target);
     if (fetched.ok) return fetched;
     await rm(target.cacheDir, { recursive: true, force: true });

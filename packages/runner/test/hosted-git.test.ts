@@ -22,7 +22,7 @@ import {
   cacheFailure,
   checkGitVersion,
   classifyRemoteFailure,
-  detectDefaultBranch,
+  checkRemoteBranch,
   directorySize,
   ensurePrivateDirectory,
   fetchBlobs,
@@ -411,9 +411,10 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
     const { git, context } = fakeContext({
       'ls-remote': { stdout: `ref: refs/heads/-x\tHEAD\n${OID_A}\tHEAD\n` },
     });
-    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
+    expect(await checkRemoteBranch(context, LOCATION, null)).toEqual({
       ok: true,
       defaultBranch: null,
+      branchFound: true,
     });
     const [call] = fakeGitCalls(git);
     expect(call?.args.slice(-5)).toEqual(['ls-remote', '--symref', '--', LOCATION, 'HEAD']);
@@ -501,7 +502,7 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
       },
       { caBundle: '/etc/ca/proxy.pem' },
     );
-    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
+    expect(await checkRemoteBranch(context, LOCATION, null)).toEqual({
       ok: false,
       code: 'unreachable',
       message:
@@ -511,7 +512,7 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
 
   it('reports output beyond what is read', async () => {
     const { context } = fakeContext({ 'ls-remote': { stdout: Buffer.alloc(2 * 1024 * 1024) } });
-    expect(await detectDefaultBranch(context, LOCATION)).toEqual({
+    expect(await checkRemoteBranch(context, LOCATION, null)).toEqual({
       ok: false,
       code: 'git-failed',
       message: 'git ls-remote printed more output than DirectiveBench reads.',

@@ -130,7 +130,7 @@ async function prepare(
     ...(extra.readTotalBytes === undefined ? {} : { readTotalBytes: extra.readTotalBytes }),
     ...(extra.readTotalMs === undefined ? {} : { timeouts: { readTotal: extra.readTotalMs } }),
   };
-  const registered = await registerHostedUrl(handle, remote.location, options);
+  const registered = await registerHostedUrl(handle, { url: remote.location }, options);
   if (!registered.ok) throw new Error(registered.message);
   const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: registered.repositoryId });
   handle.sqlite.prepare(`update jobs set status = 'running' where id = ?`).run(job.id);
