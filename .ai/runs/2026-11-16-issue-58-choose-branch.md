@@ -179,49 +179,117 @@ after switching back.
 
 ## Work performed
 
-(in progress)
+1. Plan in this log, reviewed by Codex as a sceptical staff engineer (10 findings, all adopted,
+   none changed an approved decision): `c21e33a`.
+2. Specs first: SPEC-104, SPEC-105, SPEC-125 (one sentence), database schema: `2ec9063`.
+3. `branchNameSchema` / `isSafeBranchName` in core: `633dcea`.
+4. Migration `0008_repository_scanned_branch`, `repository-branch` job type: `dcc95e7`.
+5. Job schemas, `enqueueRepositoryBranchJob`, `setRepositoryBranch`, the scan's branch re-check
+   (`BranchChangedError`) and `scanned_branch`: `d42e4ef`.
+6. Runner: one `ls-remote` for default and chosen branch, registration with a branch, the
+   `repository-branch` job (short lane), the cache ref rule, the branch in the scan
+   configuration hash, `branch-changed`, the "deleted upstream" message: `dfe3457`.
+7. Web: Branch field, Change branch panel, Branch caption, Last scan hint, actions: `32fe39e`;
+   focus fix found by the QA flow (fragment blocks autofocus): `95ca3f7`.
+8. Playwright (`apps/web/e2e/repository-branch.spec.ts`, existing expectations updated):
+   `197f102`; CLI test fixture: `7ae94f4`; Storybook Form pattern stories: `58cbc68`; spec
+   status and lesson: `54da100`.
+9. Codex adversarial review round 1 fix `ef3b5f8`, round 2 fix `2320276`; the wide layout tried
+   in `95ca3f7` was reverted in `1d8fead` because it contradicts issue 122 (72rem width pinned by
+   `artifacts-full-hd.spec.ts`).
 
 ## Verification
 
-(in progress)
+Red-first evidence (each test failed before the code it covers, recorded on 2026-11-16):
+
+| Test | Red | Green |
+|---|---|---|
+| `packages/core/test/branch-name.test.ts` | module missing (no tests ran) | 30 passed |
+| migration test (client.test.ts), journal without `0008` | `expected +0 to be 1` | passes |
+| `repository-branch.test.ts` with the branch re-check disabled | 1 failed (applies nothing when the effective branch changed) | 18 passed |
+| `hosted-branch.test.ts` without the cache ref rule | 1 failed (fresh cache after a change) | 14 passed |
+| `hosted-branch.test.ts` with the hash ignoring the branch | 2 failed (fresh cache; same commit on two branches) | passes |
+| QA flow on the built app: open Change branch | focus on the panel `div`, then on `body` | focus in the Branch field (e2e asserts it) |
+| Codex round 1/2 regressions (`actions.test.ts`, `hosted-branch.test.ts`) | old messages claimed "Nothing was changed" | pass |
+
+Quality gate on `2320276`+`1d8fead` (2026-11-16, TMPDIR under /var/tmp): `pnpm format:check` ok,
+`pnpm lint` ok, `pnpm typecheck` ok, `pnpm test` ok (core 351, database 363, runner 307, web 605,
+cli 207, benchmark-engine 518, agent-adapters 365 + 2 skipped; 100 % lines, branches, functions
+and statements everywhere), `pnpm build` ok, `pnpm verify:pack` ok, `pnpm test:e2e` 188 passed,
+`pnpm test:storybook` 340 passed. The first gate run failed `artifacts-full-hd.spec.ts` (the
+wide layout broke the issue-122 width rule) and `typecheck` (a CLI test fixture): both fixed.
+
+Codex adversarial review: round 1 needs-attention (interrupted change claimed nothing changed),
+round 2 needs-attention (unexpected failure after the commit claimed the same), round 3 approve.
+
+QA evidence: PR #248 comment, screenshots on `qa-evidence-pr-248`.
+
+Real app: `sh .ai/scripts/test-env-up.sh` (port 4402, built CLI, `directivebench demo`, mock
+agent only), seeded GitHub rows and held jobs (a trigger keeps every `repository-branch` and URL
+registration job pending, so nothing reached github.com); scripted browser flows: local path with
+a branch (error under Branch, focus, values kept), local path without branch (registered), URL
+with invalid branch, credential-like branch (not echoed in URL or field), URL with branch
+(pending, then runner outcome under Branch), Change branch with the keyboard only (25 Tabs, Enter,
+focus in field, invalid name, Cancel), save (pending, then done line and Last scan hint), refused
+while another change or a scan waits; screenshots in both themes at 1440 px and 320 px, no console
+errors, no horizontal page scroll.
+
+Not verified: a real github.com remote (no network in tests or QA; the production transport
+differs only in the URL and the allowed protocol); the runner side of the UI flows in the built
+app (played by the test, covered by `hosted-branch.test.ts` with real git).
 
 ## Problems and deviations
 
+- The approved screenshots were rendered in Storybook without the app shell. Inside the app
+  (sidebar, 72rem content width) the three row actions (Scan, Change branch, Remove) wrap onto
+  several lines; the proposal showed them on one line. Making the page wide fixes it at 1440 px
+  but contradicts issue 122, so it was reverted: raised as a decision in the PR.
+- The register form keeps the path and branch in the disabled fields while the runner checks
+  them (approved screenshot `register-pending`); before, the path field was emptied.
 ## Lessons recorded
+
+- [A URL fragment that names an element stops the browser's autofocus on page load](../lessons/2026-11-16-a-fragment-target-blocks-autofocus.md)
 
 ## Follow-ups
 
+- Decision: row actions on one line (wide Repositories page, or a narrower Location column) or
+  keep them wrapping.
+- Branch list (`listRepositoryBranches`, SPEC-104 §19) if users ask.
+- Post-submit focus on the page stays issue 243.
+
 ## Progress
+
+PR: #248
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Specs first
 
-- [ ] 1.1 Update SPEC-104, SPEC-105, SPEC-125 and the database schema spec
+- [x] 1.1 Update SPEC-104, SPEC-105, SPEC-125 and the database schema spec
 
 ### Phase 2: Core and database
 
-- [ ] 2.1 branchNameSchema and isSafeBranchName in core
-- [ ] 2.2 scanned_branch migration and schema
-- [ ] 2.3 Job schemas, enqueue and setRepositoryBranch, scan apply branch re-check
+- [x] 2.1 branchNameSchema and isSafeBranchName in core
+- [x] 2.2 scanned_branch migration and schema
+- [x] 2.3 Job schemas, enqueue and setRepositoryBranch, scan apply branch re-check
 
 ### Phase 3: Runner
 
-- [ ] 3.1 checkRemoteBranch and the cache ref rule
-- [ ] 3.2 Registration with a branch and the repository-branch job
-- [ ] 3.3 Branch in the scan config hash, scan result and messages
+- [x] 3.1 checkRemoteBranch and the cache ref rule
+- [x] 3.2 Registration with a branch and the repository-branch job
+- [x] 3.3 Branch in the scan config hash, scan result and messages
 
 ### Phase 4: Web
 
-- [ ] 4.1 Actions and lib helpers
-- [ ] 4.2 Register form Branch field and change panel
-- [ ] 4.3 Storybook stories
-- [ ] 4.4 Playwright tests
+- [x] 4.1 Actions and lib helpers
+- [x] 4.2 Register form Branch field and change panel
+- [x] 4.3 Storybook stories
+- [x] 4.4 Playwright tests
 
 ### Phase 5: Verification and review
 
-- [ ] 5.1 Full quality gate
-- [ ] 5.2 Real-app run and browser QA with evidence
-- [ ] 5.3 Codex adversarial review until approved
+- [x] 5.1 Full quality gate
+- [x] 5.2 Real-app run and browser QA with evidence
+- [x] 5.3 Codex adversarial review until approved
 - [ ] 5.4 om-auto-review-pr with autofix
 - [ ] 5.5 Implementation status, lessons and run log finalised
