@@ -135,6 +135,30 @@ describe('benchmark init (SPEC-118 FR-118-20/21, AC-1, AC-14)', () => {
     expect(definition.artifactTypes).toEqual(['rule']);
   });
 
+  it('scaffolds the type of the latest version, the default candidate (issue 66, FR-118-25)', async () => {
+    const agents = '# Guide\n';
+    const instruction = artifact('pdf', {
+      type: 'instruction',
+      format: 'agents-md',
+      primaryFile: 'AGENTS.md',
+      files: [
+        {
+          path: 'AGENTS.md',
+          sha256: sha256(agents),
+          size: Buffer.byteLength(agents),
+          content: agents,
+        },
+      ],
+    });
+    // v1 skill, v2 instruction at the same location, then back to v1: the artifact is a skill
+    // again, while the latest version, which `benchmark run` picks by default, is an instruction.
+    const dataDir = await dataDirWith(artifact('pdf'), instruction, artifact('pdf'));
+    const cwd = tempDir();
+    await init({ dataDir, artifact: 'pdf', cwd });
+    const definition = await loadDefinitionFile(join(cwd, 'pdf-benchmark', 'benchmark.yaml'));
+    expect(definition.artifactTypes).toEqual(['instruction']);
+  });
+
   it('accepts an empty target directory and refuses a non-empty one or a file', async () => {
     const dataDir = await dataDirWith(artifact('pdf'));
     const cwd = tempDir();

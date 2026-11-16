@@ -25,6 +25,7 @@ import type {
   MoveCandidate,
 } from '@directivebench/core';
 import {
+  ARTIFACT_FORMAT_TYPES,
   classifyArtifactPath,
   createId,
   hashManifest,
@@ -334,8 +335,9 @@ async function insertOccurrence(
  * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
  * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
  * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
- * the occurrence at it, and sets the source fields (name, description) from this write. Hashes are
- * recomputed from the content (see `recomputeFiles`). User-managed metadata is never touched.
+ * the occurrence at it, and sets the source fields (name, description, type) from this write.
+ * Hashes are recomputed from the content (see `recomputeFiles`). User-managed metadata is never
+ * touched.
  */
 export async function importArtifactVersion(
   handle: DatabaseHandle,
@@ -367,7 +369,12 @@ export async function importArtifactVersion(
       // Source-derived fields follow the source; user-managed fields are left untouched.
       await db
         .update(artifacts)
-        .set({ name: input.name, description: input.description, updatedAt: nowIso() })
+        .set({
+          name: input.name,
+          description: input.description,
+          type: input.type,
+          updatedAt: nowIso(),
+        })
         .where(eq(artifacts.id, artifactId));
     } else {
       artifactId = (await insertArtifact(db, slugAllocator(db), input.slug, input)).id;
@@ -969,6 +976,11 @@ async function markUnseenOccurrences(
   return marked.map(({ artifactId }) => artifactId);
 }
 
+/** The type of a stored version's format (SPEC-103 FR-103-16). */
+function artifactTypeOf(version: { format: string }): ArtifactType {
+  return ARTIFACT_FORMAT_TYPES[version.format as ArtifactFormat];
+}
+
 /** Where discovery reads an occurrence's primary file, relative to the repository root. */
 function primaryPathOf(format: string, occurrencePath: string): string {
   if (format !== 'skill-md') return occurrencePath;
@@ -976,16 +988,18 @@ function primaryPathOf(format: string, occurrencePath: string): string {
 }
 
 /**
- * Sets each artifact's name and description from its active occurrences (SPEC-126 FR-126-07, A9),
- * inside the caller's transaction: the active occurrence holding the highest version number (ties:
- * oldest occurrence `created_at`, then id) names it, parsed with core's `parseArtifactFile` from
- * that version's primary file at the path discovery would read. Only changed fields are written;
- * an artifact with no active occurrence keeps them, and so does one whose chosen version lacks its
- * primary file or whose occurrence path does not classify as the version's format (rows
- * DirectiveBench's scans never write: kept rather than guessed). The result depends only on the
- * active occurrences and their version numbers, never on which scan ran last. Two reads per
- * `IDENTITY_LOOKUP_BATCH_SIZE` artifacts: the occurrences with their versions' numbers, then the
- * chosen versions' files. `slug` never changes (FR-105-13).
+ * Sets each artifact's name, description and type from its active occurrences (SPEC-126
+ * FR-126-07, A9; SPEC-103 FR-103-16), inside the caller's transaction: the active occurrence
+ * holding the highest version number (ties: oldest occurrence `created_at`, then id) names it,
+ * parsed with core's `parseArtifactFile` from that version's primary file at the path discovery
+ * would read; the type is the type of that version's format, which needs no parse. Only changed
+ * fields are written. An artifact with no active occurrence keeps all three; one whose chosen
+ * version lacks its primary file or whose occurrence path does not classify as the version's
+ * format keeps its name and description (rows DirectiveBench's scans never write: kept rather
+ * than guessed) and still gets its type. The result depends only on the active occurrences and
+ * their version numbers, never on which scan ran last. Two reads per `IDENTITY_LOOKUP_BATCH_SIZE`
+ * artifacts: the occurrences with their versions' numbers, then the chosen versions' files.
+ * `slug` never changes (FR-105-13).
  */
 export async function refreshSourceFields(
   db: Database,
@@ -1003,6 +1017,7 @@ export async function refreshSourceFields(
         format: artifactVersions.format,
         name: artifacts.name,
         description: artifacts.description,
+        type: artifacts.type,
       })
       .from(artifactOccurrences)
       .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
@@ -1050,17 +1065,26 @@ export async function refreshSourceFields(
       ]),
     );
     for (const row of chosen.values()) {
+      // The type needs no parse: it is the type of the version's stored format (FR-103-16).
+      const fields = { name: row.name, description: row.description, type: artifactTypeOf(row) };
       const content = primaryContent.get(row.versionId);
       const primaryPath = primaryPathOf(row.format, row.path);
       // Only a path discovery would have read as this format can be parsed as it.
-      if (content === undefined || classifyArtifactPath(primaryPath)?.format !== row.format) {
+      if (content !== undefined && classifyArtifactPath(primaryPath)?.format === row.format) {
+        const parsed = parseArtifactFile(primaryPath, content);
+        fields.name = parsed.name;
+        fields.description = parsed.description;
+      }
+      if (
+        fields.name === row.name &&
+        fields.description === row.description &&
+        fields.type === row.type
+      ) {
         continue;
       }
-      const parsed = parseArtifactFile(primaryPath, content);
-      if (parsed.name === row.name && parsed.description === row.description) continue;
       await db
         .update(artifacts)
-        .set({ name: parsed.name, description: parsed.description, updatedAt: nowIso() })
+        .set({ ...fields, updatedAt: nowIso() })
         .where(eq(artifacts.id, row.artifactId));
     }
   }
@@ -2165,7 +2189,10 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
 
 export type ArtifactDetail = NonNullable<Awaited<ReturnType<typeof getArtifactDetail>>>;
 
-/** Loads one exact artifact version in the shape agent adapters install. */
+/**
+ * Loads one exact artifact version in the shape agent adapters install. Its `type` is the type of
+ * the version's format, not the artifact's current type (SPEC-118 FR-118-25, SPEC-103 FR-103-16).
+ */
 export async function getArtifactBundle(
   db: Database,
   versionId: string,
@@ -2182,7 +2209,8 @@ export async function getArtifactBundle(
     versionId: row.version.id,
     slug: row.artifact.slug,
     name: row.artifact.name,
-    type: row.artifact.type,
+    // The bundled version's own type: an artifact may hold versions of two formats (N2).
+    type: artifactTypeOf(row.version),
     format: row.version.format as ArtifactFormat,
     contentHash: row.version.contentHash,
     files: row.version.files,

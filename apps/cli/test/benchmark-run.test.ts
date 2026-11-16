@@ -28,7 +28,7 @@ import {
 import { LocalRunner } from '@directivebench/runner';
 import { eq } from 'drizzle-orm';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
-import { benchmarkRunCommand, type RunTerminal } from '../src/benchmark-run';
+import { benchmarkRunCommand, candidateLabel, type RunTerminal } from '../src/benchmark-run';
 import { CliError, ExitCode, resolveAssets } from '../src/runtime';
 import type * as DatabaseModule from '@directivebench/database';
 import { initialize } from '../src/setup';
@@ -956,6 +956,22 @@ posix('benchmark run edge paths', () => {
   }, 60_000);
 });
 
+describe('candidateLabel (Q5)', () => {
+  it('adds the current name only when the slug no longer reads as it', () => {
+    expect(candidateLabel({ slug: 'review', name: 'Review' })).toBe('review');
+    expect(candidateLabel({ slug: 'review', name: 'code-review' })).toBe(
+      'review (named code-review)',
+    );
+    expect(candidateLabel({ slug: 'review-2', name: 'review' })).toBe('review-2 (named review)');
+  });
+
+  it('prints control and format characters of a source-controlled name as escapes (Codex review)', () => {
+    const label = candidateLabel({ slug: 'review', name: 'x\u001b[2J\u001b[H\r\n\u009b\u202ey' });
+    expect(label).toBe('review (named x\\u001b[2J\\u001b[H\\u000d\\u000a\\u009b\\u202ey)');
+    expect(label).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+  });
+});
+
 describe('benchmark run terminal helpers', () => {
   it('reads a yes or no answer', async () => {
     const { PassThrough } = await import('node:stream');
@@ -1008,5 +1024,56 @@ describe('benchmark run terminal helpers', () => {
     stop();
     expect(handler).toHaveBeenCalledTimes(1);
     expect(process.listeners('SIGINT')).not.toContain(handler);
+  });
+});
+
+posix('benchmark run after a rename or a type change (issue 66, SPEC-103 FR-103-16)', () => {
+  it('resolves the slug assigned at creation after a rename and names the artifact (Q5)', async () => {
+    const s = await setup({
+      versions: [
+        skill('Answer briefly.'),
+        {
+          ...skill('GOOD: write a summary.', 'name: pdf-report\ndescription: d\n'),
+          name: 'pdf-report',
+        },
+      ],
+    });
+    const code = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    );
+    // The run starts for that artifact (the fake's recorded stream names the old skill name, so the
+    // outcome itself is not what this test checks).
+    expect(code).not.toBe(ExitCode.Usage);
+    expect(s.fake.starts()).toBe(2);
+    expect(s.output()).toContain('Candidate:  pdf (named pdf-report) v2');
+  });
+
+  it('gates each version with its own type after a type change (FR-118-25, N2)', async () => {
+    const agents = '# Guide\n';
+    const instruction = {
+      ...skill('unused'),
+      type: 'instruction',
+      format: 'agents-md',
+      primaryFile: 'AGENTS.md',
+      files: [
+        {
+          path: 'AGENTS.md',
+          sha256: sha256(agents),
+          size: Buffer.byteLength(agents),
+          content: agents,
+        },
+      ],
+    } satisfies ImportArtifactInput;
+    const s = await setup({ versions: [skill('GOOD: write a summary.'), instruction] });
+    // The latest version is an instruction now: a skill suite refuses it.
+    expect(await refused(s, {})).toMatch(/evaluates skill artifacts; "pdf" is a instruction/);
+    // The older version is still a skill and runs.
+    const code = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', version: '1', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    );
+    expect(code).toBe(ExitCode.Ok);
+    expect(s.output()).toContain('Candidate:  pdf v1');
   });
 });

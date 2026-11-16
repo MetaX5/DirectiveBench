@@ -3,7 +3,7 @@ id: SPEC-101
 title: Artifact Registry
 status: draft
 created: 2026-10-14
-updated: 2026-11-13
+updated: 2026-11-16
 category: feature
 related: [SPEC-005, SPEC-006, SPEC-102, SPEC-103, SPEC-104, SPEC-105, SPEC-106, SPEC-111, SPEC-112, SPEC-113, SPEC-116]
 ---
@@ -99,9 +99,9 @@ type DisplayStatus =
 /** Row of `artifacts` — logical identity. */
 interface Artifact {
   id: string;                 // 'art_…', stable
-  slug: string;               // slugify(name); globally unique (artifacts_slug_unique) → numeric suffix on collision
+  slug: string;               // slugify(name at creation), numeric suffix on collision; globally unique (artifacts_slug_unique); immutable, never freed or reassigned (SPEC-103 FR-103-16)
   name: string;
-  type: ArtifactType;
+  type: ArtifactType;         // type of the format of the version the chosen active occurrence holds (SPEC-103 FR-103-16)
   description: string | null; // from the parser (ParsedArtifact.description)
   notes: string | null;       // user metadata, never overwritten by sync
   tags: string[];             // user metadata (JSON column, default [])
@@ -166,6 +166,8 @@ An **artifact** answers "which piece of guidance is this?"; an **occurrence** an
 2. **Move/rename within a repository**: a newly discovered artifact of the same format whose content matches an occurrence in the same repository that disappeared in the same sync (rules in [SPEC-103 FR-103-09](2026-10-14-artifact-versioning.md)) → same artifact, occurrence path updated.
 3. **Exact copy across repositories** ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) §6.1): a new occurrence (a path its repository has no occurrence row for) whose content hash and format equal an existing version of an artifact → linked to that artifact at that version, without a new version. Only **linkable formats** link, those whose name is part of the hashed content: skills with a frontmatter `name` (`skill-md`), `cursor-rule`, `claude-rule` and `copilot-path-instructions` (named after their file); repository-level files (`agents-md`, `claude-md`, `copilot-instructions`, `gitlab-duo-chat-rules`) and skills named only by their directory never do (SPEC-126 A2, A3). Only **local repositories** link: the scanned repository is `local-git` or `local-directory` and every occurrence of the candidate artifact (at least one, active or missing) is in a local repository; a hosted copy never links (A4, A16). Bundled examples are never candidates (A5). The artifact's current name is not compared (A2). When several artifacts qualify, the oldest (`created_at`, then `id`) is chosen (A7).
 4. Otherwise → new artifact.
+
+**Identity versus source fields** (issue 66, [SPEC-103 FR-103-16](2026-10-14-artifact-versioning.md)): location (rule 1) and exact content of the same format (rules 2 and 3) decide identity; a name, a slug or a type never does. `name`, `description` and `type` are derived from the chosen active occurrence ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) FR-126-07) and follow renames and format changes; an artifact with no active occurrence keeps them. The slug is a handle: assigned once at creation, never changed, freed or reassigned while the artifact exists (also after it goes missing), so suite files, scripts and reports that name it stay valid; `/artifacts/[id]` uses the id. A move or copy into another format is a new artifact.
 
 Same-name artifacts with *different* content in different repositories are **not** merged automatically; the UI shows them as "possible duplicates" (same type + same parsed name; their slugs differ by suffix; SPEC-126 FR-126-11 narrows it to an exactly equal name and the same linkable format of the latest version) and offers a manual **link** action (future) that moves occurrences under one artifact. Rationale: false merges corrupt evaluation history; false splits are cheap to fix.
 
@@ -241,6 +243,10 @@ Function names are indicative; the authoritative names are those exported by `@d
 - The same skill with a frontmatter `name` in two local repositories → one artifact, two occurrences; an edit in one copy adds the next version of that artifact and the other occurrence keeps its version ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) A8). The same skill in a registered GitHub repository, or an identical `AGENTS.md` in two repositories → separate artifacts (A16, A3).
 - Several existing artifacts hold the exact copy's content (duplicates created before rule 3) → linked to the oldest (A7); existing duplicates are never merged (A6).
 - Two different artifacts with the same name and type → distinct artifacts; slug uniqueness enforced with a numeric suffix (`validate-input-2`); "possible duplicate" hint.
+- Two artifacts swap names (issue 66, SPEC-103 §14 case 1) → each keeps its artifact and slug; a later artifact with one of the names gets a suffix.
+- An artifact is renamed to a name another artifact has (SPEC-103 §14 case 2) → its slug is unchanged; the list adds ", slug x" and the possible-duplicate Badge applies when the latest format matches.
+- Linked copies whose names diverge (SPEC-103 §14 case 7) → the name follows FR-126-07, the slug never changes, in either scan order.
+- A slug, once assigned, belongs to its artifact for the artifact's lifetime; slugs are never reassigned, also after the artifact goes missing.
 - Artifact with no description (e.g. `AGENTS.md`) → the parser falls back to the first `# ` heading of the body (`parseArtifactFile` in core); if none, description is `null` and the list shows "—".
 - Artifact whose every occurrence is removed but which has evaluation history → `removed`, still visible via filter, history intact.
 - Artifact assigned to a suite whose latest version is not comparable with earlier runs → status `not-comparable` for that pair, history shows both comparability keys separately.
@@ -251,6 +257,7 @@ Function names are indicative; the authoritative names are those exported by `@d
 Per [SPEC-012](2026-10-14-testing-strategy.md):
 - Unit: identity resolution rules (§8.3), worst-status aggregation (FR-101-12), slug generation and collision suffixing, tag normalisation.
 - Database integration (temp SQLite): list filters, sorting, pagination, FTS/LIKE search, user metadata survives a simulated re-sync.
+- Source fields (issue 66, `packages/database/test/source-changes.test.ts`): renames keep the id and slug, a format change at the same path updates `type` and the type filter, the slug assigned at creation still resolves (`resolveArtifactRef`), the runner tests rescan for `local-git`, `local-directory` and `github`, and `apps/web/e2e/identity.spec.ts` opens the same `/artifacts/[id]` after a rename and a type change.
 - Component/E2E (Playwright): list renders imported demo artifact, filter by type/category updates URL, detail tabs show content and evaluation history, mock-agent label visible.
 
 ## 16. Acceptance criteria
@@ -302,4 +309,5 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - **Implemented for SPEC-126 Phase 2 (issue #20; verified on 2026-11-13 by `packages/database/test/identity.test.ts` "possible duplicates", `apps/web/test/artifacts.test.ts` `possibleDuplicatesCard` and `searchPrefix`, `apps/web/e2e/identity.spec.ts` "possible duplicates", `artifacts-full-hd.spec.ts` and `text-contrast.spec.ts` in both themes):** §8.3's "possible duplicates" hint: `ArtifactListItem.possibleDuplicates` and the list's Name cell Badge (FR-101-10 above), the artifact page's header Badge and the Overview's "Possible duplicates" card ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) FR-126-11 to FR-126-13, §11.4).
 - **Implemented for issue 227 (verified on 2026-11-16 by `packages/database/test/shared-names.test.ts`, `apps/web/test/row-names.test.ts`, `apps/web/test/categories.test.ts`, `apps/web/e2e/disambiguation.spec.ts` (red on the old pages), `apps/web/e2e/artifact-metadata.spec.ts` and `apps/web/e2e/text-contrast.spec.ts` in both themes):** the assigned suites' IDs (K3), the suite ID in Results by version on a clash (K4), the clash slug on category chips (K5) and the Status link names on `/artifacts`.
 - **Implemented for issues 235 and 236 (verified on 2026-11-16 by `packages/database/test/shared-names.test.ts`, `packages/database/test/benchmarks.test.ts` `listSuiteNames`, `apps/web/test/artifact-metadata.test.ts` `suiteOptions`, `apps/web/test/row-names.test.ts`, `apps/web/e2e/disambiguation.spec.ts` "the suite picker adds the ID when an assigned suite has the same name" and "Artifacts shows the slug of each same-named artifact" (red on the old pages), `artifacts-full-hd.spec.ts` and `text-contrast.spec.ts` in both themes with the clashes seeded):** the database-wide suite picker rule (L1) and the clash slug and link name on the `/artifacts` Name cell (L2, L7).
+- **Implemented for issue 66 (verified on 2026-11-16 by `packages/database/test/source-changes.test.ts`, the migration `0007` test in `packages/database/test/client.test.ts`, the issue 66 runner tests for `local-git`, `local-directory` and `github`, `apps/cli/test/benchmark-run.test.ts` and `apps/web/e2e/identity.spec.ts` "renames and type changes keep the URL (issue 66)"):** §8.2 `slug` and `type`, §8.3 "Identity versus source fields" and the §14 cases above; existing databases get their stale types repaired by migration `0007`.
 - **Not implemented:** `archived_at`/description override/compatibility override columns, hard delete, FTS search, link/unlink.

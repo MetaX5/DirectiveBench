@@ -233,6 +233,64 @@ describe('hosted scans keep identity across moves (SPEC-126 Phase 3)', realGit, 
   });
 });
 
+describe(
+  'hosted rescans after a rename and a type change (issue 66, SPEC-103 FR-103-16)',
+  realGit,
+  () => {
+    it('keeps the artifact and slug through a rename, and the type follows a format change', async () => {
+      const skill = (name: string) => `---\nname: ${name}\ndescription: D.\n---\n# ${name}\n`;
+      const remote = new FixtureRemote(remotes, 'acme', 'renames', {
+        'docs/AGENTS.md': '# Docs\n',
+        'skills/review/SKILL.md': skill('review'),
+      });
+      const repository = await registered(remote);
+      await scan(repository);
+      const rows = () =>
+        new Map(
+          handle.sqlite
+            .prepare(
+              `select o.path, a.id, a.slug, a.name, a.type
+               from artifact_occurrences o join artifacts a on a.id = o.artifact_id
+              where o.status = 'active'`,
+            )
+            .all()
+            .map((row) => [
+              String(row.path),
+              {
+                id: String(row.id),
+                slug: String(row.slug),
+                name: String(row.name),
+                type: String(row.type),
+              },
+            ]),
+        );
+      const before = rows();
+      git(remote.work, ['rm', '-q', 'docs/AGENTS.md']);
+      const head = remote.commit({
+        'docs/AGENTS.md/SKILL.md': skill('docs-skill'),
+        'skills/review/SKILL.md': skill('code-review'),
+      });
+      expect(await scan(repository)).toMatchObject({
+        ok: true,
+        commitSha: head,
+        createdArtifacts: 0,
+        createdVersions: 2,
+        removedOccurrences: 0,
+      });
+      const after = rows();
+      expect(after.get('skills/review')).toEqual({
+        ...before.get('skills/review'),
+        name: 'code-review',
+      });
+      expect(after.get('docs/AGENTS.md')).toEqual({
+        ...before.get('docs/AGENTS.md'),
+        name: 'docs-skill',
+        type: 'skill',
+      });
+    });
+  },
+);
+
 describe('registerHostedUrl', realGit, () => {
   it('registers a public repository with provider github and its default branch, without credentials', async () => {
     const remote = teamSkills();

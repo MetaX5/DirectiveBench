@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyArtifactPath, parseArtifactFile, slugify } from '../src/artifacts';
+import {
+  ARTIFACT_FORMATS,
+  ARTIFACT_FORMAT_TYPES,
+  classifyArtifactPath,
+  parseArtifactFile,
+  slugify,
+} from '../src/artifacts';
 
 describe('classifyArtifactPath', () => {
   it.each([
@@ -32,6 +38,27 @@ describe('classifyArtifactPath', () => {
 
   it('normalises Windows separators and leading ./', () => {
     expect(classifyArtifactPath('.\\.cursor\\rules\\a.mdc')?.format).toBe('cursor-rule');
+  });
+});
+
+describe('ARTIFACT_FORMAT_TYPES (SPEC-103 FR-103-16)', () => {
+  it('gives every format the type classification gives it', () => {
+    const sample: Record<string, string> = {
+      'skill-md': 'skills/x/SKILL.md',
+      'agents-md': 'AGENTS.md',
+      'claude-md': 'CLAUDE.md',
+      'claude-rule': '.claude/rules/a.md',
+      'copilot-instructions': '.github/copilot-instructions.md',
+      'copilot-path-instructions': '.github/instructions/a.instructions.md',
+      'cursor-rule': '.cursor/rules/a.mdc',
+      'gitlab-duo-chat-rules': '.gitlab/duo/chat-rules.md',
+    };
+    expect(Object.keys(ARTIFACT_FORMAT_TYPES).sort()).toEqual([...ARTIFACT_FORMATS].sort());
+    for (const format of ARTIFACT_FORMATS) {
+      const classified = classifyArtifactPath(sample[format] ?? '');
+      expect(classified?.format).toBe(format);
+      expect(classified?.type).toBe(ARTIFACT_FORMAT_TYPES[format]);
+    }
   });
 });
 

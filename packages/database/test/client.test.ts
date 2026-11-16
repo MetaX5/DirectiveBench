@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { eq, getTableName, is, sql } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ARTIFACT_FORMAT_TYPES, ARTIFACT_FORMATS } from '@directivebench/core';
 import {
   ensureDatabaseDir,
   migrateDatabase,
   openDatabase,
+  refreshSourceFields,
   schema,
   withTransaction,
   type DatabaseHandle,
@@ -61,7 +63,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(7);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(8);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -807,7 +809,7 @@ describe('additive migrations', () => {
       `);
 
       // Up: existing versions keep a null parent; the three indexes exist.
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 7))).applied).toBe(1);
       expect(
         handle.sqlite
           .prepare('select id, parent_version_id from artifact_versions order by id')
@@ -856,12 +858,105 @@ describe('additive migrations', () => {
           .all()
           .map((row) => String(row.name)),
       ).not.toContain('parent_version_id');
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(1);
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 7))).applied).toBe(1);
       expect(
         handle.sqlite
           .prepare("select parent_version_id from artifact_versions where id = 'artv_3'")
           .get(),
       ).toEqual({ parent_version_id: null });
+    } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('repairs stale artifact types from the chosen active occurrence on a 0006 database, and can be re-applied (issue 66)', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const types = () =>
+      Object.fromEntries(
+        handle.sqlite
+          .prepare('select id, type, updated_at from artifacts order by id')
+          .all()
+          .map((row) => [String(row.id), [String(row.type), String(row.updated_at)]]),
+      );
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 7));
+      const insertVersion = handle.sqlite.prepare(
+        "insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at) values (?, ?, ?, ?, ?, 'x', '[]', '{}', 't')",
+      );
+      const insertOccurrence = handle.sqlite.prepare(
+        "insert into artifact_occurrences (id, artifact_id, repository_id, path, latest_version_id, status, last_seen_at, created_at, updated_at) values (?, ?, 'repo_1', ?, ?, ?, 't', ?, 't')",
+      );
+      const insertArtifact = handle.sqlite.prepare(
+        "insert into artifacts (id, slug, name, type, created_at, updated_at) values (?, ?, ?, ?, 't', 'old')",
+      );
+      handle.sqlite.exec(
+        "insert into repositories (id, provider, name, location, created_at, updated_at) values ('repo_1', 'local-directory', 'r', '/r', 't', 't')",
+      );
+      // One stale artifact per format: an instruction-typed row whose only version has that format.
+      for (const format of ARTIFACT_FORMATS) {
+        const id = `art_${format}`;
+        insertArtifact.run(
+          id,
+          format,
+          format,
+          ARTIFACT_FORMAT_TYPES[format] === 'skill' ? 'rule' : 'skill',
+        );
+        insertVersion.run(`artv_${format}`, id, 1, `h_${format}`, format);
+        insertOccurrence.run(`occ_${format}`, id, `p/${format}`, `artv_${format}`, 'active', 't');
+      }
+      // (b3): v1 agents-md, v2 skill-md at the same path; still typed instruction.
+      insertArtifact.run('art_b3', 'b3', 'b3', 'instruction');
+      insertVersion.run('artv_b3_1', 'art_b3', 1, 'h1', 'agents-md');
+      insertVersion.run('artv_b3_2', 'art_b3', 2, 'h2', 'skill-md');
+      insertOccurrence.run('occ_b3', 'art_b3', 'docs/AGENTS.md', 'artv_b3_2', 'active', 't');
+      // Already correct: untouched, `updated_at` kept.
+      insertArtifact.run('art_ok', 'ok', 'ok', 'rule');
+      insertVersion.run('artv_ok', 'art_ok', 1, 'h', 'cursor-rule');
+      insertOccurrence.run('occ_ok', 'art_ok', '.cursor/rules/ok.mdc', 'artv_ok', 'active', 't');
+      // Missing (no active occurrence): keeps its type.
+      insertArtifact.run('art_gone', 'gone', 'gone', 'instruction');
+      insertVersion.run('artv_gone', 'art_gone', 1, 'h', 'skill-md');
+      insertOccurrence.run('occ_gone', 'art_gone', 'skills/gone', 'artv_gone', 'removed', 't');
+      // The active occurrence holds v1 (rule); a newer v2 (skill) is held only by a removed one.
+      insertArtifact.run('art_old', 'old', 'old', 'skill');
+      insertVersion.run('artv_old_1', 'art_old', 1, 'h1', 'cursor-rule');
+      insertVersion.run('artv_old_2', 'art_old', 2, 'h2', 'skill-md');
+      insertOccurrence.run(
+        'occ_old_a',
+        'art_old',
+        '.cursor/rules/old.mdc',
+        'artv_old_1',
+        'active',
+        't',
+      );
+      insertOccurrence.run('occ_old_b', 'art_old', 'skills/old', 'artv_old_2', 'removed', 't');
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 8))).applied).toBe(1);
+      const after = types();
+      for (const format of ARTIFACT_FORMATS) {
+        expect(after[`art_${format}`]?.[0], format).toBe(ARTIFACT_FORMAT_TYPES[format]);
+        expect(after[`art_${format}`]?.[1]).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+      }
+      expect(after.art_b3?.[0]).toBe('skill');
+      expect(after.art_ok).toEqual(['rule', 'old']);
+      expect(after.art_gone).toEqual(['instruction', 'old']);
+      expect(after.art_old?.[0]).toBe('rule');
+
+      // The runtime refresh makes the same choice for every row: it changes nothing more.
+      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
+      expect(Object.fromEntries(Object.entries(types()).map(([id, [type]]) => [id, type]))).toEqual(
+        Object.fromEntries(Object.entries(after).map(([id, [type]]) => [id, type])),
+      );
+
+      // Down: a data-only migration has nothing to undo (the old type was stale by definition);
+      // forgetting it and applying it again changes nothing.
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      const before = types();
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 8))).applied).toBe(1);
+      expect(types()).toEqual(before);
     } finally {
       handle.close();
       temp.dispose();

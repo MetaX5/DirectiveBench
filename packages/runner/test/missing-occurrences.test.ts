@@ -458,3 +458,68 @@ describe('local scans keep identity across moves (SPEC-126 Phase 3)', () => {
     },
   );
 });
+
+describe('local rescans after a rename and a type change (issue 66, SPEC-103 FR-103-16)', () => {
+  /** Each artifact by its occurrence path: id, slug, name and type. */
+  function artifactsByPath(): Map<
+    string,
+    { id: string; slug: string; name: string; type: string }
+  > {
+    return new Map(
+      handle.sqlite
+        .prepare(
+          `select o.path, a.id, a.slug, a.name, a.type
+             from artifact_occurrences o join artifacts a on a.id = o.artifact_id
+            where o.status = 'active'`,
+        )
+        .all()
+        .map((row) => [
+          String(row.path),
+          {
+            id: String(row.id),
+            slug: String(row.slug),
+            name: String(row.name),
+            type: String(row.type),
+          },
+        ]),
+    );
+  }
+
+  it.each(['local-git', 'local-directory'] as const)(
+    'keeps the artifact and slug through a rename, and the type follows a format change (%s)',
+    async (provider) => {
+      const repo = join(sources, provider);
+      write(repo, { 'docs/AGENTS.md': '# Docs\n', 'skills/review/SKILL.md': SKILL('review') });
+      if (provider === 'local-git') {
+        execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, env: FIXTURE_GIT_ENV });
+      }
+      const id = await register(repo, provider);
+      await scan(id);
+      const before = artifactsByPath();
+      expect(before.get('docs/AGENTS.md')).toMatchObject({ type: 'instruction' });
+
+      // The skill is renamed in place; the file `docs/AGENTS.md` becomes a skill directory.
+      rmSync(join(repo, 'docs/AGENTS.md'));
+      write(repo, {
+        'docs/AGENTS.md/SKILL.md': SKILL('docs-skill'),
+        'skills/review/SKILL.md': SKILL('code-review'),
+      });
+      expect((await scan(id)).result).toMatchObject({
+        ok: true,
+        createdArtifacts: 0,
+        createdVersions: 2,
+        removedOccurrences: 0,
+      });
+      const after = artifactsByPath();
+      expect(after.get('skills/review')).toEqual({
+        ...before.get('skills/review'),
+        name: 'code-review',
+      });
+      expect(after.get('docs/AGENTS.md')).toEqual({
+        ...before.get('docs/AGENTS.md'),
+        name: 'docs-skill',
+        type: 'skill',
+      });
+    },
+  );
+});
