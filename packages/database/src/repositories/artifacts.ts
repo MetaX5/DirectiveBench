@@ -586,6 +586,29 @@ async function readLinkCandidates(
   return candidates;
 }
 
+/**
+ * The re-check at the start of a scan's write transaction (FR-105-17): the job's abort signal has
+ * not fired and the job is still running without a cancellation request; otherwise a
+ * `JobNoLongerRunningError` and nothing is written.
+ */
+async function assertScanStillRunning(
+  db: Database,
+  jobId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) {
+    throw new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`);
+  }
+  const job = await db
+    .select({ status: jobs.status, cancelRequestedAt: jobs.cancelRequestedAt })
+    .from(jobs)
+    .where(eq(jobs.id, jobId))
+    .get();
+  if (job?.status !== 'running' || job.cancelRequestedAt !== null) {
+    throw new JobNoLongerRunningError(`Job ${jobId} is no longer running`);
+  }
+}
+
 /** One discovered artifact of a scan with its recomputed files and content hash. */
 interface PreparedArtifact {
   input: ScannedArtifactInput;
@@ -635,17 +658,7 @@ export async function applyRepositoryScan(
     .map((input) => ({ input, recomputed: recomputeFiles(input) }))
     .sort((a, b) => compareCodeUnits(a.input.path, b.input.path));
   return withTransaction(handle, async (db) => {
-    if (application.signal.aborted) {
-      throw new JobNoLongerRunningError(`Job ${jobId} was aborted before its results were stored`);
-    }
-    const job = await db
-      .select({ status: jobs.status, cancelRequestedAt: jobs.cancelRequestedAt })
-      .from(jobs)
-      .where(eq(jobs.id, jobId))
-      .get();
-    if (job?.status !== 'running' || job.cancelRequestedAt !== null) {
-      throw new JobNoLongerRunningError(`Job ${jobId} is no longer running`);
-    }
+    await assertScanStillRunning(db, jobId, application.signal);
     const repository = await db
       .select({ provider: repositories.provider })
       .from(repositories)
@@ -1066,6 +1079,61 @@ export async function markRepositoryScanFailed(
     .update(repositories)
     .set({ syncStatus: 'error', syncError: message, updatedAt: nowIso() })
     .where(eq(repositories.id, repositoryId));
+}
+
+/**
+ * Records a hosted rescan that found the remote head at the commit of the last successful scan
+ * with the same configuration (SPEC-105 FR-105-10, issue 63), in one transaction: after the same
+ * job re-check as {@link applyRepositoryScan}, the repository records a successful sync
+ * (`last_sync_at`, `sync_status = 'ok'`, `sync_error = null`) only while it is still synced at
+ * `commitSha` (one conditional statement), and its active occurrences found at that commit get
+ * `last_seen_at`, as a scan that read the commit again would set it. Occurrences kept from an
+ * older commit (unobserved paths, the empty-scan guard), missing ones, versions, artifacts and
+ * every user field are untouched.
+ *
+ * Returns false and writes nothing when the repository is no longer synced at `commitSha` (a
+ * failure or another scan recorded meanwhile): the caller then scans in full. A removed
+ * repository is a `NotFoundError`; a job that is no longer running a `JobNoLongerRunningError`.
+ */
+export async function recordUnchangedRepositoryScan(
+  handle: DatabaseHandle,
+  scan: { repositoryId: string; jobId: string; commitSha: string; signal: AbortSignal },
+): Promise<boolean> {
+  return withTransaction(handle, async (db) => {
+    await assertScanStillRunning(db, scan.jobId, scan.signal);
+    const now = nowIso();
+    const updated = await db
+      .update(repositories)
+      .set({ lastSyncAt: now, syncStatus: 'ok', syncError: null, updatedAt: now })
+      .where(
+        and(
+          eq(repositories.id, scan.repositoryId),
+          eq(repositories.lastCommitSha, scan.commitSha),
+          eq(repositories.syncStatus, 'ok'),
+        ),
+      )
+      .returning({ id: repositories.id });
+    if (updated.length === 0) {
+      const exists = await db
+        .select({ id: repositories.id })
+        .from(repositories)
+        .where(eq(repositories.id, scan.repositoryId))
+        .get();
+      if (!exists) throw new NotFoundError(`Repository ${scan.repositoryId} not found`);
+      return false;
+    }
+    await db
+      .update(artifactOccurrences)
+      .set({ lastSeenAt: now })
+      .where(
+        and(
+          eq(artifactOccurrences.repositoryId, scan.repositoryId),
+          eq(artifactOccurrences.status, 'active'),
+          eq(artifactOccurrences.commitSha, scan.commitSha),
+        ),
+      );
+    return true;
+  });
 }
 
 /**

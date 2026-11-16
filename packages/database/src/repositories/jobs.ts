@@ -216,6 +216,22 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
         .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/)
         .nullable()
         .default(null),
+      /**
+       * The SHA-256 of the effective configuration a hosted scan read the commit with (SPEC-105
+       * FR-105-10, issue 63): with the commit it decides whether a rescan may skip the fetch.
+       * Absent for local scans, for scans by a runner that does not know its version, and in
+       * results stored before it existed; a hosted rescan then reads the repository again.
+       */
+      scanConfigHash: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
+      /**
+       * True when a hosted rescan found the remote head at the commit of the last successful scan
+       * with the same configuration and stopped before fetching (FR-105-10): nothing was read,
+       * every change count is 0 and the discovery counts repeat that scan's. Absent otherwise.
+       */
+      unchanged: z.boolean().optional(),
       durationMs: count,
     })
     .strict(),
@@ -228,6 +244,7 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
     .strict(),
 ]);
 export type RepositoryScanResult = z.infer<typeof repositoryScanResultSchema>;
+export type RepositoryScanSuccess = Extract<RepositoryScanResult, { ok: true }>;
 
 /** Providers registered by local path (SPEC-104 FR-104-01, FR-104-03). */
 export const LOCAL_PROVIDERS = ['local-git', 'local-directory'] as const;
@@ -460,6 +477,35 @@ export async function enqueueRepositoryScanJob(
     if (!job) throw new Error('Failed to enqueue job');
     return { job, created: true };
   });
+}
+
+/**
+ * The outcome of the repository's latest `completed` scan job by finish time (SPEC-105 FR-105-10,
+ * issue 63), or null when it has none or that result does not parse as a successful scan. A later
+ * failed, cancelled or interrupted scan does not hide it, so the caller also checks the
+ * repository's own sync state (`sync_status`, `last_commit_sha`): a recorded failure sets
+ * `sync_status = 'error'`, and an apply that committed without its job finishing (a crash) moved
+ * `last_commit_sha` past this result's commit or read the same commit again.
+ */
+export async function getLastCompletedRepositoryScan(
+  db: Database,
+  repositoryId: string,
+): Promise<RepositoryScanSuccess | null> {
+  const row = await db
+    .select({ result: jobs.result })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.type, 'repository-scan'),
+        eq(jobs.status, 'completed'),
+        sql`json_extract(${jobs.payload}, '$.repositoryId') = ${repositoryId}`,
+      ),
+    )
+    .orderBy(desc(jobs.finishedAt), desc(jobs.id))
+    .limit(1)
+    .get();
+  const parsed = repositoryScanResultSchema.safeParse(row?.result);
+  return parsed.success && parsed.data.ok ? parsed.data : null;
 }
 
 /**
