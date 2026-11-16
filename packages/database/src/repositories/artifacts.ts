@@ -53,6 +53,7 @@ import {
   repositories,
   type StoredArtifactFile,
 } from '../schema';
+import { categoryChipShared, suiteNameShared } from './shared-names';
 
 export type RepositoryProvider = (typeof repositories.$inferSelect)['provider'];
 
@@ -1393,6 +1394,8 @@ export interface ArtifactCategory {
   slug: string;
   name: string;
   archived: boolean;
+  /** Another category shows the same chip text, so the chip adds the slug (issue 227, K5). */
+  chipShared: boolean;
 }
 
 function toArtifactCategory(row: {
@@ -1400,8 +1403,15 @@ function toArtifactCategory(row: {
   slug: string;
   name: string;
   archivedAt: string | null;
+  chipShared: boolean;
 }): ArtifactCategory {
-  return { id: row.id, slug: row.slug, name: row.name, archived: row.archivedAt !== null };
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    archived: row.archivedAt !== null,
+    chipShared: row.chipShared,
+  };
 }
 
 /** Orders assigned categories: active first, then by name. */
@@ -1727,6 +1737,7 @@ export async function listArtifacts(
       slug: categories.slug,
       name: categories.name,
       archivedAt: categories.archivedAt,
+      chipShared: categoryChipShared,
     })
     .from(artifactCategories)
     .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
@@ -2018,13 +2029,20 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
       slug: categories.slug,
       name: categories.name,
       archivedAt: categories.archivedAt,
+      chipShared: categoryChipShared,
     })
     .from(artifactCategories)
     .innerJoin(categories, eq(artifactCategories.categoryId, categories.id))
     .where(eq(artifactCategories.artifactId, artifactId))
     .orderBy(...assignedCategoryOrder);
   const suites = await db
-    .select({ id: benchmarkSuites.id, slug: benchmarkSuites.slug, name: benchmarkSuites.name })
+    .select({
+      id: benchmarkSuites.id,
+      slug: benchmarkSuites.slug,
+      name: benchmarkSuites.name,
+      /** Another suite has the name; the suite link's name adds the ID (issue 227). */
+      nameShared: suiteNameShared,
+    })
     .from(artifactBenchmarkAssignments)
     .innerJoin(benchmarkSuites, eq(artifactBenchmarkAssignments.suiteId, benchmarkSuites.id))
     .where(eq(artifactBenchmarkAssignments.artifactId, artifactId));

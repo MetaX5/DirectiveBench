@@ -10,6 +10,7 @@ import {
 } from '@directivebench/core';
 import { withTransaction, type DatabaseHandle } from '../client';
 import type { Database } from '../client';
+import { suiteNameShared } from './shared-names';
 import {
   artifacts,
   artifactVersions,
@@ -603,6 +604,10 @@ export async function getJob(db: Database, jobId: string): Promise<JobRecord | n
 export interface JobListItem {
   job: JobRecord;
   suiteName: string | null;
+  /** The suite's slug (its definition ID), null with `suiteName`. */
+  suiteSlug: string | null;
+  /** Another suite has the name, so the list adds the ID (issue 227). */
+  suiteNameShared: boolean;
   artifactName: string | null;
   benchmarkRunId: string | null;
 }
@@ -621,11 +626,15 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
   const result: JobListItem[] = [];
   for (const job of rows) {
     const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
-    let suiteName: string | null = null;
+    let suite: { name: string; slug: string; nameShared: boolean } | undefined;
     let artifactName: string | null = null;
     if (payload.success) {
-      const suite = await db
-        .select({ name: benchmarkSuites.name })
+      suite = await db
+        .select({
+          name: benchmarkSuites.name,
+          slug: benchmarkSuites.slug,
+          nameShared: suiteNameShared,
+        })
         .from(benchmarkSuiteVersions)
         .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
         .where(eq(benchmarkSuiteVersions.id, payload.data.suiteVersionId))
@@ -636,7 +645,6 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
         .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
         .where(eq(artifactVersions.id, payload.data.artifactVersionId))
         .get();
-      suiteName = suite?.name ?? null;
       artifactName = artifact?.name ?? null;
     }
     const run = await db
@@ -644,7 +652,14 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
       .from(benchmarkRuns)
       .where(eq(benchmarkRuns.jobId, job.id))
       .get();
-    result.push({ job, suiteName, artifactName, benchmarkRunId: run?.id ?? null });
+    result.push({
+      job,
+      suiteName: suite?.name ?? null,
+      suiteSlug: suite?.slug ?? null,
+      suiteNameShared: suite?.nameShared ?? false,
+      artifactName,
+      benchmarkRunId: run?.id ?? null,
+    });
   }
   return result;
 }

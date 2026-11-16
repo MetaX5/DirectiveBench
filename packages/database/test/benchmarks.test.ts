@@ -182,8 +182,8 @@ describe('getSuiteDetail', () => {
     expect(detail?.versions.map((v) => v.version)).toEqual([2, 1]);
     expect(detail?.latestVersion?.id).toBe(v2.versionId);
     expect(detail?.assignedArtifacts).toEqual([
-      { id: other.artifactId, name: 'Ant', slug: 'other', type: 'rule' },
-      { id: targets.artifactId, name: 'Zed', slug: 'validate', type: 'skill' },
+      { id: other.artifactId, name: 'Ant', slug: 'other', type: 'rule', nameShared: false },
+      { id: targets.artifactId, name: 'Zed', slug: 'validate', type: 'skill', nameShared: false },
     ]);
   });
 });

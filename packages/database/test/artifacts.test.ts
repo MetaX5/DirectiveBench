@@ -371,7 +371,13 @@ describe('assignCategoriesBySlug', () => {
       unknown: [],
     });
     expect((await listArtifacts(handle.db))[0]?.categories).toEqual([
-      { id: expect.any(String), slug: 'security', name: 'Security', archived: false },
+      {
+        id: expect.any(String),
+        slug: 'security',
+        name: 'Security',
+        archived: false,
+        chipShared: false,
+      },
     ]);
   });
 });
@@ -385,7 +391,9 @@ describe('assignBenchmarkSuite', () => {
 
     expect((await listArtifacts(handle.db))[0]?.benchmarkCount).toBe(1);
     const detail = await getArtifactDetail(handle.db, targets.artifactId);
-    expect(detail?.suites).toEqual([{ id: targets.suiteId, slug: 'suite', name: 'Suite' }]);
+    expect(detail?.suites).toEqual([
+      { id: targets.suiteId, slug: 'suite', name: 'Suite', nameShared: false },
+    ]);
   });
 });
 

@@ -10,6 +10,7 @@ import {
   fixtureVersions,
 } from '../schema';
 import { createAcquiredBenchmarkJob, type BenchmarkJobPayload, type JobRecord } from './jobs';
+import { artifactNameShared } from './shared-names';
 
 export interface FixtureVersionInput {
   id: string;
@@ -169,10 +170,15 @@ export async function listSuites(db: Database) {
     .innerJoin(benchmarkSuiteVersions, eq(benchmarkRuns.suiteVersionId, benchmarkSuiteVersions.id))
     .where(inArray(benchmarkSuiteVersions.suiteId, ids))
     .orderBy(desc(benchmarkRuns.startedAt));
+  // Every suite is listed, so counting names here sees the whole table (issue 227).
+  const nameCounts = new Map<string, number>();
+  for (const s of suites) nameCounts.set(s.name, (nameCounts.get(s.name) ?? 0) + 1);
   return suites.map((suite) => {
     const latest = versions.find((v) => v.suiteId === suite.id) ?? null;
     return {
       suite,
+      /** Another suite has the name; the list's link names add the ID (issue 227). */
+      nameShared: (nameCounts.get(suite.name) as number) > 1,
       latestVersion: latest,
       assignedArtifactCount: assignments.filter((a) => a.suiteId === suite.id).length,
       lastRun: runs.find((r) => r.suiteId === suite.id)?.run ?? null,
@@ -194,7 +200,14 @@ export async function getSuiteDetail(db: Database, suiteId: string) {
     .where(eq(benchmarkSuiteVersions.suiteId, suiteId))
     .orderBy(desc(benchmarkSuiteVersions.version));
   const assigned = await db
-    .select({ id: artifacts.id, name: artifacts.name, slug: artifacts.slug, type: artifacts.type })
+    .select({
+      id: artifacts.id,
+      name: artifacts.name,
+      slug: artifacts.slug,
+      type: artifacts.type,
+      /** Another artifact has the name; the Run card adds the slug (issue 227, K9). */
+      nameShared: artifactNameShared,
+    })
     .from(artifactBenchmarkAssignments)
     .innerJoin(artifacts, eq(artifactBenchmarkAssignments.artifactId, artifacts.id))
     .where(eq(artifactBenchmarkAssignments.suiteId, suiteId))

@@ -485,7 +485,7 @@ describe('listArtifactRuns (SPEC-118 FR-118-50)', () => {
         verdict: 'improved',
         agentAdapterId: 'claude-code',
       }),
-      suite: { id: targets.suiteId, name: 'Suite', version: 1 },
+      suite: { id: targets.suiteId, name: 'Suite', version: 1, slug: 'suite', nameShared: false },
       artifactVersion: { id: v2.versionId, version: 2 },
       baselineVersion: { id: targets.artifactVersionId, version: 1 },
     });

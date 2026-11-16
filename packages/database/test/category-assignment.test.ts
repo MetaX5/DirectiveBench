@@ -208,10 +208,10 @@ describe('assigned categories on the artifact list and page', () => {
       }
     }
     const expected = [
-      { id: ids.get('Beta'), slug: 'beta', name: 'Beta', archived: false },
-      { id: ids.get('Zeta'), slug: 'zeta', name: 'Zeta', archived: false },
-      { id: ids.get('Alpha'), slug: 'alpha', name: 'Alpha', archived: true },
-      { id: ids.get('Gamma'), slug: 'gamma', name: 'Gamma', archived: true },
+      { id: ids.get('Beta'), slug: 'beta', name: 'Beta', archived: false, chipShared: false },
+      { id: ids.get('Zeta'), slug: 'zeta', name: 'Zeta', archived: false, chipShared: false },
+      { id: ids.get('Alpha'), slug: 'alpha', name: 'Alpha', archived: true, chipShared: false },
+      { id: ids.get('Gamma'), slug: 'gamma', name: 'Gamma', archived: true, chipShared: false },
     ];
     expect((await listArtifacts(handle.db))[0]?.categories).toEqual(expected);
     expect((await getArtifactDetail(handle.db, artifactId))?.categories).toEqual(expected);
