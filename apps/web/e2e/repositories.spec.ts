@@ -454,10 +454,10 @@ test.describe('GitHub repositories by URL', () => {
       'acme/e2e-skills',
       'GitHub',
       location,
-      'mainDefault branch', // the branch and its caption (issue 58)
+      'mainDefault branchChange', // the branch, its caption and Change (issues 58 and 249)
       '0',
       'Never',
-      'ScanChange branchRemove', // the actions cell: Scan, Change branch, then Remove (SPEC-125 §11.3 D12, issue 58)
+      'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12, issue 249)
     ]);
     // Not clicked: a scan would reach github.com, and the suite stays offline.
     await expect(row.getByRole('button', { name: 'Scan acme/e2e-skills' })).toBeEnabled();

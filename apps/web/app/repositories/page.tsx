@@ -496,12 +496,15 @@ export default async function RepositoriesPage({
                       <Button type="submit" disabled={panelPending}>
                         Save branch
                       </Button>
-                      <Link
-                        href={`/repositories#repository-${panelRepository.id}`}
+                      {/* A full page load (not `Link`): on load the browser focuses the
+                          fragment's target, the row's Change button (issue 249); a client
+                          navigation only scrolls to it. */}
+                      <a
+                        href={`/repositories#change-branch-${panelRepository.id}`}
                         className="text-ui underline"
                       >
                         Cancel
-                      </Link>
+                      </a>
                     </div>
                   </form>
                   {changeNotice?.kind === 'active' ? (
@@ -582,6 +585,24 @@ export default async function RepositoriesPage({
                             {branchCaption(repository)}
                           </span>
                         ) : null}
+                        {isHosted(repository) ? (
+                          // Issue 249: Change sits under the caption, so Scan and Remove fit on
+                          // one line. No `#branch-panel`: a fragment target stops the browser's
+                          // autofocus, and focusing the Branch field scrolls the panel into view
+                          // (issue 58 B9). The panel's Cancel returns focus here by its id.
+                          <form method="get" action="/repositories" className="mt-1">
+                            <input type="hidden" name="changeBranch" value={repository.id} />
+                            <Button
+                              id={`change-branch-${repository.id}`}
+                              type="submit"
+                              size="xs"
+                              variant="outline"
+                              aria-label={`Change branch of ${repositorySubject(repository)}`}
+                            >
+                              Change
+                            </Button>
+                          </form>
+                        ) : null}
                       </TD>
                       <TD className="text-right tabular-nums">
                         {Number(repository.artifactCount)}
@@ -599,7 +620,7 @@ export default async function RepositoriesPage({
                         {scannedBranchHint(repository) ? `. ${scannedBranchHint(repository)}` : ''}
                       </TD>
                       <TD className="text-right">
-                        <div className="flex flex-wrap justify-end gap-inline">
+                        <div className="flex flex-nowrap justify-end gap-inline">
                           {canScan(repository) ? (
                             <form action={scanRepositoryAction}>
                               <input type="hidden" name="repositoryId" value={repository.id} />
@@ -610,21 +631,6 @@ export default async function RepositoriesPage({
                                 aria-label={`Scan ${repositorySubject(repository)}`}
                               >
                                 Scan
-                              </Button>
-                            </form>
-                          ) : null}
-                          {isHosted(repository) ? (
-                            // No `#branch-panel`: a fragment target stops the browser's autofocus,
-                            // and focusing the Branch field scrolls the panel into view (B9).
-                            <form method="get" action="/repositories">
-                              <input type="hidden" name="changeBranch" value={repository.id} />
-                              <Button
-                                type="submit"
-                                size="sm"
-                                variant="outline"
-                                aria-label={`Change branch of ${repositorySubject(repository)}`}
-                              >
-                                Change branch
                               </Button>
                             </form>
                           ) : null}
