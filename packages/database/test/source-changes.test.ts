@@ -100,6 +100,7 @@ async function hosted(handle: DatabaseHandle, name: string) {
       name,
       location: `https://github.com/acme/${name}`,
       defaultBranch: 'main',
+      selectedBranch: null,
     })
   ).repository.id;
 }
@@ -122,6 +123,7 @@ async function scan(
       unobserved: [],
       signal,
       commitSha,
+      branch: null,
     });
   } finally {
     await finishJob(handle.db, job.id, 'completed');

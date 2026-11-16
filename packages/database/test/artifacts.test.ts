@@ -855,6 +855,7 @@ describe('applyRepositoryScan', () => {
     input.files = [{ path: 'AGENTS.md', content: '# Rules\n', sha256: 'f'.repeat(64), size: 1 }];
     const summary = await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: repository.id,
       jobId,
       signal,
@@ -899,6 +900,7 @@ describe('applyRepositoryScan', () => {
     const apply = (content: string, jobId: string) =>
       applyRepositoryScan(handle, {
         commitSha: null,
+        branch: null,
         repositoryId: first.repository.id,
         jobId,
         signal,
@@ -933,6 +935,7 @@ describe('applyRepositoryScan', () => {
     const apply = (content: string) =>
       applyRepositoryScan(handle, {
         commitSha: null,
+        branch: null,
         repositoryId: first.repository.id,
         jobId: first.jobId,
         signal,
@@ -974,6 +977,7 @@ describe('applyRepositoryScan', () => {
         signal,
         unobserved,
         commitSha: null,
+        branch: null,
       });
     await apply([scanned('AGENTS.md', 'v1'), scanned('packages/api/AGENTS.md', 'v1', 'api')]);
     const before = await handle.db.select().from(schema.artifactOccurrences);
@@ -1016,6 +1020,7 @@ describe('applyRepositoryScan', () => {
     const a = await runningScan(handle, '/srv/a');
     await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: a.repository.id,
       jobId: a.jobId,
       signal,
@@ -1025,6 +1030,7 @@ describe('applyRepositoryScan', () => {
     const b = await runningScan(handle, '/srv/b');
     await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: b.repository.id,
       jobId: b.jobId,
       signal,
@@ -1057,6 +1063,7 @@ describe('applyRepositoryScan', () => {
     const scan = await runningScan(handle, '/srv/a');
     await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: scan.repository.id,
       jobId: scan.jobId,
       signal,
@@ -1093,6 +1100,7 @@ describe('applyRepositoryScan', () => {
       const prepare = vi.spyOn(handle.sqlite, 'prepare');
       const summary = await applyRepositoryScan(handle, {
         commitSha: null,
+        branch: null,
         repositoryId: repository.id,
         jobId,
         signal,
@@ -1120,6 +1128,7 @@ describe('applyRepositoryScan', () => {
     const first = await runningScan(handle, '/srv/a');
     await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: first.repository.id,
       jobId: first.jobId,
       signal,
@@ -1133,6 +1142,7 @@ describe('applyRepositoryScan', () => {
     const second = await runningScan(handle, '/srv/b');
     await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: second.repository.id,
       jobId: second.jobId,
       signal,
@@ -1171,6 +1181,7 @@ describe('applyRepositoryScan', () => {
       signal,
       unobserved: [],
       commitSha: null,
+      branch: null,
     };
     await requestJobCancellation(handle.db, jobId);
     await expect(applyRepositoryScan(handle, application)).rejects.toThrow(JobNoLongerRunningError);
@@ -1183,6 +1194,7 @@ describe('applyRepositoryScan', () => {
     await expect(
       applyRepositoryScan(handle, {
         commitSha: null,
+        branch: null,
         repositoryId: other.repository.id,
         jobId: other.jobId,
         signal,
@@ -1203,6 +1215,7 @@ describe('applyRepositoryScan', () => {
     const broken = { ...scanned('docs/AGENTS.md', 'x'), parsedMetadata: { frontmatter: circular } };
     const failure = await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: repository.id,
       jobId,
       signal,
@@ -1229,6 +1242,7 @@ describe('applyRepositoryScan', () => {
     handle.sqlite.exec(`pragma max_page_count = ${pages}`);
     const failure = await applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: repository.id,
       jobId,
       signal,
@@ -1261,6 +1275,7 @@ describe('applyRepositoryScan', () => {
     const controller = new AbortController();
     const applied = applyRepositoryScan(handle, {
       commitSha: null,
+      branch: null,
       repositoryId: repository.id,
       jobId,
       artifacts: [scanned('AGENTS.md', 'x')],
@@ -1288,6 +1303,7 @@ describe('applyRepositoryScan', () => {
     await expect(
       applyRepositoryScan(handle, {
         commitSha: null,
+        branch: null,
         repositoryId: repository.id,
         jobId,
         signal,

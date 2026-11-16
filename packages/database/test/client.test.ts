@@ -986,9 +986,7 @@ describe('additive migrations', () => {
         'scanned_branch',
       ]);
       expect(
-        handle.sqlite
-          .prepare("select scanned_branch from repositories where id = 'repo_gh'")
-          .get(),
+        handle.sqlite.prepare("select scanned_branch from repositories where id = 'repo_gh'").get(),
       ).toEqual({ scanned_branch: null });
       expect(row()).toEqual({ selected_branch: 'dev', last_commit_sha: 'a'.repeat(40) });
 

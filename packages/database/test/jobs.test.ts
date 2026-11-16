@@ -399,6 +399,7 @@ describe('getRepositoryRegistration', () => {
       status: 'pending',
       input: '/srv/pending',
       source: 'path',
+      branch: null,
       error: null,
       result: null,
       repository: null,
@@ -425,6 +426,7 @@ describe('getRepositoryRegistration', () => {
     expect(await getRepositoryRegistration(handle.db, done.id)).toMatchObject({
       input: '/srv/skills/',
       source: 'path',
+      branch: null,
       result: success,
       repository,
     });

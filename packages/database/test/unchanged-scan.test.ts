@@ -50,6 +50,7 @@ async function hosted(handle: DatabaseHandle, repo = 'skills') {
     name: `acme/${repo}`,
     location: `https://github.com/acme/${repo}`,
     defaultBranch: 'main',
+    selectedBranch: null,
   });
   return repository.id;
 }
@@ -167,6 +168,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         unobserved: [],
         signal,
         commitSha: COMMIT,
+        branch: 'main',
       });
       await finishJob(handle.db, jobId, 'completed', undefined, success());
     }
@@ -210,6 +212,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId,
         jobId,
         commitSha: COMMIT,
+        branch: 'main',
         signal,
       }),
     ).toBe(true);
@@ -240,6 +243,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId,
         jobId,
         commitSha: OTHER_COMMIT,
+        branch: 'main',
         signal,
       }),
     ).toBe(false);
@@ -252,6 +256,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId,
         jobId,
         commitSha: COMMIT,
+        branch: 'main',
         signal,
       }),
     ).toBe(false);
@@ -272,12 +277,19 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId,
         jobId,
         commitSha: COMMIT,
+        branch: 'main',
         signal: aborted.signal,
       }),
     ).rejects.toBeInstanceOf(JobNoLongerRunningError);
     await requestJobCancellation(handle.db, jobId);
     await expect(
-      recordUnchangedRepositoryScan(handle, { repositoryId, jobId, commitSha: COMMIT, signal }),
+      recordUnchangedRepositoryScan(handle, {
+        repositoryId,
+        jobId,
+        commitSha: COMMIT,
+        branch: 'main',
+        signal,
+      }),
     ).rejects.toBeInstanceOf(JobNoLongerRunningError);
     const next = await hosted(handle, 'next');
     const nextJob = await running(handle, next);
@@ -287,6 +299,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId: next,
         jobId: nextJob,
         commitSha: COMMIT,
+        branch: 'main',
         signal,
       }),
     ).rejects.toBeInstanceOf(JobNoLongerRunningError);
@@ -298,6 +311,7 @@ describe('recordUnchangedRepositoryScan (issue 63)', () => {
         repositoryId: gone,
         jobId: goneJob,
         commitSha: COMMIT,
+        branch: 'main',
         signal,
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
