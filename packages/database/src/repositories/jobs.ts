@@ -627,11 +627,11 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
     .where(eq(jobs.type, 'benchmark-run'))
     .orderBy(desc(jobs.createdAt))
     .limit(limit);
-  const result: JobListItem[] = [];
+  const result: (Omit<JobListItem, 'artifactNameShared'> & { artifactId: string | null })[] = [];
   for (const job of rows) {
     const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
     let suite: { name: string; slug: string; nameShared: boolean } | undefined;
-    let artifact: { name: string; slug: string; nameShared: boolean } | undefined;
+    let artifact: { id: string; name: string; slug: string } | undefined;
     if (payload.success) {
       suite = await db
         .select({
@@ -644,7 +644,7 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
         .where(eq(benchmarkSuiteVersions.id, payload.data.suiteVersionId))
         .get();
       artifact = await db
-        .select({ name: artifacts.name, slug: artifacts.slug, nameShared: artifactNameShared })
+        .select({ id: artifacts.id, name: artifacts.name, slug: artifacts.slug })
         .from(artifactVersions)
         .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
         .where(eq(artifactVersions.id, payload.data.artifactVersionId))
@@ -660,13 +660,31 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
       suiteName: suite?.name ?? null,
       suiteSlug: suite?.slug ?? null,
       suiteNameShared: suite?.nameShared ?? false,
+      artifactId: artifact?.id ?? null,
       artifactName: artifact?.name ?? null,
       artifactSlug: artifact?.slug ?? null,
-      artifactNameShared: artifact?.nameShared ?? false,
       benchmarkRunId: run?.id ?? null,
     });
   }
-  return result;
+  // One statement flags every listed artifact whose name another artifact has (issue 236), so
+  // the artifacts table is grouped once per list, not once per job.
+  const artifactIds = [...new Set(result.flatMap((r) => (r.artifactId ? [r.artifactId] : [])))];
+  const shared = new Set(
+    artifactIds.length === 0
+      ? []
+      : (
+          await db
+            .select({ id: artifacts.id, nameShared: artifactNameShared })
+            .from(artifacts)
+            .where(inArray(artifacts.id, artifactIds))
+        )
+          .filter((a) => a.nameShared)
+          .map((a) => a.id),
+  );
+  return result.map(({ artifactId, ...item }) => ({
+    ...item,
+    artifactNameShared: artifactId !== null && shared.has(artifactId),
+  }));
 }
 
 export async function countJobsByStatus(db: Database): Promise<Record<JobStatus, number>> {
