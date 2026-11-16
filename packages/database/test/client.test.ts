@@ -63,7 +63,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(8);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(9);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -958,6 +958,53 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 8))).applied).toBe(1);
       expect(types()).toEqual(before);
     } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds a nullable repositories.scanned_branch on a 0007 database, and can be rolled back and re-applied (issue 58)', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const row = () =>
+      handle.sqlite
+        .prepare("select selected_branch, last_commit_sha from repositories where id = 'repo_gh'")
+        .get();
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 8));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 8));
+      handle.sqlite.exec(
+        `insert into repositories (id, provider, name, location, default_branch, selected_branch, last_commit_sha, sync_status, created_at, updated_at)
+         values ('repo_gh', 'github', 'a/b', 'https://github.com/a/b', 'main', 'dev', '${'a'.repeat(40)}', 'ok', 't', 't')`,
+      );
+
+      // Up: the existing row keeps its values and reads an unknown scanned branch.
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 9))).applied).toBe(1);
+      expect(columns(handle, 'repositories')).toEqual([
+        ...columns(before, 'repositories'),
+        'scanned_branch',
+      ]);
+      expect(
+        handle.sqlite
+          .prepare("select scanned_branch from repositories where id = 'repo_gh'")
+          .get(),
+      ).toEqual({ scanned_branch: null });
+      expect(row()).toEqual({ selected_branch: 'dev', last_commit_sha: 'a'.repeat(40) });
+
+      // Down: drop the column and forget the migration; the data stays, and it applies again.
+      handle.sqlite.exec('alter table repositories drop column scanned_branch');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(columns(handle, 'repositories')).toEqual(columns(before, 'repositories'));
+      expect(row()).toEqual({ selected_branch: 'dev', last_commit_sha: 'a'.repeat(40) });
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 9))).applied).toBe(1);
+      expect(columns(handle, 'repositories')).toContain('scanned_branch');
+      // Re-applying everything is a no-op.
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 9))).applied).toBe(0);
+    } finally {
+      before.close();
       handle.close();
       temp.dispose();
     }
