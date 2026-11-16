@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-11-13
+updated: 2026-11-16
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -175,7 +175,7 @@ PK (artifact_id, suite_id); both FK cascade; `created_at`. User metadata — pre
 | type | text NOT NULL | `benchmark-run` \| `repository-registration` ([SPEC-104](2026-10-14-repository-management.md) §9) \| `repository-scan` (local repositories, [SPEC-102](2026-10-14-artifact-discovery.md) Phasing) (future: `repository-sync`) |
 | status | text NOT NULL | `pending` \| `running` \| `completed` \| `failed` \| `cancelled` \| `interrupted`; **I** (status, created_at) |
 | payload | json NOT NULL | input, validated per type: `{suiteVersionId, artifactVersionId}` (`benchmark-run`), `{path, confirmedLocation?}` (`repository-registration`), `{repositoryId}` (`repository-scan`) |
-| result | json | outcome written by the runner when the job type has one; `repository-registration`: `{ok: true, repositoryId, created}` \| `{ok: false, code, message}` \| `{ok: false, code: 'confirmation-required', location, home, overlaps}`; `repository-scan`: `{ok: true, scannedFiles, discovered, createdArtifacts, createdVersions, warningCount, errorCount, errors, durationMs}` \| `{ok: false, code, message}`; null otherwise (migration `0001`) |
+| result | json | outcome written by the runner when the job type has one; `repository-registration`: `{ok: true, repositoryId, created}` \| `{ok: false, code, message}` \| `{ok: false, code: 'confirmation-required', location, home, overlaps}`; `repository-scan`: `{ok: true, scannedFiles, discovered, createdArtifacts, createdVersions, warningCount, errorCount, errors, durationMs, …}` \| `{ok: false, code, message}`; a hosted scan also stores `commitSha` and, when the runner knows its version, `scanConfigHash` (SHA-256 of the effective scan configuration), and a hosted rescan that skipped an unchanged remote `unchanged: true` (both optional, absent in older results, issue 63, [SPEC-105](2026-10-14-repository-synchronization.md) FR-105-10); null otherwise (migration `0001`) |
 | runner_id | text | acquiring runner instance |
 | attempts | int NOT NULL default 0 | incremented on acquire; no automatic retry |
 | error | text | redacted |
