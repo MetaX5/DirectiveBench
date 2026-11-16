@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -11,13 +12,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { discoverArtifacts } from '@directivebench/core';
 import {
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
+  finishJob,
   getRepository,
   getRepositoryRegistration,
   getRepositoryScan,
@@ -34,6 +36,8 @@ import {
   LocalRunner,
   NOT_FOUND_OR_NOT_PUBLIC,
   REPOSITORY_ID,
+  ScanCancelledError,
+  hostedScanConfigHash,
   registerHostedUrl,
   scanHostedRepository,
   type HostedRepositoryOptions,
@@ -1008,5 +1012,306 @@ describe('missing occurrences of a hosted repository (SPEC-125)', realGit, () =>
     });
     expect(statuses().every(([, status]) => status === 'active')).toBe(true);
     expect(await scan(repository)).toMatchObject({ ok: true, removedOccurrences: 1 });
+  });
+});
+
+describe('an unchanged remote skips the fetch and the scan (issue 63, SPEC-105 FR-105-10)', realGit, () => {
+  const VERSION = '1.0.0';
+  let gitLog: string;
+  let gitBin: string;
+
+  beforeEach(() => {
+    // A git on PATH that logs every call and runs the real git: the subcommands show whether a
+    // scan fetched anything.
+    const realGitPath = execFileSync('sh', ['-c', 'command -v git']).toString().trim();
+    gitBin = join(remotes, '.logging-git');
+    gitLog = join(remotes, 'git-calls.log');
+    mkdirSync(gitBin);
+    writeFileSync(
+      join(gitBin, 'git'),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> '${gitLog}'\nexec '${realGitPath}' "$@"\n`,
+      { mode: 0o755 },
+    );
+  });
+
+  /** The subcommands git ran since the last call, without the `-c` pairs before them. */
+  function gitCommands(): string[] {
+    if (!existsSync(gitLog)) return [];
+    const lines = readFileSync(gitLog, 'utf8').split('\n').filter(Boolean);
+    rmSync(gitLog);
+    return lines.map((line) => {
+      const args = line.split(' ');
+      let i = 0;
+      while (args[i] === '-c') i += 2;
+      return String(args[i]);
+    });
+  }
+
+  /** A scan as the runner runs it: a running job, the hosted scan, then the job's outcome. */
+  async function rescan(
+    repository: RepositoryRecord,
+    overrides: Partial<HostedRepositoryOptions> = {},
+  ) {
+    const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+    handle.sqlite.prepare(`update jobs set status = 'running' where id = ?`).run(job.id);
+    const current = (await getRepository(handle.db, repository.id)) as RepositoryRecord;
+    const result = await scanHostedRepository(
+      handle,
+      { jobId: job.id, repository: current },
+      options({
+        appVersion: VERSION,
+        env: { PATH: `${gitBin}${delimiter}${process.env.PATH}` },
+        ...overrides,
+      }),
+    );
+    if (result.ok) await finishJob(handle.db, job.id, 'completed', undefined, result);
+    else await finishJob(handle.db, job.id, 'failed', result.message, result);
+    return { jobId: job.id, result };
+  }
+
+  const versionCount = () => handle.db.$count(schema.artifactVersions);
+  const syncOf = (repositoryId: string) =>
+    handle.sqlite
+      .prepare('select last_sync_at, sync_status, sync_error from repositories where id = ?')
+      .get(repositoryId);
+
+  /** A transport that runs `hook` once, when git is first given the remote URL after arming. */
+  function hooked(hook: () => void) {
+    let armed = false;
+    return {
+      arm: () => {
+        armed = true;
+      },
+      transport: {
+        protocol: 'file' as const,
+        remoteUrl: (location: string) => {
+          if (armed) {
+            armed = false;
+            hook();
+          }
+          return fileTransport(remotes).remoteUrl(location);
+        },
+      },
+    };
+  }
+
+  posixOnly('rescans an unchanged remote with ls-remote alone and records it unchanged with 0 versions', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    const { result: first } = await rescan(repository);
+    expect(first).toMatchObject({
+      ok: true,
+      createdArtifacts: 4,
+      commitSha: remote.head(),
+      scanConfigHash: hostedScanConfigHash(VERSION),
+    });
+    expect(first.ok && first.unchanged).toBeFalsy();
+    expect(gitCommands()).toContain('clone');
+    const versions = await versionCount();
+    const before = syncOf(repository.id);
+    if (!first.ok) throw new Error(first.message);
+
+    const { jobId, result: second } = await rescan(repository);
+    expect(gitCommands()).toEqual(['version', 'ls-remote']);
+    expect(second).toEqual({
+      ok: true,
+      unchanged: true,
+      scannedFiles: first.scannedFiles,
+      discovered: first.discovered,
+      createdArtifacts: 0,
+      createdVersions: 0,
+      removedOccurrences: 0,
+      reactivatedOccurrences: 0,
+      emptyScanKeptOccurrences: first.emptyScanKeptOccurrences,
+      linkedOccurrences: 0,
+      ambiguousLinks: 0,
+      movedOccurrences: 0,
+      ambiguousMoves: 0,
+      warningCount: first.warningCount,
+      errorCount: first.errorCount,
+      errors: first.errors,
+      skippedUserLevelFolders: [],
+      commitSha: first.commitSha,
+      scanConfigHash: first.scanConfigHash,
+      durationMs: expect.any(Number) as number,
+    });
+    expect(await versionCount()).toBe(versions);
+    expect(syncOf(repository.id)).toMatchObject({ sync_status: 'ok', sync_error: null });
+    expect(String(syncOf(repository.id)?.last_sync_at) > String(before?.last_sync_at)).toBe(true);
+    // The stored outcome parses for the Repositories page, which shows it like any rescan.
+    expect((await getRepositoryScan(handle.db, jobId))?.result).toMatchObject({
+      ok: true,
+      unchanged: true,
+      createdVersions: 0,
+    });
+
+    // An unchanged scan is itself a baseline for the next one.
+    expect((await rescan(repository)).result).toMatchObject({ ok: true, unchanged: true });
+    expect(gitCommands()).toEqual(['version', 'ls-remote']);
+  });
+
+  posixOnly('scans a changed remote as before', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    await rescan(repository);
+    await rescan(repository);
+    gitCommands();
+    const head = remote.commit({ '.agents/skills/review/SKILL.md': `${SKILL}More.\n` }, 'edit');
+    const { result } = await rescan(repository);
+    expect(result).toMatchObject({ ok: true, createdVersions: 1, commitSha: head });
+    expect(result.ok && result.unchanged).toBeFalsy();
+    expect(gitCommands()).toEqual(expect.arrayContaining(['ls-remote', 'fetch', 'ls-tree']));
+  });
+
+  posixOnly('scans when the scan configuration changed or was not recorded', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    await rescan(repository);
+    gitCommands();
+    expect(hostedScanConfigHash('1.0.1')).toMatch(/^[0-9a-f]{64}$/);
+    expect(hostedScanConfigHash('1.0.1')).not.toBe(hostedScanConfigHash(VERSION));
+
+    // Another DirectiveBench version reads the same commit again, once.
+    const { result: upgraded } = await rescan(repository, { appVersion: '1.0.1' });
+    expect(upgraded).toMatchObject({ ok: true, scanConfigHash: hostedScanConfigHash('1.0.1') });
+    expect(upgraded.ok && upgraded.unchanged).toBeFalsy();
+    expect(gitCommands()).toContain('ls-tree');
+    const { jobId, result: again } = await rescan(repository, { appVersion: '1.0.1' });
+    expect(again).toMatchObject({ ok: true, unchanged: true });
+    gitCommands();
+
+    // A result stored before the hash existed is no baseline (issue 63 fallback: scan).
+    const stored = JSON.parse(
+      String(handle.sqlite.prepare('select result from jobs where id = ?').get(jobId)?.result),
+    ) as Record<string, unknown>;
+    delete stored.scanConfigHash;
+    handle.sqlite
+      .prepare('update jobs set result = ? where id = ?')
+      .run(JSON.stringify(stored), jobId);
+    expect((await rescan(repository, { appVersion: '1.0.1' })).result).toMatchObject({ ok: true });
+    expect(gitCommands()).toContain('ls-tree');
+
+    // A runner that does not know its version never skips, and records no hash (fail closed).
+    const { result: unknown } = await rescan(repository, { appVersion: undefined });
+    expect(unknown.ok && unknown.scanConfigHash).toBeUndefined();
+    expect(gitCommands()).not.toContain('ls-remote');
+    expect((await rescan(repository)).result).toMatchObject({ ok: true });
+    expect(gitCommands()).toContain('ls-tree');
+  });
+
+  posixOnly('scans when the last scan failed or the repository is not synced at the last scanned commit', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    await rescan(repository);
+    gitCommands();
+    handle.sqlite
+      .prepare(`update repositories set sync_status = 'error', sync_error = 'x' where id = ?`)
+      .run(repository.id);
+    expect((await rescan(repository)).result).toMatchObject({ ok: true });
+    expect(gitCommands()).toContain('ls-tree');
+    expect(syncOf(repository.id)).toMatchObject({ sync_status: 'ok', sync_error: null });
+    handle.sqlite
+      .prepare(`update repositories set last_commit_sha = ? where id = ?`)
+      .run('f'.repeat(40), repository.id);
+    expect((await rescan(repository)).result).toMatchObject({ ok: true });
+    expect(gitCommands()).toContain('ls-tree');
+  });
+
+  posixOnly('fails when the remote head check fails, and scans when the branch is gone', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    await rescan(repository);
+    gitCommands();
+    rmSync(remote.bare, { recursive: true, force: true });
+    expect((await rescan(repository)).result).toEqual({
+      ok: false,
+      code: 'auth-required',
+      message: NOT_FOUND_OR_NOT_PUBLIC,
+    });
+    expect(gitCommands()).toEqual(['version', 'ls-remote']);
+    expect(syncOf(repository.id)).toMatchObject({ sync_status: 'error' });
+
+    const other = new FixtureRemote(remotes, 'acme', 'branchless', { 'AGENTS.md': '# Rules\n' });
+    const branchless = await registered(other);
+    await rescan(branchless);
+    git(other.bare, ['update-ref', '-d', 'refs/heads/main']);
+    gitCommands();
+    expect((await rescan(branchless)).result).toMatchObject({
+      ok: false,
+      code: 'branch-not-found',
+    });
+    expect(gitCommands()).toEqual(expect.arrayContaining(['ls-remote', 'fetch']));
+  });
+
+  posixOnly('scans in full when the repository changed between the head check and the write', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    const hook = hooked(() => {
+      handle.sqlite
+        .prepare(`update repositories set sync_status = 'error' where id = ?`)
+        .run(repository.id);
+    });
+    await rescan(repository, { transport: hook.transport });
+    gitCommands();
+    hook.arm();
+    const { result } = await rescan(repository, { transport: hook.transport });
+    expect(result).toMatchObject({ ok: true, createdVersions: 0 });
+    expect(result.ok && result.unchanged).toBeFalsy();
+    expect(gitCommands()).toEqual(expect.arrayContaining(['ls-remote', 'fetch', 'ls-tree']));
+    expect(syncOf(repository.id)).toMatchObject({ sync_status: 'ok' });
+  });
+
+  posixOnly('honours a cancellation and a removal that land during the head check', async () => {
+    const remote = teamSkills();
+    const repository = await registered(remote);
+    const cancel = hooked(() => {
+      handle.sqlite
+        .prepare(`update jobs set cancel_requested_at = ? where status = 'running'`)
+        .run(new Date().toISOString());
+    });
+    await rescan(repository, { transport: cancel.transport });
+    const before = syncOf(repository.id);
+    cancel.arm();
+    await expect(rescan(repository, { transport: cancel.transport })).rejects.toBeInstanceOf(
+      ScanCancelledError,
+    );
+    expect(syncOf(repository.id)).toEqual(before);
+    // The runner records the cancelled job; do the same so the next scan gets a job of its own.
+    handle.sqlite.prepare(`update jobs set status = 'cancelled' where status = 'running'`).run();
+
+    const remove = hooked(() => {
+      handle.sqlite.prepare('delete from repositories where id = ?').run(repository.id);
+    });
+    remove.arm();
+    expect((await rescan(repository, { transport: remove.transport })).result).toEqual({
+      ok: false,
+      code: 'repository-not-found',
+      message: 'The repository was removed during the scan.',
+    });
+  });
+
+  it('skips an unchanged remote in the LocalRunner, which passes its version', async () => {
+    const remote = teamSkills();
+    const runner = new LocalRunner({
+      handle,
+      fixtureStore: join(dataDir, 'fixtures'),
+      cacheDir: cacheDir(),
+      adapters: new Map(),
+      workspaceRoot: join(dataDir, 'workspaces'),
+      hostedGitTransport: fileTransport(remotes),
+      hostedGitLimits: { cacheSizePollIntervalMs: 5 },
+      appVersion: VERSION,
+    });
+    const repository = await registered(remote);
+    const results = [];
+    for (let i = 0; i < 2; i++) {
+      const { job } = await enqueueRepositoryScanJob(handle, { repositoryId: repository.id });
+      expect(await runner.runUntilIdle()).toMatchObject([{ status: 'completed' }]);
+      results.push((await getRepositoryScan(handle.db, job.id))?.result);
+    }
+    expect(results).toMatchObject([
+      { ok: true, createdArtifacts: 4, scanConfigHash: hostedScanConfigHash(VERSION) },
+      { ok: true, unchanged: true, createdArtifacts: 0, createdVersions: 0 },
+    ]);
   });
 });

@@ -32,6 +32,7 @@ import {
   listSnapshot,
   readBlobs,
   resolveCaBundle,
+  resolveRemoteHead,
   type HostedGitContext,
   type HostedGitFailure,
 } from '../src/hosted-git';
@@ -440,6 +441,75 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
     expect(call?.args.slice(-5)).toEqual(['ls-remote', '--symref', '--', LOCATION, 'HEAD']);
     expect(call?.env).not.toHaveProperty('GIT_NO_LAZY_FETCH');
     expect(call?.env).toMatchObject({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_GLOBAL: '/dev/null' });
+  });
+
+  it('resolves the remote head of exactly refs/heads/<branch> with the hardened ls-remote (issue 63)', async () => {
+    const { git, context } = fakeContext({
+      'ls-remote': {
+        // ls-remote matches patterns against the tail of a ref name: only the exact ref counts.
+        stdout: `${OID_B}\trefs/heads/x/refs/heads/main\n${OID_A}\trefs/heads/main\n`,
+      },
+    });
+    expect(await resolveRemoteHead(context, { location: LOCATION, branch: 'main' })).toEqual({
+      ok: true,
+      commitSha: OID_A,
+    });
+    const [call] = fakeGitCalls(git);
+    expect(call?.args).toEqual([
+      ...hostedGitArgs('https', []),
+      'ls-remote',
+      '--',
+      LOCATION,
+      'refs/heads/main',
+    ]);
+    expect(call?.cwd).toBe(realpathSync(join(dir, 'git-home')));
+    expect(call?.env).not.toHaveProperty('GIT_NO_LAZY_FETCH');
+    expect(call?.env).not.toHaveProperty('GIT_DIR');
+    expect(call?.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CEILING_DIRECTORIES: dir,
+    });
+  });
+
+  it('resolves no remote head for a missing branch or output that is not a full object ID', async () => {
+    for (const stdout of [
+      '',
+      `${OID_A}\trefs/heads/other\n`,
+      `${OID_A.slice(0, 39)}\trefs/heads/main\n`,
+      `${OID_A.toUpperCase()}\trefs/heads/main\n`,
+    ]) {
+      rmSync(join(dir, 'bin'), { recursive: true, force: true });
+      const { context } = fakeContext({ 'ls-remote': { stdout } });
+      expect(await resolveRemoteHead(context, { location: LOCATION, branch: 'main' })).toEqual({
+        ok: true,
+        commitSha: null,
+      });
+    }
+  });
+
+  it('classifies a failed or abnormal remote head check like the other remote steps', async () => {
+    let { context } = fakeContext({
+      'ls-remote': { exit: 128, stderr: 'remote: Repository not found.\n' },
+    });
+    expect(await resolveRemoteHead(context, { location: LOCATION, branch: 'main' })).toEqual({
+      ok: false,
+      code: 'auth-required',
+      message: NOT_FOUND_OR_NOT_PUBLIC,
+    });
+    rmSync(join(dir, 'bin'), { recursive: true, force: true });
+    ({ context } = fakeContext({ 'ls-remote': { sleepMs: 5_000 } }));
+    expect(
+      await resolveRemoteHead(
+        { ...context, timeouts: { ...context.timeouts, lsRemote: 50 } },
+        { location: LOCATION, branch: 'main' },
+      ),
+    ).toEqual({
+      ok: false,
+      code: 'timeout',
+      message: 'git ls-remote did not finish within the time limit.',
+    });
   });
 
   it('never names the CA bundle path in a message', async () => {
