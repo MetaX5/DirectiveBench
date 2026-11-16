@@ -134,6 +134,12 @@ keyboard-only assign and unassign; no console messages; axe 0 violations on the 
 
 Codex adversarial review round 1 (head `96a17fa`): approve, no findings.
 
+om-auto-review-pr (engine om-code-review, head `81a011e`, comment review since self-authored):
+approve; gate re-run on that head (format, lint, typecheck, test, build, verify:pack) all pass;
+two nits left as follow-ups (the existing em-dash placeholder on `/executions`, issue 123; the
+colour-and-weight distinction of the `/artifacts` and `/results` links). Manual QA instructions
+posted.
+
 Not verified: the screenshots predate the F1 fix (the Run card is covered by the e2e test);
 the native picker's open option list cannot be captured headless (option texts were read and
 are asserted in e2e).
