@@ -57,6 +57,32 @@ Modelled on Tags and Assigned benchmarks on `/artifacts/[id]` (issue 64).
 9. Long values without spaces wrap inside the card (`break-all` on the Badge, `wrap-anywhere`
    on messages that repeat them); the Remove button never leaves the card.
 
+## An optional field and an edit panel
+
+Modelled on "Branch (optional)" and Change branch on `/repositories` (issue 58).
+
+1. An optional field says so in its label ("Branch (optional)") and has a help line that says
+   what an empty value means, linked with `aria-describedby`.
+2. No placeholder when an example could be read as a value (a branch name could look like the
+   repository's default branch). Source: maintainer decision on issue 58.
+3. Every error about the optional field, from the form or from the runner, sits directly under
+   that field, not under the button row; `aria-describedby` names the error first, then the
+   help. Source: maintainer correction on issue 58.
+4. The button of a row with fields of different heights keeps `items-start` and `mt-5`, so it
+   lines up with the inputs and not with the help lines.
+5. An edit panel opened from a table row sits above the table, puts focus in its field, has one
+   `default` button and a Cancel link back to the row, and says in advance what saving does
+   ("Saving does not scan…"). Opening it from a GET form without a fragment keeps the browser's
+   autofocus working.
+
+<Canvas of={Stories.OptionalFieldIdle} />
+<Canvas of={Stories.OptionalFieldError} />
+<Canvas of={Stories.OptionalFieldNotFound} />
+<Canvas of={Stories.OptionalFieldPending} />
+<Canvas of={Stories.EditPanelOpen} />
+<Canvas of={Stories.EditPanelError} />
+<Canvas of={Stories.EditPanelNotFound} />
+
 ## States
 
 <Canvas of={Stories.Idle} />

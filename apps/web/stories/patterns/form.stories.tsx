@@ -277,3 +277,238 @@ export const EditableList: Story = {
     await expect(field).toHaveFocus();
   },
 };
+
+/**
+ * An optional field next to the main one, modelled on "Branch (optional)" of "Register a
+ * repository" (issue 58): no placeholder (an example name could read as the default), a help line
+ * that says what empty means, and its errors directly under it, linked by `aria-describedby`.
+ */
+const BRANCH_RULE =
+  'A branch name may use letters, digits, ".", "_", "-" and "/". It cannot start with "-" or ".", contain ".." or a space, or end with ".lock".';
+
+function OptionalField({
+  state,
+  path,
+  branch,
+}: {
+  state: 'idle' | 'pending' | 'invalid' | 'notFound';
+  path?: string;
+  branch?: string;
+}) {
+  const pending = state === 'pending';
+  const error =
+    state === 'invalid'
+      ? BRANCH_RULE
+      : state === 'notFound'
+        ? `The branch ${branch} does not exist in acme/agent-skills. Check the name on GitHub, or leave Branch empty to use the default branch.`
+        : null;
+  return (
+    <Card className="max-w-content">
+      <CardHeader>
+        <CardTitle>Register a repository</CardTitle>
+        <CardDescription>
+          A GitHub repository is scanned on its default branch unless you name another branch. A
+          local repository is scanned from its working tree.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-stack">
+        <form
+          className="flex flex-wrap items-start gap-inline"
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <label className="flex min-w-64 flex-1 flex-col gap-1 text-ui text-muted-foreground">
+            Path or GitHub URL
+            <Input
+              name="path"
+              defaultValue={path}
+              placeholder="~/code/my-skills or https://github.com/owner/repo"
+              disabled={pending}
+              className="font-mono"
+            />
+          </label>
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-56">
+            <label className="flex flex-col gap-1 text-ui text-muted-foreground">
+              Branch (optional)
+              <Input
+                name="branch"
+                defaultValue={branch}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={
+                  error ? 'story-branch-error story-branch-help' : 'story-branch-help'
+                }
+                autoFocus={error !== null}
+                disabled={pending}
+                className="font-mono"
+              />
+            </label>
+            {error ? (
+              <p
+                id="story-branch-error"
+                role="alert"
+                className="text-ui text-destructive-foreground wrap-anywhere"
+              >
+                {error}
+              </p>
+            ) : null}
+            <p id="story-branch-help" className="text-caption text-muted-foreground">
+              GitHub only. Empty: the default branch.
+            </p>
+          </div>
+          <Button type="submit" disabled={pending} className="mt-5">
+            Register
+          </Button>
+        </form>
+        {pending ? (
+          <p role="status" className="text-ui wrap-anywhere">
+            Asking GitHub about {path} and its branch {branch} (read-only, without credentials;
+            nothing is downloaded yet)…
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** An optional field: a visible "(optional)" label, no placeholder, a help line for empty. */
+export const OptionalFieldIdle: Story = {
+  render: () => <OptionalField state="idle" />,
+  play: async ({ canvas }) => {
+    const field = canvas.getByRole('textbox', { name: 'Branch (optional)' });
+    await expect(field).not.toHaveAttribute('placeholder');
+    await expect(field).toHaveAccessibleDescription('GitHub only. Empty: the default branch.');
+  },
+};
+
+/** The optional field's error sits directly under it, not under the button row. */
+export const OptionalFieldError: Story = {
+  render: () => (
+    <OptionalField
+      state="invalid"
+      path="https://github.com/acme/agent-skills"
+      branch="-upload-pack=x"
+    />
+  ),
+  play: async ({ canvas }) => {
+    const field = canvas.getByRole('textbox', { name: 'Branch (optional)' });
+    await waitFor(() => expect(field).toHaveFocus());
+    await expect(field).toBeInvalid();
+    await expect(field).toHaveValue('-upload-pack=x');
+    await expect(field).toHaveAccessibleDescription(
+      `${BRANCH_RULE} GitHub only. Empty: the default branch.`,
+    );
+  },
+};
+
+/** A runner answer about the optional field also goes under it, with both values kept. */
+export const OptionalFieldNotFound: Story = {
+  render: () => (
+    <OptionalField state="notFound" path="https://github.com/acme/agent-skills" branch="relase" />
+  ),
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('alert')).toHaveTextContent('The branch relase does not exist');
+    await expect(canvas.getByRole('textbox', { name: 'Branch (optional)' })).toHaveValue('relase');
+  },
+};
+
+/** While the runner asks, both fields keep their values and are disabled. */
+export const OptionalFieldPending: Story = {
+  render: () => (
+    <OptionalField state="pending" path="https://github.com/acme/agent-skills" branch="relase" />
+  ),
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('textbox', { name: 'Branch (optional)' })).toBeDisabled();
+    await expect(canvas.getByRole('status')).toHaveTextContent('and its branch relase');
+  },
+};
+
+/**
+ * An edit panel above a table, modelled on Change branch on `/repositories` (issue 58): opened from
+ * a row, the field focused, one `default` Save button and a Cancel link, the error under the
+ * field, and a note that says what saving does and does not do.
+ */
+function EditPanel({ state, value }: { state: 'open' | 'invalid' | 'notFound'; value: string }) {
+  const error =
+    state === 'invalid'
+      ? BRANCH_RULE
+      : state === 'notFound'
+        ? `The branch ${value} does not exist in acme/team-rules. Nothing was changed: the repository still uses release/2.0.`
+        : null;
+  return (
+    <div className="min-w-0 max-w-content space-y-stack rounded-surface border border-control p-3 text-ui">
+      <p className="font-medium wrap-anywhere">
+        Branch of acme/team-rules (GitHub,{' '}
+        <span className="font-mono">https://github.com/acme/team-rules</span>)
+      </p>
+      <form
+        className="flex flex-wrap items-start gap-inline"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <div className="flex min-w-48 flex-1 flex-col gap-1 sm:max-w-80">
+          <label className="flex flex-col gap-1 text-ui text-muted-foreground">
+            Branch
+            <Input
+              name="branch"
+              defaultValue={value}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={
+                error
+                  ? 'story-change-branch-error story-change-branch-help'
+                  : 'story-change-branch-help'
+              }
+              autoFocus
+              className="font-mono"
+            />
+          </label>
+          {error ? (
+            <p
+              id="story-change-branch-error"
+              role="alert"
+              className="text-destructive-foreground wrap-anywhere"
+            >
+              {error}
+            </p>
+          ) : null}
+          <p id="story-change-branch-help" className="text-caption text-muted-foreground">
+            Leave empty to follow the default branch (main).
+          </p>
+        </div>
+        <div className="mt-5 flex items-center gap-inline">
+          <Button type="submit">Save branch</Button>
+          <a href="#repository-b" className="text-ui underline">
+            Cancel
+          </a>
+        </div>
+      </form>
+      <p className="text-muted-foreground">
+        Saving does not scan. The next scan reads the new branch: artifacts found only on
+        release/2.0 are then marked missing (their history is kept) and return when a later scan
+        finds them again.
+      </p>
+    </div>
+  );
+}
+
+/** Opening the panel puts focus in its field. */
+export const EditPanelOpen: Story = {
+  render: () => <EditPanel state="open" value="release/2.0" />,
+  play: async ({ canvas }) => {
+    await waitFor(() => expect(canvas.getByRole('textbox', { name: 'Branch' })).toHaveFocus());
+  },
+};
+
+/** An invalid value: the error under the field, the value kept. */
+export const EditPanelError: Story = {
+  render: () => <EditPanel state="invalid" value="release 2.0" />,
+  play: async ({ canvas }) => {
+    const field = canvas.getByRole('textbox', { name: 'Branch' });
+    await expect(field).toBeInvalid();
+    await expect(field).toHaveAccessibleDescription(
+      `${BRANCH_RULE} Leave empty to follow the default branch (main).`,
+    );
+  },
+};
+
+/** The runner's "does not exist": under the field too, saying that nothing changed. */
+export const EditPanelNotFound: Story = {
+  render: () => <EditPanel state="notFound" value="release/3.0" />,
+};
