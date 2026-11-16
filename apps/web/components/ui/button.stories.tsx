@@ -113,6 +113,36 @@ export const Sizes: Story = {
   },
 };
 
+/**
+ * The `xs` use in the app (issue 249): Change under the branch caption in the Branch cell on
+ * `/repositories`. The visible label starts the accessible name (WCAG 2.5.3), which names the
+ * repository because the label repeats on every row.
+ */
+export const XsInTableCell: Story = {
+  render: () => (
+    <div className="text-ui">
+      <span className="font-mono">release/2.0</span>
+      <span className="block text-caption text-muted-foreground">Chosen. Default: main</span>
+      <form className="mt-1" onSubmit={(event) => event.preventDefault()}>
+        <Button
+          type="submit"
+          size="xs"
+          variant="outline"
+          aria-label="Change branch of acme/team-rules (GitHub, https://github.com/acme/team-rules)"
+        >
+          Change
+        </Button>
+      </form>
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: /^Change branch of acme\/team-rules / });
+    await expect(button).toHaveTextContent('Change');
+    await expect(button.getBoundingClientRect().height).toBe(24);
+    await expect(getComputedStyle(button).cursor).toBe('pointer');
+  },
+};
+
 export const WithIcon: Story = {
   render: (args) => (
     <div className="flex flex-wrap items-center gap-inline">

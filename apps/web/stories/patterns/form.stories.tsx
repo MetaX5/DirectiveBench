@@ -474,7 +474,7 @@ function EditPanel({ state, value }: { state: 'open' | 'invalid' | 'notFound'; v
         </div>
         <div className="mt-5 flex items-center gap-inline">
           <Button type="submit">Save branch</Button>
-          <a href="#repository-b" className="text-ui underline">
+          <a href="#change-branch-b" className="text-ui underline">
             Cancel
           </a>
         </div>

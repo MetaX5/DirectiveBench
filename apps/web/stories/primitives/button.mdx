@@ -40,24 +40,28 @@ label and, optionally, one icon before it (`data-icon="inline-start"`) or after 
 
 ## 5. Variants
 
-| Variant       | Choose it for                                                           | In the app                        |
-| ------------- | ----------------------------------------------------------------------- | --------------------------------- |
-| `default`     | The one main action of a form or section                                | Register, Run                     |
-| `outline`     | A secondary action, or one action repeated per row                      | Filter, Scan, Cancel, Cancel scan |
-| `secondary`   | A neutral action that is not the main one, when an outline is too light | available, unused                 |
-| `ghost`       | An action inside dense UI where a frame is noise: the theme toggle      | ThemeToggle                       |
-| `destructive` | An action that cannot be undone or overrides a warning                  | Register anyway                   |
-| `link`        | An action that reads as text inside a sentence                          | available, unused                 |
+| Variant       | Choose it for                                                           | In the app                                |
+| ------------- | ----------------------------------------------------------------------- | ----------------------------------------- |
+| `default`     | The one main action of a form or section                                | Register, Run                             |
+| `outline`     | A secondary action, or one action repeated per row                      | Filter, Scan, Cancel, Cancel scan, Change |
+| `secondary`   | A neutral action that is not the main one, when an outline is too light | available, unused                         |
+| `ghost`       | An action inside dense UI where a frame is noise: the theme toggle      | ThemeToggle                               |
+| `destructive` | An action that cannot be undone or overrides a warning                  | Register anyway                           |
+| `link`        | An action that reads as text inside a sentence                          | available, unused                         |
 
 At most one `default` button per form or section. Source: SPEC-122 §18 P12.
 
 <Canvas of={ButtonStories.Variants} />
 
 Sizes: `default` (32px) in forms, `sm` (28px) in table rows and dense cards, `xs` (24px) only
-where 28px does not fit. `lg` and `icon-lg` (36px) are available and unused. Source:
+where 28px does not fit: Change under the branch caption in the Branch cell on `/repositories`
+(issue 249), which keeps the row low and leaves Scan and Remove on one line. `lg` and
+`icon-lg` (36px) are available and unused. Source:
 SPEC-119 FR-6, "Parameters in force".
 
 <Canvas of={ButtonStories.Sizes} />
+
+<Canvas of={ButtonStories.XsInTableCell} />
 
 ## 6. States
 

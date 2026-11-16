@@ -71,9 +71,11 @@ Modelled on "Branch (optional)" and Change branch on `/repositories` (issue 58).
 4. The button of a row with fields of different heights keeps `items-start` and `mt-5`, so it
    lines up with the inputs and not with the help lines.
 5. An edit panel opened from a table row sits above the table, puts focus in its field, has one
-   `default` button and a Cancel link back to the row, and says in advance what saving does
-   ("Saving does not scan…"). Opening it from a GET form without a fragment keeps the browser's
-   autofocus working.
+   `default` button and a Cancel link back to the control that opened it, and says in advance
+   what saving does ("Saving does not scan…"). Opening it from a GET form without a fragment
+   keeps the browser's autofocus working; Cancel is a plain link to `#<id of that control>`, so
+   the page load focuses the control again (a `next/link` navigation only scrolls to it,
+   issue 249).
 
 <Canvas of={Stories.OptionalFieldIdle} />
 <Canvas of={Stories.OptionalFieldError} />
