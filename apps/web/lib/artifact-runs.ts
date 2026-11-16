@@ -33,7 +33,8 @@ export type VersionComparison =
 
 export interface VersionRunRow {
   runId: string;
-  suite: { id: string; name: string; version: number };
+  /** `nameShared`: another suite has the name, so the row adds the suite ID (issue 227). */
+  suite: { id: string; slug: string; name: string; version: number; nameShared: boolean };
   /** "no artifact" or "vN" (FR-118-50). */
   baseline: string;
   agentAdapterId: string;

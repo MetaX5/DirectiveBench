@@ -74,7 +74,7 @@ function item(
       startedAt: `2026-10-${String(10 + version).padStart(2, '0')}T00:00:00.000Z`,
       summary,
     },
-    suite: { id: 'suite', name: 'Docs suite', version: 1 },
+    suite: { id: 'suite', slug: 'docs', name: 'Docs suite', version: 1, nameShared: false },
     artifactVersion: { id: `v${version}`, version },
     baselineVersion: baseline === null ? null : { id: `v${baseline}`, version: baseline },
   };
@@ -137,7 +137,7 @@ describe('resultsByVersion (SPEC-118 FR-118-50/51)', () => {
     const results = resultsByVersion(versions, [ab], []);
     expect(rowOf(results, ab.run.id)).toEqual({
       runId: ab.run.id,
-      suite: { id: 'suite', name: 'Docs suite', version: 1 },
+      suite: { id: 'suite', slug: 'docs', name: 'Docs suite', version: 1, nameShared: false },
       baseline: 'v1',
       agentAdapterId: 'claude-code',
       agentVersion: '2.1.302',

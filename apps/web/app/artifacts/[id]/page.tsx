@@ -62,6 +62,7 @@ import {
   type SearchParams,
 } from '@/lib/artifacts';
 import { metadataLimits, suiteOptions, suiteSubject } from '@/lib/artifact-metadata';
+import { suiteLinkName } from '@/lib/row-names';
 import { categoriesCardModel, type CategoriesCardModel } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
@@ -398,6 +399,8 @@ function BenchmarksTab({ detail, suites }: { detail: ArtifactDetail; suites: Sui
       assigned={detail.suites.map((s) => ({
         id: s.id,
         name: s.name,
+        slug: s.slug,
+        linkName: suiteLinkName(s),
         unassignName: `Unassign suite ${suiteSubject(s)}`,
       }))}
       available={suiteOptions(suites.filter((s) => !assigned.has(s.id)))}
@@ -475,10 +478,20 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
                 </Link>
               </TD>
               <TD className="text-ui">
-                <Link className="underline" href={`/benchmarks/${row.suite.id}`}>
+                <Link
+                  className="underline"
+                  href={`/benchmarks/${row.suite.id}`}
+                  aria-label={suiteLinkName(row.suite)}
+                >
                   {row.suite.name}
                 </Link>{' '}
                 v{row.suite.version}
+                {/* A name another suite has adds the suite ID (issue 227, K4). */}
+                {row.suite.nameShared ? (
+                  <span className="text-muted-foreground" data-testid="suite-id">
+                    , ID <span className="font-mono">{row.suite.slug}</span>
+                  </span>
+                ) : null}
               </TD>
               <TD className="text-ui" data-testid="run-baseline">
                 {row.baseline}

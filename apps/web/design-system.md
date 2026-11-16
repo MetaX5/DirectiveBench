@@ -24,7 +24,7 @@ surfaces with one lime accent, Figtree, 32px controls with 12px text, light and 
 | NativeSelect | `@/components/ui/native-select` | One value from a short list, "All" first in filters | Search in many options |
 | Table | `@/components/ui/table` | Rows with the same columns; give it an `aria-label` | Facts of one item (`dl`) |
 | Pre | `@/components/ui/primitives` | JSON, code, raw output | A path in a sentence (`font-mono`) |
-| PageHeader | `@/components/common` | The h1 of every page, once | Section titles |
+| PageHeader | `@/components/common` | The h1 of every page, once; `subtitle` for an identifier such as a suite ID | Section titles |
 | EmptyState | `@/components/common` | Nothing to show; "nothing yet" and "no results" differ | Errors |
 | NotInitialized | `@/components/common` | No local database | An empty list |
 | PlannedSection | `@/components/common` | A whole page that is not built | One planned part of a page (muted Badge) |

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/primitives';
 import { cancelJobAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
+import { cancelJobName, viewRunOfJobName } from '@/lib/row-names';
 import { formatDate } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Executions' };
@@ -60,42 +61,70 @@ export default async function ExecutionsPage() {
                 </TR>
               </THead>
               <TBody>
-                {jobs.map(({ job, suiteName, artifactName, benchmarkRunId }) => (
-                  <TR key={job.id} data-job-status={job.status}>
-                    <TD className="font-mono text-ui">{job.id}</TD>
-                    <TD>{suiteName ?? '—'}</TD>
-                    <TD>{artifactName ?? '—'}</TD>
-                    <TD>
-                      <JobStatusBadge status={job.status} />
-                      {job.cancelRequestedAt && job.status === 'running' ? (
-                        <span className="ml-1 text-ui text-muted-foreground">cancelling…</span>
-                      ) : null}
-                    </TD>
-                    <TD className="text-ui text-muted-foreground">{formatDate(job.createdAt)}</TD>
-                    <TD className="text-ui text-muted-foreground">{formatDate(job.finishedAt)}</TD>
-                    <TD className="max-w-xs text-ui">
-                      {benchmarkRunId ? (
-                        <Link className="underline" href={`/results/${benchmarkRunId}`}>
-                          View run
-                        </Link>
-                      ) : null}
-                      {job.error ? (
-                        <p className="text-destructive-foreground">{job.error}</p>
-                      ) : null}
-                    </TD>
-                    <TD>
-                      {(job.status === 'pending' || job.status === 'running') &&
-                      !job.cancelRequestedAt ? (
-                        <form action={cancelJobAction}>
-                          <input type="hidden" name="jobId" value={job.id} />
-                          <Button size="sm" variant="outline" type="submit">
-                            Cancel
-                          </Button>
-                        </form>
-                      ) : null}
-                    </TD>
-                  </TR>
-                ))}
+                {jobs.map(
+                  ({
+                    job,
+                    suiteName,
+                    suiteSlug,
+                    suiteNameShared,
+                    artifactName,
+                    benchmarkRunId,
+                  }) => (
+                    <TR key={job.id} data-job-status={job.status}>
+                      <TD className="font-mono text-ui">{job.id}</TD>
+                      <TD>
+                        {suiteName ?? '—'}
+                        {/* A name another suite has adds the suite ID (issue 227, K4). */}
+                        {suiteNameShared ? (
+                          <span className="text-ui text-muted-foreground" data-testid="suite-id">
+                            , ID <span className="font-mono">{suiteSlug}</span>
+                          </span>
+                        ) : null}
+                      </TD>
+                      <TD>{artifactName ?? '—'}</TD>
+                      <TD>
+                        <JobStatusBadge status={job.status} />
+                        {job.cancelRequestedAt && job.status === 'running' ? (
+                          <span className="ml-1 text-ui text-muted-foreground">cancelling…</span>
+                        ) : null}
+                      </TD>
+                      <TD className="text-ui text-muted-foreground">{formatDate(job.createdAt)}</TD>
+                      <TD className="text-ui text-muted-foreground">
+                        {formatDate(job.finishedAt)}
+                      </TD>
+                      <TD className="max-w-xs text-ui">
+                        {benchmarkRunId ? (
+                          <Link
+                            className="underline"
+                            href={`/results/${benchmarkRunId}`}
+                            aria-label={viewRunOfJobName(job.id)}
+                          >
+                            View run
+                          </Link>
+                        ) : null}
+                        {job.error ? (
+                          <p className="text-destructive-foreground">{job.error}</p>
+                        ) : null}
+                      </TD>
+                      <TD>
+                        {(job.status === 'pending' || job.status === 'running') &&
+                        !job.cancelRequestedAt ? (
+                          <form action={cancelJobAction}>
+                            <input type="hidden" name="jobId" value={job.id} />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              type="submit"
+                              aria-label={cancelJobName(job.id)}
+                            >
+                              Cancel
+                            </Button>
+                          </form>
+                        ) : null}
+                      </TD>
+                    </TR>
+                  ),
+                )}
               </TBody>
             </Table>
           </CardContent>

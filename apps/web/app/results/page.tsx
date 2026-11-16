@@ -12,6 +12,7 @@ import {
 import { Card, CardContent, TBody, TD, TH, THead, TR, Table } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import { resultRunName } from '@/lib/row-names';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Results' };
@@ -64,13 +65,23 @@ export default async function ResultsPage() {
                   return (
                     <TR key={run.id}>
                       <TD>
-                        <Link className="font-medium hover:underline" href={`/results/${run.id}`}>
+                        <Link
+                          className="font-medium hover:underline"
+                          href={`/results/${run.id}`}
+                          aria-label={resultRunName(artifact.name, run.id)}
+                        >
                           {artifact.name}
                         </Link>{' '}
                         <span className="text-ui text-muted-foreground">v{artifact.version}</span>
                       </TD>
                       <TD className="text-muted-foreground">
                         {suite.name} <span className="text-ui">v{suite.version}</span>
+                        {/* A name another suite has adds the suite ID (issue 227, K4). */}
+                        {suite.nameShared ? (
+                          <span className="text-ui" data-testid="suite-id">
+                            , ID <span className="font-mono">{suite.slug}</span>
+                          </span>
+                        ) : null}
                       </TD>
                       <TD>
                         {isMockAgent(run.agentAdapterId) ? (

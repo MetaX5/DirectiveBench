@@ -32,6 +32,7 @@ import {
 import { enqueueBenchmarkRunAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import { artifactSubject, runOnArtifactName } from '@/lib/row-names';
 import { cliRunCommand } from '@/lib/run-guard';
 import { formatDate, formatDelta } from '@/lib/utils';
 
@@ -63,6 +64,15 @@ export default async function BenchmarkPage({
     <>
       <PageHeader
         title={detail.suite.name}
+        // Names repeat, the suite ID does not (issue 227, K2).
+        subtitle={
+          <>
+            ID{' '}
+            <span className="font-mono" data-testid="suite-id">
+              {detail.suite.slug}
+            </span>
+          </>
+        }
         description={detail.suite.description ?? undefined}
         actions={
           <>
@@ -196,10 +206,27 @@ export default async function BenchmarkPage({
                   >
                     <input type="hidden" name="suiteVersionId" value={version.id} />
                     <input type="hidden" name="artifactId" value={artifact.id} />
-                    <Link href={`/artifacts/${artifact.id}`} className="truncate hover:underline">
-                      {artifact.name}
-                    </Link>
-                    <Button size="sm" type="submit" disabled={!definition || blockers.length > 0}>
+                    {/* A name another artifact has shows its slug (issue 227, K9). */}
+                    <span className="min-w-0 wrap-anywhere">
+                      <Link
+                        href={`/artifacts/${artifact.id}`}
+                        className="hover:underline"
+                        aria-label={artifact.nameShared ? artifactSubject(artifact) : undefined}
+                      >
+                        {artifact.name}
+                      </Link>
+                      {artifact.nameShared ? (
+                        <span className="text-ui text-muted-foreground" data-testid="artifact-slug">
+                          , slug <span className="font-mono">{artifact.slug}</span>
+                        </span>
+                      ) : null}
+                    </span>
+                    <Button
+                      size="sm"
+                      type="submit"
+                      disabled={!definition || blockers.length > 0}
+                      aria-label={runOnArtifactName(artifact)}
+                    >
                       <Play aria-hidden /> Run
                     </Button>
                   </form>

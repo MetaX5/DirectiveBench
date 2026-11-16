@@ -307,8 +307,17 @@ export function SuitesCard({
   available,
 }: {
   artifactId: string;
-  /** `unassignName` is the Unassign button's accessible name, unique on the page (issue 219). */
-  assigned: Array<{ id: string; name: string; unassignName: string }>;
+  /**
+   * `unassignName` is the Unassign button's accessible name, unique on the page (issue 219).
+   * `linkName` names the suite link when another suite has the name, else undefined (issue 227).
+   */
+  assigned: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    linkName: string | undefined;
+    unassignName: string;
+  }>;
   /** The picker's options; a label adds the suite ID when two suites share a name. */
   available: Array<{ id: string; label: string }>;
 }) {
@@ -349,9 +358,19 @@ export function SuitesCard({
               data-suite-id={suite.id}
               className="flex flex-wrap items-center gap-inline"
             >
-              <Link href={`/benchmarks/${suite.id}`} className="underline">
-                {suite.name}
-              </Link>
+              {/* Every assigned suite shows its ID: names repeat (issue 227, K3). */}
+              <span className="min-w-0 wrap-anywhere">
+                <Link
+                  href={`/benchmarks/${suite.id}`}
+                  className="underline"
+                  aria-label={suite.linkName}
+                >
+                  {suite.name}
+                </Link>
+                <span className="text-ui text-muted-foreground" data-testid="suite-id">
+                  , ID <span className="font-mono">{suite.slug}</span>
+                </span>
+              </span>
               <form action={dispatch}>
                 <input type="hidden" name="intent" value="remove" />
                 <input type="hidden" name="artifactId" value={artifactId} />
@@ -493,11 +512,17 @@ export function CategoriesCard({
               data-category-id={chip.id}
               className="flex max-w-full min-w-0 items-center gap-inline-tight"
             >
-              <Badge
-                variant={chip.archived ? 'muted' : 'secondary'}
-                className="min-w-0 shrink break-all"
-              >
-                {chip.label}
+              <Badge variant={chip.archived ? 'muted' : 'secondary'} className="min-w-0 shrink">
+                {/* One inline span: the Badge is a flex box, so loose parts would become columns
+                    (issue 227, K5). It wraps anywhere, so a long name never widens the card. */}
+                <span className="min-w-0 wrap-anywhere">
+                  {chip.label}
+                  {chip.clashSlug ? (
+                    <span data-testid="category-slug">
+                      , slug <span className="font-mono">{chip.clashSlug}</span>
+                    </span>
+                  ) : null}
+                </span>
               </Badge>
               <form action={dispatch} onSubmit={() => setPressed('remove')}>
                 <input type="hidden" name="intent" value="remove" />

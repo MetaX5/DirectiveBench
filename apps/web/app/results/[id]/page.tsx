@@ -791,7 +791,11 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <dd>
               <Link className="underline" href={`/benchmarks/${suite.id}`}>
                 {suite.name} v{suiteVersion.version}
-              </Link>{' '}
+              </Link>
+              {/* The suite ID always shows in the run's facts (issue 227, K4). */}
+              <span className="text-muted-foreground" data-testid="suite-id">
+                , ID <span className="font-mono">{suite.slug}</span>
+              </span>{' '}
               <span className="font-mono">{suiteVersion.contentHash.slice(0, 12)}…</span>
             </dd>
             <dt className="text-muted-foreground">Agent</dt>

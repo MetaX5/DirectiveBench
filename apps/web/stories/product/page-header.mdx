@@ -24,14 +24,20 @@ Once per page, first in `main`. Every route in `app/` uses it, `PlannedSection` 
 
 ## 4. Anatomy
 
-`h1` (`text-page-title`), optional description (`text-body`, `muted-foreground`), optional
-actions at the right (`gap-inline`). Bottom spacing `mb-section`.
+`h1` (`text-page-title`), optional subtitle (`text-ui`, `muted-foreground`, wraps anywhere),
+optional description (`text-body`, `muted-foreground`), optional actions at the right
+(`gap-inline`). Bottom spacing `mb-section`.
 
 ## 5. Variants
 
-None. Title only; with a description; with actions; with a planned notice in the actions.
+One: **with a subtitle**, a muted line under the title that tells the item apart from others
+with the same title, such as a suite's ID on the suite page ("ID safety-v2"; suite names repeat,
+the ID does not, issue 227). Approved by the maintainer on 2026-11-16 (decision K2). Otherwise:
+title only; with a description; with actions; with a planned notice in the actions.
 
 <Canvas of={Stories.WithActions} />
+
+<Canvas of={Stories.WithSubtitle} />
 
 ## 6. States
 
@@ -45,11 +51,16 @@ data has none (Detail view pattern); a missing item gets the title "… not foun
 - The only h1 on the page; the browser tab title repeats it ("Repositories · DirectiveBench",
   `app/layout.tsx`). Source: WCAG 2.4.2, 1.3.1.
 - Actions follow the title in reading and tab order.
+- The subtitle is a paragraph after the h1, not part of the heading's name; its label ("ID")
+  is plain text, so a screen reader reads "ID safety-v2". Contrast: `muted-foreground` on the
+  page background, 6.01:1 light and 7.66:1 dark.
 
 ## 8. Content
 
 - Title: the page or item name, sentence case; item names as they are (`validate-external-input`).
 - Description: one sentence that says what the page holds, under about 90 characters.
+- Subtitle: a label and an identifier only ("ID safety-v2", the value in `font-mono`), no
+  sentence and no parentheses. Leave it out when the title is unique by itself.
 
 ## 9. Responsiveness
 
@@ -57,6 +68,10 @@ The title and the actions wrap: the actions move under the title on narrow scree
 and buttons inside them wrap too, so nothing leaves a 320px screen (SPEC-122 P14).
 
 <Canvas of={Stories.LongTextNarrowScreen} />
+
+A long identifier in the subtitle wraps anywhere, so it never widens the page at 320px.
+
+<Canvas of={Stories.LongSubtitleNarrowScreen} />
 
 ## 10. API
 
@@ -70,6 +85,12 @@ and buttons inside them wrap too, so nothing leaves a 320px screen (SPEC-122 P14
   description="Sources DirectiveBench reads skills, instructions and rules from."
   actions={<Button>Register</Button>}
 />
+
+<PageHeader
+  title={suite.name}
+  subtitle={<>ID <span className="font-mono">{suite.slug}</span></>}
+  description={suite.description ?? undefined}
+/>
 ```
 
 ## 12. Do and don't
@@ -78,6 +99,7 @@ and buttons inside them wrap too, so nothing leaves a 320px screen (SPEC-122 P14
 | --------------------------------- | ---------------------------------- |
 | One PageHeader per page           | A bare `<h1>` with its own classes |
 | The main page action in `actions` | Five buttons in `actions`          |
+| An identifier in `subtitle`       | A second sentence in `subtitle`    |
 
 ## 13. Related
 

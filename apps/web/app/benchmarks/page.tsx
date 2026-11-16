@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/primitives';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import { suiteLinkName } from '@/lib/row-names';
 import { formatDate } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Benchmarks' };
@@ -64,15 +65,35 @@ export default async function BenchmarksPage() {
               </THead>
               <TBody>
                 {suites.map(
-                  ({ suite, latestVersion, assignedArtifactCount, lastRun, runCount }) => {
+                  ({
+                    suite,
+                    nameShared,
+                    latestVersion,
+                    assignedArtifactCount,
+                    lastRun,
+                    runCount,
+                  }) => {
                     const definition = latestVersion?.definition as
                       { technologies?: string[]; execution?: { agent?: string } } | undefined;
                     return (
                       <TR key={suite.id}>
-                        <TD className="font-medium">
-                          <Link className="hover:underline" href={`/benchmarks/${suite.id}`}>
+                        {/* The suite ID always shows under the name: names repeat, the ID does
+                            not (issue 227, K1). Both wrap anywhere within a minimum width. */}
+                        <TD className="min-w-40 font-medium wrap-anywhere">
+                          <Link
+                            className="hover:underline"
+                            href={`/benchmarks/${suite.id}`}
+                            aria-label={suiteLinkName({ ...suite, nameShared })}
+                          >
                             {suite.name}
                           </Link>
+                          <div
+                            className="font-mono text-ui font-normal text-muted-foreground"
+                            data-testid="suite-id"
+                          >
+                            <span className="sr-only">ID </span>
+                            {suite.slug}
+                          </div>
                         </TD>
                         <TD>v{latestVersion?.version}</TD>
                         <TD>
