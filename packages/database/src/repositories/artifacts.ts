@@ -335,8 +335,9 @@ async function insertOccurrence(
  * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
  * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
  * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
- * the occurrence at it, and sets the source fields (name, description, type) from this write. Hashes are
- * recomputed from the content (see `recomputeFiles`). User-managed metadata is never touched.
+ * the occurrence at it, and sets the source fields (name, description, type) from this write.
+ * Hashes are recomputed from the content (see `recomputeFiles`). User-managed metadata is never
+ * touched.
  */
 export async function importArtifactVersion(
   handle: DatabaseHandle,

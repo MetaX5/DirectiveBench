@@ -3,7 +3,7 @@ title: Issue 66, an artifact's type follows its source and slugs stay immutable 
 date: 2026-11-16
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request to implement issue #66 after approving every decision (N1-N9, Q1-Q8)
-status: in-progress
+status: completed
 branch: feat/issue-66-type-follows-source
 specs: [SPEC-101, SPEC-103, SPEC-105, SPEC-118, SPEC-126]
 ---
@@ -112,45 +112,95 @@ Findings and what was adopted (none changes an approved decision):
 
 ## Work performed
 
-Uncommitted in the worktree so far (nothing pushed yet):
-
-- core: `ARTIFACT_FORMAT_TYPES` (+ `ofFormat` in `classifyArtifactPath`), test in
-  `packages/core/test/artifacts.test.ts`.
-- database: `refreshSourceFields` writes `type` from the chosen version's format (also when the
-  name cannot be parsed), `importArtifactVersion` sets `type`, `getArtifactBundle` takes the
-  version's type; migration `0007_artifact_type_follows_source.sql` (+ journal, snapshot);
-  tests `packages/database/test/source-changes.test.ts` (16) and the 0007 test in
-  `client.test.ts` (count 7 → 8, 0006 test pinned to `partialMigrations(7)`).
-- cli: `candidateLabel` (Q5) in `benchmark-run.ts`; `benchmark init` scaffolds the latest
-  version's type; tests in `benchmark-run.test.ts` and `benchmark-init.test.ts`.
-- runner: issue-66 tests in `missing-occurrences.test.ts` (local-git, local-directory) and
-  `hosted-repository.test.ts` (github, local bare remote).
-- web e2e: `identity.spec.ts` "renames and type changes keep the URL (issue 66)".
-- Still to do: spec edits (step 6), the refresh doc comment in `artifacts.ts` needs re-wrapping
-  to 100 columns, lint/typecheck/full gate, commits, PR, real-app run, QA, reviews.
+1. Plan in this log, reviewed by Codex (above); red-first tests, then the implementation.
+2. Commits on `feat/issue-66-type-follows-source` (PR #247):
+   - `docs(specs)`: SPEC-103 FR-103-16, §14 cases 1 to 11, §16, §20; SPEC-101 §8.2, §8.3, §14,
+     §15, §20; SPEC-105 FR-105-09, FR-105-13; SPEC-118 FR-118-22, FR-118-25, §20.
+   - `feat(core)`: `ARTIFACT_FORMAT_TYPES`, used by `classifyArtifactPath`.
+   - `feat(database)`: `refreshSourceFields` writes `type` from the chosen version's format (also
+     when the name cannot be parsed), `importArtifactVersion` sets `type`, `getArtifactBundle`
+     takes the version's type; data-only migration `0007_artifact_type_follows_source`
+     (drizzle-kit `generate --custom`, hand-written `UPDATE … FROM` with `row_number()`);
+     `source-changes.test.ts` (16) and the `0007` test in `client.test.ts`.
+   - `feat(cli)`: `candidateLabel` (Q5) and `benchmark init` scaffolding the latest version's
+     type.
+   - `test`: runner tests for `local-git`, `local-directory`, `github`; e2e
+     `identity.spec.ts` "renames and type changes keep the URL (issue 66)".
+   - `fix(cli)`: escape control and format characters in the candidate name (Codex round 1).
+   - `docs(lessons)`: Playwright browser garbage collection.
+3. Follow-up issue #246 (possible-duplicate grouping after a revert), labels `enhancement`,
+   `priority-low`, `risk-low`.
+4. Browser QA evidence on `qa-evidence-pr-247`, posted on the PR.
 
 ## Verification
 
-Red first (new tests against the old `src`, 2026-11-16):
+Red first (new tests against the old `src`):
 
 - database `source-changes.test.ts` + `client.test.ts`: 9 failed (7 type tests, the 0007
-  migration test, the migration count), the 9 rename/slug pins passed.
+  migration test, the migration count); the 9 rename/slug pins passed, as intended.
 - core `artifacts.test.ts`: 1 failed (`ARTIFACT_FORMAT_TYPES` missing).
 - cli: 4 failed (`init` wrote `['skill']` instead of `['instruction']`, `candidateLabel`, the
-  rename run, the type gate).
+  rename run, the type gate); the Codex round 1 escape test failed on `f502586`'s label.
 - runner: 3 failed (`type` stayed `instruction`) for local-git, local-directory and github.
 
-Green on the new code: database 344 passed with 100% coverage, core 321 passed with 100%
-coverage, cli `benchmark-run`/`benchmark-init` 47 passed, runner issue-66 tests 3 passed,
-`identity.spec.ts` 8 passed (after `pnpm build`, TMPDIR under `/var/tmp`).
+Gate (every pnpm command with `TMPDIR` under a unique `/var/tmp` directory, removed after):
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass on `54d3ac6` |
+| `pnpm test --force` | pass on `54d3ac6`, 100% in all 7 packages (database 344, runner 308, CLI 207, core 321, web 589, engine 518, adapters 365) |
+| `pnpm build`, `pnpm verify:pack` | pass on `54d3ac6` |
+| `pnpm test:e2e` | 181 passed on `af95025` (only the CLI label changed after it) |
+| `pnpm test:storybook` | 326 passed on `af95025` |
+
+Real app (built `apps/cli/dist/cli.js`, mock agent only, data under `/var/tmp`, removed):
+
+- Migration on a copied database: `directivebench demo`, then the `0007` journal row deleted
+  and the demo artifact's type set to `rule` (a 0006 database with a stale type); `init` on a
+  copy applied 1 migration, the type became `skill` again, 8 migrations recorded.
+- `test-env-up.sh` on port 4402: a fixture repository registered and scanned through the UI;
+  `docs/AGENTS.md` replaced by `docs/AGENTS.md/SKILL.md` and a skill renamed in place;
+  rescan "(0 new, 2 new versions)"; same ids and URLs; header, Type cell and `?type=` filter
+  follow; Versions tab shows both formats; keyboard-only filter works; 320px no horizontal
+  scroll in both themes; no console or page errors.
+- CLI against that data with a fake `claude` (no session started): plan line
+  `Candidate:  review-notes (named code-review-notes) v2`; `benchmark init` scaffolds
+  `[skill]` for the type-changed artifact; an `instruction` suite refuses its latest version and
+  accepts `--artifact-version 1`.
+
+Reviews: Codex adversarial review round 1 `needs-attention` (terminal controls in the candidate
+name, fixed with a regression test), round 2 **approve**; `om-auto-review-pr 247 --autofix`
+approve (comment review, own PR) with one nit (an over-long JSDoc line), fixed in the final
+commit; label `risk-medium` raised to `risk-high` because of the data migration.
+
+Not verified: a real github.com remote (the runner test uses a local bare remote), Windows and
+macOS locally (CI runs macOS unit tests), a database created by a released version (the
+migration was proved on a demo database with its `0007` row removed).
 
 ## Problems and deviations
 
-- The run stopped after the e2e run: `/tmp` (the volume of Claude Code's temporary directory)
-  reported 0 free inodes, so no shell command could start. Not investigated (no shell).
+- **`/tmp` ran out of inodes** after the first targeted e2e run (no shell could start until it
+  freed when processes ended). Not reproduced afterwards: with `TMPDIR` under `/var/tmp` for
+  every pnpm command, `/tmp` used inodes peaked at about 67 000 for unit tests, build,
+  `verify:pack` and Storybook, but rose to about 106 000 during `pnpm test:e2e` although
+  `TMPDIR` pointed at `/var/tmp`, so the browser run writes to `/tmp` by some other route. The
+  1 million inodes of the first failure were not attributed to a step; the earlier commands of
+  this run (runner, CLI and database Vitest runs, `pnpm build`) used the default `/tmp`.
+- **Playwright's Chromium 1254 disappeared** from `~/.cache/ms-playwright` between two e2e runs
+  (an unrelated project's `playwright install` garbage-collected it); reinstalled from the
+  worktree with `TMPDIR` under `/var/tmp` (lesson below).
+- The work was not driven through `om-auto-create-pr`: the plan, implementation and first
+  verification were done by hand before the run stopped on `/tmp`, and the resumed run opened
+  the PR in the house layout directly. `om-auto-review-pr` ran as briefed.
+- No deviation from an approved decision. Two readings recorded under Decisions (Q5 compares
+  `slugify(name)`; `benchmark init` scaffolds the latest version's type).
 
 ## Lessons recorded
+
+- [2026-11-16 Playwright install elsewhere removes unlinked browsers](../lessons/2026-11-16-playwright-install-elsewhere-removes-unlinked-browsers.md)
 
 ## Follow-ups
 
 - #245: install name of a nameless skill (Q7), out of scope.
+- #246: possible duplicates disagree after a revert to a version of another format (Codex plan
+  review finding 1).
