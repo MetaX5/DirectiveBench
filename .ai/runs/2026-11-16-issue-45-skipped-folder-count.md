@@ -3,7 +3,7 @@ title: Store the skipped user-level folder count and say "and N more" (issue 45)
 date: 2026-11-16
 agent: Claude Code / claude-opus-5-5
 trigger: GitHub issue #45, UI decisions M1-M7 approved by the maintainer (option A for M3)
-status: in-progress
+status: completed
 branch: fix/issue-45-skipped-folder-count
 specs: [SPEC-102, SPEC-104, database schema spec]
 ---
@@ -38,6 +38,8 @@ stale parts of §3.11 beyond bringing its shape up to date.
 
 ## Progress
 
+PR: #241
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Tests first
@@ -53,7 +55,7 @@ stale parts of §3.11 beyond bringing its shape up to date.
 
 - [x] 3.1 Quality gate, e2e and Storybook
 - [x] 3.2 Browser QA on the built app with evidence
-- [ ] 3.3 Codex adversarial review and om-auto-review-pr
+- [x] 3.3 Codex adversarial review and om-auto-review-pr
 
 ## Decisions
 
@@ -106,6 +108,21 @@ stale parts of §3.11 beyond bringing its shape up to date.
   `.ai/lessons/2026-10-30-keep-heavy-data-off-tmp.md` (TMPDIR must be outside every git work
   tree); rerun with `/var/tmp`, all 180 passed. No new lesson: the existing one covers it.
 
+## Review
+
+- Codex adversarial review round 1 (`--scope branch --base main`, head `41c21d3`): approve, no
+  material findings.
+- `om-auto-review-pr 241 --autofix` (engine `om-code-review`, head `41c21d3`, comment review
+  since self-authored): approve, no findings; gate re-run on that head passed; manual QA
+  instructions posted; labels `merge-queue`, `needs-qa`, `bug`, `priority-low`, `risk-low`.
+
 ## Lessons recorded
 
+None new; the TMPDIR mistake is covered by `.ai/lessons/2026-10-30-keep-heavy-data-off-tmp.md`.
+
 ## Follow-ups
+
+- QA observations outside this PR: focus drops to `<body>` after each form submit on
+  /repositories; the overlap confirmation for a user-level folder inside a registered repository
+  says "Its files are already scanned there" although such a location reads nothing; Register
+  card copy still has em dashes (#123).
