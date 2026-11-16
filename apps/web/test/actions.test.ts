@@ -21,12 +21,15 @@ import {
   registerLocalRepository,
   registerHostedRepository,
   getRepositoryBranchChange,
+  recoverStaleJobs,
+  setRepositoryBranch,
   enqueueRepositoryScanJob,
   importSuiteVersion,
   listJobs,
   upsertRepository,
   type DatabaseHandle,
 } from '@directivebench/database';
+import { describeBranchChange } from '../lib/repositories';
 import {
   addArtifactTagAction,
   assignArtifactCategoryAction,
@@ -666,6 +669,33 @@ describe('changeRepositoryBranchAction (issue 58)', () => {
     expect(
       await redirectOf(changeRepositoryBranchAction(form({ repositoryId: other, branch: 'x' }))),
     ).toBe('/repositories?branchChangeError=branch-change-active#branch-panel');
+  });
+
+  it('never says "nothing was changed" for a change interrupted after its branch was stored', async () => {
+    // Codex review round 1 of PR #248: the branch commits in its own transaction before the job
+    // records its outcome; a crash in between leaves the job interrupted and the branch saved.
+    const repositoryId = await hostedRepository();
+    const url = await redirectOf(
+      changeRepositoryBranchAction(form({ repositoryId, branch: 'dev' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('branchChange') as string;
+    await acquireNextJob(handle.db, 'runner', { types: ['repository-branch'] });
+    expect(
+      await setRepositoryBranch(handle, {
+        repositoryId,
+        jobId,
+        signal: new AbortController().signal,
+        branch: 'dev',
+        defaultBranch: 'main',
+      }),
+    ).toMatchObject({ status: 'updated' });
+    expect(await recoverStaleJobs(handle.db, '9999-01-01T00:00:00.000Z')).toEqual([jobId]);
+    const change = await getRepositoryBranchChange(handle.db, jobId);
+    expect(change?.repository?.selectedBranch).toBe('dev');
+    const notice = describeBranchChange(change!);
+    expect(notice.kind).toBe('error');
+    expect(notice.message).toContain('The new branch may have been saved');
+    expect(notice.message).not.toContain('Nothing was changed');
   });
 
   it('still fails loudly on an unexpected database error', async () => {

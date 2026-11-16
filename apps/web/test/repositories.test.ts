@@ -1013,7 +1013,8 @@ describe('the Change branch panel (issue 58)', () => {
       [change({ status: 'cancelled' }), 'The branch change was cancelled. Nothing was changed.'],
       [
         change({ status: 'interrupted' }),
-        'The runner stopped before the branch change finished. Nothing was changed.',
+        // A crash after the branch transaction committed: never "nothing was changed".
+        'The runner stopped before it recorded the outcome of the branch change. The new branch may have been saved: check the Branch column before you scan.',
       ],
       [change({}), 'The runner finished without a result.'],
       [

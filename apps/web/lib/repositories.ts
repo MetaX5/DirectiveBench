@@ -582,9 +582,13 @@ export function describeBranchChange(change: RepositoryBranchChange): BranchChan
     case 'cancelled':
       return { kind: 'error', message: 'The branch change was cancelled. Nothing was changed.' };
     case 'interrupted':
+      // The branch is stored in its own transaction before the job records its outcome, so a
+      // crash in between leaves the new branch saved: this cannot promise that nothing changed
+      // (Codex review round 1 of PR #248).
       return {
         kind: 'error',
-        message: 'The runner stopped before the branch change finished. Nothing was changed.',
+        message:
+          'The runner stopped before it recorded the outcome of the branch change. The new branch may have been saved: check the Branch column before you scan.',
       };
     case 'completed':
       break;
