@@ -862,6 +862,8 @@ describe('listJobs', () => {
     expect(jobs.map((j) => j.job.id)).toEqual([newer.id, older.id]);
     expect(jobs[0]).toMatchObject({
       suiteName: 'Suite',
+      suiteSlug: 'suite',
+      suiteNameShared: false,
       artifactName: 'Validator',
       benchmarkRunId: null,
     });
@@ -888,9 +890,16 @@ describe('listJobs', () => {
         createdAt: '2026-04-02T00:00:00Z',
       },
     ]);
+    const unresolved = {
+      suiteName: null,
+      suiteSlug: null,
+      suiteNameShared: false,
+      artifactName: null,
+      benchmarkRunId: null,
+    };
     expect(await listJobs(db)).toEqual([
-      expect.objectContaining({ suiteName: null, artifactName: null, benchmarkRunId: null }),
-      expect.objectContaining({ suiteName: null, artifactName: null, benchmarkRunId: null }),
+      expect.objectContaining(unresolved),
+      expect.objectContaining(unresolved),
     ]);
   });
 });

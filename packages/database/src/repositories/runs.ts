@@ -12,6 +12,7 @@ import {
   benchmarkSuites,
   benchmarkSuiteVersions,
 } from '../schema';
+import { suiteNameShared } from './shared-names';
 
 export type BenchmarkRunRecord = typeof benchmarkRuns.$inferSelect;
 export type AgentRunRecord = typeof agentRuns.$inferSelect;
@@ -208,7 +209,8 @@ export async function finishBenchmarkRun(
 
 export interface BenchmarkRunListItem {
   run: BenchmarkRunRecord;
-  suite: { id: string; name: string; version: number };
+  /** `nameShared`: another suite has the name, so lists add its ID (issue 227). */
+  suite: { id: string; slug: string; name: string; version: number; nameShared: boolean };
   artifact: { id: string; name: string; version: number };
 }
 
@@ -220,7 +222,9 @@ export async function listBenchmarkRuns(
     .select({
       run: benchmarkRuns,
       suiteId: benchmarkSuites.id,
+      suiteSlug: benchmarkSuites.slug,
       suiteName: benchmarkSuites.name,
+      suiteNameShared,
       suiteVersion: benchmarkSuiteVersions.version,
       artifactId: artifacts.id,
       artifactName: artifacts.name,
@@ -238,7 +242,13 @@ export async function listBenchmarkRuns(
     : await query;
   return rows.map((r) => ({
     run: r.run,
-    suite: { id: r.suiteId, name: r.suiteName, version: r.suiteVersion },
+    suite: {
+      id: r.suiteId,
+      slug: r.suiteSlug,
+      name: r.suiteName,
+      version: r.suiteVersion,
+      nameShared: r.suiteNameShared,
+    },
     artifact: { id: r.artifactId, name: r.artifactName, version: r.artifactVersion },
   }));
 }
@@ -375,7 +385,8 @@ export interface ArtifactRunSummary {
 
 export interface ArtifactRunItem {
   run: ArtifactRunSummary;
-  suite: { id: string; name: string; version: number };
+  /** `nameShared`: another suite has the name, so the table adds its ID (issue 227). */
+  suite: { id: string; slug: string; name: string; version: number; nameShared: boolean };
   /** The candidate: the artifact version the run tested. */
   artifactVersion: { id: string; version: number };
   /** The A/B baseline version, or null for baseline kind `none` (SPEC-118 FR-118-13). */
@@ -420,7 +431,9 @@ export async function listArtifactRuns(
         summary: leanSummary,
       },
       suiteId: benchmarkSuites.id,
+      suiteSlug: benchmarkSuites.slug,
       suiteName: benchmarkSuites.name,
+      suiteNameShared,
       suiteVersion: benchmarkSuiteVersions.version,
       versionId: artifactVersions.id,
       version: artifactVersions.version,
@@ -436,7 +449,13 @@ export async function listArtifactRuns(
     .limit(ARTIFACT_RUNS_PAGE_LIMIT);
   return rows.map((r) => ({
     run: r.run,
-    suite: { id: r.suiteId, name: r.suiteName, version: r.suiteVersion },
+    suite: {
+      id: r.suiteId,
+      slug: r.suiteSlug,
+      name: r.suiteName,
+      version: r.suiteVersion,
+      nameShared: r.suiteNameShared,
+    },
     artifactVersion: { id: r.versionId, version: r.version },
     baselineVersion: r.baselineVersion,
   }));

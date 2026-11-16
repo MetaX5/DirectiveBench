@@ -2,16 +2,23 @@ import type { DisplayStatus } from '@directivebench/benchmark-engine/scoring';
 import { Construction, DatabaseZap, FlaskConical } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge, Card, CardContent } from '@/components/ui/primitives';
+import { DISPLAY_STATUS_LABELS } from '@/lib/run-status';
 
 // Pure logic lives in lib/ so it is unit-tested; re-exported for existing page imports.
 export { runDisplayStatus } from '@/lib/run-status';
 
 export function PageHeader({
   title,
+  subtitle,
   description,
   actions,
 }: {
   title: string;
+  /**
+   * A muted line under the title that tells the item apart from others with the same title, such
+   * as a suite's ID ("ID safety-v2", issue 227). Not a second description.
+   */
+  subtitle?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
 }) {
@@ -19,6 +26,9 @@ export function PageHeader({
     <div className="mb-section flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
         <h1 className="text-page-title tracking-tight wrap-anywhere">{title}</h1>
+        {subtitle ? (
+          <p className="mt-1 text-ui text-muted-foreground wrap-anywhere">{subtitle}</p>
+        ) : null}
         {description ? <p className="mt-1 text-body text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? (
@@ -28,24 +38,20 @@ export function PageHeader({
   );
 }
 
-const statusStyles: Record<
-  DisplayStatus,
-  { label: string; variant: Parameters<typeof Badge>[0]['variant'] }
-> = {
-  passed: { label: 'Passed', variant: 'success' },
-  failed: { label: 'Failed', variant: 'destructive' },
-  regression: { label: 'Regression', variant: 'destructive' },
-  unstable: { label: 'Unstable', variant: 'warning' },
-  error: { label: 'Error', variant: 'destructive' },
-  'not-tested': { label: 'Not tested', variant: 'muted' },
-  'not-comparable': { label: 'Not comparable', variant: 'warning' },
+const statusVariants: Record<DisplayStatus, Parameters<typeof Badge>[0]['variant']> = {
+  passed: 'success',
+  failed: 'destructive',
+  regression: 'destructive',
+  unstable: 'warning',
+  error: 'destructive',
+  'not-tested': 'muted',
+  'not-comparable': 'warning',
 };
 
 export function StatusBadge({ status }: { status: DisplayStatus }) {
-  const style = statusStyles[status];
   return (
-    <Badge variant={style.variant} data-status={status}>
-      {style.label}
+    <Badge variant={statusVariants[status]} data-status={status}>
+      {DISPLAY_STATUS_LABELS[status]}
     </Badge>
   );
 }

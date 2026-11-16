@@ -331,8 +331,18 @@ export function unassignCategoryState(outcome: UnassignArtifactCategoryOutcome):
  * category exists).
  */
 export interface CategoriesCardModel {
-  /** `removeName` is the chip's Remove name, unique on the page (D17, issue 220). */
-  chips: { id: string; label: string; archived: boolean; removeName: string }[];
+  /**
+   * `removeName` is the chip's Remove name, unique on the page (D17, issue 220). `clashSlug` is
+   * the slug the chip shows after its label when another category has the same chip text, else
+   * null (issue 227, K5).
+   */
+  chips: {
+    id: string;
+    label: string;
+    archived: boolean;
+    clashSlug: string | null;
+    removeName: string;
+  }[];
   available: { id: string; name: string }[];
   noPicker: 'all-assigned' | 'none-active' | null;
 }
@@ -350,6 +360,7 @@ export function categoriesCardModel(
       id: c.id,
       label: categoryChipLabel(c),
       archived: c.archived,
+      clashSlug: c.chipShared ? c.slug : null,
       removeName: `Remove category ${categorySubject(c)}`,
     })),
     available,

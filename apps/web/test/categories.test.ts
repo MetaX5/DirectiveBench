@@ -28,7 +28,7 @@ import {
 } from '../lib/categories';
 
 const values = { name: 'Testing', description: 'Kept' };
-const python = { id: 'cat_py', slug: 'python', name: 'Python', archived: false };
+const python = { id: 'cat_py', slug: 'python', name: 'Python', archived: false, chipShared: false };
 
 function messages(result: { success: boolean; error?: { issues: { message: string }[] } }) {
   return result.error?.issues.map((issue) => issue.message);
@@ -402,7 +402,13 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
     { id: 'cat_doc', name: 'Documentation' },
     { id: 'cat_test', name: 'Testing' },
   ];
-  const testing = { id: 'cat_test', slug: 'testing', name: 'Testing', archived: false };
+  const testing = {
+    id: 'cat_test',
+    slug: 'testing',
+    name: 'Testing',
+    archived: false,
+    chipShared: false,
+  };
   const archivedPython = { ...python, archived: true };
 
   it('labels the chips and offers the active, unassigned categories in the given order', () => {
@@ -412,12 +418,14 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
           id: 'cat_test',
           label: 'Testing',
           archived: false,
+          clashSlug: null,
           removeName: 'Remove category Testing, slug testing',
         },
         {
           id: 'cat_py',
           label: 'Python (archived)',
           archived: true,
+          clashSlug: null,
           removeName: 'Remove category Python (archived), slug python',
         },
       ],
@@ -426,11 +434,18 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
     });
   });
 
-  it('gives two archived chips with one name different Remove names (issue 220)', () => {
-    const platform = { id: 'cat_p1', slug: 'platform', name: 'Platform', archived: true };
-    const platform2 = { id: 'cat_p2', slug: 'platform-2', name: 'Platform', archived: true };
+  it('gives two archived chips with one name different Remove names and slugs (issues 220, 227)', () => {
+    const platform = {
+      id: 'cat_p1',
+      slug: 'platform',
+      name: 'Platform',
+      archived: true,
+      chipShared: true,
+    };
+    const platform2 = { ...platform, id: 'cat_p2', slug: 'platform-2' };
     const { chips } = categoriesCardModel([platform, platform2], []);
     expect(chips.map((c) => c.label)).toEqual(['Platform (archived)', 'Platform (archived)']);
+    expect(chips.map((c) => c.clashSlug)).toEqual(['platform', 'platform-2']);
     expect(chips.map((c) => c.removeName)).toEqual([
       'Remove category Platform (archived), slug platform',
       'Remove category Platform (archived), slug platform-2',
@@ -439,7 +454,10 @@ describe('categoriesCardModel (§11, D20 to D22)', () => {
 
   it('replaces the picker when every active category is assigned (D21)', () => {
     const documentation = { id: 'cat_doc', slug: 'documentation', name: 'Documentation' };
-    const model = categoriesCardModel([{ ...documentation, archived: false }, testing], all);
+    const model = categoriesCardModel(
+      [{ ...documentation, archived: false, chipShared: false }, testing],
+      all,
+    );
     expect(model.available).toEqual([]);
     expect(model.noPicker).toBe('all-assigned');
   });

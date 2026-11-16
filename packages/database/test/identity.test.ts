@@ -1502,7 +1502,11 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
     await listArtifacts(handle.db);
     const statements = prepare.mock.calls.map(([query]) => query);
     prepare.mockRestore();
-    const grouped = statements.filter((query) => query.includes('group by'));
+    // The assigned-categories statement groups categories for its chip-clash flag (issue 227);
+    // the duplicate groups are the one grouped statement on artifacts.
+    const grouped = statements.filter(
+      (query) => query.includes('group by') && !query.includes('from "categories" group by'),
+    );
     expect(grouped).toHaveLength(1);
     const plan = handle.sqlite
       .prepare(`explain query plan ${grouped[0]!}`)

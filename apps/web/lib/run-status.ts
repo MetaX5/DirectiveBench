@@ -10,3 +10,14 @@ export function runDisplayStatus(
   const outcome = (run.summary as { candidateOutcome?: string } | null)?.candidateOutcome;
   return displayStatus(run.verdict, outcome);
 }
+
+/** The text of a display status, as its StatusBadge shows it (and accessible names repeat it). */
+export const DISPLAY_STATUS_LABELS: Record<DisplayStatus, string> = {
+  passed: 'Passed',
+  failed: 'Failed',
+  regression: 'Regression',
+  unstable: 'Unstable',
+  error: 'Error',
+  'not-tested': 'Not tested',
+  'not-comparable': 'Not comparable',
+};

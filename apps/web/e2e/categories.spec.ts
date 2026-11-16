@@ -217,7 +217,7 @@ test('a rename keeps the slug and the filtered Artifacts link', async ({ page })
   await expect(page).toHaveURL(`/artifacts?category=${slug}`);
   await expect(page.locator('select[name="category"]')).toHaveValue(slug);
   await expect(page.locator('select[name="category"] option:checked')).toHaveText('Renamed E2E');
-  await expect(page.getByRole('link', { name: DEMO_ARTIFACT })).toBeVisible();
+  await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toBeVisible();
 });
 
 test('archive asks first with the count, Cancel writes nothing, unarchive needs no panel', async ({
@@ -288,14 +288,14 @@ test('archive asks first with the count, Cancel writes nothing, unarchive needs 
   await expect(page.locator(`select[name="category"] option[value="${slug}"]`)).toHaveCount(0);
   const row = page
     .getByRole('row')
-    .filter({ has: page.getByRole('link', { name: DEMO_ARTIFACT }) });
+    .filter({ has: page.getByRole('link', { name: DEMO_ARTIFACT, exact: true }) });
   const chip = row.getByText('Archive E2E (archived)');
   await expect(chip).toHaveAttribute('data-variant', 'muted');
   // Archived chips come after the active ones (FR-124-14).
   await expect(row.locator('[data-slot="badge"][data-variant="muted"]').last()).toHaveText(
     'Archive E2E (archived)',
   );
-  await row.getByRole('link', { name: DEMO_ARTIFACT }).click();
+  await row.getByRole('link', { name: DEMO_ARTIFACT, exact: true }).click();
   await expect(page.getByText('Archive E2E (archived)')).toHaveAttribute('data-variant', 'muted');
 
   // Filtering by the archived slug still works, and the filter shows it selected, last (D12).
@@ -304,7 +304,7 @@ test('archive asks first with the count, Cancel writes nothing, unarchive needs 
   await expect(page.locator('select[name="category"] option').last()).toHaveText(
     'Archive E2E (archived)',
   );
-  await expect(page.getByRole('link', { name: DEMO_ARTIFACT })).toBeVisible();
+  await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toBeVisible();
 
   // Unarchive without a panel; the focus goes to Archive.
   await page.goto(`/categories/${slug}`);
@@ -1374,7 +1374,12 @@ test('same-named categories get unique Remove and count link names (issue 220)',
 
   await page.goto(`/artifacts/${await demoArtifactId()}`);
   const box = categoriesCard(page);
-  await expect(box.getByText('Same Name E2E (archived)', { exact: true })).toHaveCount(2);
+  // The chips read alike but for their slugs (issue 227, K5).
+  for (const slug of [first, second]) {
+    await expect(
+      box.getByText(`Same Name E2E (archived), slug ${slug}`, { exact: true }),
+    ).toHaveCount(1);
+  }
   const removeFirst = box.getByRole('button', {
     name: `Remove category Same Name E2E (archived), slug ${first}`,
     exact: true,

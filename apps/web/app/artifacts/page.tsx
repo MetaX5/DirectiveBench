@@ -5,6 +5,7 @@ import {
   listArtifacts,
   listCategories,
   listRepositories,
+  type ArtifactListItem,
 } from '@directivebench/database';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -42,6 +43,7 @@ import {
 import { bulkCategoryModel, categoryChipLabel, categoryFilterOptions } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
+import { latestRunStatusName } from '@/lib/row-names';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 import { BulkCategoryForm } from './bulk-category-form';
 
@@ -235,7 +237,16 @@ export default async function ArtifactsPage({
                               Badges break only between words (SPEC-101, issue 122). */}
                           {a.categories.map((c) => (
                             <Badge key={c.slug} variant={c.archived ? 'muted' : 'secondary'}>
-                              {categoryChipLabel(c)}
+                              {/* Same chip text as another category: the slug tells them apart
+                                  (issue 227, K5). One inline span, since the Badge is a flex box. */}
+                              {c.chipShared ? (
+                                <span className="min-w-0" data-testid="category-slug">
+                                  {categoryChipLabel(c)}, slug{' '}
+                                  <span className="font-mono">{c.slug}</span>
+                                </span>
+                              ) : (
+                                categoryChipLabel(c)
+                              )}
                             </Badge>
                           ))}
                         </div>
@@ -271,14 +282,7 @@ export default async function ArtifactsPage({
                       </TD>
                       <TD>
                         {e ? (
-                          <Link href={`/results/${e.runId}`}>
-                            <StatusBadge
-                              status={runDisplayStatus({
-                                ...e,
-                                summary: { candidateOutcome: e.candidateOutcome },
-                              })}
-                            />
-                          </Link>
+                          <LatestRunLink artifact={a} evaluation={e} />
                         ) : (
                           <StatusBadge status="not-tested" />
                         )}
@@ -292,5 +296,24 @@ export default async function ArtifactsPage({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/** The Status cell's link to the latest run, named for its artifact (issue 227, extra scope). */
+function LatestRunLink({
+  artifact,
+  evaluation,
+}: {
+  artifact: { name: string; slug: string };
+  evaluation: NonNullable<ArtifactListItem['latestEvaluation']>;
+}) {
+  const status = runDisplayStatus({
+    ...evaluation,
+    summary: { candidateOutcome: evaluation.candidateOutcome },
+  });
+  return (
+    <Link href={`/results/${evaluation.runId}`} aria-label={latestRunStatusName(status, artifact)}>
+      <StatusBadge status={status} />
+    </Link>
   );
 }
