@@ -111,6 +111,10 @@ PR: #234
    Each flag is now a non-correlated `in (values held more than once)`; a query-plan test fails
    on the old form (CORRELATED SCALAR SUBQUERY) and passes. Codex round 2: approve.
 
+9. `009f4b5`, `8e73897` om-auto-review-pr (comment review, self-authored): approve, no blocker or
+   major; nit fixed (issue numbers written as `#219` in web comments); nit left (the existing
+   em-dash placeholders on `/executions`, issue 123). Manual QA instructions posted.
+
 ## Verification
 
 Final gate on `ad742bd` (all with `TMPDIR=/var/tmp`):
