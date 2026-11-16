@@ -964,6 +964,12 @@ describe('candidateLabel (Q5)', () => {
     );
     expect(candidateLabel({ slug: 'review-2', name: 'review' })).toBe('review-2 (named review)');
   });
+
+  it('prints control and format characters of a source-controlled name as escapes (Codex review)', () => {
+    const label = candidateLabel({ slug: 'review', name: 'x\u001b[2J\u001b[H\r\n\u009b\u202ey' });
+    expect(label).toBe('review (named x\\u001b[2J\\u001b[H\\u000d\\u000a\\u009b\\u202ey)');
+    expect(label).not.toMatch(/[\p{Cc}\p{Cf}]/u);
+  });
 });
 
 describe('benchmark run terminal helpers', () => {
