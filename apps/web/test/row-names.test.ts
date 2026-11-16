@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  artifactLinkName,
   artifactSubject,
   cancelJobName,
   latestRunStatusName,
@@ -35,7 +36,20 @@ describe('artifact names', () => {
   });
 
   it('names the Results list Artifact link by the artifact, then the run', () => {
-    expect(resultRunName('SKILL.md', 'run_a1')).toBe('SKILL.md, run run_a1');
+    expect(resultRunName({ ...skill, nameShared: false }, 'run_a1')).toBe('SKILL.md, run run_a1');
+  });
+
+  it('adds the slug to the Results Artifact link when another artifact has the name (issue 236, L7)', () => {
+    expect(resultRunName({ ...twin, nameShared: true }, 'run_a1')).toBe(
+      'SKILL.md, slug acme-review-skill-md, run run_a1',
+    );
+  });
+
+  it('names an artifact link by name and slug only on a name clash (issue 236, L7)', () => {
+    expect(artifactLinkName({ ...skill, nameShared: true })).toBe(
+      'SKILL.md, slug acme-validate-input-skill-md',
+    );
+    expect(artifactLinkName({ ...skill, nameShared: false })).toBeUndefined();
   });
 });
 

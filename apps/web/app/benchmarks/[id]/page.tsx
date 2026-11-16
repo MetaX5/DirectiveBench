@@ -32,7 +32,7 @@ import {
 import { enqueueBenchmarkRunAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
-import { artifactSubject, runOnArtifactName } from '@/lib/row-names';
+import { artifactLinkName, runOnArtifactName } from '@/lib/row-names';
 import { cliRunCommand } from '@/lib/run-guard';
 import { formatDate, formatDelta } from '@/lib/utils';
 
@@ -211,7 +211,7 @@ export default async function BenchmarkPage({
                       <Link
                         href={`/artifacts/${artifact.id}`}
                         className="hover:underline"
-                        aria-label={artifact.nameShared ? artifactSubject(artifact) : undefined}
+                        aria-label={artifactLinkName(artifact)}
                       >
                         {artifact.name}
                       </Link>
@@ -303,6 +303,16 @@ export default async function BenchmarkPage({
                       </TD>
                       <TD>
                         {artifact.name} v{artifact.version}
+                        {/* A name another artifact has adds the slug, as in the Run card above
+                            (issue 236, L5; K9). */}
+                        {artifact.nameShared ? (
+                          <span
+                            className="text-ui text-muted-foreground"
+                            data-testid="artifact-slug"
+                          >
+                            , slug <span className="font-mono">{artifact.slug}</span>
+                          </span>
+                        ) : null}
                       </TD>
                       <TD>
                         {run.status === 'running' ? (
