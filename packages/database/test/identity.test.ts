@@ -39,6 +39,15 @@ const getHandle = useTestDatabase();
 const signal = new AbortController().signal;
 /** Thousands of linked skills per scan; well under a second each locally. */
 const MANY_ARTIFACTS_TIMEOUT_MS = 60_000;
+/**
+ * Timeout of the linear-time tests that scan 3,200 skills (NFR-126-03, NFR-126-04, issue #231).
+ * Each one scans the large input about nine times (building it, the warm-up and three rounds of
+ * the code and its baseline): about 7 s alone on two cores, 48 s under `taskset -c 0,1 pnpm test
+ * --force`, and 38 to 60 s on the 2-core CI runner, where it hit `LINEAR_TIME_TEST_TIMEOUT_MS`.
+ * The size cannot shrink instead: with a full table scan per new path injected, 3,200 skills
+ * measured 4.4 against the bound of 3.5, while 1,600 measured 1.6 and passed.
+ */
+const SCAN_LINEAR_TIME_TEST_TIMEOUT_MS = 180_000;
 
 let clock = Date.parse('2026-05-01T00:00:00.000Z');
 beforeEach(() => {
@@ -650,7 +659,7 @@ describe('rule 3: exact copies link (SPEC-126 FR-126-01 to FR-126-06)', () => {
         for (const database of built) database.dispose();
       }
     },
-    LINEAR_TIME_TEST_TIMEOUT_MS,
+    SCAN_LINEAR_TIME_TEST_TIMEOUT_MS,
   );
 });
 
@@ -1080,7 +1089,7 @@ describe('rule 2: moves keep identity (SPEC-126 FR-126-14 to FR-126-18, AC-3)', 
         for (const database of built) database.dispose();
       }
     },
-    LINEAR_TIME_TEST_TIMEOUT_MS,
+    SCAN_LINEAR_TIME_TEST_TIMEOUT_MS,
   );
 });
 

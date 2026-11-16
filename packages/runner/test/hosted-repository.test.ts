@@ -58,6 +58,13 @@ import {
 
 const migrations = fileURLToPath(new URL('../../database/migrations', import.meta.url));
 const posixOnly = it.skipIf(process.platform === 'win32');
+/**
+ * Every test here runs real git against a fixture remote, most of them over several commits and
+ * scans: 1 to 1.5 s each under `taskset -c 0,1 pnpm test --force`, and one took 5.4 s on the
+ * 2-core CI runner, over vitest's 5 s default (issue #232).
+ */
+const REAL_GIT_TEST_TIMEOUT_MS = 30_000;
+const realGit = { timeout: REAL_GIT_TEST_TIMEOUT_MS };
 
 const SKILL = '---\nname: review\ndescription: Review pull requests.\n---\n# Review\n';
 
@@ -129,7 +136,7 @@ async function scan(
   return scanHostedRepository(handle, { jobId: job.id, repository: current }, options(overrides));
 }
 
-describe('hosted copies never link (SPEC-126 A16)', () => {
+describe('hosted copies never link (SPEC-126 A16)', realGit, () => {
   it('keeps the same skill in two GitHub repositories as two artifacts', async () => {
     const files = { 'skills/review/SKILL.md': SKILL };
     const first = await registered(new FixtureRemote(remotes, 'acme', 'first', files));
@@ -151,7 +158,7 @@ describe('hosted copies never link (SPEC-126 A16)', () => {
   });
 });
 
-describe('hosted scans keep identity across moves (SPEC-126 Phase 3)', () => {
+describe('hosted scans keep identity across moves (SPEC-126 Phase 3)', realGit, () => {
   const NAMELESS = (text: string) => `---\ndescription: ${text}\n---\n# ${text}\n`;
   const RULE = '---\nglobs: "*.ts"\n---\nUse named exports.\n';
 
@@ -222,7 +229,7 @@ describe('hosted scans keep identity across moves (SPEC-126 Phase 3)', () => {
   });
 });
 
-describe('registerHostedUrl', () => {
+describe('registerHostedUrl', realGit, () => {
   it('registers a public repository with provider github and its default branch, without credentials', async () => {
     const remote = teamSkills();
     git(remote.bare, ['symbolic-ref', 'HEAD', 'refs/heads/trunk']);
@@ -327,7 +334,7 @@ describe('registerHostedUrl', () => {
   });
 });
 
-describe('scanHostedRepository', () => {
+describe('scanHostedRepository', realGit, () => {
   it('discovers artifacts like a local scan, records the commit and downloads only candidate blobs', async () => {
     const remote = teamSkills();
     const repository = await registered(remote);
@@ -926,7 +933,7 @@ describe('scanHostedRepository', () => {
   });
 });
 
-describe('missing occurrences of a hosted repository (SPEC-125)', () => {
+describe('missing occurrences of a hosted repository (SPEC-125)', realGit, () => {
   const statuses = () =>
     handle.sqlite
       .prepare('select path, status from artifact_occurrences order by path')
