@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createExecutableAdapters } from '@directivebench/agent-adapters';
 import { isLoopbackHost } from '@directivebench/core';
 import { LocalRunner } from '@directivebench/runner';
+import packageJson from '../package.json' with { type: 'json' };
 import { createRunnerLogger } from './logger';
 import { CliError, ExitCode, resolveAssets, type Assets } from './runtime';
 import { initialize, resolveServerOptions } from './setup';
@@ -162,6 +163,8 @@ export async function serve(
     fixtureStore: layout.fixtures,
     cacheDir: layout.cache,
     adapters: createExecutableAdapters(),
+    // A hosted rescan skips the fetch only for scans made by this version (SPEC-105 FR-105-10).
+    appVersion: packageJson.version,
     concurrency: config.runner.concurrency,
     keepWorkspaces: config.runner.keepWorkspaces,
     logger: createRunnerLogger(join(layout.logs, 'runner.log'), (): string => runner.runnerId),

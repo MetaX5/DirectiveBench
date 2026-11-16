@@ -93,6 +93,11 @@ export interface LocalRunnerOptions {
   >;
   adapters: Map<string, AgentAdapter>;
   /**
+   * The DirectiveBench version, part of a hosted scan's configuration hash (SPEC-105 FR-105-10,
+   * issue 63). Without it a hosted rescan always fetches.
+   */
+  appVersion?: string;
+  /**
    * The installation's id (`config.json` `installationId`), passed to every benchmark run: runs
    * in the `user-profile` isolation profile need it in their comparability key (SPEC-118 §8.3).
    */
@@ -163,9 +168,12 @@ const silentLogger: RunnerLogger = { info: () => undefined, error: () => undefin
  */
 export class LocalRunner {
   readonly runnerId = `local-${hostname()}-${process.pid}-${randomBytes(4).toString('hex')}`;
-  private readonly options: Required<Omit<LocalRunnerOptions, 'logger' | 'hostId'>> & {
+  private readonly options: Required<
+    Omit<LocalRunnerOptions, 'logger' | 'hostId' | 'appVersion'>
+  > & {
     logger: RunnerLogger;
     hostId?: string;
+    appVersion?: string;
   };
   private readonly active = new Map<
     string,
@@ -709,6 +717,7 @@ export class LocalRunner {
       signal,
       cacheDir: this.options.cacheDir,
       transport: this.options.hostedGitTransport,
+      appVersion: this.options.appVersion,
     };
   }
 

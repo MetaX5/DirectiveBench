@@ -308,27 +308,40 @@ export async function storeScanResults(
   try {
     return { ok: true, summary: await applyRepositoryScan(handle, application) };
   } catch (error) {
-    // An aborted signal, a cancellation request or a job that is no longer running: nothing was
-    // written; the runner records `cancelled` or `interrupted` by the abort reason.
-    if (error instanceof JobNoLongerRunningError) {
-      throw new ScanCancelledError('Scan was cancelled');
-    }
-    if (error instanceof NotFoundError) {
-      return failure('repository-not-found', 'The repository was removed during the scan.');
-    }
-    // Not the message: a failed query's message carries its parameters, i.e. file contents. The
-    // artifact's path is repository-relative, so it names no absolute location (redacted anyway).
-    const stored = error instanceof ArtifactStoreError ? error.cause : error;
-    const cause = (stored as { cause?: unknown } | null)?.cause;
-    const code = errorCode(stored) ?? errorCode(cause) ?? 'unknown error';
-    // The path says where the write stopped, not that the artifact there is at fault: a full
-    // disk or a closed connection fails at whichever artifact comes next.
-    const message =
-      error instanceof ArtifactStoreError
-        ? `The scan failed while storing the results at ${error.path} (${code}).`
-        : `The scan failed: the results could not be stored (${code}).`;
-    const result = failure('scan-failed', redactSecrets(message));
-    await markRepositoryScanFailed(handle.db, application.repositoryId, result.message);
-    return result;
+    return scanStoreFailure(handle, application.repositoryId, error);
   }
+}
+
+/**
+ * The outcome of a scan whose write transaction threw (`applyRepositoryScan`, and the unchanged
+ * write of a hosted rescan, issue 63). A cancellation is rethrown as {@link ScanCancelledError};
+ * every other error is a typed failure, recorded on the repository unless it was removed.
+ */
+export async function scanStoreFailure(
+  handle: DatabaseHandle,
+  repositoryId: string,
+  error: unknown,
+): Promise<ScanFailure> {
+  // An aborted signal, a cancellation request or a job that is no longer running: nothing was
+  // written; the runner records `cancelled` or `interrupted` by the abort reason.
+  if (error instanceof JobNoLongerRunningError) {
+    throw new ScanCancelledError('Scan was cancelled');
+  }
+  if (error instanceof NotFoundError) {
+    return failure('repository-not-found', 'The repository was removed during the scan.');
+  }
+  // Not the message: a failed query's message carries its parameters, i.e. file contents. The
+  // artifact's path is repository-relative, so it names no absolute location (redacted anyway).
+  const stored = error instanceof ArtifactStoreError ? error.cause : error;
+  const cause = (stored as { cause?: unknown } | null)?.cause;
+  const code = errorCode(stored) ?? errorCode(cause) ?? 'unknown error';
+  // The path says where the write stopped, not that the artifact there is at fault: a full
+  // disk or a closed connection fails at whichever artifact comes next.
+  const message =
+    error instanceof ArtifactStoreError
+      ? `The scan failed while storing the results at ${error.path} (${code}).`
+      : `The scan failed: the results could not be stored (${code}).`;
+  const result = failure('scan-failed', redactSecrets(message));
+  await markRepositoryScanFailed(handle.db, repositoryId, result.message);
+  return result;
 }
