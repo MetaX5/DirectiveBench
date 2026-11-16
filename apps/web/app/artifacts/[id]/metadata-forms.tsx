@@ -512,17 +512,23 @@ export function CategoriesCard({
               data-category-id={chip.id}
               className="flex max-w-full min-w-0 items-center gap-inline-tight"
             >
-              <Badge variant={chip.archived ? 'muted' : 'secondary'} className="min-w-0 shrink">
-                {/* One inline span: the Badge is a flex box, so loose parts would become columns
-                    (issue 227, K5). It wraps anywhere, so a long name never widens the card. */}
-                <span className="min-w-0 wrap-anywhere">
-                  {chip.label}
-                  {chip.clashSlug ? (
+              <Badge
+                variant={chip.archived ? 'muted' : 'secondary'}
+                className={chip.clashSlug ? 'min-w-0 shrink' : 'min-w-0 shrink break-all'}
+              >
+                {/* On a chip-text clash the slug follows the label (issue 227, K5), in one inline
+                    span: the Badge is a flex box, so loose parts would become columns, and
+                    break-all would split the words; the span wraps anywhere instead. */}
+                {chip.clashSlug ? (
+                  <span className="min-w-0 wrap-anywhere">
+                    {chip.label}
                     <span data-testid="category-slug">
                       , slug <span className="font-mono">{chip.clashSlug}</span>
                     </span>
-                  ) : null}
-                </span>
+                  </span>
+                ) : (
+                  chip.label
+                )}
               </Badge>
               <form action={dispatch} onSubmit={() => setPressed('remove')}>
                 <input type="hidden" name="intent" value="remove" />

@@ -40,7 +40,7 @@ test.describe('artifacts', () => {
     const score = row.getByTestId('latest-score');
     await expect(score).toContainText('100%');
     await expect(score.getByText(MOCK_LABEL)).toBeVisible();
-    await row.getByRole('link', { name: DEMO_ARTIFACT }).click();
+    await row.getByRole('link', { name: DEMO_ARTIFACT, exact: true }).click();
 
     await expect(page).toHaveURL(/\/artifacts\/[\w-]+$/);
     await expect(page.getByRole('heading', { level: 1, name: DEMO_ARTIFACT })).toBeVisible();
@@ -71,7 +71,7 @@ test.describe('artifacts', () => {
 
   test('artifact filters narrow the list by text, type and category', async ({ page }) => {
     await page.goto('/artifacts?type=skill&category=security');
-    await expect(page.getByRole('link', { name: DEMO_ARTIFACT })).toBeVisible();
+    await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toBeVisible();
 
     await page.goto('/artifacts?type=rule');
     await expect(page.getByText('No artifacts match the filters')).toBeVisible();
@@ -94,7 +94,7 @@ test.describe('results', () => {
     await expect(row).toContainText(DEMO_SUITE);
     await expect(row).toContainText(MOCK_LABEL);
     await expect(row.locator('[data-status]')).toHaveAttribute('data-status', 'passed');
-    await row.getByRole('link', { name: DEMO_ARTIFACT }).click();
+    await row.getByRole('link', { name: `${DEMO_ARTIFACT}, run ${runId}`, exact: true }).click();
 
     await expect(page).toHaveURL(new RegExp(`/results/${runId}$`));
     await expect(page.getByTestId('baseline-score')).toHaveText('50%');
@@ -359,7 +359,7 @@ test.describe('catalog and configuration', () => {
     await expect(security.getByRole('cell').last()).toHaveText('1');
     await security.getByRole('link', { name: '1 artifact with Security' }).click();
     await expect(page).toHaveURL(/\/artifacts\?category=security$/);
-    await expect(page.getByRole('link', { name: DEMO_ARTIFACT })).toBeVisible();
+    await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toBeVisible();
   });
 
   test('agent connections show the built-in mock agent, labelled as not AI', async ({ page }) => {

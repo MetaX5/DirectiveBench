@@ -3,6 +3,16 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Badge } from '../components/ui/badge';
 import { scanTextContrast } from './contrast';
+import {
+  DEMO_SUITE_SLUG,
+  idOf,
+  removeArtifactTwin,
+  removeChipClash,
+  removeSuiteCopy,
+  seedArtifactTwin,
+  seedChipClash,
+  seedSuiteCopy,
+} from './disambiguation-seed';
 import { DEMO_ARTIFACT, withDatabase } from './support';
 
 /** Archives or unarchives a demo category for the scan (setup only; the pages are SPEC-124). */
@@ -137,6 +147,37 @@ for (const theme of ['light', 'dark'] as const) {
       }
     } finally {
       await withDatabase((db) => db.prepare('delete from artifacts where id = ?').run(duplicate));
+    }
+    // Name clashes (issue 227, K1 to K5, K9): a same-named suite, two archived categories with
+    // one name and a same-named artifact on the demo suite, so the muted IDs and slugs are on
+    // screen. Nothing in the demo data clashes.
+    await withDatabase((db) => {
+      seedSuiteCopy(db);
+      seedChipClash(db);
+      seedArtifactTwin(db);
+    });
+    try {
+      const suiteId = await withDatabase((db) => idOf(db, 'benchmark_suites', DEMO_SUITE_SLUG));
+      for (const path of [
+        '/benchmarks',
+        `/benchmarks/${suiteId}`,
+        '/results',
+        '/executions',
+        '/artifacts',
+        `/artifacts/${artifactId}`,
+        `/artifacts/${artifactId}?tab=benchmarks`,
+        `/artifacts/${artifactId}?tab=evaluations`,
+      ]) {
+        await page.goto(path);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await scan(`${path} (name clashes)`);
+      }
+    } finally {
+      await withDatabase((db) => {
+        removeArtifactTwin(db);
+        removeChipClash(db);
+        removeSuiteCopy(db);
+      });
     }
     // The repository removal lines (SPEC-125 §11.3 D18, D26) through crafted URLs, which write
     // nothing: the green result, the alerts and the status line for an unknown panel target.
