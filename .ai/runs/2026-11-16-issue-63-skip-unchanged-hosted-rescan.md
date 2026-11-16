@@ -170,3 +170,8 @@ test transport); Windows and macOS (the logging-git tests are POSIX-only).
   with 100% coverage in every package; `pnpm build` pass; `pnpm verify:pack` (`TMPDIR` under
   `/var/tmp`, removed) pass; `pnpm test:e2e` (`TMPDIR` under `/var/tmp`) 180 passed, which
   includes #241's issue-45 repository tests.
+- Codex adversarial review of the merged branch: round 1 no material findings (`needs-attention`
+  only because it could not run the gate in its sandbox); round 2, given the gate results,
+  **approve**, no material findings.
+- `om-auto-review-pr 242` re-review: approve (comment review, own PR). It added the skipped
+  user-level folder fields of an unchanged result to SPEC-105 FR-105-10 (docs only).
