@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { dataDirLayout, resolveDataDir } from '@directivebench/core';
+import {
+  ARTIFACT_FORMAT_TYPES,
+  dataDirLayout,
+  resolveDataDir,
+  type ArtifactFormat,
+} from '@directivebench/core';
 import {
   ArtifactRefError,
   openDatabase,
@@ -136,9 +141,13 @@ export async function benchmarkInitCommand(flags: {
   const target = join(cwd, `${name}-benchmark`);
   await assertFreeTarget(target);
   await mkdir(join(target, 'fixtures', 'example'), { recursive: true });
-  await writeFile(join(target, 'benchmark.yaml'), scaffoldDefinition(name, resolved.artifact), {
-    flag: 'wx',
-  });
+  // The type the default candidate (the latest version) is gated with (FR-118-25): its format's.
+  const type = ARTIFACT_FORMAT_TYPES[resolved.version.format as ArtifactFormat];
+  await writeFile(
+    join(target, 'benchmark.yaml'),
+    scaffoldDefinition(name, { ...resolved.artifact, type }),
+    { flag: 'wx' },
+  );
   await writeFile(join(target, 'fixtures', 'example', 'README.md'), FIXTURE_README, {
     flag: 'wx',
   });

@@ -13,6 +13,7 @@ import {
   type PreparedSuite,
   type ScoringSummary,
 } from '@directivebench/benchmark-engine';
+import { slugify } from '@directivebench/core';
 import {
   InvalidBaselineError,
   assignBenchmarkSuite,
@@ -88,6 +89,16 @@ export const processTerminal: RunTerminal = {
   },
 };
 
+/**
+ * The candidate's slug, with its current name when the slug no longer reads as it (SPEC-118
+ * FR-118-22): a slug is assigned once and never follows a rename (SPEC-103 FR-103-16).
+ */
+export function candidateLabel(artifact: { slug: string; name: string }): string {
+  return slugify(artifact.name) === artifact.slug
+    ? artifact.slug
+    : `${artifact.slug} (named ${artifact.name})`;
+}
+
 /** The plan and notices printed before anything is stored or started (FR-118-31, FR-118-33). */
 export function planText(input: {
   prepared: PreparedSuite;
@@ -103,7 +114,7 @@ export function planText(input: {
   const runs = definition.cases.length * definition.execution.repetitions * 2;
   const lines = [
     `Suite:      ${definition.name} (${definition.id}, content ${prepared.contentHash.slice(0, 12)})`,
-    `Candidate:  ${resolved.candidate.slug} v${resolved.ref.version.version}`,
+    `Candidate:  ${candidateLabel(resolved.candidate)} v${resolved.ref.version.version}`,
     `Baseline:   ${resolved.baseline ? `v${options.baselineVersion}` : 'no artifact'}`,
     `Agent:      Claude Code ${input.agentVersion ?? '(version unknown)'}`,
     `Auth mode:  ${options.authMode === 'subscription' ? 'Local Subscription Mode (isolation: user-profile)' : 'API Key Mode (isolation: isolated)'}`,
