@@ -784,8 +784,13 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <dd>
               <Link className="underline" href={`/artifacts/${artifact.id}`}>
                 {artifact.name} v{artifactVersion.version}
-              </Link>{' '}
-              <span className="font-mono">{artifactVersion.contentHash.slice(0, 12)}…</span>
+              </Link>
+              {/* The slug always shows in the run's facts, like the suite ID below (issue 236,
+                  L6). A slug can be long without a hyphen, so it wraps anywhere. */}
+              <span className="text-muted-foreground wrap-anywhere" data-testid="artifact-slug">
+                , slug <span className="font-mono">{artifact.slug}</span>
+              </span>{' '}
+              <ContentHash hash={artifactVersion.contentHash} />
             </dd>
             <dt className="text-muted-foreground">Suite version</dt>
             <dd>
@@ -797,7 +802,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <span className="text-muted-foreground wrap-anywhere" data-testid="suite-id">
                 , ID <span className="font-mono">{suite.slug}</span>
               </span>{' '}
-              <span className="font-mono">{suiteVersion.contentHash.slice(0, 12)}…</span>
+              <ContentHash hash={suiteVersion.contentHash} />
             </dd>
             <dt className="text-muted-foreground">Agent</dt>
             <dd className="font-mono">
@@ -816,5 +821,18 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         </CardContent>
       </Card>
     </>
+  );
+}
+
+/**
+ * A version's short content hash in the run facts, after a muted "hash" label, so it does not run
+ * into the slug or ID before it (issue 236, approval comment).
+ */
+function ContentHash({ hash }: { hash: string }) {
+  return (
+    <span data-testid="content-hash">
+      <span className="text-muted-foreground">hash</span>{' '}
+      <span className="font-mono">{hash.slice(0, 12)}…</span>
+    </span>
   );
 }

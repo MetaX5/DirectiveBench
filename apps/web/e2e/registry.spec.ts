@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { e2eTmpRoot } from './support';
+import { e2eTmpRoot, escapeRegExp } from './support';
 
 /**
  * Issue #17 (E01-S03, SPEC-101): artifacts of two registered repositories in one list, filters in
@@ -84,9 +84,13 @@ async function registerAndScan(page: Page, path: string, name: string): Promise<
 }
 
 function artifactRow(page: Page, name: string, repository: string) {
+  // By the link's visible text: a name another artifact has adds the slug to the link's
+  // accessible name (issue 236, L7).
   return page
     .getByRole('row')
-    .filter({ has: page.getByRole('link', { name, exact: true }) })
+    .filter({
+      has: page.getByRole('link').filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`) }),
+    })
     .filter({ hasText: repository });
 }
 
@@ -115,6 +119,12 @@ test.describe.serial('artifact registry', () => {
       await expect(row).toHaveCount(1);
       await expect(row.getByRole('cell').nth(1)).toHaveText('instruction');
       await expect(row.getByRole('cell').nth(5)).toHaveText('1');
+      // The name clashes, so the row shows the slug and its link is named by it (L2, L7).
+      const slug = (await row.getByTestId('artifact-slug').textContent())?.replace(', slug ', '');
+      expect(slug).toMatch(/^agents-md(-\d+)?$/);
+      await expect(
+        row.getByRole('link', { name: `AGENTS.md, slug ${slug}`, exact: true }),
+      ).toHaveCount(1);
     }
     await expect(
       artifactRow(page, 'e2e-style', 'registry-client').getByRole('cell').nth(1),

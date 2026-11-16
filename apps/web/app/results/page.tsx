@@ -68,11 +68,20 @@ export default async function ResultsPage() {
                         <Link
                           className="font-medium hover:underline"
                           href={`/results/${run.id}`}
-                          aria-label={resultRunName(artifact.name, run.id)}
+                          aria-label={resultRunName(artifact, run.id)}
                         >
                           {artifact.name}
                         </Link>{' '}
                         <span className="text-ui text-muted-foreground">v{artifact.version}</span>
+                        {/* A name another artifact has adds the slug (issue 236, L3). */}
+                        {artifact.nameShared ? (
+                          <span
+                            className="text-ui text-muted-foreground"
+                            data-testid="artifact-slug"
+                          >
+                            , slug <span className="font-mono">{artifact.slug}</span>
+                          </span>
+                        ) : null}
                       </TD>
                       <TD className="text-muted-foreground">
                         {suite.name} <span className="text-ui">v{suite.version}</span>

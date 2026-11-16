@@ -10,7 +10,7 @@ import {
 } from '@directivebench/core';
 import { withTransaction, type DatabaseHandle } from '../client';
 import type { Database } from '../client';
-import { suiteNameShared } from './shared-names';
+import { artifactNameShared, suiteNameShared } from './shared-names';
 import {
   artifacts,
   artifactVersions,
@@ -609,6 +609,10 @@ export interface JobListItem {
   /** Another suite has the name, so the list adds the ID (issue 227). */
   suiteNameShared: boolean;
   artifactName: string | null;
+  /** The artifact's slug, null with `artifactName`. */
+  artifactSlug: string | null;
+  /** Another artifact has the name, so the list adds the slug (issue 236). */
+  artifactNameShared: boolean;
   benchmarkRunId: string | null;
 }
 
@@ -623,11 +627,11 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
     .where(eq(jobs.type, 'benchmark-run'))
     .orderBy(desc(jobs.createdAt))
     .limit(limit);
-  const result: JobListItem[] = [];
+  const result: (Omit<JobListItem, 'artifactNameShared'> & { artifactId: string | null })[] = [];
   for (const job of rows) {
     const payload = benchmarkJobPayloadSchema.safeParse(job.payload);
     let suite: { name: string; slug: string; nameShared: boolean } | undefined;
-    let artifactName: string | null = null;
+    let artifact: { id: string; name: string; slug: string } | undefined;
     if (payload.success) {
       suite = await db
         .select({
@@ -639,13 +643,12 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
         .innerJoin(benchmarkSuites, eq(benchmarkSuiteVersions.suiteId, benchmarkSuites.id))
         .where(eq(benchmarkSuiteVersions.id, payload.data.suiteVersionId))
         .get();
-      const artifact = await db
-        .select({ name: artifacts.name })
+      artifact = await db
+        .select({ id: artifacts.id, name: artifacts.name, slug: artifacts.slug })
         .from(artifactVersions)
         .innerJoin(artifacts, eq(artifactVersions.artifactId, artifacts.id))
         .where(eq(artifactVersions.id, payload.data.artifactVersionId))
         .get();
-      artifactName = artifact?.name ?? null;
     }
     const run = await db
       .select({ id: benchmarkRuns.id })
@@ -657,11 +660,31 @@ export async function listJobs(db: Database, limit = 50): Promise<JobListItem[]>
       suiteName: suite?.name ?? null,
       suiteSlug: suite?.slug ?? null,
       suiteNameShared: suite?.nameShared ?? false,
-      artifactName,
+      artifactId: artifact?.id ?? null,
+      artifactName: artifact?.name ?? null,
+      artifactSlug: artifact?.slug ?? null,
       benchmarkRunId: run?.id ?? null,
     });
   }
-  return result;
+  // One statement flags every listed artifact whose name another artifact has (issue 236), so
+  // the artifacts table is grouped once per list, not once per job.
+  const artifactIds = [...new Set(result.flatMap((r) => (r.artifactId ? [r.artifactId] : [])))];
+  const shared = new Set(
+    artifactIds.length === 0
+      ? []
+      : (
+          await db
+            .select({ id: artifacts.id, nameShared: artifactNameShared })
+            .from(artifacts)
+            .where(inArray(artifacts.id, artifactIds))
+        )
+          .filter((a) => a.nameShared)
+          .map((a) => a.id),
+  );
+  return result.map(({ artifactId, ...item }) => ({
+    ...item,
+    artifactNameShared: artifactId !== null && shared.has(artifactId),
+  }));
 }
 
 export async function countJobsByStatus(db: Database): Promise<Record<JobStatus, number>> {

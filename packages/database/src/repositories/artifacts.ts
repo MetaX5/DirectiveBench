@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   exists,
+  getTableColumns,
   gt,
   gte,
   inArray,
@@ -53,7 +54,7 @@ import {
   repositories,
   type StoredArtifactFile,
 } from '../schema';
-import { categoryChipShared, suiteNameShared } from './shared-names';
+import { artifactNameShared, categoryChipShared, suiteNameShared } from './shared-names';
 
 export type RepositoryProvider = (typeof repositories.$inferSelect)['provider'];
 
@@ -1440,6 +1441,11 @@ export interface ArtifactListItem {
    * format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11, FR-126-12); 0 otherwise.
    */
   possibleDuplicates: number;
+  /**
+   * Another artifact, of any type, has exactly this name, so the list adds the slug (issue 236,
+   * decision L2). Wider than `possibleDuplicates`, which needs the same format.
+   */
+  nameShared: boolean;
 }
 
 /**
@@ -1713,7 +1719,7 @@ export async function listArtifacts(
   const q = listTextQuery(filter);
   const rows = (
     await db
-      .select()
+      .select({ ...getTableColumns(artifacts), nameShared: artifactNameShared })
       .from(artifacts)
       .where(and(...listConditions(db, filter)))
       .orderBy(artifacts.name, artifacts.id)
@@ -1799,6 +1805,7 @@ export async function listArtifacts(
       benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
       possibleDuplicates: otherDuplicates(duplicateGroups, row, latestVersion?.format),
+      nameShared: row.nameShared,
     };
   });
 }

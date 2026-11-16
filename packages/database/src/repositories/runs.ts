@@ -12,7 +12,7 @@ import {
   benchmarkSuites,
   benchmarkSuiteVersions,
 } from '../schema';
-import { suiteNameShared } from './shared-names';
+import { artifactNameShared, suiteNameShared } from './shared-names';
 
 export type BenchmarkRunRecord = typeof benchmarkRuns.$inferSelect;
 export type AgentRunRecord = typeof agentRuns.$inferSelect;
@@ -211,7 +211,8 @@ export interface BenchmarkRunListItem {
   run: BenchmarkRunRecord;
   /** `nameShared`: another suite has the name, so lists add its ID (issue 227). */
   suite: { id: string; slug: string; name: string; version: number; nameShared: boolean };
-  artifact: { id: string; name: string; version: number };
+  /** `nameShared`: another artifact has the name, so lists add its slug (issue 236). */
+  artifact: { id: string; slug: string; name: string; version: number; nameShared: boolean };
 }
 
 export async function listBenchmarkRuns(
@@ -227,7 +228,9 @@ export async function listBenchmarkRuns(
       suiteNameShared,
       suiteVersion: benchmarkSuiteVersions.version,
       artifactId: artifacts.id,
+      artifactSlug: artifacts.slug,
       artifactName: artifacts.name,
+      artifactNameShared,
       artifactVersion: artifactVersions.version,
     })
     .from(benchmarkRuns)
@@ -249,7 +252,13 @@ export async function listBenchmarkRuns(
       version: r.suiteVersion,
       nameShared: r.suiteNameShared,
     },
-    artifact: { id: r.artifactId, name: r.artifactName, version: r.artifactVersion },
+    artifact: {
+      id: r.artifactId,
+      slug: r.artifactSlug,
+      name: r.artifactName,
+      version: r.artifactVersion,
+      nameShared: r.artifactNameShared,
+    },
   }));
 }
 

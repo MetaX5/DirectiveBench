@@ -12,6 +12,7 @@ import {
   listArtifacts,
   listBenchmarkRuns,
   listJobs,
+  listSuiteNames,
   listSuites,
   setCategoryArchived,
   updateCategory,
@@ -85,6 +86,12 @@ describe('suite name shared', () => {
       unique: false,
     });
     expect(twin.suiteId).not.toBe(targets.suiteId);
+    // The suite picker counts every suite, assigned or not (issue 235, L1).
+    expect(bySlug(await listSuiteNames(handle.db))).toEqual({
+      'safety-a': true,
+      'safety-b': true,
+      unique: false,
+    });
   });
 });
 
@@ -118,6 +125,50 @@ describe('artifact name shared', () => {
       }),
     );
     expect(await shared()).toEqual({ validate: true, solo: false });
+  });
+
+  it('flags the artifact of every list row and job whose name another artifact has (issue 236)', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle, { artifact: { name: 'AGENTS.md' } });
+    const solo = await importArtifactVersion(
+      handle,
+      artifactInput('s', { slug: 'solo', name: 'solo', path: 'skills/solo' }),
+    );
+    await enqueueBenchmarkJob(handle.db, {
+      suiteVersionId: targets.suiteVersionId,
+      artifactVersionId: targets.artifactVersionId,
+    });
+    await seedRun(handle, targets);
+    await seedRun(handle, { ...targets, artifactVersionId: solo.versionId });
+    const flags = async () => ({
+      list: Object.fromEntries((await listArtifacts(handle.db)).map((a) => [a.slug, a.nameShared])),
+      runs: Object.fromEntries(
+        (await listBenchmarkRuns(handle.db)).map((r) => [r.artifact.slug, r.artifact.nameShared]),
+      ),
+      job: (await listJobs(handle.db)).map((j) => [j.artifactSlug, j.artifactNameShared]),
+    });
+    expect(await flags()).toEqual({
+      list: { validate: false, solo: false },
+      runs: { validate: false, solo: false },
+      job: [['validate', false]],
+    });
+
+    // Another artifact of another type with the same name, never run: shared everywhere.
+    await importArtifactVersion(
+      handle,
+      artifactInput('o', {
+        slug: 'agents-md',
+        name: 'AGENTS.md',
+        path: 'x/AGENTS.md',
+        type: 'rule',
+      }),
+    );
+    expect(await flags()).toEqual({
+      list: { validate: true, solo: false, 'agents-md': true },
+      runs: { validate: true, solo: false },
+      job: [['validate', true]],
+    });
+    expect((await listJobs(handle.db))[0]).toMatchObject({ artifactName: 'AGENTS.md' });
   });
 });
 
@@ -194,6 +245,7 @@ describe('shared-name flags at scale (Codex review of PR 234)', () => {
       () => getArtifactDetail(handle.db, targets.artifactId),
       () => getSuiteDetail(handle.db, targets.suiteId),
       () => listArtifacts(handle.db),
+      () => listSuiteNames(handle.db),
     ];
     for (const call of calls) {
       for (const plan of await flaggedPlans(handle, call)) {

@@ -43,7 +43,7 @@ import {
 import { bulkCategoryModel, categoryChipLabel, categoryFilterOptions } from '@/lib/categories';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
-import { latestRunStatusName } from '@/lib/row-names';
+import { artifactLinkName, latestRunStatusName } from '@/lib/row-names';
 import { formatDate, formatDelta, formatScore } from '@/lib/utils';
 import { BulkCategoryForm } from './bulk-category-form';
 
@@ -202,12 +202,26 @@ export default async function ArtifactsPage({
                       {/* Names can be paths (`dir/AGENTS.md`) or snake_case and repository names
                           one long word: they wrap anywhere, within a minimum width. */}
                       <TD className="min-w-40 font-medium wrap-anywhere">
-                        <Link href={`/artifacts/${a.id}`} className="hover:underline">
+                        <Link
+                          href={`/artifacts/${a.id}`}
+                          className="hover:underline"
+                          aria-label={artifactLinkName(a)}
+                        >
                           {a.name}
                         </Link>
                         <span className="ml-1 text-ui text-muted-foreground">
                           v{a.latestVersion}
                         </span>
+                        {/* A name another artifact has, of any type, adds the slug (issue 236,
+                            L2). It wraps at its hyphens inside the cell (issue 122). */}
+                        {a.nameShared ? (
+                          <span
+                            className="text-ui font-normal text-muted-foreground"
+                            data-testid="artifact-slug"
+                          >
+                            , slug <span className="font-mono">{a.slug}</span>
+                          </span>
+                        ) : null}
                         {/* Same name and format as another artifact (SPEC-126 §11.4 G1, G2):
                             on its own line, so it never widens the column (issue 122). */}
                         {a.possibleDuplicates > 0 ? (

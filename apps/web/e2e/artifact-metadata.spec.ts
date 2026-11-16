@@ -157,7 +157,7 @@ function removeSuiteCopy(): Promise<void> {
   });
 }
 
-test('two suites with one name get unique option labels and Unassign names (issue 219)', async ({
+test('two suites with one name get unique option labels and Unassign names (issues 219, 235)', async ({
   page,
 }) => {
   await removeSuiteCopy();
@@ -168,11 +168,13 @@ test('two suites with one name get unique option labels and Unassign names (issu
     const demoName = `${DEMO_SUITE}, ID ${DEMO_SUITE_SLUG}`;
     const copyName = `${DEMO_SUITE}, ID ${COPY_SUITE_SLUG}`;
 
-    // One suite of the name is listed: its option is the name alone.
+    // One suite of the name is listed, but another suite (the assigned one) has the name, so
+    // the option adds the ID (issue 235, decision L1, replacing I2's unassigned-only rule).
     const select = suites.getByRole('combobox', { name: 'Benchmark suite' });
-    await expect(select.getByRole('option', { name: DEMO_SUITE, exact: true })).toHaveCount(1);
+    await expect(select.getByRole('option', { name: copyName, exact: true })).toHaveCount(1);
+    await expect(select.getByRole('option', { name: DEMO_SUITE, exact: true })).toHaveCount(0);
 
-    // Both unassigned: the options add the ID and no two read alike (decision I2).
+    // Both unassigned: the options add the ID and no two read alike.
     await suites.getByRole('button', { name: `Unassign suite ${demoName}`, exact: true }).click();
     await expect(suites.getByRole('status')).toHaveText(
       `Unassigned ${DEMO_SUITE}. Its results stay in Results by version.`,
@@ -183,8 +185,8 @@ test('two suites with one name get unique option labels and Unassign names (issu
     expect(options).not.toContain(DEMO_SUITE);
 
     // Assign both through the form. Once the copy is assigned, the demo suite is the only
-    // listed suite of the name, so its option is the name alone again.
-    for (const label of [copyName, DEMO_SUITE]) {
+    // listed suite of the name; its option keeps the ID (L1).
+    for (const label of [copyName, demoName]) {
       await select.selectOption({ label });
       await suites.getByRole('button', { name: 'Assign', exact: true }).click();
       await expect(suites.getByRole('status')).toHaveText(

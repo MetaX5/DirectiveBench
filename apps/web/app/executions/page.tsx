@@ -68,6 +68,8 @@ export default async function ExecutionsPage() {
                     suiteSlug,
                     suiteNameShared,
                     artifactName,
+                    artifactSlug,
+                    artifactNameShared,
                     benchmarkRunId,
                   }) => (
                     <TR key={job.id} data-job-status={job.status}>
@@ -81,7 +83,18 @@ export default async function ExecutionsPage() {
                           </span>
                         ) : null}
                       </TD>
-                      <TD>{artifactName ?? '—'}</TD>
+                      <TD>
+                        {artifactName ?? '—'}
+                        {/* A name another artifact has adds the slug (issue 236, L4). */}
+                        {artifactNameShared ? (
+                          <span
+                            className="text-ui text-muted-foreground"
+                            data-testid="artifact-slug"
+                          >
+                            , slug <span className="font-mono">{artifactSlug}</span>
+                          </span>
+                        ) : null}
+                      </TD>
                       <TD>
                         <JobStatusBadge status={job.status} />
                         {job.cancelRequestedAt && job.status === 'running' ? (

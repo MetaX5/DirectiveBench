@@ -148,7 +148,7 @@ for (const theme of ['light', 'dark'] as const) {
     } finally {
       await withDatabase((db) => db.prepare('delete from artifacts where id = ?').run(duplicate));
     }
-    // Name clashes (issue 227, K1 to K5, K9): a same-named suite, two archived categories with
+    // Name clashes (issues 227 and 236, K1 to K5, K9, L1 to L5): a same-named suite, two archived categories with
     // one name and a same-named artifact on the demo suite, so the muted IDs and slugs are on
     // screen. Nothing in the demo data clashes.
     await withDatabase((db) => {

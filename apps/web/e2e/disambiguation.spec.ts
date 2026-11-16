@@ -240,6 +240,14 @@ test('the suite page Run card names each Run and shows the slug of a same-named 
       ).toHaveCount(1);
     }
 
+    // The link is underlined at rest, so it is told apart from the muted slug after it without
+    // colour (WCAG 1.4.1; dark theme link and slug are 2.48:1; browser QA finding F1 of PR 238).
+    for (const link of await run.getByRole('link').all()) {
+      expect(await link.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe(
+        'underline',
+      );
+    }
+
     // Alone with its name the artifact shows no slug, and its Run is still named for it.
     await withDatabase(removeArtifactTwin);
     await page.reload();
@@ -317,4 +325,120 @@ test('Status links on Artifacts and Artifact links on Results have unique names 
   await expect(runs.first()).toHaveText(DEMO_ARTIFACT);
   const runNames = await names(runs);
   expect(new Set(runNames).size).toBe(runNames.length);
+});
+
+test('the suite picker adds the ID when an assigned suite has the same name (issue 235, L1)', async ({
+  page,
+}) => {
+  const artifactId = await withDatabase((db) => {
+    seedSuiteCopy(db);
+    return idOf(db, 'artifacts', DEMO_ARTIFACT);
+  });
+  try {
+    await page.goto(`/artifacts/${artifactId}?tab=benchmarks`);
+    const box = card(page, 'Assigned benchmarks');
+    // The demo suite is assigned; its same-named copy is the only one in the picker, and the
+    // option still reads with the ID, as the assigned item above it does (finding G1 of PR 234).
+    await expect(
+      box.getByRole('list', { name: 'Assigned suites' }).getByRole('listitem').first(),
+    ).toContainText(`${DEMO_SUITE}, ID ${DEMO_SUITE_SLUG}`);
+    const picker = box.locator('select[name="suiteId"]');
+    const options = await picker.locator('option').allTextContents();
+    expect(options).toContain(`${DEMO_SUITE}, ID ${COPY_SUITE_SLUG}`);
+    expect(options).not.toContain(DEMO_SUITE);
+  } finally {
+    await withDatabase(removeSuiteCopy);
+  }
+});
+
+test.describe('same-named artifacts (issue 236, L2 to L7)', () => {
+  test.beforeEach(() => withDatabase(seedArtifactTwin));
+  test.afterEach(() => withDatabase(removeArtifactTwin));
+
+  const demoName = `${DEMO_ARTIFACT}, slug ${DEMO_ARTIFACT}`;
+
+  test('Artifacts shows the slug of each same-named artifact and names its link (L2, L7)', async ({
+    page,
+  }) => {
+    await page.goto('/artifacts');
+    for (const slug of [DEMO_ARTIFACT, TWIN_ARTIFACT_SLUG]) {
+      const link = page.getByRole('link', { name: `${DEMO_ARTIFACT}, slug ${slug}`, exact: true });
+      await expect(link).toHaveCount(1);
+      await expect(link).toHaveText(DEMO_ARTIFACT);
+      const row = page.getByRole('row').filter({ has: link });
+      await expect(row.getByTestId('artifact-slug')).toHaveText(`, slug ${slug}`);
+    }
+    // At 320px the slug wraps inside the table, the page does not scroll sideways.
+    await page.setViewportSize({ width: 320, height: 800 });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    // Alone with its name the artifact shows no slug and its link is its name.
+    await withDatabase(removeArtifactTwin);
+    await page.reload();
+    await expect(page.getByTestId('artifact-slug')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: DEMO_ARTIFACT, exact: true })).toHaveCount(1);
+  });
+
+  test('Results, Executions and the suite Runs table add the slug on a clash (L3, L4, L5, L7)', async ({
+    page,
+  }) => {
+    const suiteId = await withDatabase((db) => idOf(db, 'benchmark_suites', DEMO_SUITE_SLUG));
+    const runId = await withDatabase(demoRunId);
+
+    await page.goto('/results');
+    const result = page.getByRole('link', {
+      name: `${demoName}, run ${runId}`,
+      exact: true,
+    });
+    await expect(result).toHaveText(DEMO_ARTIFACT);
+    await expect(
+      page.getByRole('row').filter({ has: result }).getByTestId('artifact-slug'),
+    ).toHaveText(`, slug ${DEMO_ARTIFACT}`);
+
+    await page.goto('/executions');
+    const job = page.getByRole('row').filter({ hasText: DEMO_SUITE }).first();
+    await expect(job.getByTestId('artifact-slug')).toHaveText(`, slug ${DEMO_ARTIFACT}`);
+
+    await page.goto(`/benchmarks/${suiteId}`);
+    const runs = card(page, 'Runs').getByRole('row').filter({ hasText: runId });
+    await expect(runs.getByTestId('artifact-slug')).toHaveText(`, slug ${DEMO_ARTIFACT}`);
+
+    // Without the twin: no slug anywhere, and the Results link keeps its old name.
+    await withDatabase(removeArtifactTwin);
+    await page.goto('/results');
+    await expect(page.getByTestId('artifact-slug')).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: `${DEMO_ARTIFACT}, run ${runId}`, exact: true }),
+    ).toHaveCount(1);
+    await page.goto('/executions');
+    await expect(page.getByTestId('artifact-slug')).toHaveCount(0);
+    await page.goto(`/benchmarks/${suiteId}`);
+    await expect(card(page, 'Runs').getByTestId('artifact-slug')).toHaveCount(0);
+  });
+
+  test('the run page always shows the artifact slug and labels both hashes (L6)', async ({
+    page,
+  }) => {
+    const runId = await withDatabase((db) => {
+      removeArtifactTwin(db);
+      return demoRunId(db);
+    });
+    await page.goto(`/results/${runId}`);
+    const facts = card(page, 'Environment and versions');
+    // No clash: the fact shows the slug anyway; the title stays the name.
+    await expect(facts.getByTestId('artifact-slug')).toHaveText(`, slug ${DEMO_ARTIFACT}`);
+    await expect(facts.getByTestId('content-hash')).toHaveText([
+      /^hash [0-9a-f]{12}…$/,
+      /^hash [0-9a-f]{12}…$/,
+    ]);
+    await expect(facts.getByRole('link', { name: /^validate-external-input v\d+$/ })).toBeVisible();
+    await page.setViewportSize({ width: 320, height: 800 });
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
 });

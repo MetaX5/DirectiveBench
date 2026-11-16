@@ -32,7 +32,7 @@ import {
 import { enqueueBenchmarkRunAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
-import { artifactSubject, runOnArtifactName } from '@/lib/row-names';
+import { artifactLinkName, runOnArtifactName } from '@/lib/row-names';
 import { cliRunCommand } from '@/lib/run-guard';
 import { formatDate, formatDelta } from '@/lib/utils';
 
@@ -208,10 +208,12 @@ export default async function BenchmarkPage({
                     <input type="hidden" name="artifactId" value={artifact.id} />
                     {/* A name another artifact has shows its slug (issue 227, K9). */}
                     <span className="min-w-0 wrap-anywhere">
+                      {/* Underlined at rest: the muted slug after it differs by colour only
+                          (WCAG 1.4.1, QA finding F1 of PR 238). */}
                       <Link
                         href={`/artifacts/${artifact.id}`}
-                        className="hover:underline"
-                        aria-label={artifact.nameShared ? artifactSubject(artifact) : undefined}
+                        className="underline"
+                        aria-label={artifactLinkName(artifact)}
                       >
                         {artifact.name}
                       </Link>
@@ -303,6 +305,16 @@ export default async function BenchmarkPage({
                       </TD>
                       <TD>
                         {artifact.name} v{artifact.version}
+                        {/* A name another artifact has adds the slug, as in the Run card above
+                            (issue 236, L5; K9). */}
+                        {artifact.nameShared ? (
+                          <span
+                            className="text-ui text-muted-foreground"
+                            data-testid="artifact-slug"
+                          >
+                            , slug <span className="font-mono">{artifact.slug}</span>
+                          </span>
+                        ) : null}
                       </TD>
                       <TD>
                         {run.status === 'running' ? (

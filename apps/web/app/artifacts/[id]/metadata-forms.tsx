@@ -318,7 +318,7 @@ export function SuitesCard({
     linkName: string | undefined;
     unassignName: string;
   }>;
-  /** The picker's options; a label adds the suite ID when two suites share a name. */
+  /** The picker's options; a label adds the suite ID when another suite has the name (L1). */
   available: Array<{ id: string; label: string }>;
 }) {
   const submitted = useRef<FormDataEntryValue | null>(null);

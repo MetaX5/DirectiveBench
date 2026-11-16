@@ -108,15 +108,11 @@ export function suiteSubject(suite: { name: string; slug: string }): string {
 
 /**
  * The suite picker's options in the given order: the name alone, or the full `suiteSubject`
- * when another listed suite has the same name, so no two options read alike.
+ * when another suite anywhere in the database has the same name (`nameShared`, issue 235,
+ * decision L1, the K4 rule), so no option reads like another option or an assigned suite.
  */
 export function suiteOptions(
-  suites: readonly { id: string; slug: string; name: string }[],
+  suites: readonly { id: string; slug: string; name: string; nameShared: boolean }[],
 ): { id: string; label: string }[] {
-  const counts = new Map<string, number>();
-  for (const s of suites) counts.set(s.name, (counts.get(s.name) ?? 0) + 1);
-  return suites.map((s) => ({
-    id: s.id,
-    label: (counts.get(s.name) as number) > 1 ? suiteSubject(s) : s.name,
-  }));
+  return suites.map((s) => ({ id: s.id, label: s.nameShared ? suiteSubject(s) : s.name }));
 }

@@ -39,9 +39,27 @@ export function latestRunStatusName(
   return `${DISPLAY_STATUS_LABELS[status]}, latest run of ${artifactSubject(artifact)}`;
 }
 
-/** The Results list's Artifact link to one run (issue 227, extra scope). */
-export function resultRunName(artifactName: string, runId: string): string {
-  return `${artifactName}, run ${runId}`;
+/**
+ * A link named by an artifact name: the name with the slug when another artifact has the same
+ * name (issue 236, decision L7), else undefined, so the link keeps its visible text as its name.
+ */
+export function artifactLinkName(artifact: {
+  name: string;
+  slug: string;
+  nameShared: boolean;
+}): string | undefined {
+  return artifact.nameShared ? artifactSubject(artifact) : undefined;
+}
+
+/**
+ * The Results list's Artifact link to one run (issue 227, extra scope): the artifact, with its
+ * slug when another artifact has the name (issue 236, L7), then the run ID.
+ */
+export function resultRunName(
+  artifact: { name: string; slug: string; nameShared: boolean },
+  runId: string,
+): string {
+  return `${artifactLinkName(artifact) ?? artifact.name}, run ${runId}`;
 }
 
 /**

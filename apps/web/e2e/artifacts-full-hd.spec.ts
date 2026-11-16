@@ -20,7 +20,8 @@ const CATEGORIES = ['code-quality', 'security', 'backend', 'documentation'];
 /**
  * SPEC-126 §11.4 G1, G17: a pair of rules with a long snake_case name. Seeded with two formats
  * (not duplicates), then the second gets the first's format, so the same rows are measured
- * without and with the "Possible duplicate" Badge.
+ * without and with the "Possible duplicate" Badge. Their names clash, so both rows also show
+ * their long slug after the version (issue 236, L2) in both measurements.
  */
 const PAIR_NAME = 'enforce_strict_input_validation_for_every_public_endpoint_handler';
 const PAIR = ['art_e2e126pair1', 'art_e2e126pair2'] as const;
