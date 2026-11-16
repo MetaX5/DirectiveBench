@@ -3,7 +3,7 @@ title: Skip fetching and scanning a hosted repository whose remote head equals t
 date: 2026-11-16
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request; issue 63 (follow-up from PR 62), approach approved 2026-11-16
-status: in-progress
+status: completed
 branch: feat/issue-63-skip-unchanged-hosted-rescan
 specs: [SPEC-105, SPEC-103, SPEC-003]
 ---
@@ -44,6 +44,8 @@ local scans (no fast path for `local-directory`; `local-git` reads the working t
 
 ## Progress
 
+PR: #242
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Tests first (red)
@@ -59,7 +61,7 @@ local scans (no fast path for `local-directory`; `local-git` reads the working t
 ### Phase 3: Specs and verification
 
 - [x] 3.1 Update SPEC-105, SPEC-103 and the database schema spec — 50f5b29
-- [ ] 3.2 Quality gate, real-app check, Codex review and om-auto-review-pr
+- [x] 3.2 Quality gate, real-app check, Codex review and om-auto-review-pr
 
 ## Decisions
 
@@ -125,8 +127,29 @@ Not verified: a real github.com remote (no network; the built CLI only speaks HT
 github.com and has no file transport, so the real run used the runner from source with the
 test transport); Windows and macOS (the logging-git tests are POSIX-only).
 
+## Review
+
+- Codex adversarial review (`--scope branch --base main`), round 1: no material findings;
+  verdict `needs-attention` only because `pnpm verify:pack` could not run in its read-only
+  sandbox (it passed here with `TMPDIR` on disk). Round 2: **approve**, no material findings.
+- `om-auto-review-pr 242 --autofix` (engine `om-code-review`): full gate passed at the head,
+  verdict approve (posted as a COMMENT review, own PR); one nit (the `json_extract` filter of
+  `getLastCompletedRepositoryScan` has no index; negligible today), no fix needed.
+
 ## Problems and deviations
+
+- The first attempt at the real run used `npx tsx` from `packages/runner`, which has no `tsx`;
+  it ran with `apps/cli`'s `tsx` instead.
+- No deviation from the approved approach. The DirectiveBench version in the configuration hash
+  goes beyond the three settings named in the issue, because FR-105-10 also names the
+  discovery/parser version.
 
 ## Lessons recorded
 
+- [2026-11-16-prove-a-skipped-git-step-with-a-logging-git.md](../lessons/2026-11-16-prove-a-skipped-git-step-with-a-logging-git.md)
+
 ## Follow-ups
+
+- Development builds share one version (`0.2.0-rc.0`), so changed discovery rules on a branch do
+  not force a rescan of an unchanged remote until the version changes.
+- If job history grows large, index the repository id of scan jobs (review nit).
