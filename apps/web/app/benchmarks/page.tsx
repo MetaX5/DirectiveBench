@@ -78,8 +78,9 @@ export default async function BenchmarksPage() {
                     return (
                       <TR key={suite.id}>
                         {/* The suite ID always shows under the name: names repeat, the ID does
-                            not (issue 227, K1). Both wrap anywhere within a minimum width. */}
-                        <TD className="min-w-40 font-medium wrap-anywhere">
+                            not (issue 227, K1). It breaks only at its hyphens, so the column keeps
+                            room for it; a longer ID scrolls the table, not the page. */}
+                        <TD className="font-medium">
                           <Link
                             className="hover:underline"
                             href={`/benchmarks/${suite.id}`}
