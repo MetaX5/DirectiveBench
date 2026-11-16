@@ -10,7 +10,7 @@ import {
 } from '../lib/row-names';
 import { DISPLAY_STATUS_LABELS } from '../lib/run-status';
 
-// Issues 227 and 228: unique accessible names for per-row controls, in the #219/#220 format.
+// Issues 227 and 228: unique accessible names for per-row controls, in the format of issues 219 and 220.
 
 const skill = { name: 'SKILL.md', slug: 'acme-validate-input-skill-md' };
 const twin = { name: 'SKILL.md', slug: 'acme-review-skill-md' };
