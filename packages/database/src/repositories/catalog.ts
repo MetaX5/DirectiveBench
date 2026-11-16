@@ -613,6 +613,12 @@ export interface HostedRepositoryRegistration {
   location: string;
   /** The remote's default branch; null when it reports none (an empty repository). */
   defaultBranch: string | null;
+  /**
+   * The branch the user chose and the runner found on the remote (issue 58); null follows the
+   * default. Stored only for a new row: registering an existing URL again never changes its
+   * branch (a branch change goes through `setRepositoryBranch`).
+   */
+  selectedBranch: string | null;
 }
 
 /**
@@ -637,6 +643,7 @@ export async function registerHostedRepository(
       name: input.name,
       location: input.location,
       defaultBranch: input.defaultBranch,
+      selectedBranch: input.selectedBranch,
       createdAt: now,
       updatedAt: now,
     })

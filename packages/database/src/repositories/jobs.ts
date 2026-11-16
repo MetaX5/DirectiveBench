@@ -1,8 +1,10 @@
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  BRANCH_NAME_MESSAGE,
   baselineArtifactIssue,
   createId,
+  isSafeBranchName,
   hostedRepositoryLocationSchema,
   nowIso,
   repositoryLocationSchema,
@@ -51,11 +53,18 @@ export const benchmarkJobPayloadSchema = z
 export type BenchmarkJobPayload = z.infer<typeof benchmarkJobPayloadSchema>;
 
 /**
+ * A branch name inside a job payload or result: always a safe name (SPEC-104 §12), never empty.
+ * The runner passes it to git only after `--` or inside `refs/heads/<branch>`.
+ */
+const safeBranchSchema = z.string().refine(isSafeBranchName, { message: BRANCH_NAME_MESSAGE });
+
+/**
  * Input of a `repository-registration` job. A local path: exactly as the user entered it
  * (trimmed) and, after a broad or overlapping-path notice, the canonical location the user
  * confirmed (SPEC-104 FR-104-18); the runner skips the notice only when the path still resolves to
  * that location. A hosted repository: its normalised, credential-free URL (FR-104-02, FR-104-05) —
- * never the text the user typed, so a payload cannot hold credentials.
+ * never the text the user typed, so a payload cannot hold credentials — and, when the user named
+ * one, the branch to scan (FR-104-07, issue 58; absent: the default branch).
  */
 export const repositoryRegistrationPayloadSchema = z.union([
   z
@@ -64,7 +73,7 @@ export const repositoryRegistrationPayloadSchema = z.union([
       confirmedLocation: repositoryLocationSchema.optional(),
     })
     .strict(),
-  z.object({ url: hostedRepositoryLocationSchema }).strict(),
+  z.object({ url: hostedRepositoryLocationSchema, branch: safeBranchSchema.optional() }).strict(),
 ]);
 export type RepositoryRegistrationPayload = z.infer<typeof repositoryRegistrationPayloadSchema>;
 
@@ -126,6 +135,55 @@ export const repositoryRegistrationResultSchema = z.union([
 ]);
 export type RepositoryRegistrationResult = z.infer<typeof repositoryRegistrationResultSchema>;
 
+/**
+ * Input of a `repository-branch` job (SPEC-104 FR-104-07, FR-104-14, issue 58): the hosted
+ * repository and the branch to scan from now on; null follows the default branch.
+ */
+export const repositoryBranchPayloadSchema = z
+  .object({ repositoryId: z.string().min(1), branch: safeBranchSchema.nullable() })
+  .strict();
+export type RepositoryBranchPayload = z.infer<typeof repositoryBranchPayloadSchema>;
+
+/** Why the runner did not change the branch (SPEC-104 §13, issue 58). */
+export const REPOSITORY_BRANCH_ERROR_CODES = [
+  'repository-not-found',
+  'unsupported-provider',
+  'scan-active',
+  'branch-not-found',
+  'invalid-url',
+  'git-not-installed',
+  'git-too-old',
+  'auth-required',
+  'unreachable',
+  'timeout',
+  'git-failed',
+  'cache-limit-exceeded',
+] as const;
+export type RepositoryBranchErrorCode = (typeof REPOSITORY_BRANCH_ERROR_CODES)[number];
+
+/**
+ * Outcome of a `repository-branch` job: the branch stored (null: the default is followed, also
+ * when the chosen name equals the detected default) and the default branch the remote reported, or
+ * why nothing was changed.
+ */
+export const repositoryBranchResultSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      branch: safeBranchSchema.nullable(),
+      defaultBranch: safeBranchSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      code: z.enum(REPOSITORY_BRANCH_ERROR_CODES),
+      message: z.string().min(1),
+    })
+    .strict(),
+]);
+export type RepositoryBranchResult = z.infer<typeof repositoryBranchResultSchema>;
+
 /** Input of a `repository-scan` job (SPEC-105 FR-105-02). */
 export const repositoryScanPayloadSchema = z.object({ repositoryId: z.string().min(1) }).strict();
 export type RepositoryScanPayload = z.infer<typeof repositoryScanPayloadSchema>;
@@ -149,6 +207,7 @@ export const REPOSITORY_SCAN_ERROR_CODES = [
   'cache-limit-exceeded',
   'invalid-url',
   'git-failed',
+  'branch-changed',
 ] as const;
 export type RepositoryScanErrorCode = (typeof REPOSITORY_SCAN_ERROR_CODES)[number];
 
@@ -237,6 +296,11 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
        * every change count is 0 and the discovery counts repeat that scan's. Absent otherwise.
        */
       unchanged: z.boolean().optional(),
+      /**
+       * The branch a hosted scan read (issue 58, SPEC-105 §14). Absent for local scans and in
+       * results stored before it existed.
+       */
+      branch: safeBranchSchema.optional(),
       durationMs: count,
     })
     .strict(),
@@ -274,6 +338,14 @@ export class JobNoLongerRunningError extends Error {
 /** The A/B baseline of a benchmark job breaks SPEC-118 FR-118-12. */
 export class InvalidBaselineError extends Error {
   override name = 'InvalidBaselineError';
+}
+
+/**
+ * A hosted scan's write found the repository's effective branch (`selected_branch ??
+ * default_branch`) different from the branch it read (issue 58, SPEC-105 §14): nothing is written.
+ */
+export class BranchChangedError extends Error {
+  override name = 'BranchChangedError';
 }
 
 async function artifactVersionIdentity(db: Database, versionId: string) {
@@ -481,6 +553,84 @@ export async function enqueueRepositoryScanJob(
       .returning();
     if (!job) throw new Error('Failed to enqueue job');
     return { job, created: true };
+  });
+}
+
+/**
+ * What `enqueueRepositoryBranchJob` did: queued (or found the identical request already pending
+ * or running), or refused because a scan of the repository, or a different branch change, is
+ * pending or running.
+ */
+export type RepositoryBranchJobOutcome =
+  | { status: 'enqueued'; job: JobRecord; created: boolean }
+  | { status: 'scan-active' }
+  | { status: 'branch-change-active' };
+
+/** Pending or running jobs of `type` whose payload names `repositoryId`. */
+async function activeJobsOf(db: Database, type: JobType, repositoryId: string) {
+  return db
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.type, type),
+        inArray(jobs.status, ['pending', 'running']),
+        sql`json_extract(${jobs.payload}, '$.repositoryId') = ${repositoryId}`,
+      ),
+    )
+    .orderBy(jobs.createdAt, jobs.id);
+}
+
+/**
+ * Enqueues a branch change of a hosted repository (SPEC-104 FR-104-14, issue 58). In one
+ * transaction: the repository must exist (`NotFoundError`) and be hosted
+ * (`UnsupportedRepositoryError`); no scan of it may be pending or running (`scan-active`: the
+ * scan reads the branch it started with); an identical request already pending or running is
+ * returned instead of a second job, and a different one refuses (`branch-change-active`), so two
+ * submissions never silently replace each other. The runner checks the branch with the remote.
+ */
+export async function enqueueRepositoryBranchJob(
+  handle: DatabaseHandle,
+  payload: RepositoryBranchPayload,
+): Promise<RepositoryBranchJobOutcome> {
+  const parsed = repositoryBranchPayloadSchema.parse(payload);
+  return withTransaction(handle, async (db) => {
+    const repository = await db
+      .select({ provider: repositories.provider })
+      .from(repositories)
+      .where(eq(repositories.id, parsed.repositoryId))
+      .get();
+    if (!repository) throw new NotFoundError(`Repository ${parsed.repositoryId} not found`);
+    if (!(HOSTED_PROVIDERS as readonly string[]).includes(repository.provider)) {
+      throw new UnsupportedRepositoryError(
+        `The branch of a ${repository.provider} repository cannot be chosen`,
+      );
+    }
+    if ((await activeJobsOf(db, 'repository-scan', parsed.repositoryId)).length > 0) {
+      return { status: 'scan-active' };
+    }
+    const active = await activeJobsOf(db, 'repository-branch', parsed.repositoryId);
+    if (active.length > 0) {
+      const same = active.find(
+        (job) =>
+          repositoryBranchPayloadSchema.safeParse(job.payload).data?.branch === parsed.branch,
+      );
+      return same
+        ? { status: 'enqueued', job: same, created: false }
+        : { status: 'branch-change-active' };
+    }
+    const [job] = await db
+      .insert(jobs)
+      .values({
+        id: createId('job'),
+        type: 'repository-branch',
+        status: 'pending',
+        payload: parsed,
+        createdAt: nowIso(),
+      })
+      .returning();
+    if (!job) throw new Error('Failed to enqueue job');
+    return { status: 'enqueued', job, created: true };
   });
 }
 
@@ -762,6 +912,8 @@ export interface RepositoryRegistration {
   input: string;
   /** Whether `input` is a local path or a hosted URL. */
   source: 'path' | 'url';
+  /** The branch the user named with a URL (issue 58); null: the default branch, or a path. */
+  branch: string | null;
   /** The runner's message when the job failed outside path validation (e.g. invalid payload). */
   error: string | null;
   /** The runner's outcome; null until the job completes. */
@@ -799,8 +951,8 @@ export async function getRepositoryRegistration(
     jobId: job.id,
     status: job.status,
     ...('url' in payload.data
-      ? { input: payload.data.url, source: 'url' as const }
-      : { input: payload.data.path, source: 'path' as const }),
+      ? { input: payload.data.url, source: 'url' as const, branch: payload.data.branch ?? null }
+      : { input: payload.data.path, source: 'path' as const, branch: null }),
     error: job.error,
     result,
     repository,
@@ -847,6 +999,56 @@ export async function getRepositoryScan(
     jobId: job.id,
     status: job.status,
     repositoryId: payload.data.repositoryId,
+    error: job.error,
+    result,
+    repository,
+  };
+}
+
+export interface RepositoryBranchChange {
+  jobId: string;
+  status: JobStatus;
+  repositoryId: string;
+  /** The branch requested; null: follow the default branch. */
+  branch: string | null;
+  /** The runner's message when the job failed outside the change itself (e.g. invalid payload). */
+  error: string | null;
+  /** The runner's outcome; null until the job completes. */
+  result: RepositoryBranchResult | null;
+  /** The repository; null when it no longer exists. */
+  repository: typeof repositories.$inferSelect | null;
+}
+
+/**
+ * Reads a `repository-branch` job for display (issue 58). Returns null for an unknown id, another
+ * job type or a row whose payload or result does not match its schema, so a page never renders
+ * unvalidated data.
+ */
+export async function getRepositoryBranchChange(
+  db: Database,
+  jobId: string,
+): Promise<RepositoryBranchChange | null> {
+  const job = await getJob(db, jobId);
+  if (job?.type !== 'repository-branch') return null;
+  const payload = repositoryBranchPayloadSchema.safeParse(job.payload);
+  if (!payload.success) return null;
+  let result: RepositoryBranchResult | null = null;
+  if (job.result !== null) {
+    const parsed = repositoryBranchResultSchema.safeParse(job.result);
+    if (!parsed.success) return null;
+    result = parsed.data;
+  }
+  const repository =
+    (await db
+      .select()
+      .from(repositories)
+      .where(eq(repositories.id, payload.data.repositoryId))
+      .get()) ?? null;
+  return {
+    jobId: job.id,
+    status: job.status,
+    repositoryId: payload.data.repositoryId,
+    branch: payload.data.branch,
     error: job.error,
     result,
     repository,

@@ -64,6 +64,7 @@ async function scannedRepository(
       artifacts: found,
       unobserved: [],
       commitSha: null,
+      branch: null,
       signal,
     });
   };

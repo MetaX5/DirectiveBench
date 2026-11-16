@@ -255,6 +255,7 @@ describe('registerLocalRepository', () => {
       name: 'acme/srv',
       location: 'https://github.com/acme/srv',
       defaultBranch: 'main',
+      selectedBranch: null,
     });
 
     const outer = await registerLocalRepository(handle, { ...input, location: '/srv' }, scope);
@@ -319,6 +320,7 @@ describe('registerHostedRepository', () => {
     name: 'Acme/Skills',
     location: 'https://github.com/acme/skills',
     defaultBranch: 'main',
+    selectedBranch: null,
   };
 
   it('creates a repository that has never been synchronised', async () => {

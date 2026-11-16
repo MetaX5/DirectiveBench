@@ -555,6 +555,10 @@ text pair is at least 5.5:1, focus indicators at least 5.7:1.
 
 ## 14. Edge cases
 
+- **Branch of a hosted repository changed** (issue 58, SPEC-104 FR-104-07): the next scan reads
+  the new branch as a new snapshot of the same repository, like a new commit. Paths only on the
+  old branch become missing (history kept) and are found again when a later scan finds them; the
+  empty-scan guard (A7) still applies.
 - **Skill directory deleted, nested skill kept** (`a/SKILL.md` gone, `a/b/SKILL.md` present):
   `a` is missing, `a/b` stays active.
 - **Skill whose nested skill failed** (`a/` deleted except `a/b/SKILL.md`, which is too large):

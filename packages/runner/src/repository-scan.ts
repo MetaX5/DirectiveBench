@@ -12,6 +12,7 @@ import {
 } from '@directivebench/core';
 import {
   ArtifactStoreError,
+  BranchChangedError,
   JobNoLongerRunningError,
   MAX_REPORTED_SCAN_ERRORS,
   MAX_SKIPPED_USER_LEVEL_FOLDERS,
@@ -262,6 +263,8 @@ export async function scanLocalRepository(
     jobId: job.jobId,
     artifacts: discovery.artifacts.map(toScannedArtifact),
     commitSha: null,
+    // A working tree has no branch to record (OQ-104-02).
+    branch: null,
     signal: options.signal,
     // From the full discovery result, never from the truncated `errors` of the job result.
     unobserved: discovery.unobserved,
@@ -329,6 +332,13 @@ export async function scanStoreFailure(
   }
   if (error instanceof NotFoundError) {
     return failure('repository-not-found', 'The repository was removed during the scan.');
+  }
+  // The effective branch is no longer the one the scan read (issue 58, SPEC-105 §14): nothing
+  // was applied, so the next scan reads the new branch in full.
+  if (error instanceof BranchChangedError) {
+    const result = failure('branch-changed', 'The branch changed during the scan. Scan again.');
+    await markRepositoryScanFailed(handle.db, repositoryId, result.message);
+    return result;
   }
   // Not the message: a failed query's message carries its parameters, i.e. file contents. The
   // artifact's path is repository-relative, so it names no absolute location (redacted anyway).

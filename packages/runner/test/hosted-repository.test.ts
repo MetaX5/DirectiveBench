@@ -124,7 +124,7 @@ function teamSkills(): FixtureRemote {
 }
 
 async function registered(remote: FixtureRemote): Promise<RepositoryRecord> {
-  const result = await registerHostedUrl(handle, remote.location, options());
+  const result = await registerHostedUrl(handle, { url: remote.location }, options());
   if (!result.ok) throw new Error(result.message);
   return (await getRepository(handle.db, result.repositoryId)) as RepositoryRecord;
 }
@@ -298,7 +298,7 @@ describe('registerHostedUrl', realGit, () => {
     git(remote.bare, ['update-ref', 'refs/heads/trunk', remote.head()]);
     const result = await registerHostedUrl(
       handle,
-      'https://github.com/Acme/Team-Skills.git',
+      { url: 'https://github.com/Acme/Team-Skills.git' },
       options(),
     );
     expect(result).toMatchObject({ ok: true, created: true });
@@ -308,6 +308,7 @@ describe('registerHostedUrl', realGit, () => {
       name: 'Acme/Team-Skills',
       location: 'https://github.com/acme/team-skills',
       defaultBranch: 'trunk',
+      selectedBranch: null,
       syncStatus: 'never',
     });
     // Registration downloads nothing: no cache exists yet, only the private layout.
@@ -317,7 +318,7 @@ describe('registerHostedUrl', realGit, () => {
     }
     expect(readdirSync(join(cacheDir(), 'git-home'))).toEqual([]);
     // The same repository again returns the existing row.
-    expect(await registerHostedUrl(handle, remote.location, options())).toEqual({
+    expect(await registerHostedUrl(handle, { url: remote.location }, options())).toEqual({
       ok: true,
       repositoryId: repository?.id,
       created: false,
@@ -326,13 +327,15 @@ describe('registerHostedUrl', realGit, () => {
 
   it('stores no default branch for an empty repository, and detects it on a new registration', async () => {
     const remote = new FixtureRemote(remotes, 'acme', 'empty');
-    expect(await registerHostedUrl(handle, remote.location, options())).toMatchObject({ ok: true });
+    expect(await registerHostedUrl(handle, { url: remote.location }, options())).toMatchObject({
+      ok: true,
+    });
     const [empty] = await handle.db.select().from(schema.repositories);
     expect(empty?.defaultBranch).toBeNull();
     expect(await scan(empty as RepositoryRecord)).toMatchObject({ code: 'branch-not-found' });
     // Regression (review of PR #51): registering the URL again is the way out the error names.
     remote.commit({ 'AGENTS.md': '# Rules\n' });
-    expect(await registerHostedUrl(handle, remote.location, options())).toMatchObject({
+    expect(await registerHostedUrl(handle, { url: remote.location }, options())).toMatchObject({
       ok: true,
       created: false,
     });
@@ -342,19 +345,31 @@ describe('registerHostedUrl', realGit, () => {
   });
 
   it('rejects a missing repository as not found or not public and stores nothing', async () => {
-    const result = await registerHostedUrl(handle, 'https://github.com/acme/missing', options());
+    const result = await registerHostedUrl(
+      handle,
+      { url: 'https://github.com/acme/missing' },
+      options(),
+    );
     expect(result).toEqual({ ok: false, code: 'auth-required', message: NOT_FOUND_OR_NOT_PUBLIC });
     expect(await handle.db.$count(schema.repositories)).toBe(0);
   });
 
   it('rejects an invalid URL without running git', async () => {
-    const result = await registerHostedUrl(handle, 'https://user:pw@github.com/a/b', options());
+    const result = await registerHostedUrl(
+      handle,
+      { url: 'https://user:pw@github.com/a/b' },
+      options(),
+    );
     expect(result).toMatchObject({ ok: false, code: 'invalid-url' });
     expect(existsSync(cacheDir())).toBe(false);
   });
 
   it('reports a missing git', async () => {
-    const result = await registerHostedUrl(handle, 'https://github.com/a/b', options({ env: {} }));
+    const result = await registerHostedUrl(
+      handle,
+      { url: 'https://github.com/a/b' },
+      options({ env: {} }),
+    );
     expect(result).toEqual({
       ok: false,
       code: 'git-not-installed',
@@ -367,7 +382,7 @@ describe('registerHostedUrl', realGit, () => {
     fakeGit(bin, { version: { stdout: 'git version 2.43.0\n' } });
     const result = await registerHostedUrl(
       handle,
-      'https://github.com/a/b',
+      { url: 'https://github.com/a/b' },
       options({ env: { PATH: bin } }),
     );
     expect(result).toMatchObject({ ok: false, code: 'git-too-old' });
@@ -379,7 +394,7 @@ describe('registerHostedUrl', realGit, () => {
     const remote = teamSkills();
     const result = await registerHostedUrl(
       handle,
-      remote.location,
+      { url: remote.location },
       options({ transport: { remoteUrl: fileTransport(remotes).remoteUrl, protocol: 'https' } }),
     );
     expect(result).toMatchObject({ ok: false, code: 'git-failed' });
@@ -391,7 +406,11 @@ describe('registerHostedUrl', realGit, () => {
     const controller = new AbortController();
     controller.abort('cancelled');
     await expect(
-      registerHostedUrl(handle, 'https://github.com/a/b', options({ signal: controller.signal })),
+      registerHostedUrl(
+        handle,
+        { url: 'https://github.com/a/b' },
+        options({ signal: controller.signal }),
+      ),
     ).rejects.toThrow(GitCancelledError);
   });
 });
@@ -641,7 +660,7 @@ describe('scanHostedRepository', realGit, () => {
     // Registration (ls-remote) detects the real repository's default branch, not evil's.
     const registration = await registerHostedUrl(
       handle,
-      remote.location,
+      { url: remote.location },
       options({ cacheDir: cache }),
     );
     if (!registration.ok) throw new Error(registration.message);
@@ -716,7 +735,7 @@ describe('scanHostedRepository', realGit, () => {
     const cache = join(remotes, 'a:b', 'cache');
     const registration = await registerHostedUrl(
       handle,
-      remote.location,
+      { url: remote.location },
       options({ cacheDir: cache }),
     );
     const scanned = await scan(await registered(remote), { cacheDir: cache });
@@ -865,6 +884,7 @@ describe('scanHostedRepository', realGit, () => {
       name: 'odd',
       location: 'https://github.com/Acme/odd',
       defaultBranch: 'main',
+      selectedBranch: null,
     });
     expect(await scan(odd)).toEqual({
       ok: false,
@@ -1169,7 +1189,7 @@ describe(
           ok: true,
           createdArtifacts: 4,
           commitSha: remote.head(),
-          scanConfigHash: hostedScanConfigHash(VERSION),
+          scanConfigHash: hostedScanConfigHash(VERSION, 'main'),
         });
         expect(first.ok && first.unchanged).toBeFalsy();
         expect(gitCommands()).toContain('clone');
@@ -1182,6 +1202,7 @@ describe(
         expect(second).toEqual({
           ok: true,
           unchanged: true,
+          branch: 'main',
           scannedFiles: first.scannedFiles,
           discovered: first.discovered,
           createdArtifacts: 0,
@@ -1240,12 +1261,15 @@ describe(
       const repository = await registered(remote);
       await rescan(repository);
       gitCommands();
-      expect(hostedScanConfigHash('1.0.1')).toMatch(/^[0-9a-f]{64}$/);
-      expect(hostedScanConfigHash('1.0.1')).not.toBe(hostedScanConfigHash(VERSION));
+      expect(hostedScanConfigHash('1.0.1', 'main')).toMatch(/^[0-9a-f]{64}$/);
+      expect(hostedScanConfigHash('1.0.1', 'main')).not.toBe(hostedScanConfigHash(VERSION, 'main'));
 
       // Another DirectiveBench version reads the same commit again, once.
       const { result: upgraded } = await rescan(repository, { appVersion: '1.0.1' });
-      expect(upgraded).toMatchObject({ ok: true, scanConfigHash: hostedScanConfigHash('1.0.1') });
+      expect(upgraded).toMatchObject({
+        ok: true,
+        scanConfigHash: hostedScanConfigHash('1.0.1', 'main'),
+      });
       expect(upgraded.ok && upgraded.unchanged).toBeFalsy();
       expect(gitCommands()).toContain('ls-tree');
       const { jobId, result: again } = await rescan(repository, { appVersion: '1.0.1' });
@@ -1395,7 +1419,7 @@ describe(
         results.push((await getRepositoryScan(handle.db, job.id))?.result);
       }
       expect(results).toMatchObject([
-        { ok: true, createdArtifacts: 4, scanConfigHash: hostedScanConfigHash(VERSION) },
+        { ok: true, createdArtifacts: 4, scanConfigHash: hostedScanConfigHash(VERSION, 'main') },
         { ok: true, unchanged: true, createdArtifacts: 0, createdVersions: 0 },
       ]);
     });

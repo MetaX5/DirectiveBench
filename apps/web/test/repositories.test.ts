@@ -1,13 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { CREDENTIALS_IN_URL_MESSAGE } from '@directivebench/core';
 import type {
+  RepositoryBranchChange,
   RepositoryRecord,
   RepositoryRegistration,
   RepositoryRemovalImpact,
   RepositoryScan,
 } from '@directivebench/database';
 import {
+  branchCaption,
+  branchChangeRequestError,
+  branchFieldError,
   branchLabel,
+  branchPanelHelp,
+  branchPanelNote,
+  describeBranchChange,
+  echoedBranch,
+  isHosted,
+  parseChangeBranchParam,
+  scannedBranchHint,
   canRemove,
   canScan,
   describeRegistration,
@@ -34,6 +45,7 @@ const repository: RepositoryRecord = {
   defaultBranch: 'main',
   selectedBranch: null,
   lastCommitSha: null,
+  scannedBranch: null,
   lastSyncAt: null,
   syncStatus: 'never',
   syncError: null,
@@ -47,6 +59,7 @@ function registration(overrides: Partial<RepositoryRegistration>): RepositoryReg
     status: 'completed',
     input: '~/skills',
     source: 'path',
+    branch: null,
     error: null,
     result: null,
     repository: null,
@@ -161,11 +174,13 @@ describe('describeRegistration', () => {
     expect(describeRegistration(registration({ status: 'pending' }))).toEqual({
       kind: 'active',
       path: '~/skills',
+      branch: '',
       message: 'Waiting for the runner to check ~/skills. It runs inside directivebench serve.',
     });
     expect(describeRegistration(registration({ status: 'running' }))).toEqual({
       kind: 'active',
       path: '~/skills',
+      branch: '',
       message: 'Checking ~/skills (read-only)…',
     });
     const url = 'https://github.com/acme/skills';
@@ -174,7 +189,19 @@ describe('describeRegistration', () => {
     ).toEqual({
       kind: 'active',
       path: url,
+      branch: '',
       message: `Asking GitHub about ${url} (read-only, without credentials; nothing is downloaded yet)…`,
+    });
+    // Issue 58: the branch the user named is checked in the same request and kept in the field.
+    expect(
+      describeRegistration(
+        registration({ status: 'running', input: url, source: 'url', branch: 'relase' }),
+      ),
+    ).toEqual({
+      kind: 'active',
+      path: url,
+      branch: 'relase',
+      message: `Asking GitHub about ${url} and its branch relase (read-only, without credentials; nothing is downloaded yet)…`,
     });
   });
 
@@ -186,6 +213,7 @@ describe('describeRegistration', () => {
     ).toEqual({
       kind: 'done',
       path: '~/skills',
+      branch: '',
       message: 'Registered skills (Local Git, /srv/skills).',
     });
     expect(
@@ -225,7 +253,9 @@ describe('describeRegistration', () => {
     for (const [input, message] of cases) {
       expect(describeRegistration(input)).toEqual({
         kind: 'fieldError',
+        field: 'path',
         path: '~/skills',
+        branch: '',
         message,
       });
     }
@@ -834,5 +864,223 @@ describe('removalResult (SPEC-125 §11.3 D18)', () => {
     });
     expect(removalResult(remove, known)).toBeNull();
     expect(removalResult(none, { unknownTarget: true })).toBeNull();
+  });
+});
+
+// Issue 58: the branch of a hosted repository.
+const hosted: RepositoryRecord = {
+  ...repository,
+  id: 'repo_gh',
+  provider: 'github',
+  name: 'acme/team-rules',
+  location: 'https://github.com/acme/team-rules',
+};
+
+describe('branchCaption and isHosted (issue 58 B4)', () => {
+  it('says whether the branch is the default, chosen or the checked-out one', () => {
+    expect(branchCaption(hosted)).toBe('Default branch');
+    expect(branchCaption({ ...hosted, selectedBranch: 'release/2.0' })).toBe(
+      'Chosen. Default: main',
+    );
+    expect(branchCaption({ ...hosted, selectedBranch: 'x', defaultBranch: null })).toBe(
+      'Chosen. Default: not detected',
+    );
+    expect(branchCaption({ ...hosted, defaultBranch: null })).toBeNull();
+    expect(branchCaption(repository)).toBe('Checked out (scans the working tree)');
+    expect(branchCaption({ ...repository, provider: 'local-directory' })).toBeNull();
+    expect(isHosted(hosted)).toBe(true);
+    expect(isHosted(repository)).toBe(false);
+  });
+});
+
+describe('scannedBranchHint (issue 58 B7)', () => {
+  it('names the branch the last scan read when the repository now uses another', () => {
+    const changed = { ...hosted, selectedBranch: 'release/2.0', scannedBranch: 'main' };
+    expect(scannedBranchHint({ ...changed, syncStatus: 'ok' })).toBe(
+      'That scan read main: scan again to read release/2.0.',
+    );
+    // Nothing to say: same branch, unknown scanned branch, a failed scan, a local repository,
+    // or no branch at all.
+    expect(scannedBranchHint({ ...hosted, scannedBranch: 'main', syncStatus: 'ok' })).toBeNull();
+    expect(scannedBranchHint({ ...changed, scannedBranch: null, syncStatus: 'ok' })).toBeNull();
+    expect(scannedBranchHint({ ...changed, syncStatus: 'error' })).toBeNull();
+    expect(scannedBranchHint({ ...repository, scannedBranch: 'x', syncStatus: 'ok' })).toBeNull();
+    expect(
+      scannedBranchHint({ ...hosted, defaultBranch: null, scannedBranch: 'x', syncStatus: 'ok' }),
+    ).toBeNull();
+  });
+});
+
+describe('branch field errors and echo (issue 58 B3)', () => {
+  it('maps the action codes to fixed messages', () => {
+    expect(branchFieldError('invalid')).toMatch(/^A branch name may use letters, digits/);
+    expect(branchFieldError('local')).toBe(
+      'A local repository is scanned from its working tree; leave Branch empty.',
+    );
+    expect(branchFieldError(undefined)).toBeNull();
+    expect(branchFieldError('other')).toBeNull();
+  });
+
+  it('never echoes a value that may carry credentials, and cuts a long one', () => {
+    expect(echoedBranch('release 2.0')).toBe('release 2.0');
+    expect(echoedBranch(undefined)).toBe('');
+    for (const value of ['x@token', 'a?b', 'a#b', 'a%40b', 'a%2540b', 'a\uFF20b']) {
+      expect(echoedBranch(value)).toBe('');
+    }
+    expect(echoedBranch('x'.repeat(300))).toHaveLength(256);
+  });
+
+  it('notes a branch a re-registration did not change', () => {
+    const done = (branch: string | null, stored: Partial<RepositoryRecord>) =>
+      describeRegistration(
+        registration({
+          source: 'url',
+          input: hosted.location,
+          branch,
+          result: { ok: true, repositoryId: hosted.id, created: false },
+          repository: { ...hosted, ...stored },
+        }),
+      ).message;
+    const note = ' Its branch was not changed: use Change branch in the list.';
+    expect(done('dev', {})).toBe(
+      `acme/team-rules (GitHub, ${hosted.location}) is already registered.${note}`,
+    );
+    // Equal choices, also the default's own name against a stored null.
+    expect(done('main', {})).not.toContain(note);
+    expect(done('dev', { selectedBranch: 'dev' })).not.toContain(note);
+    expect(done(null, { selectedBranch: 'dev' })).not.toContain(note);
+  });
+
+  it('shows a branch the remote does not have under the Branch field', () => {
+    const message =
+      'The branch relase does not exist in acme/agent-skills. Check the name on GitHub, or leave Branch empty to use the default branch.';
+    expect(
+      describeRegistration(
+        registration({
+          source: 'url',
+          input: 'https://github.com/acme/agent-skills',
+          branch: 'relase',
+          result: { ok: false, code: 'branch-not-found', message },
+        }),
+      ),
+    ).toEqual({
+      kind: 'fieldError',
+      field: 'branch',
+      path: 'https://github.com/acme/agent-skills',
+      branch: 'relase',
+      message,
+    });
+  });
+});
+
+describe('the Change branch panel (issue 58)', () => {
+  function change(overrides: Partial<RepositoryBranchChange>): RepositoryBranchChange {
+    return {
+      jobId: 'job_b',
+      status: 'completed',
+      repositoryId: hosted.id,
+      branch: 'release/2.0',
+      error: null,
+      result: null,
+      repository: hosted,
+      ...overrides,
+    };
+  }
+
+  it('describes every state of a branch change', () => {
+    expect(describeBranchChange(change({ status: 'pending' }))).toEqual({
+      kind: 'active',
+      value: 'release/2.0',
+      message:
+        'Waiting for the runner to check the branch of acme/team-rules. It runs inside directivebench serve.',
+    });
+    expect(describeBranchChange(change({ status: 'running' }))).toEqual({
+      kind: 'active',
+      value: 'release/2.0',
+      message: 'Asking GitHub whether release/2.0 exists (read-only, nothing is downloaded)…',
+    });
+    expect(describeBranchChange(change({ status: 'running', branch: null }))).toEqual({
+      kind: 'active',
+      value: '',
+      message: 'Asking GitHub for the default branch (read-only, nothing is downloaded)…',
+    });
+    expect(describeBranchChange(change({ status: 'pending', repository: null })).message).toContain(
+      'the branch of the repository.',
+    );
+    const cases: [RepositoryBranchChange, string][] = [
+      [change({ status: 'failed', error: 'Boom.' }), 'Boom.'],
+      [change({ status: 'failed' }), 'The branch change failed.'],
+      [change({ status: 'cancelled' }), 'The branch change was cancelled. Nothing was changed.'],
+      [
+        change({ status: 'interrupted' }),
+        // A crash after the branch transaction committed: never "nothing was changed".
+        'The runner stopped before it recorded the outcome of the branch change. The new branch may have been saved: check the Branch column before you scan.',
+      ],
+      [change({}), 'The runner finished without a result.'],
+      [
+        change({ result: { ok: false, code: 'scan-active', message: 'A scan is running.' } }),
+        'A scan is running.',
+      ],
+    ];
+    for (const [input, message] of cases) {
+      expect(describeBranchChange(input)).toEqual({ kind: 'error', message });
+    }
+    expect(
+      describeBranchChange(
+        change({ result: { ok: false, code: 'branch-not-found', message: 'No such branch.' } }),
+      ),
+    ).toEqual({ kind: 'fieldError', message: 'No such branch.', value: 'release/2.0' });
+    expect(
+      describeBranchChange(
+        change({ result: { ok: true, branch: 'release/2.0', defaultBranch: 'main' } }),
+      ),
+    ).toEqual({
+      kind: 'done',
+      message: 'acme/team-rules now uses the branch release/2.0. Scan it to read that branch.',
+    });
+    expect(
+      describeBranchChange(
+        change({ branch: null, result: { ok: true, branch: null, defaultBranch: 'main' } }),
+      ).message,
+    ).toBe('acme/team-rules now follows its default branch (main). Scan it to read that branch.');
+    expect(
+      describeBranchChange(
+        change({ branch: null, result: { ok: true, branch: null, defaultBranch: null } }),
+      ).message,
+    ).toBe('acme/team-rules now follows its default branch. Scan it to read that branch.');
+  });
+
+  it('explains what saving does and what the empty field means', () => {
+    expect(branchPanelNote({ ...hosted, selectedBranch: 'release/2.0' })).toBe(
+      'Saving does not scan. The next scan reads the new branch: artifacts found only on release/2.0 are then marked missing (their history is kept) and return when a later scan finds them again.',
+    );
+    expect(branchPanelNote({ ...hosted, defaultBranch: null })).toContain(
+      'found only on the current branch',
+    );
+    expect(branchPanelHelp(hosted)).toBe('Leave empty to follow the default branch (main).');
+    expect(branchPanelHelp({ ...hosted, defaultBranch: null })).toBe(
+      'Leave empty to follow the default branch.',
+    );
+  });
+
+  it('parses the panel parameter and names why a change could not be requested', () => {
+    expect(parseChangeBranchParam('repo_gh')).toBe('repo_gh');
+    expect(parseChangeBranchParam(['repo_gh', 'repo_x'])).toBeNull();
+    expect(parseChangeBranchParam('../x')).toBeNull();
+    expect(parseChangeBranchParam(undefined)).toBeNull();
+    for (const code of [
+      'invalid',
+      'not-found',
+      'unsupported',
+      'scan-active',
+      'branch-change-active',
+    ]) {
+      expect(branchChangeRequestError(code)).toMatch(/\.$/);
+    }
+    expect(branchChangeRequestError('scan-active')).toBe(
+      'A scan of this repository is waiting or running. Change its branch after the scan finishes.',
+    );
+    expect(branchChangeRequestError(undefined)).toBeNull();
+    expect(branchChangeRequestError('other')).toBeNull();
   });
 });

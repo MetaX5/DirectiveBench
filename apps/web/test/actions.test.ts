@@ -19,16 +19,23 @@ import {
   getRepositoryScan,
   importArtifactVersion,
   registerLocalRepository,
+  registerHostedRepository,
+  getRepositoryBranchChange,
+  recoverStaleJobs,
+  setRepositoryBranch,
+  enqueueRepositoryScanJob,
   importSuiteVersion,
   listJobs,
   upsertRepository,
   type DatabaseHandle,
 } from '@directivebench/database';
+import { describeBranchChange } from '../lib/repositories';
 import {
   addArtifactTagAction,
   assignArtifactCategoryAction,
   assignArtifactSuiteAction,
   cancelJobAction,
+  changeRepositoryBranchAction,
   createCategoryAction,
   setCategoryArchivedAction,
   updateCategoryAction,
@@ -509,6 +516,197 @@ describe('registerRepositoryAction', () => {
     );
     const jobId = new URL(url, 'http://localhost').searchParams.get('registration') as string;
     expect((await getJob(handle.db, jobId))?.payload).toEqual({ path: '/srv' });
+  });
+});
+
+describe('registerRepositoryAction with a branch (issue 58)', () => {
+  const jobs = () =>
+    Number((handle.sqlite.prepare('select count(*) as n from jobs').get() as { n: number }).n);
+  const payloadOf = async (url: string) =>
+    (await getJob(handle.db, new URL(url, 'http://localhost').searchParams.get('registration')!))
+      ?.payload;
+
+  it('enqueues the trimmed branch with the URL, and no branch for an empty field', async () => {
+    const url = 'https://github.com/acme/skills';
+    expect(
+      await payloadOf(
+        await redirectOf(registerRepositoryAction(form({ path: url, branch: ' release/2.0 ' }))),
+      ),
+    ).toEqual({ url, branch: 'release/2.0' });
+    expect(
+      await payloadOf(await redirectOf(registerRepositoryAction(form({ path: url, branch: ' ' })))),
+    ).toEqual({ url });
+    // A form without the field (the confirmation form) is an empty field.
+    expect(
+      await payloadOf(await redirectOf(registerRepositoryAction(form({ path: url })))),
+    ).toEqual({ url });
+  });
+
+  it('returns an invalid branch to the Branch field, never echoing what may carry credentials', async () => {
+    const url = 'https://github.com/Acme/Skills.git';
+    expect(
+      await redirectOf(registerRepositoryAction(form({ path: url, branch: 'release 2.0' }))),
+    ).toBe(
+      '/repositories?path=https%3A%2F%2Fgithub.com%2Facme%2Fskills&branchName=release+2.0&branchError=invalid',
+    );
+    const secret = 'ghp_abcdefghijklmnopqrstuvwxyz0123';
+    for (const branch of [`x@${secret}`, `x?t=${secret}`, `x%40${secret}`]) {
+      const back = await redirectOf(registerRepositoryAction(form({ path: url, branch })));
+      expect(back).not.toContain(secret);
+      expect(back).toContain('branchName=&branchError=invalid');
+    }
+    const upload = new FormData();
+    upload.set('path', url);
+    upload.set('branch', new Blob(['main']), 'branch.txt');
+    expect(await redirectOf(registerRepositoryAction(upload))).toContain(
+      'branchName=&branchError=invalid',
+    );
+    expect(jobs()).toBe(0);
+  });
+
+  it('refuses a branch with a local path instead of ignoring it', async () => {
+    expect(
+      await redirectOf(registerRepositoryAction(form({ path: '/srv/skills', branch: 'main' }))),
+    ).toBe('/repositories?path=%2Fsrv%2Fskills&branchName=main&branchError=local');
+    // A valid path with `@` is registered as typed, but never echoed back.
+    expect(
+      await redirectOf(registerRepositoryAction(form({ path: '/srv/a@b', branch: 'main' }))),
+    ).toBe('/repositories?path=&branchName=main&branchError=local');
+    const upload = new FormData();
+    upload.set('path', '/srv/skills');
+    upload.set('branch', new Blob(['main']), 'branch.txt');
+    expect(await redirectOf(registerRepositoryAction(upload))).toBe(
+      '/repositories?path=%2Fsrv%2Fskills&branchName=&branchError=local',
+    );
+    expect(jobs()).toBe(0);
+    // An empty or blank Branch with a local path registers as before.
+    expect(
+      await payloadOf(
+        await redirectOf(registerRepositoryAction(form({ path: '/srv/skills', branch: '  ' }))),
+      ),
+    ).toEqual({ path: '/srv/skills' });
+  });
+});
+
+describe('changeRepositoryBranchAction (issue 58)', () => {
+  async function hostedRepository(name = 'skills'): Promise<string> {
+    const { repository } = await registerHostedRepository(handle.db, {
+      provider: 'github',
+      name: `acme/${name}`,
+      location: `https://github.com/acme/${name}`,
+      defaultBranch: 'main',
+      selectedBranch: null,
+    });
+    return repository.id;
+  }
+
+  it('enqueues a branch change and shows it in the panel', async () => {
+    const repositoryId = await hostedRepository();
+    const url = await redirectOf(
+      changeRepositoryBranchAction(form({ repositoryId, branch: ' release/2.0 ' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('branchChange') as string;
+    expect(url).toBe(`/repositories?branchChange=${jobId}#branch-panel`);
+    expect(next.revalidatePath).toHaveBeenCalledWith('/repositories');
+    expect(await getRepositoryBranchChange(handle.db, jobId)).toMatchObject({
+      status: 'pending',
+      repositoryId,
+      branch: 'release/2.0',
+    });
+    // The same request again returns the same job; an empty field follows the default.
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId, branch: 'release/2.0' }))),
+    ).toBe(url);
+    const other = await hostedRepository('other');
+    const followUrl = await redirectOf(
+      changeRepositoryBranchAction(form({ repositoryId: other, branch: '' })),
+    );
+    const followJob = new URL(followUrl, 'http://localhost').searchParams.get('branchChange')!;
+    expect((await getRepositoryBranchChange(handle.db, followJob))?.branch).toBeNull();
+  });
+
+  it('returns an invalid name to the field and refuses what cannot be changed now', async () => {
+    const repositoryId = await hostedRepository();
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId, branch: 'release 2.0' }))),
+    ).toBe(
+      `/repositories?changeBranch=${repositoryId}&branchName=release+2.0&branchError=invalid#branch-panel`,
+    );
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId, branch: 'a@token' }))),
+    ).toBe(
+      `/repositories?changeBranch=${repositoryId}&branchName=&branchError=invalid#branch-panel`,
+    );
+    expect(await redirectOf(changeRepositoryBranchAction(form({ repositoryId })))).toBe(
+      '/repositories?branchChangeError=invalid#branch-panel',
+    );
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId: '../x', branch: 'a' }))),
+    ).toBe('/repositories?branchChangeError=invalid#branch-panel');
+    expect(
+      await redirectOf(
+        changeRepositoryBranchAction(form({ repositoryId: 'repo_missing', branch: 'a' })),
+      ),
+    ).toBe('/repositories?branchChangeError=not-found#branch-panel');
+    const local = await registerLocalRepository(
+      handle,
+      { provider: 'local-git', name: 'local', location: '/srv/local', defaultBranch: 'main' },
+      { homeDirectory: '/home/me', confirmedLocation: null },
+    );
+    if (local.status !== 'registered') throw new Error('not registered');
+    expect(
+      await redirectOf(
+        changeRepositoryBranchAction(form({ repositoryId: local.repository.id, branch: 'a' })),
+      ),
+    ).toBe('/repositories?branchChangeError=unsupported#branch-panel');
+
+    await enqueueRepositoryScanJob(handle, { repositoryId });
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId, branch: 'dev' }))),
+    ).toBe('/repositories?branchChangeError=scan-active#branch-panel');
+    const other = await hostedRepository('other');
+    await redirectOf(changeRepositoryBranchAction(form({ repositoryId: other, branch: 'dev' })));
+    expect(
+      await redirectOf(changeRepositoryBranchAction(form({ repositoryId: other, branch: 'x' }))),
+    ).toBe('/repositories?branchChangeError=branch-change-active#branch-panel');
+  });
+
+  it('never says "nothing was changed" for a change interrupted after its branch was stored', async () => {
+    // Codex review round 1 of PR #248: the branch commits in its own transaction before the job
+    // records its outcome; a crash in between leaves the job interrupted and the branch saved.
+    const repositoryId = await hostedRepository();
+    const url = await redirectOf(
+      changeRepositoryBranchAction(form({ repositoryId, branch: 'dev' })),
+    );
+    const jobId = new URL(url, 'http://localhost').searchParams.get('branchChange') as string;
+    await acquireNextJob(handle.db, 'runner', { types: ['repository-branch'] });
+    expect(
+      await setRepositoryBranch(handle, {
+        repositoryId,
+        jobId,
+        signal: new AbortController().signal,
+        branch: 'dev',
+        defaultBranch: 'main',
+      }),
+    ).toMatchObject({ status: 'updated' });
+    expect(await recoverStaleJobs(handle.db, '9999-01-01T00:00:00.000Z')).toEqual([jobId]);
+    const change = await getRepositoryBranchChange(handle.db, jobId);
+    expect(change?.repository?.selectedBranch).toBe('dev');
+    const notice = describeBranchChange(change!);
+    expect(notice.kind).toBe('error');
+    expect(notice.message).toContain('The new branch may have been saved');
+    expect(notice.message).not.toContain('Nothing was changed');
+  });
+
+  it('still fails loudly on an unexpected database error', async () => {
+    const repositoryId = await hostedRepository();
+    handle.sqlite.exec(
+      "CREATE TRIGGER fail_jobs BEFORE INSERT ON jobs BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    await expect(
+      changeRepositoryBranchAction(form({ repositoryId, branch: 'dev' })),
+    ).rejects.toThrow();
+    expect(next.redirect).not.toHaveBeenCalled();
   });
 });
 

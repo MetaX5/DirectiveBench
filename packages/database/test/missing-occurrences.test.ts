@@ -60,7 +60,14 @@ async function runningScan(handle: DatabaseHandle, location: string, name = 'rep
 
 function scanWith(handle: DatabaseHandle, scan: { repositoryId: string; jobId: string }) {
   return (artifacts: ScannedArtifactInput[], unobserved: string[] = []) =>
-    applyRepositoryScan(handle, { ...scan, artifacts, unobserved, signal, commitSha: null });
+    applyRepositoryScan(handle, {
+      ...scan,
+      artifacts,
+      unobserved,
+      signal,
+      commitSha: null,
+      branch: null,
+    });
 }
 
 async function occurrencesOf(handle: DatabaseHandle, repositoryId: string) {
@@ -324,6 +331,7 @@ describe('applyRepositoryScan marks missing occurrences (SPEC-125)', () => {
         unobserved: [],
         signal: aborted.signal,
         commitSha: null,
+        branch: null,
       }),
     ).rejects.toThrow(JobNoLongerRunningError);
     await requestJobCancellation(handle.db, scan.jobId);

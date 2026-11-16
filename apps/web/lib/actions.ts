@@ -4,6 +4,7 @@ import { validateDefinition } from '@directivebench/benchmark-engine/load';
 import {
   MAX_REPOSITORY_PATH_LENGTH,
   MAX_REPOSITORY_URL_LENGTH,
+  branchNameSchema,
   looksLikeRepositoryUrl,
   parseRepositoryUrl,
   repositoryLocationSchema,
@@ -15,6 +16,7 @@ import {
   assignArtifactSuite,
   createCategory,
   enqueueBenchmarkJob,
+  enqueueRepositoryBranchJob,
   enqueueRepositoryRegistrationJob,
   enqueueRepositoryScanJob,
   NotFoundError,
@@ -83,6 +85,7 @@ import {
 import { requireDatabase } from './db';
 import { webRunBlockers } from './run-guard';
 import {
+  echoedBranch,
   looksLikeProtocolRelativeUrl,
   mayCarryCredentials,
   type RejectedInputCode,
@@ -148,15 +151,42 @@ function returnToForm(value: string, code: RejectedInputCode, limit: number): ne
 }
 
 /**
- * Registers a public GitHub repository by URL (SPEC-104 FR-104-02, FR-104-05): only its
- * normalised, credential-free location is enqueued, and the runner asks the remote for the
- * default branch. A rejected URL goes back to the form (see `returnToForm`).
+ * The Branch field of the register form (issue 58): a missing field (the "Register anyway" form
+ * has none) is empty; a file upload is not a branch. Returns the raw text, or null for an upload.
  */
-async function registerUrl(value: string): Promise<never> {
+function branchField(value: FormDataEntryValue | null): string | null {
+  if (value === null) return '';
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * Sends a rejected Branch back to the register form with its reason (`invalid`: not a safe name;
+ * `local`: a branch with a local path). The path is the accepted one (a URL's normalised,
+ * credential-free location); either value goes back only when it cannot carry credentials.
+ */
+function returnBranchToForm(path: string, branch: string, code: 'invalid' | 'local'): never {
+  const params = new URLSearchParams({
+    path: mayCarryCredentials(path) ? '' : path,
+    branchName: echoedBranch(branch),
+    branchError: code,
+  });
+  redirect(`/repositories?${params.toString()}`);
+}
+
+/**
+ * Registers a public GitHub repository by URL (SPEC-104 FR-104-02, FR-104-05, FR-104-07): only
+ * its normalised, credential-free location is enqueued, with the branch the user named (checked
+ * here for its syntax, by the runner against the remote); the runner asks the remote for the
+ * default branch. A rejected URL or branch goes back to the form (see `returnToForm`).
+ */
+async function registerUrl(value: string, rawBranch: string | null): Promise<never> {
   const parsed = parseRepositoryUrl(value);
   if (!parsed.ok) returnToForm(value, parsed.code, MAX_REPOSITORY_URL_LENGTH);
+  const branch = branchNameSchema.safeParse(rawBranch);
+  if (!branch.success) returnBranchToForm(parsed.location, rawBranch ?? '', 'invalid');
   const job = await enqueueRepositoryRegistrationJob(requireDatabase().db, {
     url: parsed.location,
+    ...(branch.data === null ? {} : { branch: branch.data }),
   });
   revalidatePath('/repositories');
   redirect(`/repositories?registration=${encodeURIComponent(job.id)}`);
@@ -171,7 +201,8 @@ async function registerUrl(value: string): Promise<never> {
  */
 export async function registerRepositoryAction(formData: FormData): Promise<void> {
   const raw = formData.get('path');
-  if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw);
+  const rawBranch = branchField(formData.get('branch'));
+  if (typeof raw === 'string' && looksLikeRepositoryUrl(raw)) return registerUrl(raw, rawBranch);
   // `//github.com/a/b?access_token=…` is a valid absolute path but reads as a protocol-relative
   // URL: with characters that can carry credentials it is refused instead of being stored as
   // typed. Without them (`//srv/share`: a UNC path on Windows, an ordinary absolute path on POSIX)
@@ -183,6 +214,11 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
   if (!input.success) {
     // A missing field or a file upload is not echoed at all.
     returnToForm(typeof raw === 'string' ? raw : '', 'not-echoed', MAX_REPOSITORY_PATH_LENGTH);
+  }
+  // A local repository is scanned from its working tree (OQ-104-02): a branch is refused, not
+  // silently ignored (issue 58 B3).
+  if (rawBranch === null || rawBranch.trim() !== '') {
+    returnBranchToForm(input.data.path, rawBranch ?? '', 'local');
   }
   // Present only when the user confirmed a broad or overlapping location (FR-104-18). An invalid
   // value is dropped, so the runner simply asks again; it never skips the check on its own.
@@ -223,6 +259,57 @@ export async function scanRepositoryAction(formData: FormData): Promise<void> {
   if ('error' in outcome) redirect(`/repositories?scanError=${outcome.error}`);
   revalidatePath('/repositories');
   redirect(`/repositories?scan=${encodeURIComponent(outcome.jobId)}`);
+}
+
+const changeBranchSchema = z.object({
+  repositoryId: z.string().regex(/^repo_[A-Za-z0-9_-]{1,64}$/),
+  branch: z.string(),
+});
+
+/**
+ * Changes the branch a GitHub repository is scanned on (SPEC-104 FR-104-07, FR-104-14, issue 58).
+ * The web process checks only the syntax (`branchNameSchema`; an invalid name returns to the
+ * panel with the error under the field) and enqueues a `repository-branch` job, refused while a
+ * scan or another branch change of the repository is pending or running; the runner checks the
+ * branch with the remote and stores it. Saving never scans. Every outcome returns to
+ * `#branch-panel`.
+ */
+export async function changeRepositoryBranchAction(formData: FormData): Promise<void> {
+  const input = changeBranchSchema.safeParse({
+    repositoryId: formData.get('repositoryId'),
+    branch: formData.get('branch'),
+  });
+  if (!input.success) redirect('/repositories?branchChangeError=invalid#branch-panel');
+  const { repositoryId } = input.data;
+  const branch = branchNameSchema.safeParse(input.data.branch);
+  if (!branch.success) {
+    const params = new URLSearchParams({
+      changeBranch: repositoryId,
+      branchName: echoedBranch(input.data.branch),
+      branchError: 'invalid',
+    });
+    redirect(`/repositories?${params.toString()}#branch-panel`);
+  }
+  let outcome;
+  try {
+    outcome = await enqueueRepositoryBranchJob(requireDatabase(), {
+      repositoryId,
+      branch: branch.data,
+    });
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      redirect('/repositories?branchChangeError=not-found#branch-panel');
+    }
+    if (error instanceof UnsupportedRepositoryError) {
+      redirect('/repositories?branchChangeError=unsupported#branch-panel');
+    }
+    throw error;
+  }
+  if (outcome.status !== 'enqueued') {
+    redirect(`/repositories?branchChangeError=${outcome.status}#branch-panel`);
+  }
+  revalidatePath('/repositories');
+  redirect(`/repositories?branchChange=${encodeURIComponent(outcome.job.id)}#branch-panel`);
 }
 
 const removeRepositorySchema = z.object({ repositoryId: z.string().min(1) });

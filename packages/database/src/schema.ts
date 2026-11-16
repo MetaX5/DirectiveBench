@@ -61,8 +61,14 @@ export const repositories = sqliteTable(
     /** Base URL of the provider instance (e.g. self-managed GitLab). */
     instanceUrl: text('instance_url'),
     defaultBranch: text('default_branch'),
+    /** The branch the user chose for a hosted repository (issue 58); null follows the default. */
     selectedBranch: text('selected_branch'),
     lastCommitSha: text('last_commit_sha'),
+    /**
+     * The branch the last successful hosted scan read, written with `last_commit_sha` (issue 58);
+     * null for local scans, before the first hosted scan and for rows scanned before it existed.
+     */
+    scannedBranch: text('scanned_branch'),
     lastSyncAt: text('last_sync_at'),
     syncStatus: text('sync_status', { enum: ['never', 'ok', 'error'] })
       .notNull()
@@ -266,7 +272,12 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export const JOB_TYPES = ['benchmark-run', 'repository-registration', 'repository-scan'] as const;
+export const JOB_TYPES = [
+  'benchmark-run',
+  'repository-registration',
+  'repository-scan',
+  'repository-branch',
+] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 /** Persistent local job queue (no Redis). */

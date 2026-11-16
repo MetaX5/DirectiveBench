@@ -94,13 +94,20 @@ afterEach(async () => {
 
 function register(env: NodeJS.ProcessEnv) {
   const { port } = server.address() as AddressInfo;
-  return registerHostedUrl(handle, LOCATION, {
-    env: { PATH: process.env.PATH, ...env },
-    signal: new AbortController().signal,
-    cacheDir: join(dir, 'cache'),
-    // The production protocol, HTTPS, to a loopback server instead of github.com.
-    transport: { remoteUrl: () => `https://127.0.0.1:${port}/acme/skills.git`, protocol: 'https' },
-  });
+  return registerHostedUrl(
+    handle,
+    { url: LOCATION },
+    {
+      env: { PATH: process.env.PATH, ...env },
+      signal: new AbortController().signal,
+      cacheDir: join(dir, 'cache'),
+      // The production protocol, HTTPS, to a loopback server instead of github.com.
+      transport: {
+        remoteUrl: () => `https://127.0.0.1:${port}/acme/skills.git`,
+        protocol: 'https',
+      },
+    },
+  );
 }
 
 describeTls('hosted git and custom CA certificates', () => {

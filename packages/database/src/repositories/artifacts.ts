@@ -41,7 +41,12 @@ import {
 import { alias } from 'drizzle-orm/sqlite-core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import type { CategoryRef } from './catalog';
-import { JobNoLongerRunningError, LOCAL_PROVIDERS, NotFoundError } from './jobs';
+import {
+  BranchChangedError,
+  JobNoLongerRunningError,
+  LOCAL_PROVIDERS,
+  NotFoundError,
+} from './jobs';
 import {
   artifactBenchmarkAssignments,
   artifactCategories,
@@ -467,6 +472,12 @@ export interface RepositoryScanApplication {
    */
   commitSha: string | null;
   /**
+   * The branch a hosted scan read (issue 58), recorded as `scanned_branch` with the commit; the
+   * transaction refuses with a `BranchChangedError` when the repository's effective branch is no
+   * longer this one. Null for a working-tree scan, which reads no branch.
+   */
+  branch: string | null;
+  /**
    * The job's abort signal (user cancellation or runner shutdown). It is checked inside the
    * transaction, before anything is written: the transaction may have waited behind another one
    * on the shared connection, and a shutdown records nothing in the `jobs` row to re-check.
@@ -666,12 +677,7 @@ export async function applyRepositoryScan(
     .sort((a, b) => compareCodeUnits(a.input.path, b.input.path));
   return withTransaction(handle, async (db) => {
     await assertScanStillRunning(db, jobId, application.signal);
-    const repository = await db
-      .select({ provider: repositories.provider })
-      .from(repositories)
-      .where(eq(repositories.id, repositoryId))
-      .get();
-    if (!repository) throw new NotFoundError(`Repository ${repositoryId} not found`);
+    const repository = await assertBranchUnchanged(db, repositoryId, application.branch);
     const summary: RepositoryScanSummary = {
       createdArtifacts: 0,
       createdVersions: 0,
@@ -806,6 +812,7 @@ export async function applyRepositoryScan(
       .update(repositories)
       .set({
         lastCommitSha: application.commitSha,
+        scannedBranch: application.branch,
         lastSyncAt: now,
         syncStatus: 'ok',
         syncError: null,
@@ -1091,6 +1098,96 @@ export async function refreshSourceFields(
 }
 
 /**
+ * The repository a scan is about to write, after checking inside the write transaction that its
+ * effective branch (`selected_branch ?? default_branch`) is still the branch a hosted scan read
+ * (issue 58, SPEC-105 §14): a `BranchChangedError` otherwise, and a `NotFoundError` for a removed
+ * repository. A working-tree scan (`branch` null) reads no branch and is not checked.
+ */
+async function assertBranchUnchanged(
+  db: Database,
+  repositoryId: string,
+  branch: string | null,
+): Promise<{ provider: RepositoryProvider }> {
+  const repository = await db
+    .select({
+      provider: repositories.provider,
+      selectedBranch: repositories.selectedBranch,
+      defaultBranch: repositories.defaultBranch,
+    })
+    .from(repositories)
+    .where(eq(repositories.id, repositoryId))
+    .get();
+  if (!repository) throw new NotFoundError(`Repository ${repositoryId} not found`);
+  if (branch !== null && (repository.selectedBranch ?? repository.defaultBranch) !== branch) {
+    throw new BranchChangedError(`The branch of repository ${repositoryId} changed`);
+  }
+  return repository;
+}
+
+/** What {@link setRepositoryBranch} did. */
+export type SetRepositoryBranchOutcome =
+  | { status: 'updated'; branch: string | null; defaultBranch: string | null }
+  | { status: 'scan-active' }
+  | { status: 'not-found' };
+
+/**
+ * Stores the branch a hosted repository is scanned on (SPEC-104 FR-104-07, FR-104-14, issue 58),
+ * after the runner checked it with the remote. One transaction: the `repository-branch` job is
+ * re-checked first (an aborted signal, a cancellation request or a job that is no longer running
+ * is a `JobNoLongerRunningError` and nothing is written); then one conditional UPDATE stores
+ * `selected_branch` (null when the name equals the default branch, so a repository never pins its
+ * default by accident) and the reported default branch (a remote that reports none keeps the known
+ * one) only while no `repository-scan` of the repository is pending or running. A no-op UPDATE is
+ * told apart by a read in the same transaction: `not-found` or `scan-active`.
+ */
+export async function setRepositoryBranch(
+  handle: DatabaseHandle,
+  change: {
+    repositoryId: string;
+    jobId: string;
+    signal: AbortSignal;
+    branch: string | null;
+    defaultBranch: string | null;
+  },
+): Promise<SetRepositoryBranchOutcome> {
+  return withTransaction(handle, async (db) => {
+    await assertScanStillRunning(db, change.jobId, change.signal);
+    const current = await db
+      .select({ defaultBranch: repositories.defaultBranch })
+      .from(repositories)
+      .where(eq(repositories.id, change.repositoryId))
+      .get();
+    if (!current) return { status: 'not-found' };
+    const defaultBranch = change.defaultBranch ?? current.defaultBranch;
+    const branch = change.branch === defaultBranch ? null : change.branch;
+    const updated = await db
+      .update(repositories)
+      .set({ selectedBranch: branch, defaultBranch, updatedAt: nowIso() })
+      .where(
+        and(
+          eq(repositories.id, change.repositoryId),
+          notExists(
+            db
+              .select({ id: jobs.id })
+              .from(jobs)
+              .where(
+                and(
+                  eq(jobs.type, 'repository-scan'),
+                  inArray(jobs.status, ['pending', 'running']),
+                  sql`json_extract(${jobs.payload}, '$.repositoryId') = ${repositories.id}`,
+                ),
+              ),
+          ),
+        ),
+      )
+      .returning({ id: repositories.id });
+    // The row exists (read above, same transaction), so a no-op means an active scan.
+    if (updated.length === 0) return { status: 'scan-active' };
+    return { status: 'updated', branch, defaultBranch };
+  });
+}
+
+/**
  * Records a scan that could not run or finish (SPEC-105 FR-105-15): the repository's
  * `sync_status` becomes `error` with the message; its artifacts and occurrences are unchanged.
  */
@@ -1117,18 +1214,34 @@ export async function markRepositoryScanFailed(
  *
  * Returns false and writes nothing when the repository is no longer synced at `commitSha` (a
  * failure or another scan recorded meanwhile): the caller then scans in full. A removed
- * repository is a `NotFoundError`; a job that is no longer running a `JobNoLongerRunningError`.
+ * repository is a `NotFoundError`; a job that is no longer running a `JobNoLongerRunningError`; a
+ * repository whose effective branch is no longer `branch` a `BranchChangedError` (issue 58). The
+ * update also records `scanned_branch`.
  */
 export async function recordUnchangedRepositoryScan(
   handle: DatabaseHandle,
-  scan: { repositoryId: string; jobId: string; commitSha: string; signal: AbortSignal },
+  scan: {
+    repositoryId: string;
+    jobId: string;
+    commitSha: string;
+    /** The branch step 0 resolved (issue 58): re-checked like in `applyRepositoryScan`. */
+    branch: string;
+    signal: AbortSignal;
+  },
 ): Promise<boolean> {
   return withTransaction(handle, async (db) => {
     await assertScanStillRunning(db, scan.jobId, scan.signal);
+    await assertBranchUnchanged(db, scan.repositoryId, scan.branch);
     const now = nowIso();
     const updated = await db
       .update(repositories)
-      .set({ lastSyncAt: now, syncStatus: 'ok', syncError: null, updatedAt: now })
+      .set({
+        lastSyncAt: now,
+        syncStatus: 'ok',
+        syncError: null,
+        scannedBranch: scan.branch,
+        updatedAt: now,
+      })
       .where(
         and(
           eq(repositories.id, scan.repositoryId),
@@ -1137,15 +1250,9 @@ export async function recordUnchangedRepositoryScan(
         ),
       )
       .returning({ id: repositories.id });
-    if (updated.length === 0) {
-      const exists = await db
-        .select({ id: repositories.id })
-        .from(repositories)
-        .where(eq(repositories.id, scan.repositoryId))
-        .get();
-      if (!exists) throw new NotFoundError(`Repository ${scan.repositoryId} not found`);
-      return false;
-    }
+    // The row exists (`assertBranchUnchanged` read it in this transaction): it is no longer synced
+    // at this commit.
+    if (updated.length === 0) return false;
     await db
       .update(artifactOccurrences)
       .set({ lastSeenAt: now })

@@ -30,6 +30,7 @@ describe('listOrphanedRepositoryCaches (SPEC-105 FR-105-19, issue 59)', () => {
       name: 'rules',
       location: 'https://github.com/acme/rules',
       defaultBranch: 'main',
+      selectedBranch: null,
     });
     const gone = createId('repo');
     expect(await listOrphanedRepositoryCaches(getHandle(), [repository.id, gone])).toEqual([gone]);

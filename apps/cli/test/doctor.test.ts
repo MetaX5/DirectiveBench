@@ -204,6 +204,7 @@ describe('doctor', () => {
           name: `rules-${i}`,
           location: `https://github.com/acme/rules-${i}`,
           defaultBranch: 'main',
+          selectedBranch: null,
         });
         ids.push(repository.id);
       }
