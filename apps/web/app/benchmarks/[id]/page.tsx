@@ -208,9 +208,11 @@ export default async function BenchmarkPage({
                     <input type="hidden" name="artifactId" value={artifact.id} />
                     {/* A name another artifact has shows its slug (issue 227, K9). */}
                     <span className="min-w-0 wrap-anywhere">
+                      {/* Underlined at rest: the muted slug after it differs by colour only
+                          (WCAG 1.4.1, QA finding F1 of PR 238). */}
                       <Link
                         href={`/artifacts/${artifact.id}`}
-                        className="hover:underline"
+                        className="underline"
                         aria-label={artifactLinkName(artifact)}
                       >
                         {artifact.name}

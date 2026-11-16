@@ -240,6 +240,14 @@ test('the suite page Run card names each Run and shows the slug of a same-named 
       ).toHaveCount(1);
     }
 
+    // The link is underlined at rest, so it is told apart from the muted slug after it without
+    // colour (WCAG 1.4.1; dark theme link and slug are 2.48:1; browser QA finding F1 of PR 238).
+    for (const link of await run.getByRole('link').all()) {
+      expect(await link.evaluate((el) => getComputedStyle(el).textDecorationLine)).toBe(
+        'underline',
+      );
+    }
+
     // Alone with its name the artifact shows no slug, and its Run is still named for it.
     await withDatabase(removeArtifactTwin);
     await page.reload();
