@@ -50,6 +50,13 @@
       "when": 1794561434719,
       "tag": "0006_artifact_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794844668152,
+      "tag": "0007_artifact_type_follows_source",
+      "breakpoints": true
     }
   ]
 }
