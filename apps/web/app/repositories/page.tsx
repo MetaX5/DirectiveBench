@@ -194,8 +194,11 @@ export default async function RepositoriesPage({
         ? null
         : { kind: 'error' as const, message: requestError };
 
+  // The table has seven columns and up to three row actions (Scan, Change branch, Remove): the
+  // wide layout keeps the actions on one line at 1440px with the sidebar (issue 58, as in the
+  // approved screenshots, whose proposal used the wide container).
   return (
-    <>
+    <div data-layout="wide">
       <AutoRefresh active={checking || scanning || panelPending} />
       <PageHeader
         title="Repositories"
@@ -445,9 +448,10 @@ export default async function RepositoriesPage({
                 </p>
               ) : null}
               {panelRepository && !branchLine ? (
+                // Not focusable: after an error the `#branch-panel` fragment only scrolls to it,
+                // and the Branch field's autofocus puts focus in the field (B9).
                 <div
                   id="branch-panel"
-                  tabIndex={-1}
                   data-testid="branch-panel"
                   className="mb-4 min-w-0 space-y-stack rounded-surface border border-control p-3 text-ui outline-none"
                 >
@@ -598,7 +602,9 @@ export default async function RepositoriesPage({
                         {scannedBranchHint(repository) ? `. ${scannedBranchHint(repository)}` : ''}
                       </TD>
                       <TD className="text-right">
-                        <div className="flex flex-wrap justify-end gap-inline">
+                        {/* One line from 1440px (the wide layout has room for three buttons, as in
+                            the approved screenshots); stacked below, where the table would scroll. */}
+                        <div className="flex flex-wrap justify-end gap-inline min-[90rem]:flex-nowrap">
                           {canScan(repository) ? (
                             <form action={scanRepositoryAction}>
                               <input type="hidden" name="repositoryId" value={repository.id} />
@@ -613,7 +619,9 @@ export default async function RepositoriesPage({
                             </form>
                           ) : null}
                           {isHosted(repository) ? (
-                            <form method="get" action="/repositories#branch-panel">
+                            // No `#branch-panel`: a fragment target stops the browser's autofocus,
+                            // and focusing the Branch field scrolls the panel into view (B9).
+                            <form method="get" action="/repositories">
                               <input type="hidden" name="changeBranch" value={repository.id} />
                               <Button
                                 type="submit"
@@ -648,6 +656,6 @@ export default async function RepositoriesPage({
           </Card>
         )}
       </div>
-    </>
+    </div>
   );
 }
