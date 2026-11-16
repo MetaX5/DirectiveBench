@@ -792,8 +792,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               <Link className="underline" href={`/benchmarks/${suite.id}`}>
                 {suite.name} v{suiteVersion.version}
               </Link>
-              {/* The suite ID always shows in the run's facts (issue 227, K4). */}
-              <span className="text-muted-foreground" data-testid="suite-id">
+              {/* The suite ID always shows in the run's facts (issue 227, K4). An ID can be 80
+                  characters without a hyphen, so it wraps anywhere instead of leaving the card. */}
+              <span className="text-muted-foreground wrap-anywhere" data-testid="suite-id">
                 , ID <span className="font-mono">{suite.slug}</span>
               </span>{' '}
               <span className="font-mono">{suiteVersion.contentHash.slice(0, 12)}…</span>

@@ -14,7 +14,14 @@ import {
   seedChipClash,
   seedSuiteCopy,
 } from './disambiguation-seed';
-import { DEMO_ARTIFACT, DEMO_SUITE, demoJobPayload, escapeRegExp, withDatabase } from './support';
+import {
+  DEMO_ARTIFACT,
+  DEMO_SUITE,
+  demoJobPayload,
+  demoRunId,
+  escapeRegExp,
+  withDatabase,
+} from './support';
 
 // Issues 227 and 228 (decisions K1 to K9, approved 2026-11-16): same-named suites, archived
 // categories and artifacts are told apart by their ID or slug, and per-row controls have unique
@@ -130,6 +137,37 @@ test.describe('same-named suites (issue 227, K1 to K4)', () => {
       .getByRole('link')
       .click();
     await expect(page.getByTestId('suite-id')).toHaveText(`, ID ${DEMO_SUITE_SLUG}`);
+  });
+
+  test('a long suite ID without hyphens wraps inside the run facts at 320px (K4, QA finding)', async ({
+    page,
+  }) => {
+    // Suite IDs may be 80 characters with no hyphen (the definition schema); found by the
+    // browser QA agent on PR 234, where the ID left the "Environment and versions" card.
+    const longSlug = 'a'.repeat(80);
+    const runId = await withDatabase((db) => {
+      db.prepare('update benchmark_suites set slug = ? where slug = ?').run(
+        longSlug,
+        DEMO_SUITE_SLUG,
+      );
+      return demoRunId(db);
+    });
+    try {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await page.goto(`/results/${runId}`);
+      const id = page.getByTestId('suite-id');
+      await expect(id).toHaveText(`, ID ${longSlug}`);
+      const facts = id.locator('xpath=ancestor::dl[1]');
+      const idBox = (await id.boundingBox())!;
+      const factsBox = (await facts.boundingBox())!;
+      expect(idBox.x + idBox.width).toBeLessThanOrEqual(factsBox.x + factsBox.width + 0.5);
+    } finally {
+      await withDatabase((db) =>
+        db
+          .prepare('update benchmark_suites set slug = ? where slug = ?')
+          .run(DEMO_SUITE_SLUG, longSlug),
+      );
+    }
   });
 });
 
