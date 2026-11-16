@@ -102,3 +102,13 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   baseline `(db) => db.select().from(table)` returned the builder unawaited, `expectLinearTime`
   measured an empty call, and a linear query failed at 11.8; write database baselines as
   `async (db) => await db.select()…` and check that both series take real time.
+- A linear-time test's size sets what it can catch, and its fixed work sets its wall-clock time
+  under load (update 2026-11-16, issues #231 and #232). The SPEC-126 tests that scan 3,200 skills
+  take ~7 s alone on two cores, 48 s under `taskset -c 0,1 pnpm test --force` and 38 to 60 s on
+  CI, where one hit the shared 60 s `LINEAR_TIME_TEST_TIMEOUT_MS` and turned `main` red. Halving
+  the size was not a fix: with a full table scan per new path injected, 3,200 skills measured 4.4
+  against the bound of 3.5, 1,600 measured 1.6 and passed. Before shrinking a ratio test, inject
+  a realistic bug (a table scan per row, not only an in-memory `find`, which measured 1.9 even at
+  3,200) and keep the smallest size that still fails; then give the test its own named timeout
+  sized from the full gate on two cores. Every test that runs real git over several scans also
+  gets a named timeout (one took 5.4 s on CI against vitest's 5 s default).
