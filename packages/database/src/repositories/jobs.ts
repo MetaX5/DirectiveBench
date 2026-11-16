@@ -208,6 +208,11 @@ export const repositoryScanResultSchema = z.discriminatedUnion('ok', [
        */
       skippedUserLevelFolders: z.array(z.string()).max(MAX_SKIPPED_USER_LEVEL_FOLDERS).default([]),
       /**
+       * How many user-level folders the scan skipped, also beyond the listed ones (issue 45).
+       * Absent in results stored before it existed: readers fall back to the list length.
+       */
+      skippedUserLevelFolderCount: count.optional(),
+      /**
        * The commit a hosted repository was read at (SPEC-105 FR-105-06); null for local scans,
        * which read the working tree. Absent in results stored before it existed.
        */

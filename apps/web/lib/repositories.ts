@@ -381,17 +381,30 @@ export function describeScan(scan: RepositoryScan): ScanNotice {
       occurrenceChanges(result),
     errors: result.errors,
     errorCount: result.errorCount,
-    info: skippedFoldersInfo(result.skippedUserLevelFolders),
+    info: skippedFoldersInfo(
+      result.skippedUserLevelFolders,
+      // Stored before the total existed (issue 45): the list is all there is.
+      result.skippedUserLevelFolderCount ?? result.skippedUserLevelFolders.length,
+    ),
   };
 }
 
-/** The line about user-level agent folders a scan skipped (D05), or null when it skipped none. */
-function skippedFoldersInfo(folders: readonly string[]): string | null {
+/**
+ * The line about user-level agent folders a scan skipped (D05), or null when it skipped none.
+ * The stored list is capped (`MAX_SKIPPED_USER_LEVEL_FOLDERS`), so a larger `total` adds
+ * "and N more" (issue 45).
+ */
+function skippedFoldersInfo(folders: readonly string[], total: number): string | null {
   if (folders.length === 0) return null;
   if (folders.includes('.')) {
     return 'This location is a user-level agent folder; those are never scanned, so nothing was read.';
   }
-  return `Skipped user-level agent folders, which are never scanned: ${folders.join(', ')}.`;
+  const more = Math.max(0, total - folders.length);
+  return (
+    `Skipped user-level agent folders, which are never scanned: ${folders.join(', ')}` +
+    (more > 0 ? ` and ${formatCount(more)} more` : '') +
+    '.'
+  );
 }
 
 /** Why the Scan button could not enqueue a scan (`?scanError=` from the action). */
