@@ -141,7 +141,7 @@ not started.
 | FR-124-11 | **Assign one.** Assigning an active category to an artifact is idempotent ("already assigned"). Assigning an archived category MUST be refused ("X is archived. Unarchive it on its page before assigning it."). The write is one conditional statement (`INSERT … SELECT … WHERE archived_at IS NULL … ON CONFLICT DO NOTHING`); follow-up reads only explain a no-op insert (already assigned, archived, unknown category or artifact). |
 | FR-124-12 | **Remove one.** Removing a category from an artifact is idempotent ("X was already removed.", §11.3 D24) and allowed for archived categories. No confirmation: assignments carry no history. |
 | FR-124-13 | **Bulk.** On the Artifacts list, a form assigns or removes one active category for every artifact the current filters list (the filtered list is the selection, A14; no per-row checkboxes). Each action first shows an inline Risky-action confirmation stating the category and the count the page showed ("Assign Client A to 1,240 artifacts?"); only the confirming button submits, and Cancel writes nothing (UD-5). The form posts the server-parsed filters (`q`, `type`, `category`, `repository`; every key of the parsed filter) and `listFingerprint`, a SHA-256 of the sorted listed artifact ids (core hashing), computed from the same database snapshot as the rows and the count the page renders (today the ids of the one `listArtifacts` result the table shows; never a separate, later read), so the fingerprint cannot describe artifacts the user did not see; it does not post the count, which the fingerprint covers (messages use the server's count). The list page ignores invalid URL parameters, so when it ignored one it hides the bulk row and says why (§11.4 D28) instead of offering an action on a wider list; the server refuses any invalid or forged filter field it receives. In one `withTransaction` it runs `listArtifactIds(db, filter)`, which shares its conditions with `listArtifacts`, and refuses, in this order: a fingerprint that differs ("The list changed since the page loaded (now N artifacts). Check it and try again."), an unknown or archived category (in both modes, so bulk remove of an archived category is refused; single remove on the artifact page stays allowed, FR-124-12), more than `MAX_BULK_CATEGORY_ARTIFACTS`; then it inserts (`ON CONFLICT DO NOTHING`) or deletes, and reports how many changed and how many already were in the target state. Any refusal writes nothing. |
-| FR-124-14 | **Display.** Wherever assignments show (Artifacts list column, artifact page), archived categories show as a `muted` Badge reading "Name (archived)", after the active ones. |
+| FR-124-14 | **Display.** Wherever assignments show (Artifacts list column, artifact page), archived categories show as a `muted` Badge reading "Name (archived)", after the active ones. When another category, anywhere in the database, shows the same chip text (two archived categories with one name, or an active one named "Platform (archived)"), the chip adds a comma and its slug: "Platform (archived), slug platform-2", the slug in `font-mono` (issue 227, decision K5 of 2026-11-16). |
 | FR-124-15 | **Filter.** The Artifacts category dropdown lists active categories. When the URL names an archived category, the dropdown also lists it as "Name (archived)", selected, so the form shows the real filter; filtering by an archived slug works (FR-106-08). |
 | FR-124-16 | All mutations are Server Actions in `apps/web/lib/actions.ts` that parse `FormData` with Zod schemas from `apps/web/lib/categories.ts`, call `@directivebench/database` repository functions only, and revalidate `/categories` (layout) and `/artifacts` (layout, once, which covers every `/artifacts/[id]` page, also after a bulk change of thousands of artifacts) (FR-106-12, SPEC-014). |
 
@@ -500,7 +500,7 @@ existing ones (lowest: archived chip, 5.50 light, 5.83 dark).
 | # | Point | Decision |
 | --- | --- | --- |
 | D16 | Card position | Right column, directly after Metadata and before Tags; Metadata keeps only Compatibility |
-| D17 | Chips and Remove | Same layout as Tags: a wrapping list (`aria-label` "Categories"), each item a Badge plus an `outline` `sm` "Remove" whose accessible name is "Remove category " plus the chip text, a comma and the slug ("Remove category Python (archived), slug python"; issue 220) |
+| D17 | Chips and Remove | Same layout as Tags: a wrapping list (`aria-label` "Categories"), each item a Badge plus an `outline` `sm` "Remove" whose accessible name is "Remove category " plus the chip text, a comma and the slug ("Remove category Python (archived), slug python"; issue 220). On a chip-text clash (FR-124-14) the chip itself shows ", slug <slug>", so its text equals the Remove name after "Remove category "; label and slug sit in one inline span inside the Badge, which wraps anywhere (issue 227, K5) |
 | D18 | Link from a chip | None; the Badge stays non-clickable |
 | D19 | Card description | "Groups for filtering the Artifacts list. A rescan keeps them." |
 | D20 | Picker | Like the Suites picker: label "Category", first option preselected, no placeholder, `default` "Assign" button (`h-control`, same height as the select) |
@@ -654,7 +654,9 @@ output does not depend on the server's locale.
   refused as slug-taken.
 - Archive or bulk confirmation open, then Cancel: nothing is written and no status line appears.
 - Two archived categories with the same name (a rename is checked against active names only):
-  the chips look alike; Remove and the count links stay distinct by the slug (issue 220).
+  Remove and the count links stay distinct by the slug (issue 220), and the chips show the slug
+  too (issue 227, K5); one archived "Platform" next to an active "Platform" shows no slug, since
+  "(archived)" already tells them apart.
 
 ## 15. Testing strategy
 
@@ -849,6 +851,12 @@ parsed filter and is posted by the bulk form automatically (§11.4 implementer n
   (`pnpm format:check`, `lint`, `typecheck`, `test` with 100% coverage, `build`, `verify:pack`,
   `test:e2e` 144 passed, `test:storybook` 306 passed) and green CI on PR 206. Moved to
   `implemented/`.
+- **Implemented for issue 227 (K5; verified on 2026-11-16 by
+  `packages/database/test/shared-names.test.ts` "category chip shared", `apps/web/test/categories.test.ts`
+  `categoriesCardModel`, `apps/web/e2e/disambiguation.spec.ts` "archived categories with one chip
+  text show their slug on the chips" (red on the old pages) and `apps/web/e2e/text-contrast.spec.ts`
+  in both themes):** `ArtifactCategory.chipShared`, computed in SQL over every category, and the
+  clash slug on the chips of `/artifacts` and the artifact page (FR-124-14, D17).
 - **Interpretations recorded in the Phase 4 PR:** `setCategoryForListedArtifacts` keeps at most
   `limit + 1` ids and looks one match further without keeping it, so a list of exactly
   `limit + 1` whose fingerprint matches is `too-many` (the §15 lowered-limit test) and a longer
