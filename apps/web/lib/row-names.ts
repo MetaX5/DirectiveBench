@@ -4,8 +4,9 @@ import { DISPLAY_STATUS_LABELS } from './run-status';
 
 // Accessible names of per-row controls (issues 227 and 228). Rows repeat a verb ("Run", "Cancel")
 // or a name (artifact and suite names repeat, SPEC-126, issue 219), so each name adds what is
-// unique for its target, in the format of issues 219 and 220: a comma and a label, never parentheses (names
-// often end in parentheses). Each name starts with the visible text, so voice control finds it.
+// unique for its target, in the format of issues 219 and 220: a comma and a label, never
+// parentheses (names often end in parentheses). Each name starts with the visible text, so voice
+// control finds it.
 
 /** An artifact in an accessible name: its name, then its slug (the slug is unique). */
 export function artifactSubject(artifact: { name: string; slug: string }): string {
