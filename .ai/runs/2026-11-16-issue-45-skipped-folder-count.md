@@ -42,26 +42,69 @@ stale parts of §3.11 beyond bringing its shape up to date.
 
 ### Phase 1: Tests first
 
-- [ ] 1.1 Red tests for schema, runner (local and GitHub) and page message
+- [x] 1.1 Red tests for schema, runner (local and GitHub) and page message — ec00d4e
 
 ### Phase 2: Implementation
 
-- [ ] 2.1 Schema field, runner writes the count, page suffix
-- [ ] 2.2 Specs SPEC-102, SPEC-104 and database schema §3.11
+- [x] 2.1 Schema field, runner writes the count, page suffix — ec00d4e
+- [x] 2.2 Specs SPEC-102, SPEC-104 and database schema §3.11 — 39922e8
 
 ### Phase 3: Verification
 
-- [ ] 3.1 Quality gate, e2e and Storybook
-- [ ] 3.2 Browser QA on the built app with evidence
+- [x] 3.1 Quality gate, e2e and Storybook
+- [x] 3.2 Browser QA on the built app with evidence
 - [ ] 3.3 Codex adversarial review and om-auto-review-pr
 
 ## Decisions
 
+- No deviation from M1 to M7. `skippedUserLevelFolderCount` is `count.optional()`; the page uses
+  `count ?? list.length` and `max(0, count - list.length)`.
+- The temporary decision story (`.ai/tmp/issue-45-stories.patch`) is not committed: the change
+  adds no component or variant, only a suffix to an existing sentence, and the Playwright test
+  covers the rendered line (text and 320px overflow).
+- e2e path: the e2e server's runner skips sibling-home folders of its own HOME only, so the
+  test seeds completed `repository-scan` jobs as the runner stores them (capped with a total,
+  and a legacy row without it) and removes them afterwards. The real runner path with more than
+  50 folders is covered by the runner unit test and by the browser QA run below.
+
 ## Work performed
+
+1. `packages/database`: `skippedUserLevelFolderCount` in `repositoryScanResultSchema`.
+2. `packages/runner`: local scans write `discovery.skippedDirectories.length`; GitHub scans 0.
+3. `apps/web/lib/repositories.ts`: `skippedFoldersInfo(folders, total)` appends
+   ` and N more` (`formatCount`) before the period.
+4. Tests: database (legacy row parses without the field, 237 parses, -1 and 1.5 rejected),
+   runner (60 sibling homes: list of 50, count 60; existing D05 tests assert the count; hosted
+   scan writes 0), web (3/3, 50/51, 50/237, 50/1,250, legacy, corrupt 3/1, `.`, empty), e2e.
+5. Specs: SPEC-102 status, SPEC-104 scan bullet, database schema §3.11 result shape (also the
+   SPEC-125/126 counters and `commitSha`, which it lacked).
 
 ## Verification
 
+- Red first: before the implementation the new and extended tests failed: database 1, runner 5
+  (4 local, 1 hosted), web 1 (the 50/51, 50/237 and 50/1,250 messages). All pass after it.
+- `pnpm format:check`, `pnpm lint`, `pnpm typecheck`: pass.
+- `pnpm test`: pass, 100% lines, branches, functions and statements in all 7 packages
+  (database 321, runner 294, web 589 tests).
+- `pnpm build`: pass. `pnpm verify:pack` (TMPDIR under `.ai/tmp`, removed): "Packaging
+  verification passed".
+- `pnpm test:e2e` (TMPDIR `/var/tmp/directivebench-e2e45`, removed): 180 passed, including the
+  two new issue 45 tests.
+- `pnpm test:storybook`: 68 files, 326 tests passed.
+- Browser QA agent (agent-browser) on the built CLI (`test-env-up.sh`, port 4402, mock agent
+  only) with `HOME` set to a fake home whose parent held 236 sibling homes: a real register and
+  scan of the parent showed 50 folders "and 187 more."; home scan and user-level location
+  unchanged; no overflow at 320 px; contrast 6.0:1 light, 6.9:1 dark; keyboard only works; no
+  console messages. Evidence: PR comment, branch `qa-evidence-pr-241`.
+- Not verified: an e2e test against the real runner with more than 50 skipped folders (needs
+  control of the e2e server's HOME); a red run of the new e2e tests against the old build.
+
 ## Problems and deviations
+
+- The first `pnpm test:e2e` used `TMPDIR` under `.ai/tmp` and 18 tests failed (registration
+  tests found the repository's own work tree). This is the known constraint in
+  `.ai/lessons/2026-10-30-keep-heavy-data-off-tmp.md` (TMPDIR must be outside every git work
+  tree); rerun with `/var/tmp`, all 180 passed. No new lesson: the existing one covers it.
 
 ## Lessons recorded
 
