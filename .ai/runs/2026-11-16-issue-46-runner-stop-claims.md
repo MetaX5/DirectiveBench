@@ -3,7 +3,7 @@ title: Interrupt jobs claimed after stop() began without running them, and log f
 date: 2026-11-16
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request; issue 46 (follow-up from PR 44), approach approved 2026-11-16
-status: in-progress
+status: completed
 branch: fix/issue-46-runner-stop-claims
 specs: [SPEC-114]
 ---
@@ -37,10 +37,8 @@ order; recovering such jobs differently (the existing `recoverStaleJobs` stays t
 - `track()` attaches a handler to `done` that logs a rejection as `outcome-not-recorded` (error
   level, raw cause via `describeUnexpectedError`). `done` itself still rejects, so
   `runAcquiredJob` and `runUntilIdle` callers see the failure as before.
-- Tests in `packages/runner/test/runner-lanes.test.ts`: the existing "claim after the deadline"
-  test now asserts the scan never starts (red on the old code); a new test runs the runner on
-  its own connection, stops it while a job ignores the abort, closes that connection, releases
-  the job and asserts the logged event and no `unhandledRejection`.
+- Tests in `runner-lanes.test.ts` and `runner-lifecycle.test.ts`, written red first (the final
+  list is under Work performed).
 - SPEC-114 §20: record both behaviours and the new log event.
 
 ## Decisions
@@ -80,15 +78,40 @@ order; recovering such jobs differently (the existing `recoverStaleJobs` stays t
   rejection or `outcome-not-recorded` line.
 - Not verified: the exact race in a real `serve` shutdown (a claim landing after the deadline,
   then the database closing) — it needs a transaction held across the deadline, which only the
-  unit tests produce. `pnpm verify:pack` not run yet (no packaging or `apps/cli` change).
+  unit tests produce.
+- `pnpm verify:pack` passes (with `TMPDIR` under `.ai/`, removed afterwards). On head `06bbb1a`,
+  `pnpm format:check`, `pnpm lint`, `pnpm typecheck` and `pnpm test` (100% in all 7 packages)
+  were re-run and pass.
+- Codex adversarial review (`--scope branch --base main`, round 1 on `06bbb1a`): approve, no
+  findings.
+- `om-auto-review-pr` (engine `om-code-review`, COMMENT review since self-authored): approve, no
+  blocker, major or minor. There were two nits: this Plan section (fixed), and the `job-error`
+  event that comes before `outcome-not-recorded` (left as a follow-up).
 
 ## Problems and deviations
 
+- The first regression test for the second measure (a job that outlives `stop()`) showed no
+  unhandled rejection on the old code. `stop()`'s `Promise.allSettled` already observed those
+  jobs. The unobserved path was a job claimed after `stop()` took its snapshot. A second test
+  covers that path with a mocked `finishJob` rejection and fails on the old code with 1
+  `unhandledRejection`.
+- Two existing tests in `runner-lanes.test.ts` asserted that a claim during `stop()` starts the
+  scan and aborts it. They now assert that the scan never starts. Their unused `scanStarted`
+  helper was removed.
+
 ## Lessons recorded
+
+- [Prove an unhandled-rejection fix on the promise nobody awaits](../lessons/2026-11-16-prove-an-unhandled-rejection-on-the-promise-nobody-awaits.md)
 
 ## Follow-ups
 
+- When a job's outcome write fails because the database is closed, the runner logs `job-error`
+  ("failed unexpectedly") from `execute()`'s catch before `outcome-not-recorded`. A single event
+  would read better (review nit).
+
 ## Progress
+
+PR: #240
 
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
@@ -96,10 +119,10 @@ order; recovering such jobs differently (the existing `recoverStaleJobs` stays t
 
 - [x] 1.1 Red-first tests for both cases — 3e44638
 - [x] 1.2 Interrupt late claims without execute() and log failed outcome writes — 3e44638
-- [ ] 1.3 Update SPEC-114 implementation status
+- [x] 1.3 Update SPEC-114 implementation status — 06bbb1a
 
 ### Phase 2: Verification and review
 
-- [ ] 2.1 Full quality gate and repeated runs under taskset
-- [ ] 2.2 Codex adversarial review until approved
-- [ ] 2.3 om-auto-review-pr verdict
+- [x] 2.1 Full quality gate and repeated runs under taskset
+- [x] 2.2 Codex adversarial review until approved
+- [x] 2.3 om-auto-review-pr verdict
