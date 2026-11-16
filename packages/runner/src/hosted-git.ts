@@ -31,7 +31,7 @@ export const MIN_HOSTED_GIT_VERSION = { major: 2, minor: 44 } as const;
 export const HOSTED_GIT_TIMEOUTS = {
   /** `git version`. */
   version: 5_000,
-  /** `ls-remote` at registration. */
+  /** `ls-remote` at registration and before a rescan fetches (§9.1 step 0). */
   lsRemote: 30_000,
   /** Clone or fetch of the commit and trees, and the blob fetch. */
   fetch: 5 * 60_000,
@@ -538,6 +538,42 @@ export async function detectDefaultBranch(
 
 /** A full object ID: SHA-1 (40) or SHA-256 (64) hex. */
 const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+/**
+ * Step 0 of SPEC-105 §9.1 (issue 63): asks the remote for the commit `refs/heads/<branch>` points
+ * at (`ls-remote -- <url> refs/heads/<branch>`) without downloading anything, with the same
+ * hardened invocation as every other remote step. ls-remote matches a pattern against the tail of
+ * each ref name, so only the line naming exactly that ref counts. Null when the remote has no such
+ * branch or does not print a full object ID for it: the caller then fetches, which reports the
+ * missing branch.
+ */
+export async function resolveRemoteHead(
+  context: HostedGitContext,
+  target: { location: string; branch: string },
+): Promise<{ ok: true; commitSha: string | null } | HostedGitFailure> {
+  const ref = `refs/heads/${target.branch}`;
+  const result = await runStep(
+    context,
+    ['ls-remote', '--', context.transport.remoteUrl(target.location), ref],
+    {
+      gitDir: null,
+      kind: 'network',
+      timeoutMs: context.timeouts.lsRemote,
+      maxStdoutBytes: SMALL_OUTPUT_BYTES,
+    },
+  );
+  const problem = abnormal(result, 'git ls-remote', context);
+  if (problem) return problem;
+  if (result.exitCode !== 0) {
+    return classifyRemoteFailure(result.stderr, new URL(target.location).host);
+  }
+  const commitSha = result.stdout
+    .toString('utf8')
+    .split('\n')
+    .map((line) => line.split('\t'))
+    .find(([oid, name]) => name === ref && OBJECT_ID.test(String(oid)))?.[0];
+  return { ok: true, commitSha: commitSha ?? null };
+}
 
 /**
  * Step 1 of SPEC-105 §9.1: the commit and its trees only, into the bare cache — a blob-less,
