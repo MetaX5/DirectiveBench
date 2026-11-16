@@ -19,6 +19,7 @@ import {
   migrateDatabase,
   openDatabase,
   requestJobCancellation,
+  withTransaction,
   type DatabaseHandle,
 } from '@directivebench/database';
 import {
@@ -408,6 +409,55 @@ describe('polling loop', () => {
     const job = await enqueueBenchmarkJob(handle.db, payload);
     await delay(60);
     expect(await jobStatus(job.id)).toBe('pending');
+  });
+
+  // Issue 46: a benchmark job claimed after the stop() deadline detected its agent and created a
+  // benchmark run before its aborted signal was checked, after stop() had returned.
+  it('interrupts a benchmark job claimed after the deadline without detecting the agent or creating a run', async () => {
+    const { payload, fixtureStore } = await importMini();
+    const job = await enqueueBenchmarkJob(handle.db, payload);
+    const adapter = new MockAgentAdapter();
+    const detect = vi.spyOn(adapter, 'detect');
+    const logger = recordingLogger();
+    const runner = createRunner(fixtureStore, {
+      shutdownTimeoutMs: 20,
+      logger,
+      adapters: new Map<string, AgentAdapter>([['mock', adapter]]),
+    });
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // An open transaction makes the claim wait until the stop() deadline has passed.
+    const holding = withTransaction(handle, async () => gate);
+    await delay(0);
+    const polling = runner.poll();
+    await delay(0);
+    await runner.stop();
+    release();
+    await holding;
+    await polling;
+
+    const [late] = await runner.runUntilIdle();
+    expect(late).toEqual({
+      jobId: job.id,
+      status: 'interrupted',
+      benchmarkRunId: null,
+      error: 'Runner shut down before the job started',
+    });
+    expect(await getJob(handle.db, job.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'Runner shut down before the job started',
+    });
+    expect(detect).not.toHaveBeenCalled();
+    expect(handle.sqlite.prepare('select count(*) as n from benchmark_runs').get()).toEqual({
+      n: 0,
+    });
+    expect(logger.entries).toContainEqual({
+      level: 'info',
+      message: `Job ${job.id} interrupted: Runner shut down before the job started`,
+      fields: { event: 'finished', jobId: job.id, status: 'interrupted', benchmarkRunId: null },
+    });
   });
 
   it('stops every polling chain even if start() was called twice', async () => {

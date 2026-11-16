@@ -288,16 +288,39 @@ export class LocalRunner {
   /** Runs a job this runner owns as an active job of `lane`, so `stop()` and heartbeats see it. */
   private track(job: JobRecord, lane: Lane): Promise<JobExecutionResult> {
     const controller = new AbortController();
-    // Claimed after `stop()` gave up waiting for this poll: interrupt it instead of running it.
-    if (this.stopping) controller.abort('shutdown');
-    const done = this.execute(job, controller)
+    // Claimed after `stop()` began (issue 46): record it as interrupted without running any of it,
+    // so nothing (agent detection, a benchmark run, git) starts once shutdown is under way.
+    const outcome = this.stopping ? this.interruptClaimed(job) : this.execute(job, controller);
+    const done = outcome
       .then((result) => {
         for (const results of this.finished) results.push(result);
         return result;
       })
       .finally(() => this.active.delete(job.id));
+    // Observed here for every job, so a failure to record the outcome (`finishJob` after `serve`
+    // closed the database) is logged, never an unhandled rejection. `done` still rejects for the
+    // callers that await it (`runAcquiredJob`, `runUntilIdle`).
+    done.catch((error: unknown) => {
+      this.options.logger.error(
+        `Job ${job.id} outcome could not be recorded: ${describeUnexpectedError(error)}`,
+        { event: 'outcome-not-recorded', jobId: job.id },
+      );
+    });
     this.active.set(job.id, { lane, controller, done });
     return done;
+  }
+
+  /** Records a job claimed after `stop()` began as `interrupted`; it never ran. */
+  private async interruptClaimed(job: JobRecord): Promise<JobExecutionResult> {
+    const error = 'Runner shut down before the job started';
+    await finishJob(this.options.handle.db, job.id, 'interrupted', error);
+    this.options.logger.info(`Job ${job.id} interrupted: ${error}`, {
+      event: 'finished',
+      jobId: job.id,
+      status: 'interrupted',
+      benchmarkRunId: null,
+    });
+    return { jobId: job.id, status: 'interrupted', benchmarkRunId: null, error };
   }
 
   /**
@@ -357,7 +380,9 @@ export class LocalRunner {
    * running jobs and waits for them — all within `shutdownTimeoutMs`. Aborted jobs are recorded
    * as `interrupted` (not user-cancelled); jobs that did not stop in time are marked
    * `interrupted` directly, waiting at most {@link SHUTDOWN_INTERRUPT_GRACE_MS} more for that
-   * write, and a job claimed after the deadline is aborted as soon as it is. No new sweep of
+   * write, and a job claimed after `stop()` began is recorded as `interrupted` without running
+   * (issue 46). A job's outcome write that fails after `stop()` returned is logged as
+   * `outcome-not-recorded`; under `serve` the database is closed by then. No new sweep of
    * orphaned caches starts, and a sweep in flight is waited for within the same deadline.
    */
   async stop(): Promise<void> {
