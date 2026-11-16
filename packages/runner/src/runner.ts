@@ -148,8 +148,10 @@ export const UNEXPECTED_JOB_FAILURE: Readonly<Record<JobType, string>> = {
     'The repository registration failed unexpectedly. Try again, and report the problem if it persists.',
   'repository-scan':
     'The repository scan failed unexpectedly. Try again, and report the problem if it persists.',
+  // The branch commits before the job records its outcome, so a failure afterwards cannot promise
+  // that nothing changed (Codex review round 2 of PR #248).
   'repository-branch':
-    'The branch change failed unexpectedly. Nothing was changed. Try again, and report the problem if it persists.',
+    'The branch change failed unexpectedly. The new branch may have been saved: check the Branch column before you scan, and try again if it was not. Report the problem if it persists.',
 };
 
 /**

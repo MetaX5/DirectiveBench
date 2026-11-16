@@ -474,6 +474,27 @@ describe('the repository-branch job (issue 58)', realGit, () => {
       result: { ok: true, branch: 'release/2.0', defaultBranch: 'main' },
     });
 
+    // Codex review round 2 of PR #248: the job's completion write fails after the branch
+    // committed. The job fails with the fixed message, which never claims nothing changed.
+    handle.sqlite.exec(
+      `CREATE TRIGGER fail_branch_completion BEFORE UPDATE OF status ON jobs
+         WHEN old.type = 'repository-branch' AND new.status = 'completed'
+         BEGIN SELECT RAISE(ABORT, 'database is locked'); END`,
+    );
+    const failing = await enqueueRepositoryBranchJob(handle, {
+      repositoryId: repository.id,
+      branch: null,
+    });
+    if (failing.status !== 'enqueued') throw new Error(failing.status);
+    const [finished] = await runner.runUntilIdle();
+    expect(finished).toMatchObject({ status: 'failed' });
+    expect(finished?.error).toMatch(
+      /^The branch change failed unexpectedly\. The new branch may have been saved/,
+    );
+    expect(finished?.error).not.toContain('Nothing was changed');
+    expect(await getRepository(handle.db, repository.id)).toMatchObject({ selectedBranch: null });
+    handle.sqlite.exec('DROP TRIGGER fail_branch_completion');
+
     // A stored payload that does not parse fails the job with the reason.
     handle.sqlite
       .prepare(
