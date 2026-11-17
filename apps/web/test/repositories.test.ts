@@ -941,7 +941,7 @@ describe('branch field errors and echo (issue 58 B3)', () => {
           repository: { ...hosted, ...stored },
         }),
       ).message;
-    const note = ' Its branch was not changed: use Change branch in the list.';
+    const note = ' Its branch was not changed: use Change in the Branch column.';
     expect(done('dev', {})).toBe(
       `acme/team-rules (GitHub, ${hosted.location}) is already registered.${note}`,
     );

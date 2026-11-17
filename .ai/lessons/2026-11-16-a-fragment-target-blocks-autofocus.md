@@ -32,3 +32,7 @@ client-side navigation (a server action's `redirect`) mounts the element and Rea
   holds an autofocused field `tabIndex={-1}`.
 - Assert the focused element in Playwright after every way of reaching the state (full page load
   and post-action redirect).
+- The other side of the same rule (issue 249): to move focus back to a control, link to
+  `#<its id>` with a plain `<a>`, so the page load focuses the fragment's target. A `next/link`
+  navigation to the same URL only scrolls to the element and leaves focus on `<body>` (Next 16.4,
+  Chromium); the issue 249 e2e test failed with `Link` and passed with `<a>`.

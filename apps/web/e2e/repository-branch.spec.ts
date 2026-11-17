@@ -90,10 +90,10 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
   }) => {
     await page.goto('/repositories');
     await expect(row(page, 'acme/e2e58-skills').getByRole('cell').nth(3)).toHaveText(
-      'mainDefault branch',
+      'mainDefault branchChange',
     );
     await expect(row(page, 'acme/e2e58-rules').getByRole('cell').nth(3)).toHaveText(
-      'release/2.0Chosen. Default: main',
+      'release/2.0Chosen. Default: mainChange',
     );
     await expect(row(page, 'acme/e2e58-rules').getByRole('cell').nth(5)).toContainText(
       'That scan read main: scan again to read release/2.0.',
@@ -250,6 +250,110 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
         count(db, "select count(*) as n from jobs where type = 'repository-branch'"),
       ),
     ).toBe(0);
+  });
+
+  test('Change sits in the Branch cell, Scan and Remove stay on one line, and Cancel returns to Change (issue 249)', async ({
+    page,
+  }) => {
+    // 1280px inside the app shell: the content is 72rem minus the sidebar (issue 122).
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/repositories');
+    for (const [, name] of REPOS) {
+      const cells = row(page, name).getByRole('cell');
+      const change = cells.nth(3).getByRole('button', {
+        name: `Change branch of ${subject(name)}`,
+        exact: true,
+      });
+      await expect(change).toHaveText('Change');
+      await expect(change).toHaveAttribute('data-size', 'xs');
+      await expect(change).toHaveCSS('cursor', 'pointer');
+      const actions = cells.nth(6).getByRole('button');
+      await expect(actions).toHaveText(['Scan', 'Remove']);
+      const [scan, remove] = await Promise.all([
+        actions.nth(0).boundingBox(),
+        actions.nth(1).boundingBox(),
+      ]);
+      expect(scan?.y, `${name}: Scan and Remove on one line`).toBe(remove?.y);
+    }
+
+    // Keyboard only: Change opens the panel with the Branch field focused; Cancel goes back.
+    const open = row(page, 'acme/e2e58-prompts')
+      .getByRole('cell')
+      .nth(3)
+      .getByRole('button', { name: `Change branch of ${subject('acme/e2e58-prompts')}` });
+    for (let i = 0; i < 120 && !(await open.evaluate((el) => el === document.activeElement)); i++) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(open).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('branch-panel')).toContainText(
+      `Branch of ${subject('acme/e2e58-prompts')}`,
+    );
+    await expect(panelField(page)).toBeFocused();
+    await page.keyboard.press('Tab'); // Save branch
+    await page.keyboard.press('Tab'); // Cancel
+    await expect(page.getByRole('link', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('branch-panel')).toHaveCount(0);
+    await expect(open).toBeFocused();
+    await expect(open).toBeInViewport();
+    // The next Tab continues from Change to the row's Scan.
+    await page.keyboard.press('Tab');
+    await expect(
+      page.getByRole('button', { name: `Scan ${subject('acme/e2e58-prompts')}` }),
+    ).toBeFocused();
+  });
+
+  test('a long location is truncated and every row action stays inside the table at 1280px (issue 250)', async ({
+    page,
+  }) => {
+    // A truncated cell keeps its max width as its floor (lesson 2026-10-29): with a 28rem
+    // Location column a long path pushed the table past its container and clipped Remove.
+    const longPath = join(
+      sources,
+      'a-repository-with-a-long-name-in-a-deeply-nested-workspace',
+      'skills-and-rules-for-the-whole-team',
+    );
+    mkdirSync(longPath, { recursive: true });
+    await withDatabase((db) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `insert into repositories (id, provider, name, location, sync_status, created_at, updated_at)
+         values ('repo_e2e58_long', 'local-directory', 'long-path-rules', ?, 'never', ?, ?)`,
+      ).run(longPath, now, now);
+    });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/repositories');
+    const longRow = page.getByRole('row').filter({ hasText: longPath });
+    const location = longRow.getByRole('cell').nth(2);
+    await expect(location).toHaveText(longPath);
+    await expect(location).toHaveAttribute('title', longPath);
+    await expect(location).toHaveCSS('text-overflow', 'ellipsis');
+    expect(
+      await location.evaluate((cell) => cell.scrollWidth > cell.clientWidth),
+      'the long location is cut, not widening the column',
+    ).toBe(true);
+
+    const geometry = await page.evaluate(() => {
+      const container = document.querySelector('[data-slot="table-container"]')!;
+      const box = container.getBoundingClientRect();
+      const outside = [...container.querySelectorAll('tbody button')]
+        .filter((button) => {
+          const r = button.getBoundingClientRect();
+          return r.left < box.left || r.right > box.right;
+        })
+        .map((button) => button.getAttribute('aria-label'));
+      return {
+        tableOverflow: container.scrollWidth - container.clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        outside,
+      };
+    });
+    expect(geometry).toEqual({ tableOverflow: 0, pageOverflow: 0, outside: [] });
+    await expect(longRow.getByRole('button', { name: /^Remove long-path-rules \(/ })).toBeVisible();
+
+    await withDatabase((db) => db.exec("delete from repositories where id = 'repo_e2e58_long'"));
   });
 
   test('saving enqueues a branch change; the panel waits, then says what changed', async ({
