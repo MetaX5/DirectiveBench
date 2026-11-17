@@ -1028,11 +1028,11 @@ function primaryPathOf(format: string, occurrencePath: string): string {
  * parsed with core's `parseArtifactFile` from that version's primary file at the path discovery
  * would read; the format is that version's format and the type its type, which need no parse
  * (issue 246: all four come from one version). Only changed fields are written. An artifact with
- * no active occurrence keeps all four; one whose chosen
- * version lacks its primary file or whose occurrence path does not classify as the version's
- * format keeps its name and description (rows DirectiveBench's scans never write: kept rather
- * than guessed) and still gets its type. The result depends only on the active occurrences and
- * their version numbers, never on which scan ran last. Two reads per `IDENTITY_LOOKUP_BATCH_SIZE`
+ * no active occurrence keeps all four; one whose chosen version lacks its primary file or whose
+ * occurrence path does not classify as the version's format keeps its name and description (rows
+ * DirectiveBench's scans never write: kept rather than guessed) and still gets its type and
+ * format. The result depends only on the active occurrences and their version numbers, never on
+ * which scan ran last. Two reads per `IDENTITY_LOOKUP_BATCH_SIZE`
  * artifacts: the occurrences with their versions' numbers, then the chosen versions' files.
  * `slug` never changes (FR-105-13).
  */
