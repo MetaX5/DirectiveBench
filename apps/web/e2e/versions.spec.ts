@@ -184,8 +184,8 @@ function seedProvenance(): Promise<void> {
          values (?, 'github', 'acme/e2e-provenance', 'https://github.com/acme/e2e-provenance', 'main', 'ok', ?, ?)`,
     ).run(PROVENANCE_REPOSITORY, now, now);
     db.prepare(
-      `insert into artifacts (id, slug, name, type, created_at, updated_at)
-         values (?, 'e2e-provenance', 'e2e-provenance', 'skill', ?, ?)`,
+      `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+         values (?, 'e2e-provenance', 'e2e-provenance', 'skill', 'skill-md', ?, ?)`,
     ).run(PROVENANCE_ARTIFACT, now, now);
     for (const v of seeded) {
       db.prepare(

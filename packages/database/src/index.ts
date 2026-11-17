@@ -8,7 +8,6 @@ export {
   type StoredArtifactFile,
 } from './schema';
 export * from './repositories/artifacts';
-export * from './repositories/artifact-bundles';
 export * from './repositories/benchmarks';
 export * from './repositories/blind-reviews';
 export * from './repositories/catalog';

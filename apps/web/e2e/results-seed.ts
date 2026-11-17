@@ -93,8 +93,8 @@ function seed(db: DatabaseSync): void {
       .get(DEMO_SUITE_NAME) as { definition: string }
   ).definition;
   db.prepare(
-    `insert into artifacts (id, slug, name, type, description, created_at, updated_at)
-     values (?, 'e2e98-doc-skill', 'e2e98-doc-skill', 'skill', 'Seeded for results by version', ?, ?)`,
+    `insert into artifacts (id, slug, name, type, format, description, created_at, updated_at)
+     values (?, 'e2e98-doc-skill', 'e2e98-doc-skill', 'skill', 'skill-md', 'Seeded for results by version', ?, ?)`,
   ).run(ARTIFACT, now, now);
   const version = db.prepare(
     `insert into artifact_versions

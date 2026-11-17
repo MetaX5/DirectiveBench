@@ -7,7 +7,6 @@ import {
   enqueueRepositoryScanJob,
   finishJob,
   getArtifactBundle,
-  getInstallableArtifactBundle,
   schema,
   type DatabaseHandle,
   type ScannedArtifactInput,
@@ -96,7 +95,7 @@ async function bySlug(handle: DatabaseHandle, slug: string) {
   return { artifact, versions };
 }
 
-describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
+describe('getArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
   it('names a renamed nameless skill after its new folder, although its version keeps the old source path', async () => {
     const handle = getHandle();
     const a = await local(handle, 'a');
@@ -105,12 +104,12 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     const { artifact, versions } = await bySlug(handle, 'review');
     // A directory move creates no version (FR-103-09): the version still names the old folder.
     expect(versions.map((version) => version.sourcePath)).toEqual(['skills/review']);
-    const bundle = await getInstallableArtifactBundle(handle.db, versions[0]!.id);
-    expect(bundle).toEqual({
-      ...(await getArtifactBundle(handle.db, versions[0]!.id)),
+    const bundle = await getArtifactBundle(handle.db, versions[0]!.id);
+    expect(bundle).toMatchObject({
+      slug: 'review',
+      name: 'code-review',
       folderName: 'code-review',
     });
-    expect(bundle).toMatchObject({ slug: 'review', name: 'code-review' });
     expect(artifact.name).toBe('code-review');
   });
 
@@ -119,7 +118,7 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     await scan(handle, await local(handle, 'a'), [skill('skills/review', skillMd('A'))]);
     await scan(handle, await local(handle, 'b'), [skill('skills/review', skillMd('B'))]);
     const { versions } = await bySlug(handle, 'review-2');
-    expect(await getInstallableArtifactBundle(handle.db, versions[0]!.id)).toMatchObject({
+    expect(await getArtifactBundle(handle.db, versions[0]!.id)).toMatchObject({
       slug: 'review-2',
       folderName: 'review',
     });
@@ -139,7 +138,7 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     const {
       versions: [v1],
     } = await bySlug(handle, 'review');
-    expect((await getInstallableArtifactBundle(handle.db, v1!.id))?.folderName).toBe('review');
+    expect((await getArtifactBundle(handle.db, v1!.id))?.folderName).toBe('review');
     // An edit in repository b makes version 2 there (rule 1): that occurrence now represents the
     // artifact, also for a run of version 1.
     await scan(handle, b, [
@@ -149,9 +148,7 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     const { versions } = await bySlug(handle, 'review');
     expect(versions).toHaveLength(2);
     for (const version of versions) {
-      expect((await getInstallableArtifactBundle(handle.db, version.id))?.folderName).toBe(
-        'code-review',
-      );
+      expect((await getArtifactBundle(handle.db, version.id))?.folderName).toBe('code-review');
     }
   });
 
@@ -166,9 +163,9 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     expect(occurrences).toHaveLength(2);
     expect(occurrences[0]!.createdAt).toBe(occurrences[1]!.createdAt);
     const [first] = occurrences.sort((x, y) => (x.id < y.id ? -1 : 1));
-    expect(
-      (await getInstallableArtifactBundle(handle.db, first!.latestVersionId))?.folderName,
-    ).toBe(first!.path.split('/').pop());
+    expect((await getArtifactBundle(handle.db, first!.latestVersionId))?.folderName).toBe(
+      first!.path.split('/').pop(),
+    );
   });
 
   it("falls back to the version's source path without an active occurrence, then to none at the root", async () => {
@@ -179,21 +176,15 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
     // A complete scan without it marks the occurrence removed (an empty scan would keep it).
     await scan(handle, a, [skill('skills/other', skillMd('Other.'))]);
     const { versions } = await bySlug(handle, 'review');
-    expect((await getInstallableArtifactBundle(handle.db, versions[0]!.id))?.folderName).toBe(
-      'review',
-    );
+    expect((await getArtifactBundle(handle.db, versions[0]!.id))?.folderName).toBe('review');
 
     const root = await local(handle, 'root');
     await scan(handle, root, [skill('', skillMd('Root.'))]);
     const { versions: rootVersions } = await bySlug(handle, 'skill');
-    expect(
-      (await getInstallableArtifactBundle(handle.db, rootVersions[0]!.id))?.folderName,
-    ).toBeNull();
+    expect((await getArtifactBundle(handle.db, rootVersions[0]!.id))?.folderName).toBeNull();
     // At the root with no active occurrence either.
     await scan(handle, root, [skill('skills/another', skillMd('Another.'))]);
-    expect(
-      (await getInstallableArtifactBundle(handle.db, rootVersions[0]!.id))?.folderName,
-    ).toBeNull();
+    expect((await getArtifactBundle(handle.db, rootVersions[0]!.id))?.folderName).toBeNull();
   });
 
   it('sets no folder for other formats and returns null for an unknown version', async () => {
@@ -214,10 +205,10 @@ describe('getInstallableArtifactBundle (issue 245, SPEC-203 §4.1)', () => {
       },
     ]);
     const version = await handle.db.select().from(schema.artifactVersions).get();
-    expect(await getInstallableArtifactBundle(handle.db, version!.id)).toMatchObject({
+    expect(await getArtifactBundle(handle.db, version!.id)).toMatchObject({
       format: 'agents-md',
       folderName: null,
     });
-    expect(await getInstallableArtifactBundle(handle.db, 'artv_missing')).toBeNull();
+    expect(await getArtifactBundle(handle.db, 'artv_missing')).toBeNull();
   });
 });

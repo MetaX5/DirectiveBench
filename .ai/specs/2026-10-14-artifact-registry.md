@@ -3,7 +3,7 @@ id: SPEC-101
 title: Artifact Registry
 status: draft
 created: 2026-10-14
-updated: 2026-11-16
+updated: 2026-11-17
 category: feature
 related: [SPEC-005, SPEC-006, SPEC-102, SPEC-103, SPEC-104, SPEC-105, SPEC-106, SPEC-111, SPEC-112, SPEC-113, SPEC-116]
 ---
@@ -55,7 +55,7 @@ Teams accumulate skills, `AGENTS.md`/`CLAUDE.md` files, Cursor rules and Copilot
 | FR-101-07 | Categories SHALL be many-to-many ([SPEC-106](2026-10-14-category-management.md)). Tags SHALL be free-form, lower-cased, trimmed, de-duplicated strings (max 64 chars, max 32 per artifact), stored in `artifacts.tags`. |
 | FR-101-08 | The registry SHALL expose, per artifact: assigned benchmark suites (`artifact_benchmark_assignments`), the compatibility list, the latest evaluation summary per assigned suite, and the full evaluation history. |
 | FR-101-09 | **Compatibility** SHALL be a derived list of agent ecosystems that natively consume the artifact's source format (e.g. `cursor-rule` → Cursor; `skill-md` → Claude Code, Codex, other Agent-Skills-compatible agents). The mapping lives in `@directivebench/core` next to the format registry. Compatibility claims for third-party agents are "Assumption — requires validation" until verified per integration spec (SPEC-203…205). Users MAY override compatibility per artifact (stored as user metadata). |
-| FR-101-10 | The list view SHALL show the columns: name, type, description (truncated), categories (archived ones as a muted "Name (archived)" badge after the active ones, SPEC-124 FR-124-14), source repository (first occurrence + "+N"), occurrence count (active occurrences across all repositories), compatibility, latest score, improvement over baseline (delta), last evaluation (timestamp), evaluation status. The name cell carries an `outline` "Possible duplicate" Badge on its own line when another artifact's latest version has the same name and linkable format (SPEC-126 FR-126-11, FR-126-12, §11.4 G1); it never widens the column (issue #122). |
+| FR-101-10 | The list view SHALL show the columns: name, type, description (truncated), categories (archived ones as a muted "Name (archived)" badge after the active ones, SPEC-124 FR-124-14), source repository (first occurrence + "+N"), occurrence count (active occurrences across all repositories), compatibility, latest score, improvement over baseline (delta), last evaluation (timestamp), evaluation status. The name cell carries an `outline` "Possible duplicate" Badge on its own line when another artifact has the same name and the same linkable format of its chosen version (`artifacts.format`; SPEC-126 FR-126-11, FR-126-12, §11.4 G1); it never widens the column (issue #122). |
 | FR-101-11 | The list view SHALL support full-text search over name, slug, description, tags and content; filters on type, source format, category, tag, repository, compatibility, evaluation status, lifecycle (active/removed); sorting on name, type, latest score, delta, last evaluation, updated at; pagination (default 50 per page). Filter state SHALL be reflected in the URL query string. |
 | FR-101-12 | **Evaluation status** SHALL use the display statuses defined in [SPEC-111](2026-10-14-benchmark-scoring.md): `error`, `not-comparable`, `unstable`, `regression`, `passed`, `failed`, `not-tested`. When an artifact has several assigned suites, the list shows the worst status by precedence `error > regression > unstable > not-comparable > failed > passed > not-tested`, with a tooltip listing per-suite statuses. |
 | FR-101-13 | "Latest score" and "improvement over baseline" SHALL be shown per suite on the detail page. In the list, they are shown only when exactly one suite is assigned or when the user selects a suite filter; otherwise the cell shows "N suites" (no averaging across suites). |
@@ -102,6 +102,7 @@ interface Artifact {
   slug: string;               // slugify(name at creation), numeric suffix on collision; globally unique (artifacts_slug_unique); immutable, never freed or reassigned (SPEC-103 FR-103-16)
   name: string;
   type: ArtifactType;         // type of the format of the version the chosen active occurrence holds (SPEC-103 FR-103-16)
+  format: ArtifactFormat | null; // format of that same version (issue 246, SPEC-126 FR-126-11); null only without a version
   description: string | null; // from the parser (ParsedArtifact.description)
   notes: string | null;       // user metadata, never overwritten by sync
   tags: string[];             // user metadata (JSON column, default [])
@@ -169,7 +170,7 @@ An **artifact** answers "which piece of guidance is this?"; an **occurrence** an
 
 **Identity versus source fields** (issue 66, [SPEC-103 FR-103-16](2026-10-14-artifact-versioning.md)): location (rule 1) and exact content of the same format (rules 2 and 3) decide identity; a name, a slug or a type never does. `name`, `description` and `type` are derived from the chosen active occurrence ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) FR-126-07) and follow renames and format changes; an artifact with no active occurrence keeps them. The slug is a handle: assigned once at creation, never changed, freed or reassigned while the artifact exists (also after it goes missing), so suite files, scripts and reports that name it stay valid; `/artifacts/[id]` uses the id. A move or copy into another format is a new artifact.
 
-Same-name artifacts with *different* content in different repositories are **not** merged automatically; the UI shows them as "possible duplicates" (same type + same parsed name; their slugs differ by suffix; SPEC-126 FR-126-11 narrows it to an exactly equal name and the same linkable format of the latest version) and offers a manual **link** action (future) that moves occurrences under one artifact. Rationale: false merges corrupt evaluation history; false splits are cheap to fix.
+Same-name artifacts with *different* content in different repositories are **not** merged automatically; the UI shows them as "possible duplicates" (same type + same parsed name; their slugs differ by suffix; SPEC-126 FR-126-11 narrows it to an exactly equal name and the same linkable format of the chosen version, `artifacts.format`, issue 246) and offers a manual **link** action (future) that moves occurrences under one artifact. Rationale: false merges corrupt evaluation history; false splits are cheap to fix.
 
 ## 9. Data flow
 
