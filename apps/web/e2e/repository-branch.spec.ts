@@ -304,6 +304,60 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
     ).toBeFocused();
   });
 
+  test('a long location is truncated and every row action stays inside the table at 1280px (issue 250)', async ({
+    page,
+  }) => {
+    // A truncated cell keeps its max width as its floor (lesson 2026-10-29): with a 28rem
+    // Location column a long path pushed the table past its container and clipped Remove.
+    const longPath = join(
+      sources,
+      'a-repository-with-a-long-name-in-a-deeply-nested-workspace',
+      'skills-and-rules-for-the-whole-team',
+    );
+    mkdirSync(longPath, { recursive: true });
+    await withDatabase((db) => {
+      const now = new Date().toISOString();
+      db.prepare(
+        `insert into repositories (id, provider, name, location, sync_status, created_at, updated_at)
+         values ('repo_e2e58_long', 'local-directory', 'long-path-rules', ?, 'never', ?, ?)`,
+      ).run(longPath, now, now);
+    });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/repositories');
+    const longRow = page.getByRole('row').filter({ hasText: longPath });
+    const location = longRow.getByRole('cell').nth(2);
+    await expect(location).toHaveText(longPath);
+    await expect(location).toHaveAttribute('title', longPath);
+    await expect(location).toHaveCSS('text-overflow', 'ellipsis');
+    expect(
+      await location.evaluate((cell) => cell.scrollWidth > cell.clientWidth),
+      'the long location is cut, not widening the column',
+    ).toBe(true);
+
+    const geometry = await page.evaluate(() => {
+      const container = document.querySelector('[data-slot="table-container"]')!;
+      const box = container.getBoundingClientRect();
+      const outside = [...container.querySelectorAll('tbody button')]
+        .filter((button) => {
+          const r = button.getBoundingClientRect();
+          return r.left < box.left || r.right > box.right;
+        })
+        .map((button) => button.getAttribute('aria-label'));
+      return {
+        tableOverflow: container.scrollWidth - container.clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        outside,
+      };
+    });
+    expect(geometry).toEqual({ tableOverflow: 0, pageOverflow: 0, outside: [] });
+    await expect(
+      longRow.getByRole('button', { name: /^Remove long-path-rules \(/ }),
+    ).toBeVisible();
+
+    await withDatabase((db) => db.exec("delete from repositories where id = 'repo_e2e58_long'"));
+  });
+
   test('saving enqueues a branch change; the panel waits, then says what changed', async ({
     page,
   }) => {
