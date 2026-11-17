@@ -90,7 +90,11 @@ the groups on `(format, name)` with the index `artifacts_format_name_idx`.
   the skill again moved `style` into `style-3`'s group. The upgrade of the `main` database
   copy was repeated with the final SQL on Node 22.23.2 and 24.21.0: same result.
 - Codex adversarial review: round 1 needs-attention (the SQLite compatibility finding, fixed);
-  round 2 approve.
+  rounds 2 and 3 (after the merge with `main`) approve.
+- `om-auto-review-pr 259 --autofix` (COMMENT only): merged `origin/main` (conflict in
+  `.ai/lessons.md`, both entries kept), fixed one doc nit, no blocker or major; the full gate
+  passed again after the merge (`test:e2e` 199 passed, `test:storybook` 342 passed). Review:
+  https://github.com/MetaX5/DirectiveBench/pull/259#pullrequestreview-5941418053
 
 Not verified: Node 22.16.0 itself (the oldest installed was 22.22.1, SQLite 3.46.1, older than
 22.16's 3.49.1); Windows; a hosted (GitHub) repository in the real-app run (covered by the
