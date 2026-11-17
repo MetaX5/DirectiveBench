@@ -364,7 +364,17 @@ describe('getRepositoryRegistration', () => {
       code: 'confirmation-required',
       location: '/srv',
       home: null,
-      overlaps: [{ repositoryId: 'repo_a', name: 'a', location: '/srv/a', relation: 'contains' }],
+      overlaps: [
+        { repositoryId: 'repo_a', name: 'a', location: '/srv/a', relation: 'contains' },
+        // Issue 244: a user-level agent folder that the scan skips.
+        {
+          repositoryId: 'repo_b',
+          name: '.claude',
+          location: '/srv/.claude',
+          relation: 'contains',
+          userLevel: 'folder',
+        },
+      ],
     };
     await finishJob(handle.db, broad.id, 'completed', undefined, confirmation);
     expect(await getRepositoryRegistration(handle.db, broad.id)).toMatchObject({
@@ -384,11 +394,32 @@ describe('getRepositoryRegistration', () => {
     await handle.db.insert(schema.jobs).values([
       { ...base, id: 'job_bad_payload', payload: { path: 'relative' } },
       { ...base, id: 'job_bad_result', payload: { path: '/srv' }, result: { ok: 'yes' } },
+      {
+        ...base,
+        id: 'job_bad_user_level',
+        payload: { path: '/srv' },
+        result: {
+          ok: false,
+          code: 'confirmation-required',
+          location: '/srv',
+          home: null,
+          overlaps: [
+            {
+              repositoryId: 'r',
+              name: 'a',
+              location: '/srv/a',
+              relation: 'inside',
+              userLevel: 'yes',
+            },
+          ],
+        },
+      },
     ]);
     expect(await getRepositoryRegistration(handle.db, 'job_missing')).toBeNull();
     expect(await getRepositoryRegistration(handle.db, benchmark.id)).toBeNull();
     expect(await getRepositoryRegistration(handle.db, 'job_bad_payload')).toBeNull();
     expect(await getRepositoryRegistration(handle.db, 'job_bad_result')).toBeNull();
+    expect(await getRepositoryRegistration(handle.db, 'job_bad_user_level')).toBeNull();
   });
 
   it('describes a pending job, a rejection and a registered repository', async () => {
