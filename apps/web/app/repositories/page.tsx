@@ -1,5 +1,4 @@
 import { Input } from '@/components/ui/input';
-import Link from 'next/link';
 import {
   getRepositoryBranchChange,
   getRepositoryRegistration,
@@ -33,6 +32,7 @@ import {
   scanRepositoryAction,
 } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
+import { TakeFocus } from './take-focus';
 import {
   branchCaption,
   branchChangeRequestError,
@@ -225,6 +225,7 @@ export default async function RepositoriesPage({
               <label className="flex min-w-64 flex-1 flex-col gap-1 text-ui text-muted-foreground">
                 Path or GitHub URL
                 <Input
+                  id="repository-path"
                   name="path"
                   required
                   defaultValue={formValues?.path ?? ''}
@@ -239,6 +240,7 @@ export default async function RepositoriesPage({
                 <label className="flex flex-col gap-1 text-ui text-muted-foreground">
                   Branch (optional)
                   <Input
+                    id="repository-branch"
                     name="branch"
                     defaultValue={formValues?.branch ?? ''}
                     aria-invalid={branchError ? true : undefined}
@@ -263,7 +265,7 @@ export default async function RepositoriesPage({
                 </p>
               </div>
               {/* The label row is 20px (text-ui line + gap-1): the button lines up with the inputs. */}
-              <Button type="submit" disabled={checking} className="mt-5">
+              <Button id="register-repository" type="submit" disabled={checking} className="mt-5">
                 Register
               </Button>
             </form>
@@ -277,11 +279,17 @@ export default async function RepositoriesPage({
                 {pathError.message}
               </p>
             ) : null}
+            {/* Issue 243: after an error, focus goes to the invalid field (Form rule 3). The
+                Branch field also has `autoFocus` for a full page load. */}
+            {pathError ? <TakeFocus target="repository-path" /> : null}
+            {branchError ? <TakeFocus target="repository-branch" /> : null}
             {confirmation ? (
               <div
+                id="registration-confirmation"
+                tabIndex={-1}
                 role="alert"
                 data-testid="registration-confirmation"
-                className="space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
+                className="space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui outline-none"
               >
                 <p className="font-medium">{confirmation.message}</p>
                 <ul className="list-disc space-y-1 pl-4">
@@ -295,55 +303,74 @@ export default async function RepositoriesPage({
                   <Button type="submit" size="sm" variant="destructive">
                     Register anyway
                   </Button>
-                  <Link href="/repositories" className="text-ui underline">
+                  {/* A full page load (not `Link`): on load the browser focuses the
+                      fragment's target, the Register button (Risky-action rule 7, issue 243). */}
+                  <a href="/repositories#register-repository" className="text-ui underline">
                     Cancel
-                  </Link>
+                  </a>
                 </form>
               </div>
             ) : null}
+            {confirmation ? <TakeFocus target="registration-confirmation" /> : null}
             {notice && notice.kind !== 'fieldError' && notice.kind !== 'confirm' ? (
-              <p
-                role="status"
-                data-testid="registration-status"
-                data-state={notice.kind}
-                className={
-                  notice.kind === 'done'
-                    ? 'text-ui text-success-foreground wrap-anywhere'
-                    : 'text-ui wrap-anywhere'
-                }
-              >
-                {notice.message}
-              </p>
+              <>
+                <p
+                  id="registration-status"
+                  tabIndex={-1}
+                  role="status"
+                  data-testid="registration-status"
+                  data-state={notice.kind}
+                  className={
+                    notice.kind === 'done'
+                      ? 'text-ui text-success-foreground outline-none wrap-anywhere'
+                      : 'text-ui outline-none wrap-anywhere'
+                  }
+                >
+                  {notice.message}
+                </p>
+                {/* Register is disabled while the runner checks: the status line takes focus. */}
+                <TakeFocus target="registration-status" />
+              </>
             ) : null}
           </CardContent>
         </Card>
 
         {scanError ? (
-          <p
-            role="alert"
-            data-testid="scan-request-error"
-            className="text-ui text-destructive-foreground"
-          >
-            {scanError}
-          </p>
+          <>
+            <p
+              id="scan-request-error"
+              tabIndex={-1}
+              role="alert"
+              data-testid="scan-request-error"
+              className="text-ui text-destructive-foreground outline-none"
+            >
+              {scanError}
+            </p>
+            <TakeFocus target="scan-request-error" />
+          </>
         ) : null}
 
         {removalLine ? (
-          <p
-            id="remove-result"
-            role={removalLine.kind === 'error' ? 'alert' : 'status'}
-            data-testid="remove-result"
-            data-state={removalLine.kind}
-            className={
-              removalLine.kind === 'error'
-                ? 'text-ui text-destructive-foreground'
-                : removalLine.kind === 'done'
-                  ? 'text-ui text-success-foreground'
-                  : 'text-ui'
-            }
-          >
-            {removalLine.message}
-          </p>
+          <>
+            <p
+              id="remove-result"
+              tabIndex={-1}
+              role={removalLine.kind === 'error' ? 'alert' : 'status'}
+              data-testid="remove-result"
+              data-state={removalLine.kind}
+              className={
+                removalLine.kind === 'error'
+                  ? 'text-ui text-destructive-foreground outline-none'
+                  : removalLine.kind === 'done'
+                    ? 'text-ui text-success-foreground outline-none'
+                    : 'text-ui outline-none'
+              }
+            >
+              {removalLine.message}
+            </p>
+            {/* The redirect's `#remove-result` only scrolls to the line (issue 243). */}
+            <TakeFocus target="remove-result" />
+          </>
         ) : null}
 
         {scanNotice ? (
@@ -351,21 +378,25 @@ export default async function RepositoriesPage({
             <CardContent className="space-y-stack pt-4">
               <div className="flex flex-wrap items-center gap-inline">
                 <p
+                  id="scan-status"
+                  tabIndex={-1}
                   role="status"
                   data-testid="scan-status"
                   data-state={scanNotice.kind}
                   className={
                     scanNotice.kind === 'error'
-                      ? 'text-ui text-destructive-foreground'
+                      ? 'text-ui text-destructive-foreground outline-none'
                       : scanNotice.kind === 'done'
-                        ? 'text-ui text-success-foreground'
+                        ? 'text-ui text-success-foreground outline-none'
                         : scanNotice.kind === 'warning'
-                          ? 'text-ui text-warning-foreground'
-                          : 'text-ui'
+                          ? 'text-ui text-warning-foreground outline-none'
+                          : 'text-ui outline-none'
                   }
                 >
                   {scanNotice.message}
                 </p>
+                {/* Again when the state changes: Cancel scan is gone once the scan ends. */}
+                <TakeFocus target="scan-status" state={scanNotice.kind} />
                 {scan && scanning ? (
                   <form action={cancelJobAction}>
                     <input type="hidden" name="jobId" value={scan.jobId} />
@@ -444,6 +475,8 @@ export default async function RepositoriesPage({
                   {branchLine.message}
                 </p>
               ) : null}
+              {/* The redirect's `#branch-panel` only scrolls to the line (issue 243). */}
+              {branchLine ? <TakeFocus target="branch-panel" /> : null}
               {panelRepository && !branchLine ? (
                 // Not focusable: after an error the `#branch-panel` fragment only scrolls to it,
                 // and the Branch field's autofocus puts focus in the field (B9).
@@ -465,6 +498,7 @@ export default async function RepositoriesPage({
                       <label className="flex flex-col gap-1 text-ui text-muted-foreground">
                         Branch
                         <Input
+                          id="change-branch-field"
                           name="branch"
                           defaultValue={panelValue}
                           aria-invalid={panelError !== null ? true : undefined}
@@ -508,9 +542,24 @@ export default async function RepositoriesPage({
                     </div>
                   </form>
                   {changeNotice?.kind === 'active' ? (
-                    <p role="status" data-testid="branch-status" className="wrap-anywhere">
-                      {changeNotice.message}
-                    </p>
+                    <>
+                      <p
+                        id="branch-status"
+                        tabIndex={-1}
+                        role="status"
+                        data-testid="branch-status"
+                        className="outline-none wrap-anywhere"
+                      >
+                        {changeNotice.message}
+                      </p>
+                      {/* Save branch is disabled while the runner checks (issue 243). */}
+                      <TakeFocus target="branch-status" />
+                    </>
+                  ) : null}
+                  {/* After the runner's error the field takes focus (Form rule 3); a full page
+                      load focuses it by `autoFocus`. */}
+                  {panelError !== null && !panelPending ? (
+                    <TakeFocus target="change-branch-field" />
                   ) : null}
                   <p className="text-muted-foreground">{branchPanelNote(panelRepository)}</p>
                 </div>
