@@ -310,6 +310,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           requestedModel: request.model?.model ?? null,
           flagsHash,
           skill: skillName !== undefined,
+          ...(skillName === undefined ? {} : { skillName }),
         },
         secrets,
       );

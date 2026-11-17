@@ -55,13 +55,24 @@ export function assertClaudeSkillName(name: string): void {
   }
 }
 
+/** Where and under which name a `skill-md` artifact is installed (SPEC-203 §4.1). */
+export interface ClaudeSkillInstall {
+  /** The name Claude Code resolves: the frontmatter `name`, else the install directory. */
+  name: string;
+  /** The directory below `.claude/skills/`. */
+  directory: string;
+}
+
 /**
- * The name Claude Code resolves for an installed `skill-md` artifact (FR-118-08, SPEC-203 §4.1):
- * the `name` in the frontmatter of the bundle's `SKILL.md`, else (absent or null) the install
- * directory, which is the artifact slug. Fails closed with `skill-name-unsupported` when there is no `SKILL.md`, its
- * frontmatter cannot be parsed, `name` is not a string, or the name is not a valid skill name.
+ * The install directory and name of a `skill-md` artifact (FR-118-08, SPEC-203 §4.1, issue 245).
+ * A `SKILL.md` that declares a `name` (not absent or null) is installed at `.claude/skills/<slug>/`
+ * under that name. One that does not is installed in, and named after, the folder its repository's
+ * own agent sees ({@link ArtifactBundle.folderName}), else the slug. Fails closed with
+ * `skill-name-unsupported` when there is no `SKILL.md`, its frontmatter cannot be parsed, `name`
+ * is not a string, or the resolved name is not a valid skill name: an invalid folder name such as
+ * `Review_Tool` is refused, never replaced by the slug.
  */
-export function claudeSkillName(artifact: ArtifactBundle): string {
+export function claudeSkillInstall(artifact: ArtifactBundle): ClaudeSkillInstall {
   const skillFile = artifact.files.find((file) => file.path === 'SKILL.md');
   if (!skillFile) {
     throw new ClaudeCodeError(
@@ -83,9 +94,18 @@ export function claudeSkillName(artifact: ArtifactBundle): string {
       'The SKILL.md frontmatter `name` is not a string.',
     );
   }
-  const name = declared ?? artifact.slug;
+  const directory =
+    declared === undefined || declared === null
+      ? (artifact.folderName ?? artifact.slug)
+      : artifact.slug;
+  const name = declared ?? directory;
   assertClaudeSkillName(name);
-  return name;
+  return { name, directory };
+}
+
+/** The name Claude Code resolves for an installed `skill-md` artifact ({@link claudeSkillInstall}). */
+export function claudeSkillName(artifact: ArtifactBundle): string {
+  return claudeSkillInstall(artifact).name;
 }
 
 /**

@@ -136,6 +136,11 @@ export interface AgentRunMetadata {
   mismatchedMessageModels: string[];
   /** sha256 of the normalised argv (FR-118-04). */
   flagsHash: string;
+  /**
+   * `skill-md` runs only: the skill name the run installed and allowed (FR-118-04/08, SPEC-203
+   * §4.1, issue 245). Recorded, not compared: the flags hash replaces it with a placeholder.
+   */
+  installedSkillName?: string;
 }
 
 /** Whether the installed skill was loaded and used in one agent run (SPEC-118 FR-118-09). */

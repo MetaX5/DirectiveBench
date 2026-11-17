@@ -64,6 +64,46 @@ describe('planText (FR-118-31)', () => {
     expect(lines).toContain('Model:      anthropic/claude-x');
     expect(lines).toContain('Agent runs: 4 (1 case(s) × 2 repetition(s) × 2 variants)');
     expect(lines.join('\n')).not.toContain('disable-model-invocation');
+    expect(lines.join('\n')).not.toContain('Skill name:');
+  });
+
+  it('shows the name a nameless skill is installed under: its folder (issue 245)', () => {
+    const prepared = {
+      contentHash: 'c'.repeat(64),
+      definition: {
+        id: 'suite',
+        name: 'Suite',
+        cases: [{ id: 'a', setup: [], assertions: [] }],
+        execution: { model: null, repetitions: 1 },
+      },
+    } as unknown as PreparedSuite;
+    const content = '---\ndescription: d\n---\nBody\n';
+    const skill = {
+      ...candidate,
+      slug: 'review',
+      name: 'code-review',
+      type: 'skill',
+      format: 'skill-md',
+      files: [{ path: 'SKILL.md', sha256: 's', size: content.length, content }],
+      folderName: 'code-review',
+    } satisfies ArtifactBundle;
+    const lines = planText({
+      prepared,
+      resolved: {
+        ref: { version: { version: 1 } },
+        candidate: skill,
+        baseline: null,
+      } as unknown as Resolved,
+      options,
+      agentVersion: '2.1.302',
+      storedApproved: false,
+      runsCommands: false,
+    });
+    expect(lines.slice(1, 4)).toEqual([
+      'Candidate:  review (named code-review) v1',
+      'Skill name: code-review',
+      'Baseline:   no artifact',
+    ]);
   });
 });
 

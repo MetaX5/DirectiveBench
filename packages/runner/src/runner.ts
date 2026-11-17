@@ -20,7 +20,7 @@ import {
   createBenchmarkRun,
   finishBenchmarkRun,
   finishJob,
-  getArtifactBundle,
+  getInstallableArtifactBundle,
   getJob,
   getRepository,
   getSuiteVersion,
@@ -608,14 +608,15 @@ export class LocalRunner {
         return await finishAs('failed', `The stored benchmark request is invalid: ${reasons}`);
       }
       const suiteVersion = await getSuiteVersion(db, payload.data.suiteVersionId);
-      const artifact = await getArtifactBundle(db, payload.data.artifactVersionId);
+      const artifact = await getInstallableArtifactBundle(db, payload.data.artifactVersionId);
       if (!suiteVersion || !artifact)
         return await finishAs('failed', 'Suite or artifact version no longer exists');
       // The A/B baseline is checked when the job is created and again here (SPEC-118 FR-118-12).
       let baselineArtifact: ArtifactBundle | undefined;
       if (payload.data.baselineArtifactVersionId !== undefined) {
         baselineArtifact =
-          (await getArtifactBundle(db, payload.data.baselineArtifactVersionId)) ?? undefined;
+          (await getInstallableArtifactBundle(db, payload.data.baselineArtifactVersionId)) ??
+          undefined;
         if (!baselineArtifact) {
           return await finishAs('failed', 'Baseline artifact version no longer exists');
         }

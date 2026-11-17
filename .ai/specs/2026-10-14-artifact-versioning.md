@@ -3,7 +3,7 @@ id: SPEC-103
 title: Artifact Versioning
 status: draft
 created: 2026-10-14
-updated: 2026-11-16
+updated: 2026-11-17
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-105, SPEC-005, SPEC-006, SPEC-110, SPEC-111, SPEC-112, SPEC-113]
 ---
@@ -93,6 +93,10 @@ interface ArtifactBundle {
   artifactId: string; versionId: string; slug: string; name: string;
   type: ArtifactType; format: ArtifactFormat; contentHash: string;
   files: ArtifactFile[];
+  /** Folder a nameless skill is installed in and named after (SPEC-203 §4.1, issue 245): the
+   *  representative active occurrence's folder, else the version's source_path folder; null =
+   *  the slug. Set by getInstallableArtifactBundle; absent in bundles built without a repository. */
+  folderName?: string | null;
 }
 
 /** Planned repository function. */
@@ -162,7 +166,7 @@ flowchart TD
   6. *Rename plus a content change in another location*: a new artifact; the old one goes missing with its history (FR-103-10); its slug stays taken.
   7. *Linked copies whose names diverge*: the name follows FR-126-07 in either scan order; the slug never changes.
   8. *Hosted and local repositories*: the same rules; hosted copies never link ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) A16); an unchanged hosted remote is not re-applied, so migration `0007` repairs types stored before this rule.
-  9. *A skill folder without a frontmatter `name` is renamed*: a move (FR-103-09); the name follows the folder, the slug stays (the Claude Code install name of such a skill is issue 245).
+  9. *A skill folder without a frontmatter `name` is renamed*: a move (FR-103-09); the name follows the folder, the slug stays. No version is created, so the version's `source_path` still names the old folder; agent adapters install such a skill under the folder of the representative active occurrence (the new folder), not under the slug or the version's `source_path` ([SPEC-203](2026-10-14-integration-claude-code.md) §4.1, issue 245).
   10. *A bundled example whose format changes in a new release*: `importArtifactVersion` sets `type` from its input like `name`; its slug-or-name identity is unchanged (SPEC-126 A5).
   11. *A slug equal to another artifact's id*: the id wins in the CLI ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-22), unchanged.
   - Known limitation: possible-duplicate groups key on the artifact's current `type` and its latest version's format, so after a revert to a version of another format the two can disagree and a same-named artifact is not flagged (issue 246).
@@ -216,4 +220,5 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - **Implemented for SPEC-126 Phase 3 (issue #20; verified on 2026-11-13 by `packages/core/test/moves.test.ts`, `packages/database/test/identity.test.ts` "rule 2", the move tests in `packages/runner/test/missing-occurrences.test.ts` and `hosted-repository.test.ts` for `local-git`, `local-directory` and `github`, and `apps/web/e2e/identity.spec.ts`):** FR-103-09: within one scan of one repository, a new path and an active occurrence the scan did not find (not under an unobserved path) match when their formats are equal and, for a directory skill, the content hash is equal, or, for a single file, the primary file's recomputed `sha256` is equal (core `matchMoves`); a one-to-one match updates the occurrence in place (same id and artifact, new path; a directory skill keeps its version, a renamed single file gets the next version with the old one as parent, §14); an ambiguous match moves nothing (the old occurrences go missing, rules 3 and 4 decide for the new paths) and is counted in the scan line without a separate warning (SPEC-126 §11.5 H3). FR-103-10 is unchanged: a move combined with a content change is a missing occurrence plus a new path.
 - **Implemented — an unchanged hosted remote is not read again (issue 63; verified on 2026-11-16 by `packages/runner/test/hosted-repository.test.ts` "an unchanged remote skips the fetch and the scan", local bare remote, no network, and `packages/database/test/unchanged-scan.test.ts`):** a rescan of a `github` repository whose remote branch head is still the commit of its last successful scan, made with the same scan configuration, creates 0 versions without fetching or hashing anything; the versions and occurrences stay as that scan wrote them (SPEC-105 §20, FR-105-10). A changed remote or configuration versions content exactly as above.
 - **Implemented: what a rescan changes on an existing artifact (issue 66; verified on 2026-11-16 by `packages/database/test/source-changes.test.ts`, the migration `0007` test in `packages/database/test/client.test.ts`, the issue 66 tests in `packages/runner/test/missing-occurrences.test.ts` (`local-git`, `local-directory`) and `hosted-repository.test.ts` (`github`, local bare remote), `apps/cli/test/benchmark-run.test.ts`, `benchmark-init.test.ts` and `apps/web/e2e/identity.spec.ts` "renames and type changes keep the URL (issue 66)"):** FR-103-16: `type` follows the chosen active occurrence's version format like `name` and `description`; `getArtifactBundle` types a run by its version; bundled examples take their input type; slugs never change, are never freed or reused; migration `0007` repairs stale types; the §14 cases 1 to 11 hold. The decision record is the maintainer's approval on issue 66 (no ADR, Q8).
+- **Implemented: install folder of a nameless skill (issue 245; verified on 2026-11-17 by `packages/database/test/artifact-bundles.test.ts`):** §14 case 9. `getInstallableArtifactBundle` returns the bundle with `folderName`, the folder of the representative active occurrence, else the version's `source_path` folder, else null. Agent adapters install a nameless skill under it ([SPEC-203](2026-10-14-integration-claude-code.md) §4.1).
 - **Not implemented:** versions from private hosted repository sync (SPEC-105), "evaluated on vN, latest is vM" notice, version-over-version comparison, diff view, binary file storage.
