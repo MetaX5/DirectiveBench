@@ -3,7 +3,7 @@ id: SPEC-108
 title: Benchmark Definition Format
 status: draft
 created: 2026-10-14
-updated: 2026-10-22
+updated: 2026-11-17
 category: feature
 related: [SPEC-107, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-106, SPEC-005, SPEC-007, ADR-0005, ADR-0006]
 ---
@@ -182,7 +182,7 @@ interface MockAgentOptions {
 ```
 
 Semantics:
-1. The Mock Agent loads its **instruction context** like a harness would discover installed artifacts: `AGENTS.md` at the workspace root and every `.agents/skills/*/SKILL.md` (sorted). In the candidate variant the artifact is installed first (skills → `.agents/skills/<slug>/`; instructions/rules → `.agents/instructions/<slug>/` and appended to `AGENTS.md`); the baseline has only what the fixture contains.
+1. The Mock Agent loads its **instruction context** like a harness would discover installed artifacts: `AGENTS.md` at the workspace root and every `.agents/skills/*/SKILL.md` (sorted). In the candidate variant the artifact is installed first (skills → `.agents/skills/<dir>/`, `<dir>` per [SPEC-203](2026-10-14-integration-claude-code.md) §4.1: the slug for a skill with a frontmatter `name`, else its folder name; instructions/rules → `.agents/instructions/<slug>/` and appended to `AGENTS.md`); the baseline has only what the fixture contains.
 2. Steps run in order. A step with `when.contextIncludes` is **skipped** (trace `step-skipped`) if the phrase is absent; otherwise its file is written (trace `step-applied`, `file-written`). Later steps may overwrite earlier ones.
 3. Invalid options or a failing write → execution status `agent-error`.
 4. The playbook is ignored by every other adapter. Results produced with it are labelled **"Mock agent — not an AI evaluation"**: it demonstrates the pipeline (fixtures, installation, hidden tests, scoring) and that an artifact's text carries a directive; it does **not** measure AI behaviour.

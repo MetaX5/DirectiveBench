@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import {
   findSecretRanges,
+  parseFrontmatter,
   type ArtifactBundle,
   type TextEnd,
   type TextRange,
@@ -87,7 +88,7 @@ export class MockAgentAdapter implements AgentAdapter {
     const workspaceDir = workspace.path;
     const target =
       artifact.type === 'skill'
-        ? `.agents/skills/${artifact.slug}`
+        ? `.agents/skills/${mockSkillDirectory(artifact)}`
         : `.agents/instructions/${artifact.slug}`;
     const paths = await writeArtifactFiles(workspaceDir, target, artifact);
     if (artifact.type !== 'skill') {
@@ -158,6 +159,20 @@ export class MockAgentAdapter implements AgentAdapter {
     trace.push({ type: 'message', text: summary });
     return finish('completed', summary, null);
   }
+}
+
+/**
+ * The directory below `.agents/skills/` a skill is installed in, by the rule of the Claude Code
+ * adapter (SPEC-203 §4.1, SPEC-107 §8, issue 245): the slug when its `SKILL.md` declares a `name`,
+ * else the folder its repository's agent sees ({@link ArtifactBundle.folderName}), else the slug.
+ * The mock reads no skill names, so it does not check Claude Code's name form.
+ */
+export function mockSkillDirectory(artifact: ArtifactBundle): string {
+  const skillFile = artifact.files.find((file) => file.path === 'SKILL.md');
+  const declared = skillFile ? parseFrontmatter(skillFile.content).frontmatter.name : undefined;
+  return declared === undefined || declared === null
+    ? (artifact.folderName ?? artifact.slug)
+    : artifact.slug;
 }
 
 async function loadInstructionContext(

@@ -7,7 +7,7 @@ import { writeArtifactFiles } from '../install';
 import type { ClaudeArtifactProfile } from './argv';
 import { artifactRefusalCode, inspectArtifactBundle } from './bundle-inspection';
 import { ClaudeCodeError } from './errors';
-import { claudeSkillName } from './skill-name';
+import { claudeSkillInstall, claudeSkillName } from './skill-name';
 import { workspacePinIssue, type WorkspacePin } from '../workspace-pin';
 
 /** Artifact formats Claude Code can load from a workspace (SPEC-203 §4.1). */
@@ -128,7 +128,8 @@ async function moveIntoPlace(stage: string, workspaceDir: string): Promise<void>
  * Installs one artifact version into a workspace with the Claude Code convention (SPEC-203 §4.1),
  * for the candidate and for an A/B baseline alike (FR-118-11):
  *
- * - `skill-md` → `.claude/skills/<slug>/` with every bundled file;
+ * - `skill-md` → `.claude/skills/<dir>/` with every bundled file, `<dir>` the slug for a skill with
+ *   a frontmatter `name`, else its folder name ({@link claudeSkillInstall}, issue 245);
  * - `claude-rule` → `.claude/rules/<file>`;
  * - `claude-md` → appended to `./CLAUDE.md`;
  * - `agents-md` → appended to `./AGENTS.md`, plus an `@AGENTS.md` import appended to `./CLAUDE.md`,
@@ -170,8 +171,11 @@ export async function installClaudeArtifact(
     const issue = await workspacePinIssue(workspace);
     if (issue !== null) throw new ClaudeCodeError('workspace-replaced', `${issue}.`);
   };
-  if (format === 'skill-md' && !SLUG.test(artifact.slug)) {
-    throw conflict(`.claude/skills/${artifact.slug}`, 'the slug is not a single plain segment');
+  // The name of a nameless skill is its directory and was validated as a skill name; a named
+  // skill's directory is the slug, which must be one plain segment.
+  const skillDir = format === 'skill-md' ? claudeSkillInstall(artifact).directory : null;
+  if (skillDir !== null && !SLUG.test(skillDir)) {
+    throw conflict(`.claude/skills/${skillDir}`, 'the slug is not a single plain segment');
   }
   // A rule is one file in `.claude/rules/`.
   const nested = artifact.files.find((file) => file.path.includes('/'));
@@ -189,8 +193,8 @@ export async function installClaudeArtifact(
   const stage = await mkdtemp(join(dirname(workspaceDir), '.claude-install-'));
   try {
     let paths: string[];
-    if (format === 'skill-md') {
-      paths = await writeArtifactFiles(stage, `.claude/skills/${artifact.slug}`, artifact);
+    if (skillDir !== null) {
+      paths = await writeArtifactFiles(stage, `.claude/skills/${skillDir}`, artifact);
     } else if (format === 'claude-rule') {
       paths = await writeArtifactFiles(stage, '.claude/rules', artifact);
     } else if (format === 'claude-md') {

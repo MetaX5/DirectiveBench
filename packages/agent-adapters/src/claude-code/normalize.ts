@@ -262,6 +262,8 @@ export interface ClaudeRunConditions {
   flagsHash: string;
   /** `skill-md` runs only: whether to report `skillActivation`. */
   skill: boolean;
+  /** `skill-md` runs only: the installed skill's resolved name, recorded in the metadata. */
+  skillName?: string;
 }
 
 /** Placeholder model for a model set that exceeded its bound, so the run cannot compare equal. */
@@ -296,6 +298,7 @@ export function claudeRunMetadata(
     ),
     mismatchedMessageModels: [...mismatched].sort(),
     flagsHash: conditions.flagsHash,
+    ...(conditions.skillName === undefined ? {} : { installedSkillName: conditions.skillName }),
   };
 }
 

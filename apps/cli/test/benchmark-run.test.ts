@@ -1047,6 +1047,8 @@ posix('benchmark run after a rename or a type change (issue 66, SPEC-103 FR-103-
     expect(code).not.toBe(ExitCode.Usage);
     expect(s.fake.starts()).toBe(2);
     expect(s.output()).toContain('Candidate:  pdf (named pdf-report) v2');
+    // A skill with a frontmatter name is installed under that name (SPEC-203 §4.1, issue 245).
+    expect(s.output()).toContain('Skill name: pdf-report');
   });
 
   it('gates each version with its own type after a type change (FR-118-25, N2)', async () => {
