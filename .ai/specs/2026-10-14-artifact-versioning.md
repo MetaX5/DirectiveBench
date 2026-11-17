@@ -3,7 +3,7 @@ id: SPEC-103
 title: Artifact Versioning
 status: draft
 created: 2026-10-14
-updated: 2026-11-16
+updated: 2026-11-17
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-105, SPEC-005, SPEC-006, SPEC-110, SPEC-111, SPEC-112, SPEC-113]
 ---
@@ -93,6 +93,10 @@ interface ArtifactBundle {
   artifactId: string; versionId: string; slug: string; name: string;
   type: ArtifactType; format: ArtifactFormat; contentHash: string;
   files: ArtifactFile[];
+  /** Folder a nameless skill is installed in and named after (SPEC-203 §4.1, issue 245): the
+   *  representative active occurrence's folder, else the version's source_path folder; null =
+   *  the slug. Set by getInstallableArtifactBundle; absent in bundles built without a repository. */
+  folderName?: string | null;
 }
 
 /** Planned repository function. */
@@ -162,7 +166,7 @@ flowchart TD
   6. *Rename plus a content change in another location*: a new artifact; the old one goes missing with its history (FR-103-10); its slug stays taken.
   7. *Linked copies whose names diverge*: the name follows FR-126-07 in either scan order; the slug never changes.
   8. *Hosted and local repositories*: the same rules; hosted copies never link ([SPEC-126](implemented/2026-11-12-cross-repository-artifact-identity.md) A16); an unchanged hosted remote is not re-applied, so migration `0007` repairs types stored before this rule.
-  9. *A skill folder without a frontmatter `name` is renamed*: a move (FR-103-09); the name follows the folder, the slug stays (the Claude Code install name of such a skill is issue 245).
+  9. *A skill folder without a frontmatter `name` is renamed*: a move (FR-103-09); the name follows the folder, the slug stays. No version is created, so the version's `source_path` still names the old folder; agent adapters install such a skill under the folder of the representative active occurrence (the new folder), not under the slug or the version's `source_path` ([SPEC-203](2026-10-14-integration-claude-code.md) §4.1, issue 245).
   10. *A bundled example whose format changes in a new release*: `importArtifactVersion` sets `type` from its input like `name`; its slug-or-name identity is unchanged (SPEC-126 A5).
   11. *A slug equal to another artifact's id*: the id wins in the CLI ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-22), unchanged.
   - Known limitation: possible-duplicate groups key on the artifact's current `type` and its latest version's format, so after a revert to a version of another format the two can disagree and a same-named artifact is not flagged (issue 246).

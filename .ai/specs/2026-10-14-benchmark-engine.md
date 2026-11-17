@@ -3,7 +3,7 @@ id: SPEC-107
 title: Benchmark Engine
 status: draft
 created: 2026-10-14
-updated: 2026-10-22
+updated: 2026-11-17
 category: feature
 related: [SPEC-118, SPEC-108, SPEC-109, SPEC-110, SPEC-111, SPEC-112, SPEC-113, SPEC-114, SPEC-005, SPEC-006, SPEC-007, SPEC-012, ADR-0005, ADR-0006, ADR-0007]
 ---
@@ -199,7 +199,7 @@ type EngineEvent =
 
 ### 8.2 Agent adapter contract (consumed, not owned)
 
-Owned by `@directivebench/agent-adapters` (`src/contract.ts`): `AgentAdapter { id, displayName, capabilities: AgentCapabilities, detect(), installArtifact(workspaceDir, ArtifactBundle), run(AgentRunRequest): Promise<AgentRunResult> }` with `AgentCapabilities { execution, headless, modelSelection, artifactInstallation, structuredOutput, usageReporting, deterministic }`. The engine passes `case.agentOptions[adapter.id]` as `AgentRunRequest.options`. Mock Agent install convention: skills → `.agents/skills/<slug>/`; instructions/rules → `.agents/instructions/<slug>/` and appended to `AGENTS.md`.
+Owned by `@directivebench/agent-adapters` (`src/contract.ts`): `AgentAdapter { id, displayName, capabilities: AgentCapabilities, detect(), installArtifact(workspaceDir, ArtifactBundle), run(AgentRunRequest): Promise<AgentRunResult> }` with `AgentCapabilities { execution, headless, modelSelection, artifactInstallation, structuredOutput, usageReporting, deterministic }`. The engine passes `case.agentOptions[adapter.id]` as `AgentRunRequest.options`. Mock Agent install convention: skills → `.agents/skills/<dir>/`, where `<dir>` is the slug for a skill with a frontmatter `name` and otherwise the skill's folder name, by the same rule and fallbacks as the Claude Code adapter ([SPEC-203](2026-10-14-integration-claude-code.md) §4.1, issue 245); instructions/rules → `.agents/instructions/<slug>/` and appended to `AGENTS.md`.
 
 ### 8.3 Assertion plugin contract
 
