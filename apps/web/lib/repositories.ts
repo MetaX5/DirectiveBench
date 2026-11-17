@@ -330,7 +330,7 @@ function ignoredBranchNote(
   const chosen = typed === repository.defaultBranch ? null : typed;
   return chosen === repository.selectedBranch
     ? ''
-    : ' Its branch was not changed: use Change branch in the list.';
+    : ' Its branch was not changed: use Change in the Branch column.';
 }
 
 /** Whether the Repositories page offers "Scan" for a repository (local and GitHub so far). */
