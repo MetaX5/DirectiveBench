@@ -308,13 +308,10 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    // Cancel writes nothing and returns to the row: the next Tab reaches its Scan, then Remove.
+    // Cancel writes nothing and returns focus to the row's Remove (issue 252).
     await cancel.click();
-    await expect(page).toHaveURL(new RegExp(`/repositories#repository-${id}$`));
+    await expect(page).toHaveURL(new RegExp(`/repositories#remove-repository-${id}$`));
     await expect(page.getByTestId('remove-panel')).toHaveCount(0);
-    await page.keyboard.press('Tab');
-    await expect(row.getByRole('button', { name: `Scan ${REPOSITORY}` })).toBeFocused();
-    await page.keyboard.press('Tab');
     await expect(row.getByRole('button', { name: `Remove ${REPOSITORY}` })).toBeFocused();
     expect(await repositoryIdOf()).toBe(id);
     expect((await statusesOf()).every((o) => o.status === 'active')).toBe(true);
