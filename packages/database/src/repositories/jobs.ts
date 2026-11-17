@@ -104,6 +104,13 @@ export const repositoryOverlapSchema = z
     location: z.string().min(1),
     /** `inside`: the new location is below this repository; `contains`: it is above it. */
     relation: z.enum(['inside', 'contains']),
+    /**
+     * Issue 244: set when the nested side (the new location for `inside`, this repository for
+     * `contains`) is a user-level agent folder that the scan of the other side skips (D05):
+     * `folder` when it is one, `inside-folder` when it lies inside one. Absent for an ordinary
+     * overlap, whose files both scans read.
+     */
+    userLevel: z.enum(['folder', 'inside-folder']).optional(),
   })
   .strict();
 export type RepositoryOverlap = z.infer<typeof repositoryOverlapSchema>;

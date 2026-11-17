@@ -10,6 +10,7 @@ import {
   HOSTED_PROVIDERS,
   SCANNABLE_PROVIDERS,
   type RepositoryBranchChange,
+  type RepositoryOverlap,
   type RepositoryRecord,
   type RepositoryRemovalImpact,
   type RepositoryRegistration,
@@ -220,6 +221,32 @@ export type RegistrationNotice =
 type ConfirmationRequest = Extract<RepositoryRegistrationResult, { code: 'confirmation-required' }>;
 
 /**
+ * One overlap's reason. An ordinary overlap counts the same files twice; one whose nested side is
+ * a user-level agent folder the scan skips (issue 244, D05) does not, so it says that instead.
+ */
+function overlapReason(
+  relation: RepositoryOverlap['relation'],
+  userLevel: RepositoryOverlap['userLevel'],
+  subject: string,
+): string {
+  if (userLevel === undefined) {
+    return relation === 'inside'
+      ? `It is inside the registered repository ${subject}. Its files are already scanned there; registering it too counts each of its artifacts twice, once per repository.`
+      : `It contains the registered repository ${subject}. A scan reads that repository's files again and counts each of its artifacts twice, once per repository.`;
+  }
+  if (relation === 'inside') {
+    const what =
+      userLevel === 'folder' ? 'a user-level agent folder' : 'inside a user-level agent folder';
+    return `It is inside the registered repository ${subject}, but it is ${what}: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.`;
+  }
+  const what =
+    userLevel === 'folder'
+      ? 'a user-level agent folder'
+      : 'which is inside a user-level agent folder';
+  return `It contains the registered repository ${subject}, ${what}. A scan skips that folder, so nothing is counted twice.`;
+}
+
+/**
  * The FR-104-18 explanation: why this location needs a confirmation — the size of a scan and the
  * same files counted as occurrences of two repositories. User-level agent folders are never part
  * of it: a scan always skips them (product decision D05).
@@ -239,11 +266,7 @@ export function confirmationReasons(request: ConfirmationRequest): string[] {
   }
   for (const overlap of request.overlaps) {
     const subject = `${overlap.name} (${overlap.location})`;
-    reasons.push(
-      overlap.relation === 'inside'
-        ? `It is inside the registered repository ${subject}. Its files are already scanned there; registering it too counts each of its artifacts twice, once per repository.`
-        : `It contains the registered repository ${subject}. A scan reads that repository's files again and counts each of its artifacts twice, once per repository.`,
-    );
+    reasons.push(overlapReason(overlap.relation, overlap.userLevel, subject));
   }
   return reasons;
 }

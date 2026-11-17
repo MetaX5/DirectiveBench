@@ -2,13 +2,20 @@ import { constants } from 'node:fs';
 import { access, lstat, realpath, stat } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { runCommand, type CommandResult } from '@directivebench/benchmark-engine';
-import { REDACTION_MARKER, expandHomePath, isFilesystemRoot } from '@directivebench/core';
+import {
+  REDACTION_MARKER,
+  expandHomePath,
+  isFilesystemRoot,
+  pathRelation,
+} from '@directivebench/core';
 import {
   registerLocalRepository,
   type DatabaseHandle,
+  type RepositoryOverlap,
   type RepositoryRegistrationErrorCode,
   type RepositoryRegistrationResult,
 } from '@directivebench/database';
+import { userLevelAgentFolders } from './repository-scan';
 
 /** NFR-104-01: local validation completes or times out within 2 s (applied per git call). */
 export const LOCAL_GIT_TIMEOUT_MS = 2_000;
@@ -336,6 +343,41 @@ async function canonicalHome(homeDir: string): Promise<string> {
   return realpath(homeDir).catch(() => resolve(homeDir));
 }
 
+/**
+ * Whether a scan of `scanned` skips `nested` as a user-level agent folder (D05, issue 244): the
+ * same list the scan uses, so the overlap wording never disagrees with what a scan reads.
+ */
+async function userLevelOf(
+  scanned: string,
+  nested: string,
+  options: LocalPathInspectionOptions,
+): Promise<RepositoryOverlap['userLevel']> {
+  const folders = await userLevelAgentFolders(options.homeDir, options.env, scanned);
+  const relations = folders.map((folder) => pathRelation(nested, folder));
+  if (relations.includes('same')) return 'folder';
+  return relations.includes('inside') ? 'inside-folder' : undefined;
+}
+
+/**
+ * Marks each overlap whose nested side the other side's scan skips (issue 244). It only changes
+ * the wording of the confirmation, never whether one is asked, so it runs after the transaction.
+ */
+async function markUserLevelOverlaps(
+  location: string,
+  overlaps: RepositoryOverlap[],
+  options: LocalPathInspectionOptions,
+): Promise<RepositoryOverlap[]> {
+  return Promise.all(
+    overlaps.map(async (overlap) => {
+      const userLevel =
+        overlap.relation === 'inside'
+          ? await userLevelOf(overlap.location, location, options)
+          : await userLevelOf(location, overlap.location, options);
+      return userLevel === undefined ? overlap : { ...overlap, userLevel };
+    }),
+  );
+}
+
 export interface RegistrationRequest {
   /** The path as the user entered it. */
   path: string;
@@ -383,7 +425,7 @@ export async function registerLocalPath(
       code: 'confirmation-required',
       location: inspection.location,
       home: outcome.home,
-      overlaps: outcome.overlaps,
+      overlaps: await markUserLevelOverlaps(inspection.location, outcome.overlaps, options),
     };
   }
   return { ok: true, repositoryId: outcome.repository.id, created: outcome.created };

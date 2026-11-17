@@ -415,6 +415,92 @@ test.describe('skipped user-level folders beyond the listed ones (issue 45)', ()
   });
 });
 
+// Issue 244: an overlap with a user-level agent folder that the scan skips is still confirmed,
+// but without the double-counting claim. Only the runner knows its home directory, and the suite
+// never registers anything there, so it seeds finished registration jobs the way the runner
+// stores them.
+test.describe('overlap with a user-level agent folder (issue 244)', () => {
+  const home = '/home/e2e-issue-244';
+  const jobIds: string[] = [];
+
+  function seedConfirmation(jobId: string, path: string, result: object): Promise<void> {
+    jobIds.push(jobId);
+    const now = new Date().toISOString();
+    return withDatabase((db) => {
+      db.prepare(
+        `insert into jobs (id, type, status, payload, result, attempts, created_at, finished_at)
+         values (?, 'repository-registration', 'completed', ?, ?, 1, ?, ?)`,
+      ).run(
+        jobId,
+        JSON.stringify({ path }),
+        JSON.stringify({ ok: false, code: 'confirmation-required', location: path, ...result }),
+        now,
+        now,
+      );
+    });
+  }
+
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = db.prepare('delete from jobs where id = ?');
+      for (const id of jobIds) remove.run(id);
+    });
+  });
+
+  test('a nested user-level folder is not counted twice, an ordinary one still is', async ({
+    page,
+  }) => {
+    await seedConfirmation('job_e2e_issue_244_inside', `${home}/.claude/skills`, {
+      home: null,
+      overlaps: [
+        {
+          repositoryId: 'repo_e2e_issue_244_home',
+          name: 'e2e-issue-244',
+          location: home,
+          relation: 'inside',
+          userLevel: 'inside-folder',
+        },
+      ],
+    });
+    await page.goto('/repositories?registration=job_e2e_issue_244_inside');
+    const confirmation = page.getByTestId('registration-confirmation');
+    await expect(confirmation.getByRole('listitem')).toHaveText([
+      `It is inside the registered repository e2e-issue-244 (${home}), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.`,
+    ]);
+    await expect(confirmation.getByRole('button', { name: 'Register anyway' })).toBeVisible();
+
+    await seedConfirmation('job_e2e_issue_244_contains', home, {
+      home: 'home',
+      overlaps: [
+        {
+          repositoryId: 'repo_e2e_issue_244_claude',
+          name: '.claude',
+          location: `${home}/.claude`,
+          relation: 'contains',
+          userLevel: 'folder',
+        },
+        {
+          repositoryId: 'repo_e2e_issue_244_project',
+          name: 'project',
+          location: `${home}/project`,
+          relation: 'contains',
+        },
+      ],
+    });
+    await page.goto('/repositories?registration=job_e2e_issue_244_contains');
+    await expect(confirmation.getByRole('listitem')).toHaveText([
+      /^This is your home directory\./,
+      `It contains the registered repository .claude (${home}/.claude), a user-level agent folder. A scan skips that folder, so nothing is counted twice.`,
+      `It contains the registered repository project (${home}/project). A scan reads that repository's files again and counts each of its artifacts twice, once per repository.`,
+    ]);
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(confirmation).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+});
+
 // Public GitHub repositories by URL (issue #18). The suite never reaches the network: it tests
 // the web-side validation, and shows runner outcomes it seeds into the database itself. The
 // runner's git side is covered against a local bare repository in packages/runner.

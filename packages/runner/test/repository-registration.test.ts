@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, relative } from 'node:path';
+import { basename, delimiter, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -639,6 +639,102 @@ describe('registerLocalPath', () => {
     expect(await registerLocalPath(handle, request(inner, inner), options())).toMatchObject({
       ok: true,
       created: true,
+    });
+  });
+
+  describe('an overlap with a user-level agent folder the scan skips (issue 244, D05)', () => {
+    /** No CLAUDE_CONFIG_DIR, CODEX_HOME or XDG_CONFIG_HOME from the machine running the tests. */
+    const env = (extra: NodeJS.ProcessEnv = {}) => ({ PATH: process.env.PATH, ...extra });
+
+    async function registered(path: string, extra: NodeJS.ProcessEnv = {}): Promise<string> {
+      const location = realpathSync(path);
+      const result = await registerLocalPath(
+        handle,
+        request(path, location),
+        options({ env: env(extra) }),
+      );
+      if (!result.ok) throw new Error(`fixture registration failed: ${JSON.stringify(result)}`);
+      return result.repositoryId;
+    }
+
+    async function overlapsOf(path: string, extra: NodeJS.ProcessEnv = {}) {
+      const result = await registerLocalPath(handle, request(path), options({ env: env(extra) }));
+      if (result.ok || result.code !== 'confirmation-required') {
+        throw new Error(`expected a confirmation: ${JSON.stringify(result)}`);
+      }
+      return result.overlaps;
+    }
+
+    it('flags a user-level folder, or a location inside one, below a registered home directory', async () => {
+      // `options()` uses `root` as the home directory.
+      const codex = makeDir('.codex');
+      const skills = makeDir('.claude', 'skills');
+      const home = await registered(root);
+      const name = basename(root);
+      expect(await overlapsOf(codex)).toEqual([
+        { repositoryId: home, name, location: root, relation: 'inside', userLevel: 'folder' },
+      ]);
+      expect(await overlapsOf(skills)).toEqual([
+        {
+          repositoryId: home,
+          name,
+          location: root,
+          relation: 'inside',
+          userLevel: 'inside-folder',
+        },
+      ]);
+    });
+
+    it('flags a registered user-level folder that the new location contains', async () => {
+      const claude = makeDir('.claude');
+      const cursorRules = makeDir('.cursor', 'rules');
+      const claudeId = await registered(claude);
+      const rulesId = await registered(cursorRules);
+      expect(await overlapsOf(root)).toEqual([
+        {
+          repositoryId: claudeId,
+          name: '.claude',
+          location: claude,
+          relation: 'contains',
+          userLevel: 'folder',
+        },
+        {
+          repositoryId: rulesId,
+          name: 'rules',
+          location: cursorRules,
+          relation: 'contains',
+          userLevel: 'inside-folder',
+        },
+      ]);
+    });
+
+    it('uses the scan skip list, environment overrides included', async () => {
+      const outer = makeDir('elsewhere');
+      const config = makeDir('elsewhere', 'claude-config');
+      const extra = { CLAUDE_CONFIG_DIR: config };
+      const outerId = await registered(outer, extra);
+      expect(await overlapsOf(config, extra)).toEqual([
+        {
+          repositoryId: outerId,
+          name: 'elsewhere',
+          location: outer,
+          relation: 'inside',
+          userLevel: 'folder',
+        },
+      ]);
+      // Without the override the same folder is an ordinary one, scanned twice.
+      expect(await overlapsOf(config)).toEqual([
+        { repositoryId: outerId, name: 'elsewhere', location: outer, relation: 'inside' },
+      ]);
+    });
+
+    it("keeps a project's own .claude folder an ordinary overlap", async () => {
+      const project = makeDir('project');
+      const own = makeDir('project', '.claude');
+      const projectId = await registered(project);
+      expect(await overlapsOf(own)).toEqual([
+        { repositoryId: projectId, name: 'project', location: project, relation: 'inside' },
+      ]);
     });
   });
 });

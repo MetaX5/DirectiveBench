@@ -265,7 +265,7 @@ describe('describeRegistration', () => {
 describe('describeRegistration confirmation (FR-104-18)', () => {
   const confirm = (
     home: 'home' | 'contains-home' | null,
-    overlaps: { relation: 'inside' | 'contains' }[],
+    overlaps: { relation: 'inside' | 'contains'; userLevel?: 'folder' | 'inside-folder' }[],
   ) =>
     describeRegistration(
       registration({
@@ -274,11 +274,11 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
           code: 'confirmation-required',
           location: '/home/me',
           home,
-          overlaps: overlaps.map(({ relation }) => ({
+          overlaps: overlaps.map((overlap) => ({
             repositoryId: 'repo_1',
             name: 'skills',
             location: '/home/me/skills',
-            relation,
+            ...overlap,
           })),
         },
       }),
@@ -306,6 +306,21 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
     expect(notice.kind === 'confirm' && notice.reasons).toEqual([
       "It contains the registered repository skills (/home/me/skills). A scan reads that repository's files again and counts each of its artifacts twice, once per repository.",
       'It is inside the registered repository skills (/home/me/skills). Its files are already scanned there; registering it too counts each of its artifacts twice, once per repository.',
+    ]);
+  });
+
+  it('does not claim double counting for a user-level agent folder the scan skips (issue 244)', () => {
+    const notice = confirm('home', [
+      { relation: 'inside', userLevel: 'folder' },
+      { relation: 'inside', userLevel: 'inside-folder' },
+      { relation: 'contains', userLevel: 'folder' },
+      { relation: 'contains', userLevel: 'inside-folder' },
+    ]);
+    expect(notice.kind === 'confirm' && notice.reasons.slice(1)).toEqual([
+      'It is inside the registered repository skills (/home/me/skills), but it is a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.',
+      'It is inside the registered repository skills (/home/me/skills), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.',
+      'It contains the registered repository skills (/home/me/skills), a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
+      'It contains the registered repository skills (/home/me/skills), which is inside a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
     ]);
   });
 });
