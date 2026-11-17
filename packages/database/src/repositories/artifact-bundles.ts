@@ -5,10 +5,12 @@ import type { Database } from '../client';
 import { artifactOccurrences, artifactVersions } from '../schema';
 import { getArtifactBundle } from './artifacts';
 
-/** Code-unit order (SPEC-126 FR-126-24), independent of the locale. */
+/**
+ * Code-unit order (SPEC-126 FR-126-24), independent of the locale. Branch-free, so its coverage
+ * does not depend on which of two random ids sorts first.
+ */
 function compareCodeUnits(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
+  return Number(a > b) - Number(a < b);
 }
 
 /** The last segment of a repository-relative path, or null for the repository root. */

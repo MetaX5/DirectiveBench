@@ -30,3 +30,6 @@ a fallback for artifacts with no active occurrence.
   occurrence (highest version number, then oldest `created_at`, then id).
 - In scan tests, mark an occurrence removed with a complete scan that finds something else.
 - In scan tests, give linked copies the same frontmatter `name`.
+- A comparator over random ids must not branch on their order (`Number(a > b) - Number(a < b)`):
+  otherwise branch coverage depends on which id the test happened to generate. It failed the macOS
+  CI job once (issue 245).

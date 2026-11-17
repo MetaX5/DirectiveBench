@@ -98,6 +98,11 @@ coverage; mock agent only.
   because the request did not list the installed paths. The test now passes them, as the
   engine does.
 
+- CI on `a0baef2`: the macOS unit job failed at 99.83% branch coverage on
+  `artifact-bundles.ts` line 11. The `a < b ? -1 : 1` branch of the id tie-break depended on
+  which of two random occurrence ids sorted first, so Linux happened to cover both directions and
+  macOS did not. The comparator is now branch-free (`Number(a > b) - Number(a < b)`).
+
 ## Lessons recorded
 
 - [2026-11-17 A version's source_path is where it was created, not where the artifact is now](../lessons/2026-11-17-a-version-source-path-is-its-creation-path.md)
