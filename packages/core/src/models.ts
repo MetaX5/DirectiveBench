@@ -33,6 +33,12 @@ export interface ArtifactBundle {
   format: ArtifactFormat;
   contentHash: string;
   files: ArtifactFile[];
+  /**
+   * The folder a skill without a frontmatter `name` is installed in and named after (SPEC-203
+   * §4.1, issue 245): the basename of the artifact's representative active occurrence, else of the
+   * version's `source_path`. Null or absent: no folder is known and adapters use the slug.
+   */
+  folderName?: string | null;
 }
 
 /**
