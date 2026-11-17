@@ -3,7 +3,7 @@ title: Cancel in the Remove panel returns focus to Remove (issue 252)
 date: 2026-11-17
 agent: Claude Code / claude-opus-5-5
 trigger: user request, om-auto-fix-issue 252
-status: in-progress
+status: completed
 branch: fix/issue-252-remove-cancel-focus
 specs: [SPEC-125]
 ---
@@ -38,6 +38,11 @@ continue after it. No visual change.
 - `9bc3b58` test(web): the new e2e test (red on main).
 - `8ec484c` fix(web): id on Remove, plain `<a>` Cancel, `missing-occurrences.spec.ts`
   expectation, risky-action pattern rule 7 and stories, SPEC-125 §11 and D19 notes.
+- `2ae271d` docs(runs): this log; draft PR #253 opened right after the first push.
+- Codex adversarial review (`--scope branch --base main`) round 1: approve, no findings.
+- `om-auto-review-pr 253 --autofix` (om-code-review, submitted as a COMMENT review): approve,
+  no blocker, major or minor findings, one non-actionable nit (the `FromTableRowLocal` story's
+  Cancel targets a button that story does not render, as before); autofix changed nothing.
 
 ## Verification
 
@@ -68,7 +73,8 @@ plain focus there (Remove is the last focusable control); the e2e test checks th
 row below.
 
 Not verified: focus return in Firefox and Safari (Chromium only); contrast was not re-measured
-(no colour or copy changed).
+(no colour or copy changed). CI results are recorded on PR #253, not here (a later commit would
+re-trigger them).
 
 ## Problems and deviations
 
