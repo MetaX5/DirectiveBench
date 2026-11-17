@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-11-16
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -91,12 +91,13 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | slug | text NOT NULL | **U** `artifacts_slug_unique` |
 | name | text NOT NULL | |
 | type | text NOT NULL | `skill` \| `instruction` \| `rule` |
+| format | text | source field: the format of the version the chosen active occurrence holds, like `type` (SPEC-103 FR-103-16, SPEC-126 FR-126-07); the possible-duplicate key with `name` (FR-126-11). Null only for an artifact without a version. Migration `0009`, backfilled (issue 246) |
 | description | text | |
 | notes | text | user-managed; never overwritten by sync |
 | tags | json `string[]` NOT NULL default `'[]'` | user-managed (normalized table planned, §7) |
 | created_at, updated_at | text | |
 
-Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`, for the possible-duplicate lookup planned in SPEC-126 Phase 2).
+Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`; the type filter and the bundled-example lookup by name and type). Index `artifacts_format_name_idx` on `(format, name)` (migration `0009`, issue 246: the possible-duplicate groups and lookup, SPEC-126 NFR-126-02).
 
 ### 3.4 `artifact_versions` (immutable)
 | Column | Type | Notes |
