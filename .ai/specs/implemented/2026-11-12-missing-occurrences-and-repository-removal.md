@@ -403,6 +403,9 @@ contains no en or em dash.
   The actions cell wraps (`flex-wrap`) at narrow widths. **Changed by issue 249 (2026-11-16):**
   the actions cell holds Scan and Remove on one line (`flex-nowrap`); a GitHub row's Change
   branch control sits in its Branch cell.
+  **Changed by issue 250 (2026-11-17):** the Location column is at most 20rem (`max-w-xs
+  truncate`, full location in the cell text and `title`), so Remove stays inside the table at
+  1280px in the app shell with a long location.
 - With `?remove=<id>`, the Registered repositories Card shows, above the table, the Risky-action
   panel (unchanged pattern: `role="alert"`, `warning` fill and border, reasons as a list). The
   pattern puts the panel under the form that asked; here the asking control is a table row, and a
