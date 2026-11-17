@@ -717,6 +717,15 @@ of the built app:
 
 Acceptance criteria verified for Phase 2: AC-2, and AC-8 for the Phase 2 UI points.
 
+**Issue 246 (option B, verified on 2026-11-17, run log
+`.ai/runs/2026-11-17-issue-246-duplicates-by-chosen-format.md`):** `artifacts.format` is a source
+field written by `insertArtifact`, `importArtifactVersion` and `refreshSourceFields`; possible
+duplicates key on `(format, name)` through `artifacts_format_name_idx` (grouped statement:
+covering index only, no temp B-tree); migration `0009` backfills it on upgrade
+(`packages/database/test/source-changes.test.ts` "possible duplicates follow the chosen version",
+`client.test.ts` migration `0009`, `identity.test.ts` query plans; a `main` database upgraded by the
+built CLI, on Node 22 and 24).
+
 **Phase 3 implemented (issue #20, branch `feat/spec-126-phase-3-moves`, run log
 `.ai/runs/2026-11-13-spec-126-phase-3.md`).** Verified on 2026-11-13 by the full gate (format,
 lint, typecheck, unit tests with 100% coverage, build, `verify:pack`, Playwright, Storybook), a run
