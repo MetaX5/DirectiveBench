@@ -1506,8 +1506,22 @@ export async function setArtifactNotes(
   if (updated.length === 0) throw new NotFoundError(`Artifact ${artifactId} not found`);
 }
 
+/**
+ * The suite an assignment outcome names: its name, its slug (shown as "ID") and whether another
+ * suite in the database has the name, read in the action's transaction (issue 239), so the
+ * message can name it the way the picker does.
+ */
+export interface AssignmentSuite {
+  name: string;
+  slug: string;
+  nameShared: boolean;
+}
+
 export type ArtifactSuiteOutcome =
-  | { status: 'assigned' | 'already-assigned' | 'unassigned' | 'not-assigned'; suiteName: string }
+  | {
+      status: 'assigned' | 'already-assigned' | 'unassigned' | 'not-assigned';
+      suite: AssignmentSuite;
+    }
   | { status: 'missing-artifact' | 'missing-suite' };
 
 /**
@@ -1527,14 +1541,14 @@ export async function assignArtifactSuite(
       .where(eq(artifacts.id, artifactId))
       .get();
     if (!artifact) return { status: 'missing-artifact' };
-    const suite = await suiteName(db, suiteId);
-    if (suite === null) return { status: 'missing-suite' };
+    const suite = await assignmentSuite(db, suiteId);
+    if (suite === undefined) return { status: 'missing-suite' };
     const inserted = await db
       .insert(artifactBenchmarkAssignments)
       .values({ artifactId, suiteId, createdAt: nowIso() })
       .onConflictDoNothing()
       .returning({ suiteId: artifactBenchmarkAssignments.suiteId });
-    return { status: inserted.length ? 'assigned' : 'already-assigned', suiteName: suite };
+    return { status: inserted.length ? 'assigned' : 'already-assigned', suite };
   });
 }
 
@@ -1551,8 +1565,8 @@ export async function unassignArtifactSuite(
       .where(eq(artifacts.id, artifactId))
       .get();
     if (!artifact) return { status: 'missing-artifact' };
-    const suite = await suiteName(db, suiteId);
-    if (suite === null) return { status: 'missing-suite' };
+    const suite = await assignmentSuite(db, suiteId);
+    if (suite === undefined) return { status: 'missing-suite' };
     const deleted = await db
       .delete(artifactBenchmarkAssignments)
       .where(
@@ -1562,17 +1576,16 @@ export async function unassignArtifactSuite(
         ),
       )
       .returning({ suiteId: artifactBenchmarkAssignments.suiteId });
-    return { status: deleted.length ? 'unassigned' : 'not-assigned', suiteName: suite };
+    return { status: deleted.length ? 'unassigned' : 'not-assigned', suite };
   });
 }
 
-async function suiteName(db: Database, suiteId: string): Promise<string | null> {
-  const suite = await db
-    .select({ name: benchmarkSuites.name })
+function assignmentSuite(db: Database, suiteId: string): Promise<AssignmentSuite | undefined> {
+  return db
+    .select({ name: benchmarkSuites.name, slug: benchmarkSuites.slug, nameShared: suiteNameShared })
     .from(benchmarkSuites)
     .where(eq(benchmarkSuites.id, suiteId))
     .get();
-  return suite?.name ?? null;
 }
 
 export interface LatestEvaluation {

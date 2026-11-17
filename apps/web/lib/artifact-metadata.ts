@@ -107,12 +107,20 @@ export function suiteSubject(suite: { name: string; slug: string }): string {
 }
 
 /**
- * The suite picker's options in the given order: the name alone, or the full `suiteSubject`
- * when another suite anywhere in the database has the same name (`nameShared`, issue 235,
- * decision L1, the K4 rule), so no option reads like another option or an assigned suite.
+ * A suite as a value: the name alone, or the full `suiteSubject` when another suite anywhere in
+ * the database has the same name (`nameShared`, issue 235, decision L1, the K4 rule). The picker
+ * options and the assignment confirmations (issue 239) use it, so both read the same.
+ */
+export function suiteLabel(suite: { slug: string; name: string; nameShared: boolean }): string {
+  return suite.nameShared ? suiteSubject(suite) : suite.name;
+}
+
+/**
+ * The suite picker's options in the given order, labelled by `suiteLabel`, so no option reads
+ * like another option or an assigned suite.
  */
 export function suiteOptions(
   suites: readonly { id: string; slug: string; name: string; nameShared: boolean }[],
 ): { id: string; label: string }[] {
-  return suites.map((s) => ({ id: s.id, label: s.nameShared ? suiteSubject(s) : s.name }));
+  return suites.map((s) => ({ id: s.id, label: suiteLabel(s) }));
 }
