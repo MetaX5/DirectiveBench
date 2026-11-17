@@ -34,6 +34,12 @@ naming the object, the reasons as a list, then the destructive action and Cancel
    `outline` variant of the other row actions, since it only asks. Source: SPEC-125 §11.3 D12,
    D13, D19.
 
+8. When a job's result opens the panel (Register anyway: the runner found the home directory
+   or an overlap after Register), the panel has `tabIndex=-1` and takes focus when it appears,
+   so it is read out and focus never drops to the page body (Usage rule 7). Cancel is a plain
+   link to `#<id of the form's submit button>`, so the page load focuses Register again.
+   Source: issue 243.
+
 ## When not to use
 
 An action that is easy to undo and keeps the item's history needs no confirmation: removing a

@@ -12,11 +12,12 @@ The rules every screen follows, each with its source.
    Use the components: native elements bring this for free. Source: WCAG 2.1.1, SPEC-121.
 2. Focus is always visible: `border-ring` plus a solid 1px ring on fields, a 2px outline
    offset 2px on buttons. Source: tokeny.md D4, WCAG
-   2.4.7.
+   2.4.7. Exception: a result line that takes focus after a submit (rule 7) is text, not a
+   control, and has no ring (`tabIndex={-1}`, `outline-none`); Tab moves on from it.
 3. Focus order follows reading order; no positive `tabIndex`. Scrolling blocks (`Pre`, wide
    tables) are tab stops. Source: WCAG 2.4.3, SPEC-122 P13.
 4. After a submit with errors, focus moves to the first invalid field. Source: Form pattern.
-   The artifact editing forms do this; `/repositories` does not yet (What is missing).
+   The artifact editing forms and `/repositories` (issue 243) do this.
 5. When the focused control disappears (its item was removed or unassigned), focus moves to
    the field that adds items to that list, never to the page body. After an item is added,
    focus stays in that field, ready for the next one. When that field is gone or disabled
@@ -29,9 +30,16 @@ The rules every screen follows, each with its source.
 5. Every field has a visible label; the placeholder is an example. Source: WCAG 3.3.2.
 6. Field errors sit under the field with `aria-invalid`, `aria-describedby` and
    `role="alert"`; general errors go above the form. Source: WCAG 3.3.1, Form pattern.
-7. Status and progress use `role="status"`; they never take focus. Keep the `role="status"`
-   element rendered and change its text: a live region inserted together with its message is
-   often not announced. Source: WCAG 4.1.3, WAI-ARIA live regions.
+7. Status and progress use `role="status"`; progress updates never take focus. Keep the
+   `role="status"` element rendered and change its text: a live region inserted together with
+   its message is often not announced. Source: WCAG 4.1.3, WAI-ARIA live regions.
+   Exception: when the submit disabled or removed the control that had focus (a server action
+   that redirects re-mounts the page; a button disabled while the runner checks), the action's
+   result line takes focus once, so it is read out and focus never drops to the page body: a
+   `role="status"` (or `role="alert"`) line with `tabIndex={-1}` and `outline-none`. Later
+   progress in the same line does not move focus again, and focus the user moved elsewhere
+   stays. Source: maintainer decision on issue 243 (option A1), `app/repositories/page.tsx`,
+   the blind-review result line.
 8. Loading: disable the control and say what is happening; no spinner. Source: SPEC-122 P11.
 9. A disabled control says why next to it, linked with `aria-describedby`. Source: WCAG 3.3.2,
    Button page.

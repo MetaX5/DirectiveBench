@@ -17,8 +17,9 @@ function RiskyConfirmation({
 }) {
   return (
     <div
+      tabIndex={-1}
       role="alert"
-      className="max-w-xl space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui"
+      className="max-w-xl space-y-stack rounded-surface border border-warning/40 bg-warning/10 p-3 text-ui outline-none"
     >
       <p className="font-medium">
         Register <span className="font-mono">{path}</span>? It needs a confirmation:
@@ -38,7 +39,7 @@ function RiskyConfirmation({
         <Button type="submit" size="sm" variant="destructive">
           Register anyway
         </Button>
-        <a href="#repositories" className="text-ui underline">
+        <a href="#register-repository" className="text-ui underline">
           Cancel
         </a>
       </form>
