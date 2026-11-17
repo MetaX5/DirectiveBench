@@ -351,9 +351,7 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
       };
     });
     expect(geometry).toEqual({ tableOverflow: 0, pageOverflow: 0, outside: [] });
-    await expect(
-      longRow.getByRole('button', { name: /^Remove long-path-rules \(/ }),
-    ).toBeVisible();
+    await expect(longRow.getByRole('button', { name: /^Remove long-path-rules \(/ })).toBeVisible();
 
     await withDatabase((db) => db.exec("delete from repositories where id = 'repo_e2e58_long'"));
   });
