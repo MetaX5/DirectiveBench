@@ -14,6 +14,9 @@ const plain = join(sources, 'plain-rules');
 const project = join(sources, 'scan-me');
 const outside = join(sources, 'outside');
 const removed = join(sources, 'removed-meanwhile');
+// Outside `sources`, so the FR-104-18 test's count of contained repositories is unchanged.
+const cancelledRoot = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'remove-cancel-')));
+const cancelled = join(cancelledRoot, 'remove-cancelled');
 
 function write(root: string, files: Record<string, string>): void {
   for (const [relPath, content] of Object.entries(files)) {
@@ -27,6 +30,7 @@ test.beforeAll(() => {
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   mkdirSync(plain);
   mkdirSync(removed);
+  mkdirSync(cancelled);
   writeFileSync(join(sources, 'notes.txt'), 'not a directory\n');
   // A repository with every format of SPEC-013 M1 AC1 and a symlink at a candidate path.
   write(project, {
@@ -42,7 +46,10 @@ test.beforeAll(() => {
   symlinkSync(join(outside, 'CLAUDE.md'), join(project, 'CLAUDE.md'));
 });
 
-test.afterAll(() => rmSync(sources, { recursive: true, force: true }));
+test.afterAll(() => {
+  rmSync(sources, { recursive: true, force: true });
+  rmSync(cancelledRoot, { recursive: true, force: true });
+});
 
 async function register(page: Page, path: string): Promise<void> {
   await page.goto('/repositories');
@@ -129,6 +136,58 @@ test.describe('repositories', () => {
       'Never',
       'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12)
     ]);
+  });
+
+  test("Cancel in the Remove panel returns keyboard focus to the row's Remove (issue 252)", async ({
+    page,
+  }) => {
+    await register(page, cancelled);
+    await expect(page.getByTestId('registration-status')).toHaveText(
+      `Registered remove-cancelled (Local directory, ${cancelled}).`,
+      { timeout: REGISTRATION_TIMEOUT },
+    );
+    // Keyboard only from a fresh load: Tab to the row's Remove, Enter opens the panel.
+    await page.goto('/repositories');
+    const remove = repositoryRow(page, cancelled).getByRole('button', {
+      name: `Remove remove-cancelled (Local directory, ${cancelled})`,
+      exact: true,
+    });
+    for (
+      let i = 0;
+      i < 120 && !(await remove.evaluate((el) => el === document.activeElement));
+      i++
+    ) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(remove).toBeFocused();
+    await page.keyboard.press('Enter');
+    const panel = page.getByTestId('remove-panel');
+    await expect(panel).toContainText(`Remove remove-cancelled (Local directory, ${cancelled})?`);
+    await page.keyboard.press('Tab'); // Remove repository
+    await page.keyboard.press('Tab'); // Cancel
+    await expect(panel.getByRole('link', { name: 'Cancel' })).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    // A full page load to the button's id: the browser focuses it, with the focus ring. A
+    // `next/link` to the row only scrolled to it and left focus on <body>.
+    await expect(panel).toHaveCount(0);
+    await expect(remove).toBeFocused();
+    expect(await remove.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
+    await expect(remove).toBeInViewport();
+    // The next Tab continues after Remove instead of restarting at the top of the page.
+    await page.keyboard.press('Tab');
+    expect(
+      await remove.evaluate(
+        (el) =>
+          document.activeElement !== document.body &&
+          document.activeElement !== null &&
+          (el.compareDocumentPosition(document.activeElement) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      ),
+    ).toBe(true);
+    // Cancel wrote nothing.
+    expect(await rowsAt(cancelled)).toBe(1);
   });
 
   test('missing paths and files get a field error and store nothing', async ({ page }) => {
