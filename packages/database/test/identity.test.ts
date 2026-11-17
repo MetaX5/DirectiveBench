@@ -1496,7 +1496,27 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
     expect(await duplicatesOf(handle, 'bare')).toEqual({ items: [], total: 0 });
   });
 
-  it('reads the groups in one grouped statement on artifacts_type_name_idx (NFR-126-02)', async () => {
+  it('counts and lists a row with a stored format but no version alike (issue 246)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review'))]);
+    // A hand-made row scans never write: the list and the card read the same stored fields.
+    handle.sqlite
+      .prepare(
+        `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+         values ('art_bare', 'bare', 'review', 'skill', 'skill-md', 't', 't')`,
+      )
+      .run();
+    expect(await counts(handle)).toEqual({ review: 1, bare: 1 });
+    expect((await duplicatesOf(handle, 'review'))?.items).toEqual([
+      expect.objectContaining({ slug: 'bare', activeOccurrences: 0, sameLatestContent: false }),
+    ]);
+    expect((await duplicatesOf(handle, 'bare'))?.items).toEqual([
+      expect.objectContaining({ slug: 'review', sameLatestContent: false }),
+    ]);
+  });
+
+  it('reads the groups in one grouped statement on the covering artifacts_format_name_idx (NFR-126-02, issue 246)', async () => {
     const handle = getHandle();
     const a = await local(handle, 'a');
     await scan(handle, a, [skill('skills/review', skillMd('review'))]);
@@ -1518,7 +1538,32 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
       .prepare(`explain query plan ${grouped[0]!}`)
       .all(...POSSIBLE_DUPLICATE_FORMATS, 1)
       .map((row) => String((row as { detail: string }).detail));
-    expect(plan.join('\n')).toContain('artifacts_type_name_idx');
+    // The stored source fields only: the covering index, no join to the versions and no
+    // temp B-tree for the grouping (issue 246).
+    expect(plan).toEqual([
+      expect.stringMatching(
+        /^SEARCH artifacts USING COVERING INDEX artifacts_format_name_idx \(format=\?\)$/,
+      ),
+    ]);
+  });
+
+  it('looks the detail card up by format and name on artifacts_format_name_idx (NFR-126-02, issue 246)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review'))]);
+    const [row] = await listArtifacts(handle.db);
+    const prepare = vi.spyOn(handle.sqlite, 'prepare');
+    await getArtifactDetail(handle.db, row!.id);
+    const statements = prepare.mock.calls.map(([query]) => query);
+    prepare.mockRestore();
+    const [lookup] = statements.filter((query) => query.includes('count(*) over ()'));
+    const plan = handle.sqlite
+      .prepare(`explain query plan ${lookup!}`)
+      .all('skill-md', 'review', row!.id, MAX_LISTED_DUPLICATES)
+      .map((r) => String((r as { detail: string }).detail));
+    expect(plan.join('\n')).toMatch(
+      /SEARCH artifacts USING INDEX artifacts_format_name_idx \(format=\? AND name=\?\)/,
+    );
   });
 
   it(
@@ -1531,8 +1576,8 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
         built.push(database);
         const { sqlite } = database.handle;
         const artifact = sqlite.prepare(
-          `insert into artifacts (id, slug, name, type, created_at, updated_at)
-           values (?, ?, ?, 'skill', 't', 't')`,
+          `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+           values (?, ?, ?, 'skill', 'skill-md', 't', 't')`,
         );
         const version = sqlite.prepare(
           `insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)

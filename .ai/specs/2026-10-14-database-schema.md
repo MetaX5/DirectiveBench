@@ -3,7 +3,7 @@ id: SPEC-006
 title: Database Schema
 status: draft
 created: 2026-10-14
-updated: 2026-11-16
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-005, SPEC-007, SPEC-011, SPEC-101, SPEC-103, SPEC-105, SPEC-107, SPEC-111, SPEC-114]
 ---
@@ -91,12 +91,13 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | slug | text NOT NULL | **U** `artifacts_slug_unique` |
 | name | text NOT NULL | |
 | type | text NOT NULL | `skill` \| `instruction` \| `rule` |
+| format | text | source field: the format of the version the chosen active occurrence holds, like `type` (SPEC-103 FR-103-16, SPEC-126 FR-126-07); the possible-duplicate key with `name` (FR-126-11). Null only for an artifact without a version. Migration `0009`, backfilled (issue 246) |
 | description | text | |
 | notes | text | user-managed; never overwritten by sync |
 | tags | json `string[]` NOT NULL default `'[]'` | user-managed (normalized table planned, §7) |
 | created_at, updated_at | text | |
 
-Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`, for the possible-duplicate lookup planned in SPEC-126 Phase 2).
+Index `artifacts_type_name_idx` on `(type, name)` (migration `0006`; the type filter and the bundled-example lookup by name and type). Index `artifacts_format_name_idx` on `(format, name)` (migration `0009`, issue 246: the possible-duplicate groups and lookup, SPEC-126 NFR-126-02).
 
 ### 3.4 `artifact_versions` (immutable)
 | Column | Type | Notes |
@@ -325,6 +326,7 @@ Each lands with its feature spec ([SPEC-105](2026-10-14-repository-synchronizati
 
 - **Implemented (verified by `packages/database/test/{client,artifacts,benchmarks,jobs,runs,catalog}.test.ts` and `packages/runner/test/runner.test.ts` on 2026-10-14 and 2026-10-15):** all 14 tables of §3 with listed keys and indexes (`schema.ts`, `migrations/0000_init.sql`; migrations idempotent); `node:sqlite` client with WAL, `busy_timeout = 5000`, `foreign_keys = ON`; forward-only `migrateDatabase()` applying all pending migrations in one `BEGIN IMMEDIATE` transaction; `withTransaction()` (IMMEDIATE, serialised per connection); repository functions for artifacts, catalog (categories seeding, repositories, dashboard stats), benchmarks, jobs (atomic `UPDATE … RETURNING` acquisition in FIFO order, cancellation, stale recovery, and `interruptJobs` — shared by stale recovery and the capped graceful shutdown, it marks jobs and their running benchmark runs `interrupted`, verified by `runner.test.ts` on 2026-10-15) and runs; `drizzle-kit generate` script; ID prefixes above.
 - **Implemented (verified by `packages/database/test/{client,jobs,catalog}.test.ts` on 2026-10-19):** `jobs.result` (migration `0001_add_job_result`; a test applies it to a database migrated to `0000` with an existing job, checks the row survives with `result = null`, and rehearses the rollback `ALTER TABLE jobs DROP COLUMN result` back to the `0000` table shape); job type `repository-registration` with `enqueueRepositoryRegistrationJob` and `getRepositoryRegistration` (payload and result validated on read); `registerLocalRepository` (single conditional insert, returns the existing row); `listRepositories` with an active-occurrence artifact count; `listJobs` returns `benchmark-run` jobs only.
+- **Implemented (issue 246, verified by `packages/database/test/{client,identity,source-changes}.test.ts` on 2026-11-17):** `artifacts.format` and `artifacts_format_name_idx` (migration `0009_artifact_format_source_field`; a test applies it to a `0008` database, checks the backfill for every format with and without an active occurrence and for an artifact without a version, keeps `updated_at`, rolls it back by dropping the index and the column, and applies it again; also run on Node 22.23 with SQLite 3.51).
 - **Implemented (issue 58, PR #248, verified by `packages/database/test/{client,repository-branch}.test.ts` on 2026-11-16):** `repositories.scanned_branch` (migration `0008_repository_scanned_branch`; a test applies it to a `0007` database with a hosted row, checks the row keeps its values with `scanned_branch = null`, rolls it back with `ALTER TABLE repositories DROP COLUMN scanned_branch` and applies it again); job type `repository-branch` (no DDL: `jobs.type` is unconstrained text) with `enqueueRepositoryBranchJob`, `getRepositoryBranchChange` and `setRepositoryBranch`; registration payload `branch`; scan result `branch` and error code `branch-changed`.
 - **Implemented without a migration (issue #16, verified by `packages/database/test/{jobs,artifacts,catalog,client}.test.ts` on 2026-10-19):** job type `repository-scan` (`jobs.type` is unconstrained text, so no DDL changes); `enqueueRepositoryScanJob`, `getRepositoryScan`, `applyRepositoryScan`, `markRepositoryScanFailed`, `getRepository`; `registerLocalRepository` checks FR-104-18 and inserts in one `withTransaction`; `acquireNextJob` optionally limited to job types; `finishJob` guarded against overwriting a terminal status; statements outside a running `withTransaction` on the same connection wait for it.
 - **Implemented (SPEC-123 Phase 5, verified by `packages/database/test/{client,blind-reviews}.test.ts` on 2026-10-30):** `blind_reviews` and `blind_review_pairs` (§3.16, §3.17, migration `0004_blind_reviews`; a test applies it to a database migrated to `0003`, checks the unique indexes, both CHECKs, the foreign keys and the cascades, and rehearses the rollback to the `0003` shape) and the blind-review repository functions of SPEC-123 §8.3.

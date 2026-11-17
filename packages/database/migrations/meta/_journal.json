@@ -64,6 +64,13 @@
       "when": 1794853662007,
       "tag": "0008_repository_scanned_branch",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794925949354,
+      "tag": "0009_artifact_format_source_field",
+      "breakpoints": true
     }
   ]
 }

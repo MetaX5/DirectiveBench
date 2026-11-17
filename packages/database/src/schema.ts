@@ -87,6 +87,12 @@ export const artifacts = sqliteTable(
     slug: text('slug').notNull(),
     name: text('name').notNull(),
     type: text('type', { enum: ['skill', 'instruction', 'rule'] }).notNull(),
+    /**
+     * Source field like `type`: the format of the version the chosen active occurrence holds
+     * (SPEC-126 FR-126-07, SPEC-103 FR-103-16), the possible-duplicate key with `name`
+     * (FR-126-11, issue 246). Null only for an artifact without a version.
+     */
+    format: text('format'),
     description: text('description'),
     /** User-managed; never overwritten by synchronisation. */
     notes: text('notes'),
@@ -98,8 +104,10 @@ export const artifacts = sqliteTable(
   },
   (t) => [
     uniqueIndex('artifacts_slug_unique').on(t.slug),
-    // The possible-duplicate lookup by name (SPEC-126 NFR-126-02, used from Phase 2).
+    // The type filter and the bundled-example lookup by name and type (SPEC-126 NFR-126-02).
     index('artifacts_type_name_idx').on(t.type, t.name),
+    // The possible-duplicate groups and lookup (SPEC-126 NFR-126-02, FR-126-11, issue 246).
+    index('artifacts_format_name_idx').on(t.format, t.name),
   ],
 );
 

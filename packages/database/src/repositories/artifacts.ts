@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import {
   and,
   count,
@@ -212,7 +213,7 @@ async function insertArtifact(
   db: Database,
   allocateSlug: SlugAllocator,
   slugBase: string,
-  input: Pick<VersionContent, 'name' | 'type' | 'description'>,
+  input: Pick<VersionContent, 'name' | 'type' | 'format' | 'description'>,
 ): Promise<{ id: string; createdAt: string }> {
   const now = nowIso();
   const id = createId('art');
@@ -221,6 +222,7 @@ async function insertArtifact(
     slug: await allocateSlug(slugBase),
     name: input.name,
     type: input.type,
+    format: input.format,
     description: input.description,
     createdAt: now,
     updatedAt: now,
@@ -340,7 +342,8 @@ async function insertOccurrence(
  * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
  * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
  * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
- * the occurrence at it, and sets the source fields (name, description, type) from this write.
+ * the occurrence at it, and sets the source fields (name, description, type, format) from this
+ * write.
  * Hashes are recomputed from the content (see `recomputeFiles`). User-managed metadata is never
  * touched.
  */
@@ -378,6 +381,7 @@ export async function importArtifactVersion(
           name: input.name,
           description: input.description,
           type: input.type,
+          format: input.format,
           updatedAt: nowIso(),
         })
         .where(eq(artifacts.id, artifactId));
@@ -530,10 +534,33 @@ interface LinkCandidate {
   artifactCreatedAt: string;
 }
 
-/** Code-unit order (SPEC-126 FR-126-24), independent of the locale. */
+/**
+ * Code-unit order (SPEC-126 FR-126-24), independent of the locale. Branch-free, so its coverage
+ * does not depend on which of two random ids sorts first.
+ */
 function compareCodeUnits(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
+  return Number(a > b) - Number(a < b);
+}
+
+/** An active occurrence as FR-126-07 ranks it: the number of the version it holds, age and id. */
+interface RankedOccurrence {
+  id: string;
+  createdAt: string;
+  version: number;
+}
+
+/**
+ * The order that picks an artifact's representative active occurrence (SPEC-126 FR-126-07,
+ * SPEC-103 FR-103-16): the highest version number, then the oldest occurrence `created_at`, then
+ * id. Negative when `a` comes first. The source fields and a nameless skill's install folder
+ * (SPEC-203 §4.1, issue 245) both use it, so they always name the same occurrence.
+ */
+function compareRepresentative(a: RankedOccurrence, b: RankedOccurrence): number {
+  return (
+    b.version - a.version ||
+    compareCodeUnits(a.createdAt, b.createdAt) ||
+    compareCodeUnits(a.id, b.id)
+  );
 }
 
 /** Oldest artifact first (`created_at`, then id), the A7 choice among several candidates. */
@@ -995,16 +1022,17 @@ function primaryPathOf(format: string, occurrencePath: string): string {
 }
 
 /**
- * Sets each artifact's name, description and type from its active occurrences (SPEC-126
+ * Sets each artifact's name, description, type and format from its active occurrences (SPEC-126
  * FR-126-07, A9; SPEC-103 FR-103-16), inside the caller's transaction: the active occurrence
  * holding the highest version number (ties: oldest occurrence `created_at`, then id) names it,
  * parsed with core's `parseArtifactFile` from that version's primary file at the path discovery
- * would read; the type is the type of that version's format, which needs no parse. Only changed
- * fields are written. An artifact with no active occurrence keeps all three; one whose chosen
- * version lacks its primary file or whose occurrence path does not classify as the version's
- * format keeps its name and description (rows DirectiveBench's scans never write: kept rather
- * than guessed) and still gets its type. The result depends only on the active occurrences and
- * their version numbers, never on which scan ran last. Two reads per `IDENTITY_LOOKUP_BATCH_SIZE`
+ * would read; the format is that version's format and the type its type, which need no parse
+ * (issue 246: all four come from one version). Only changed fields are written. An artifact with
+ * no active occurrence keeps all four; one whose chosen version lacks its primary file or whose
+ * occurrence path does not classify as the version's format keeps its name and description (rows
+ * DirectiveBench's scans never write: kept rather than guessed) and still gets its type and
+ * format. The result depends only on the active occurrences and their version numbers, never on
+ * which scan ran last. Two reads per `IDENTITY_LOOKUP_BATCH_SIZE`
  * artifacts: the occurrences with their versions' numbers, then the chosen versions' files.
  * `slug` never changes (FR-105-13).
  */
@@ -1015,8 +1043,8 @@ export async function refreshSourceFields(
   for (let start = 0; start < artifactIds.length; start += IDENTITY_LOOKUP_BATCH_SIZE) {
     const rows = await db
       .select({
-        occurrenceId: artifactOccurrences.id,
-        occurrenceCreatedAt: artifactOccurrences.createdAt,
+        id: artifactOccurrences.id,
+        createdAt: artifactOccurrences.createdAt,
         artifactId: artifactOccurrences.artifactId,
         path: artifactOccurrences.path,
         versionId: artifactVersions.id,
@@ -1025,6 +1053,7 @@ export async function refreshSourceFields(
         name: artifacts.name,
         description: artifacts.description,
         type: artifacts.type,
+        storedFormat: artifacts.format,
       })
       .from(artifactOccurrences)
       .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
@@ -1041,13 +1070,7 @@ export async function refreshSourceFields(
     const chosen = new Map<string, (typeof rows)[number]>();
     for (const row of rows) {
       const best = chosen.get(row.artifactId);
-      if (
-        !best ||
-        row.version > best.version ||
-        (row.version === best.version &&
-          (compareCodeUnits(row.occurrenceCreatedAt, best.occurrenceCreatedAt) ||
-            compareCodeUnits(row.occurrenceId, best.occurrenceId)) < 0)
-      ) {
+      if (!best || compareRepresentative(row, best) < 0) {
         chosen.set(row.artifactId, row);
       }
     }
@@ -1072,8 +1095,13 @@ export async function refreshSourceFields(
       ]),
     );
     for (const row of chosen.values()) {
-      // The type needs no parse: it is the type of the version's stored format (FR-103-16).
-      const fields = { name: row.name, description: row.description, type: artifactTypeOf(row) };
+      // Format and type need no parse: the version's stored format and its type (FR-103-16).
+      const fields = {
+        name: row.name,
+        description: row.description,
+        type: artifactTypeOf(row),
+        format: row.format,
+      };
       const content = primaryContent.get(row.versionId);
       const primaryPath = primaryPathOf(row.format, row.path);
       // Only a path discovery would have read as this format can be parsed as it.
@@ -1085,7 +1113,8 @@ export async function refreshSourceFields(
       if (
         fields.name === row.name &&
         fields.description === row.description &&
-        fields.type === row.type
+        fields.type === row.type &&
+        fields.format === row.storedFormat
       ) {
         continue;
       }
@@ -1649,8 +1678,9 @@ export interface ArtifactListItem {
   benchmarkCount: number;
   latestEvaluation: LatestEvaluation | null;
   /**
-   * Other artifacts whose latest version has the same format and exactly the same name, for a
-   * format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11, FR-126-12); 0 otherwise.
+   * Other artifacts with the same stored format (`artifacts.format`, the chosen version's) and
+   * exactly the same name, for a format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11,
+   * FR-126-12, issue 246); 0 otherwise. Not `format` above, which is the latest version's.
    */
   possibleDuplicates: number;
   /**
@@ -1698,65 +1728,62 @@ const isLatestVersion = and(
   ),
 );
 
-/** The key of a possible-duplicate group: type, exact name and the latest version's format. */
-function duplicateKey(type: string, name: string, format: string): string {
-  return `${type}\u0000${name}\u0000${format}`;
+/**
+ * The key of a possible-duplicate group: the stored format (the chosen version's, FR-126-07) and
+ * the exact name (FR-126-11, issue 246). The type is the format's type, so it is not part of it.
+ */
+function duplicateKey(format: string, name: string): string {
+  return `${format}\u0000${name}`;
 }
 
 /** The others in an artifact's possible-duplicate group (FR-126-12); 0 outside any group. */
 function otherDuplicates(
   groups: ReadonlyMap<string, number>,
-  artifact: { type: string; name: string },
-  format: string | undefined,
+  artifact: { format: string | null; name: string },
 ): number {
   const size =
-    format === undefined
-      ? undefined
-      : groups.get(duplicateKey(artifact.type, artifact.name, format));
+    artifact.format === null ? undefined : groups.get(duplicateKey(artifact.format, artifact.name));
   return size === undefined ? 0 : size - 1;
 }
 
 /**
- * The size of every group of two or more artifacts with the same type, name and latest format
- * among `POSSIBLE_DUPLICATE_FORMATS` (FR-126-11), keyed by `duplicateKey`. One grouped statement
- * over all artifacts, walking `artifacts_type_name_idx` (NFR-126-02), whatever the list's filters:
- * a duplicate may be filtered out of the list and still count.
+ * The size of every group of two or more artifacts with the same stored format among
+ * `POSSIBLE_DUPLICATE_FORMATS` and the same name (FR-126-11), keyed by `duplicateKey`. One grouped
+ * statement over all artifacts that reads only the covering `artifacts_format_name_idx`
+ * (NFR-126-02, issue 246), whatever the list's filters: a duplicate may be filtered out of the
+ * list and still count.
  */
 async function possibleDuplicateGroups(db: Database): Promise<Map<string, number>> {
   const groups = await db
-    .select({
-      type: artifacts.type,
-      name: artifacts.name,
-      format: latestVersionRow.format,
-      size: count(),
-    })
+    .select({ format: artifacts.format, name: artifacts.name, size: count() })
     .from(artifacts)
-    .innerJoin(latestVersionRow, isLatestVersion)
-    .where(inArray(latestVersionRow.format, [...POSSIBLE_DUPLICATE_FORMATS]))
-    .groupBy(artifacts.type, artifacts.name, latestVersionRow.format)
+    .where(inArray(artifacts.format, [...POSSIBLE_DUPLICATE_FORMATS]))
+    .groupBy(artifacts.format, artifacts.name)
     .having(gt(count(), 1));
-  return new Map(groups.map((g) => [duplicateKey(g.type, g.name, g.format), g.size]));
+  // The filter excludes a null format; the type cannot say so.
+  return new Map(groups.map((g) => [duplicateKey(g.format as string, g.name), g.size]));
 }
 
 /**
  * The other artifacts of `artifact`'s possible-duplicate group (FR-126-13): at most
- * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A latest
- * format outside `POSSIBLE_DUPLICATE_FORMATS`, or no version, has none.
+ * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A stored
+ * format outside `POSSIBLE_DUPLICATE_FORMATS`, or none (no version), has none. The group is keyed
+ * on the stored format (issue 246); `sameLatestContent` still compares the latest versions.
  */
 async function readPossibleDuplicates(
   db: Database,
-  artifact: { id: string; type: ArtifactType; name: string },
-  latest: { format: string; contentHash: string } | undefined,
+  artifact: { id: string; format: string | null; name: string },
+  latest: { contentHash: string } | undefined,
 ): Promise<{ items: PossibleDuplicate[]; total: number }> {
-  if (!latest || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(latest.format)) {
+  const format = artifact.format;
+  if (format === null || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(format)) {
     return { items: [], total: 0 };
   }
-  // The type keeps `artifacts_type_name_idx` usable; the same format implies the same type.
+  // Seeks `artifacts_format_name_idx` (NFR-126-02).
   const sameGroup = and(
-    eq(artifacts.type, artifact.type),
+    eq(artifacts.format, format),
     eq(artifacts.name, artifact.name),
     ne(artifacts.id, artifact.id),
-    eq(latestVersionRow.format, latest.format),
   );
   const listed = await db
     .select({
@@ -1767,7 +1794,8 @@ async function readPossibleDuplicates(
       total: sql<number>`count(*) over ()`,
     })
     .from(artifacts)
-    .innerJoin(latestVersionRow, isLatestVersion)
+    // Left: the list counts the group from `artifacts` alone, so a row without a version counts.
+    .leftJoin(latestVersionRow, isLatestVersion)
     .where(sameGroup)
     .orderBy(artifacts.createdAt, artifacts.id)
     .limit(MAX_LISTED_DUPLICATES);
@@ -1805,7 +1833,7 @@ async function readPossibleDuplicates(
           found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.repositoryName }]),
         ).values(),
       ],
-      sameLatestContent: row.contentHash === latest.contentHash,
+      sameLatestContent: row.contentHash !== null && row.contentHash === latest?.contentHash,
     };
   });
   return { items, total };
@@ -2016,7 +2044,7 @@ export async function listArtifacts(
       missing: found.length === 0,
       benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
-      possibleDuplicates: otherDuplicates(duplicateGroups, row, latestVersion?.format),
+      possibleDuplicates: otherDuplicates(duplicateGroups, row),
       nameShared: row.nameShared,
     };
   });
@@ -2309,9 +2337,47 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
 
 export type ArtifactDetail = NonNullable<Awaited<ReturnType<typeof getArtifactDetail>>>;
 
+/** The last segment of a repository-relative path, or null for the repository root. */
+function folderOf(path: string | null): string | null {
+  return path ? posix.basename(path) : null;
+}
+
 /**
- * Loads one exact artifact version in the shape agent adapters install. Its `type` is the type of
- * the version's format, not the artifact's current type (SPEC-118 FR-118-25, SPEC-103 FR-103-16).
+ * The folder a skill version without a frontmatter `name` is installed in and named after
+ * (SPEC-203 §4.1, issue 245). The repository's own agent sees the folder of the current
+ * occurrence, so this is the basename of the path of the artifact's representative active
+ * occurrence (`compareRepresentative`, the one that names the artifact). A folder rename creates
+ * no version (FR-103-09), so the version's own `source_path` is only the fallback (no active
+ * occurrence, or one at the repository root); null when neither names a folder, and the adapter
+ * then uses the slug.
+ */
+async function skillFolderName(
+  db: Database,
+  artifactId: string,
+  sourcePath: string | null,
+): Promise<string | null> {
+  const occurrences = await db
+    .select({
+      id: artifactOccurrences.id,
+      path: artifactOccurrences.path,
+      createdAt: artifactOccurrences.createdAt,
+      version: artifactVersions.version,
+    })
+    .from(artifactOccurrences)
+    .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
+    .where(
+      and(eq(artifactOccurrences.artifactId, artifactId), eq(artifactOccurrences.status, 'active')),
+    );
+  const [chosen] = occurrences.sort(compareRepresentative);
+  return (chosen ? folderOf(chosen.path) : null) ?? folderOf(sourcePath);
+}
+
+/**
+ * Loads one exact artifact version as agent adapters install it. Its `type` is the type of the
+ * version's format, not the artifact's current type (SPEC-118 FR-118-25, SPEC-103 FR-103-16), and
+ * for a `skill-md` version `folderName` is the folder of SPEC-203 §4.1
+ * (`skillFolderName`; null for every other format). The CLI plan and the runner both load bundles
+ * through this function, so both resolve the same name for the same repository state.
  */
 export async function getArtifactBundle(
   db: Database,
@@ -2324,6 +2390,7 @@ export async function getArtifactBundle(
     .where(eq(artifactVersions.id, versionId))
     .get();
   if (!row) return null;
+  const format = row.version.format as ArtifactFormat;
   return {
     artifactId: row.artifact.id,
     versionId: row.version.id,
@@ -2331,9 +2398,13 @@ export async function getArtifactBundle(
     name: row.artifact.name,
     // The bundled version's own type: an artifact may hold versions of two formats (N2).
     type: artifactTypeOf(row.version),
-    format: row.version.format as ArtifactFormat,
+    format,
     contentHash: row.version.contentHash,
     files: row.version.files,
+    folderName:
+      format === 'skill-md'
+        ? await skillFolderName(db, row.artifact.id, row.version.sourcePath)
+        : null,
   };
 }
 

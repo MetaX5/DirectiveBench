@@ -92,6 +92,9 @@ export function seedArtifactTwin(db: DatabaseSync): void {
     ...demo,
     id: TWIN_ARTIFACT_ID,
     slug: TWIN_ARTIFACT_SLUG,
+    // No version is copied, so no format either (SPEC-006 §3.3): the twin clashes by name only
+    // and is not a possible duplicate (issue 246).
+    format: null,
   };
   const columns = Object.keys(twin);
   db.prepare(
