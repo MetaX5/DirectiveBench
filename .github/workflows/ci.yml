@@ -71,6 +71,42 @@ jobs:
       - name: Packaging verification (pack, install, help/version, demo, serve)
         run: pnpm verify:pack
 
+  # The oldest Node that engines.node accepts (issue #263). node:sqlite bundles the SQLite of its
+  # Node release, so SQL that the newer SQLite on Node 24 accepts can fail here (migration 0009
+  # in PR #259: "no such column" before SQLite 3.53). Coverage is off: the 100% threshold is
+  # enforced on Node 24 by `unit` and `unit-macos`; this job checks that the code runs there.
+  # The apps/cli and apps/web unit tests do not pass on 22.16 yet (issues #265 and #266); the
+  # packed CLI and web app run on it through verify:pack.
+  oldest-node:
+    name: Oldest supported Node (22.16.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OLDEST_NODE: 22.16.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          node-version: ${{ env.OLDEST_NODE }}
+      - name: Node and SQLite versions, and the engines.node minimum
+        run: |
+          node -p '`Node ${process.version}, node:sqlite SQLite ${process.versions.sqlite}`'
+          node -e '
+            const { readFileSync } = require("node:fs");
+            const expected = `>=${process.versions.node}`;
+            for (const file of ["package.json", "apps/cli/package.json"]) {
+              const declared = JSON.parse(readFileSync(file, "utf8")).engines?.node;
+              if (declared !== expected) {
+                console.error(`${file}: engines.node is ${declared}, this job runs ${expected}`);
+                process.exit(1);
+              }
+            }'
+      - name: Package tests (database migrations, runner, engine, adapters, core) without coverage
+        run: pnpm --filter "./packages/*" --no-bail test --coverage.enabled=false
+      - run: pnpm build
+      - name: Packaging verification on the oldest Node (pack, install, demo, serve)
+        run: pnpm verify:pack
+
   e2e:
     name: Integration tests (browser, SQLite)
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@ id: SPEC-012
 title: Testing Strategy
 status: draft
 created: 2026-10-14
-updated: 2026-10-29
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, SPEC-111, SPEC-112, ADR-0005, ADR-0006]
 ---
@@ -98,7 +98,7 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 ## 8. CI (GitHub Actions)
 
-Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Platforms: Node 24 on `ubuntu-latest` for every job, and the unit tests also on `macos-latest` (issue #120; not a required check for now: the maintainer decided on 2026-10-29 to watch it first). `windows-latest` (best effort, NFR-118-04) and the Node 22.x minimum supported version are targets: Windows failed 154 tests in its first full run and is tracked in issue #160. Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
+Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Platforms: Node 24 on `ubuntu-latest` for every job but `oldest-node`, and the unit tests also on `macos-latest` (issue #120; not a required check for now: the maintainer decided on 2026-10-29 to watch it first). The `oldest-node` job runs the `engines.node` minimum, Node 22.16.0, and is meant to be a required check (issue #263). `windows-latest` (best effort, NFR-118-04) is a target: Windows failed 154 tests in its first full run and is tracked in issue #160. Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
 
 | Job | Steps |
 | --- | --- |
@@ -106,6 +106,7 @@ Workflow `.github/workflows/ci.yml`, triggered on every pull request and on push
 | `unit` | `pnpm test` with the 100% coverage threshold (§3); coverage reports uploaded as an artifact |
 | `unit-macos` | `pnpm test --continue` on `macos-latest` with the same 100% threshold; `--continue` reports every package's failures |
 | `build` | `pnpm build`, `pnpm verify:pack` (§5) |
+| `oldest-node` | On Node 22.16.0 (the `engines.node` minimum; `node:sqlite` bundles SQLite 3.49.1): prints the Node and SQLite versions and fails when `engines.node` in the root or CLI `package.json` is not `>=` that version; runs the `packages/*` tests (every migration from an empty and from an earlier database, repositories, runner, engine, adapters, core) without the coverage threshold, which `unit` and `unit-macos` enforce on Node 24; then `pnpm build` and `pnpm verify:pack`. The `apps/cli` and `apps/web` unit tests do not pass on 22.16 yet (issues #265, #266) |
 | `e2e` | `pnpm build`, install Playwright Chromium, `pnpm test:e2e` against a temporary instance with a SQLite data dir (§4); traces uploaded on failure |
 
 No secrets are configured for the default workflow.
