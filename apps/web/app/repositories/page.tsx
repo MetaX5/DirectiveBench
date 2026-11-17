@@ -540,12 +540,15 @@ export default async function RepositoriesPage({
                     <Button type="submit" size="sm" variant="destructive">
                       Remove repository
                     </Button>
-                    <Link
-                      href={`/repositories#repository-${removalImpact.id}`}
+                    {/* A full page load (not `Link`): on load the browser focuses the
+                        fragment's target, the row's Remove button (issue 252); a client
+                        navigation only scrolls to it. */}
+                    <a
+                      href={`/repositories#remove-repository-${removalImpact.id}`}
                       className="text-ui underline"
                     >
                       Cancel
-                    </Link>
+                    </a>
                   </form>
                 </div>
               ) : null}
@@ -642,6 +645,7 @@ export default async function RepositoriesPage({
                             <form method="get" action="/repositories#remove-panel">
                               <input type="hidden" name="remove" value={repository.id} />
                               <Button
+                                id={`remove-repository-${repository.id}`}
                                 type="submit"
                                 size="sm"
                                 variant="outline"

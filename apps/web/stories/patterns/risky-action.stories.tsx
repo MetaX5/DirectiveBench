@@ -131,7 +131,7 @@ export const FromTableRow: Story = {
           <Button type="submit" size="sm" variant="destructive">
             Remove repository
           </Button>
-          <a href="#repository-acme-rules" className="text-ui underline">
+          <a href="#remove-repository-acme-rules" className="text-ui underline">
             Cancel
           </a>
         </form>
@@ -142,6 +142,7 @@ export const FromTableRow: Story = {
             <TableCell className="font-medium">acme/rules</TableCell>
             <TableCell className="text-right">
               <Button
+                id="remove-repository-acme-rules"
                 size="sm"
                 variant="outline"
                 aria-label="Remove acme/rules (GitHub, https://github.com/acme/rules)"
@@ -200,7 +201,7 @@ export const FromTableRowLocal: Story = {
           <Button type="submit" size="sm" variant="destructive">
             Remove repository
           </Button>
-          <a href="#repository-client-a" className="text-ui underline">
+          <a href="#remove-repository-client-a" className="text-ui underline">
             Cancel
           </a>
         </form>

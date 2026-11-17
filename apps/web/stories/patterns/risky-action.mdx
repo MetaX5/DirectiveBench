@@ -29,8 +29,10 @@ naming the object, the reasons as a list, then the destructive action and Cancel
    SPEC-124 §11.2 D11.
 7. When the asking control is a table row, the panel opens through a `GET` form at the top of
    the Card that holds the table, with `id` and `tabIndex=-1` as the form's fragment target;
-   Cancel is a link back to the row (SPEC-125). The row button keeps the `outline` variant of
-   the other row actions, since it only asks. Source: SPEC-125 §11.3 D12, D13, D19.
+   Cancel is a plain link to `#<id of the row button>`, so the page load focuses that button
+   again (a `next/link` navigation only scrolls to it, issue 252). The row button keeps the
+   `outline` variant of the other row actions, since it only asks. Source: SPEC-125 §11.3 D12,
+   D13, D19.
 
 ## When not to use
 
