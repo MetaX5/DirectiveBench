@@ -1,0 +1,100 @@
+---
+title: Suite assignment confirmations name a shared-name suite with its ID (issue 239)
+date: 2026-11-17
+agent: Claude Code / claude-opus-5-5
+trigger: issue 239 (follow-up of the PR #238 review), run by the coordinator in two phases
+status: completed
+branch: fix/issue-239-suite-confirmation-names
+specs: [SPEC-101, SPEC-014]
+---
+
+# Run: Suite assignment confirmations name a shared-name suite with its ID
+
+## Objective
+
+After an assign or unassign on an artifact's Benchmarks tab, the status line named the suite by
+name only, although suite names repeat. It must add ", ID <id>" when another suite has the name,
+the way the picker does (decision L1), for sighted users and screen readers alike; a unique name
+stays as it is.
+
+## Plan
+
+1. Phase 1 (decision material, no commits): prototype the strings, seed same-named suites in a
+   QA database, screenshot both themes at 1280 and 320, write the open questions.
+2. Phase 2 (after approval): red-first tests (database, web lib, e2e), the transactional
+   design, spec text, gate, browser QA, Codex adversarial review, `om-auto-review-pr`, CI.
+
+## Decisions
+
+Approved by the maintainer on 2026-11-17 from the phase 1 screenshots:
+
+1. The ID only on a name clash (the picker's L1 rule), never for a unique name.
+2. Plain text in the status line (no mono span): the visible text is the announced text.
+3. The same rule for "is already assigned" and "was already unassigned".
+4. The clash is read in the action's transaction: `assignArtifactSuite` and
+   `unassignArtifactSuite` return `suite: { name, slug, nameShared }` (`suiteNameShared`), and
+   the web app words it with `suiteLabel` (shared with `suiteOptions`, built on `suiteSubject`).
+5. The clash is measured at the time of the action; a suite imported between render and submit
+   can add the ID although the option had none. Accepted.
+
+## Work performed
+
+- `6d8f9de` test: database outcome shape and clash flag, web messages, e2e confirmations (red).
+- `96a66c9` fix: `AssignmentSuite` in the outcome, `suiteLabel` in `artifact-metadata.ts`.
+- `f204a01` docs: SPEC-101 §11 "Detail editing" (Suites), the confirmation strings and the rule.
+- `86fae5b` docs: verification, implementation status for issue 239.
+- Draft PR #255; screenshots on branch `qa-evidence-pr-255`.
+
+## Verification
+
+Red first: with only the test commit, `packages/database` "assigns and unassigns a suite…" and
+"says when another suite has the name…" failed, and `apps/web` "adds the suite ID to every suite
+message…" failed with `- "Assigned Input validation, ID mock-input-validation. Run it from its
+suite page."` / `+ "Assigned Input validation. Run it from its suite page."`.
+
+The e2e test "two suites with one name get unique option labels, Unassign names and
+confirmations (issues 219, 235, 239)" failed against a build of the old source:
+`Expected: "Unassigned Input validation (mock agent demo), ID mock-input-validation. Its results
+stay in Results by version."`, `Received: "Unassigned Input validation (mock agent demo). Its
+results stay in Results by version."`. It passes with the fix.
+
+| Command (TMPDIR under /var/tmp, e2e on port 4403) | Result |
+| --- | --- |
+| `pnpm format:check` | pass |
+| `pnpm lint` | pass |
+| `pnpm typecheck` | pass |
+| `pnpm test` | pass, 100% lines/branches/functions/statements in every package (database 364, web 606 tests) |
+| `pnpm build` | pass |
+| `pnpm verify:pack` | pass |
+| `pnpm test:e2e` | 191 passed |
+| `pnpm test:storybook` | 68 files, 342 tests passed |
+
+Real app: built CLI via `test-env-up.sh` on port 4402 with demo data (mock agent only) and
+seeded suites "Smoke checks" (IDs `smoke-checks`, `smoke-checks-v2`) and "Release gate".
+Playwright Chromium, keyboard only (focus the select, Tab to Assign, Enter; Enter on Unassign),
+light and dark at 1280px and 320px: the shared-name assign and unassign lines carry
+", ID smoke-checks", "Release gate" reads as before, focus moves to the select as before, no
+horizontal scroll, no console errors or warnings. A forged suite ID shows "This suite no longer
+exists. Reload the page to see the current list." Screenshots on branch `qa-evidence-pr-255`.
+
+Codex adversarial review (`--scope branch --base main`) round 1: approve, no material findings.
+`om-auto-review-pr 255 --autofix`: approve, submitted as a COMMENT, no findings, no autofix.
+
+Not verified: the "already assigned" / "already unassigned" lines in a browser (a race between
+two tabs or the CLI; covered by unit tests only); Firefox and Safari; contrast was not
+re-measured, because the line's colour and size did not change (`text-contrast.spec.ts` passes).
+
+## Problems and deviations
+
+None. Phase 1's prototype (a `listSuiteNames` lookup in the web action) was replaced by the
+approved transactional design and never committed.
+
+## Lessons recorded
+
+None: nothing non-obvious came up (the transactional read and the shared label rule follow the
+existing shared-names pattern).
+
+## Follow-ups
+
+- The "already assigned" / "already unassigned" lines are checked by unit tests only.
+- The PR stays a draft by request; it needs manual QA (`needs-qa`) and a maintainer merge.

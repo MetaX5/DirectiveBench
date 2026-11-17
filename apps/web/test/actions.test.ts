@@ -1001,6 +1001,39 @@ describe('artifact metadata actions (issue #64)', () => {
     expect(next.revalidatePath).toHaveBeenCalledWith(`/artifacts/${artifactId}`);
   });
 
+  it('adds the suite ID to every suite message when another suite has the name (issue 239)', async () => {
+    const { artifactId } = await importArtifact();
+    const { suiteId } = await importSuite({}, null);
+    await importSuiteVersion(handle, {
+      slug: 'input-validation-copy',
+      name: 'Input validation',
+      description: null,
+      schemaVersion: 1,
+      definition: {},
+      fixtures: {},
+      contentHash: 'suite-copy',
+      sourcePath: null,
+      approval: null,
+    });
+    const subject = 'Input validation, ID mock-input-validation';
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: `Assigned ${subject}. Run it from its suite page.`,
+    });
+    expect(await assignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: `${subject} is already assigned.`,
+    });
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: `Unassigned ${subject}. Its results stay in Results by version.`,
+    });
+    expect(await unassignArtifactSuiteAction(idle, form({ artifactId, suiteId }))).toEqual({
+      kind: 'success',
+      message: `${subject} was already unassigned.`,
+    });
+  });
+
   it('says when the suite no longer exists', async () => {
     const { artifactId } = await importArtifact();
     const gone = { kind: 'error', message: SUITE_GONE_MESSAGE };

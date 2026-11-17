@@ -53,6 +53,7 @@ import {
   removeTagSchema,
   SUITE_GONE_MESSAGE,
   suiteAssignmentSchema,
+  suiteLabel,
   type MetadataFormState,
 } from './artifact-metadata';
 import {
@@ -431,7 +432,10 @@ export async function saveArtifactNotesAction(
   });
 }
 
-/** The message for a suite assignment outcome (issue #64). */
+/**
+ * The message for a suite assignment outcome (issue #64). The suite is named as in the picker,
+ * with its ID when another suite has the name (issue 239).
+ */
 function suiteMessage(outcome: ArtifactSuiteOutcome): MetadataFormState {
   switch (outcome.status) {
     case 'missing-artifact':
@@ -441,17 +445,17 @@ function suiteMessage(outcome: ArtifactSuiteOutcome): MetadataFormState {
     case 'assigned':
       return {
         kind: 'success',
-        message: `Assigned ${outcome.suiteName}. Run it from its suite page.`,
+        message: `Assigned ${suiteLabel(outcome.suite)}. Run it from its suite page.`,
       };
     case 'already-assigned':
-      return { kind: 'success', message: `${outcome.suiteName} is already assigned.` };
+      return { kind: 'success', message: `${suiteLabel(outcome.suite)} is already assigned.` };
     case 'unassigned':
       return {
         kind: 'success',
-        message: `Unassigned ${outcome.suiteName}. Its results stay in Results by version.`,
+        message: `Unassigned ${suiteLabel(outcome.suite)}. Its results stay in Results by version.`,
       };
     case 'not-assigned':
-      return { kind: 'success', message: `${outcome.suiteName} was already unassigned.` };
+      return { kind: 'success', message: `${suiteLabel(outcome.suite)} was already unassigned.` };
   }
 }
 
