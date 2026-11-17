@@ -369,6 +369,8 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
     const jobId = new URL(page.url()).searchParams.get('branchChange') as string;
     await expect(page.getByTestId('branch-status')).toContainText('Waiting for the runner');
     await expect(panelField(page)).toBeDisabled();
+    // Issue 243: Save branch is disabled while the runner checks, so the status line has focus.
+    await expect(page.getByTestId('branch-status')).toBeFocused();
 
     // The remote does not have it: the error goes under the field and the value stays.
     const missing =
@@ -379,6 +381,7 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
     });
     await expect(panelField(page)).toHaveValue('release/3.0');
     await expect(panelField(page)).toBeEnabled();
+    await expect(panelField(page)).toBeFocused(); // the invalid field (Form rule 3)
 
     // A name that exists: the runner stores it, the page says so and does not scan.
     await panelField(page).fill('release/2.1');
@@ -397,6 +400,7 @@ test.describe.serial('choose the branch of a GitHub repository (issue 58)', () =
       'acme/e2e58-rules now uses the branch release/2.1. Scan it to read that branch.',
       { timeout: RUNNER_TIMEOUT },
     );
+    await expect(page.getByTestId('branch-result')).toBeFocused();
     await expect(page.getByTestId('branch-panel')).toHaveCount(0);
     await expect(row(page, 'acme/e2e58-rules').getByRole('cell').nth(5)).toContainText(
       'That scan read main: scan again to read release/2.1.',
