@@ -6,6 +6,7 @@ import {
   CLAUDE_CODE_ADAPTER_ID,
   ClaudeCodeAdapter,
   claudeSkillName,
+  promptInvokesSkill,
   type AgentAdapter,
   type ClaudeAuthMode,
 } from '@directivebench/agent-adapters';
@@ -130,7 +131,22 @@ export function planText(input: {
   if (resolved.candidate.format === 'skill-md') {
     // The name the skill is installed and invoked under (FR-118-31, SPEC-203 §4.1, issue 245):
     // for a skill without a frontmatter name, the folder its repository's agent sees.
-    lines.splice(2, 0, `Skill name: ${claudeSkillName(resolved.candidate)}`);
+    const skillName = claudeSkillName(resolved.candidate);
+    // A case whose prompt starts with another `/command` (for example the slug of a renamed
+    // nameless skill) is no longer an explicit invocation; warn, never refuse (issue 258).
+    const stale = definition.cases.filter(
+      (testCase) =>
+        testCase.prompt.startsWith('/') && !promptInvokesSkill(testCase.prompt, skillName),
+    );
+    lines.splice(
+      2,
+      0,
+      `Skill name: ${skillName}`,
+      ...stale.map(
+        (testCase) =>
+          `Warning:    case ${testCase.id}: the prompt starts with a / command other than /${skillName} (the installed skill name), so it does not invoke the skill.`,
+      ),
+    );
   }
   if (options.maxBudgetUsd !== undefined) {
     lines.push(`Budget:     at most $${options.maxBudgetUsd} per agent run (--max-budget-usd)`);
