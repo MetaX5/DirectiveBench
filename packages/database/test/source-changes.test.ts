@@ -335,7 +335,7 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
       ['docs-agents-md', 'docs-skill', 'skill', ['docs/AGENTS.md:active']],
     ]);
     const detail = await getArtifactDetail(handle.db, artifact.id);
-    expect(detail?.artifact).toMatchObject({ id: artifact.id, type: 'skill' });
+    expect(detail?.artifact).toMatchObject({ id: artifact.id, type: 'skill', format: 'skill-md' });
     expect(detail?.versions.map((v) => [v.version, v.format])).toEqual([
       [2, 'skill-md'],
       [1, 'agents-md'],
@@ -359,6 +359,8 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
     expect(await artifactRows(handle)).toEqual([
       ['docs-agents-md', 'docs/AGENTS.md', 'instruction', ['docs/AGENTS.md:active']],
     ]);
+    // The format is a source field from the same version (issue 246).
+    expect((await bySlug(handle, 'docs-agents-md')).format).toBe('agents-md');
   });
 
   it('follows a type change in a hosted repository too (§14 N9.8)', async () => {
@@ -421,10 +423,13 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
     // A hand-made stale type is kept rather than guessed once nothing names the artifact.
     await handle.db
       .update(schema.artifacts)
-      .set({ type: 'rule' })
+      .set({ type: 'rule', format: 'cursor-rule' })
       .where(eq(schema.artifacts.id, artifact.id));
     await scan(handle, a, [single('AGENTS.md', '# A')]);
-    expect((await bySlug(handle, 'docs-skill')).type).toBe('rule');
+    expect(await bySlug(handle, 'docs-skill')).toMatchObject({
+      type: 'rule',
+      format: 'cursor-rule',
+    });
   });
 
   it('writes the type even when the chosen version cannot be parsed for its name', async () => {
@@ -434,7 +439,7 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
     const artifact = await bySlug(handle, 'review');
     await handle.db
       .update(schema.artifacts)
-      .set({ type: 'rule', name: 'renamed by hand' })
+      .set({ type: 'rule', format: 'cursor-rule', name: 'renamed by hand' })
       .where(eq(schema.artifacts.id, artifact.id));
     // A damaged row (no primary file) keeps its name, but its format still decides the type.
     handle.sqlite
@@ -444,6 +449,7 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
     expect(await bySlug(handle, 'review')).toMatchObject({
       name: 'renamed by hand',
       type: 'skill',
+      format: 'skill-md',
     });
   });
 
@@ -460,18 +466,24 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
       .run(artifact.id);
     handle.sqlite
       .prepare(
-        "update artifacts set type = 'skill', name = 'kept', updated_at = 'old' where id = ?",
+        "update artifacts set type = 'skill', format = 'skill-md', name = 'kept', updated_at = 'old' where id = ?",
       )
       .run(artifact.id);
     await withTransaction(handle, (db) => refreshSourceFields(db, [artifact.id]));
     const refreshed = await bySlug(handle, 'style');
     // The name cannot be parsed from that path and is kept; the stored format decides the type.
-    expect(refreshed).toMatchObject({ type: 'rule', name: 'kept' });
+    expect(refreshed).toMatchObject({ type: 'rule', format: 'cursor-rule', name: 'kept' });
     expect(refreshed.updatedAt).not.toBe('old');
     // A second refresh with nothing to change writes nothing.
     tick();
     await withTransaction(handle, (db) => refreshSourceFields(db, [artifact.id]));
     expect((await bySlug(handle, 'style')).updatedAt).toBe(refreshed.updatedAt);
+    // A stale format alone, with the right type, is written too (issue 246).
+    handle.sqlite
+      .prepare("update artifacts set format = 'claude-rule' where id = ?")
+      .run(artifact.id);
+    await withTransaction(handle, (db) => refreshSourceFields(db, [artifact.id]));
+    expect((await bySlug(handle, 'style')).format).toBe('cursor-rule');
   });
 
   it('reverts the type when the repository holding the highest version is removed (FR-126-23)', async () => {
@@ -533,6 +545,109 @@ describe('the type follows the source (FR-103-16, N1, N2)', () => {
       }),
     );
     expect(second.artifactId).toBe(first.artifactId);
-    expect(await bySlug(handle, 'guide')).toMatchObject({ id: first.artifactId, type: 'skill' });
+    expect(await bySlug(handle, 'guide')).toMatchObject({
+      id: first.artifactId,
+      type: 'skill',
+      format: 'skill-md',
+    });
+  });
+});
+
+// Issue 246 (SPEC-126 FR-126-11, option B): possible duplicates key on the stored source field
+// `artifacts.format`, the format of the same chosen version that gives the name and the type,
+// never on the latest version's format when the two differ.
+describe('possible duplicates follow the chosen version (issue 246)', () => {
+  const rule = '---\nglobs: "*.ts"\n---\nUse named exports.\n';
+
+  /** `[slug, type, format, possibleDuplicates]` of every listed artifact, by slug. */
+  async function duplicateRows(handle: DatabaseHandle) {
+    return (await listArtifacts(handle.db))
+      .map((row) => [row.slug, row.type, row.format, row.possibleDuplicates])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  }
+
+  async function cardSlugs(handle: DatabaseHandle, slug: string) {
+    const detail = await getArtifactDetail(handle.db, (await bySlug(handle, slug)).id);
+    return detail?.possibleDuplicates.items.map((item) => item.slug);
+  }
+
+  it('groups a rule reverted from a skill with same-named rules, not skills (revert at the same path)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    const c = await local(handle, 'c');
+    await scan(handle, a, [single('.cursor/rules/style.mdc', rule)]); // v1 cursor-rule
+    await scan(handle, a, [skill('.cursor/rules/style.mdc', skillMd('style'))]); // v2 skill-md
+    await scan(handle, a, [single('.cursor/rules/style.mdc', rule)]); // back to v1
+    await scan(handle, b, [single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nOther.\n')]);
+    await scan(handle, c, [skill('skills/style', skillMd('style', 'A skill.'))]);
+
+    // The Format column still shows the latest version's format (a separate issue).
+    expect(await duplicateRows(handle)).toEqual([
+      ['style', 'rule', 'skill-md', 1],
+      ['style-2', 'rule', 'cursor-rule', 1],
+      ['style-3', 'skill', 'skill-md', 0],
+    ]);
+    expect((await bySlug(handle, 'style')).format).toBe('cursor-rule');
+    expect(await cardSlugs(handle, 'style')).toEqual(['style-2']);
+    expect(await cardSlugs(handle, 'style-2')).toEqual(['style']);
+    expect(await cardSlugs(handle, 'style-3')).toEqual([]);
+  });
+
+  it('groups a skill reverted from a rule with same-named skills', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const c = await local(handle, 'c');
+    await scan(handle, a, [skill('.cursor/rules/style.mdc', skillMd('style'))]); // v1 skill-md
+    await scan(handle, a, [single('.cursor/rules/style.mdc', rule)]); // v2 cursor-rule
+    await scan(handle, a, [skill('.cursor/rules/style.mdc', skillMd('style'))]); // back to v1
+    await scan(handle, c, [skill('skills/style', skillMd('style', 'A skill.'))]);
+
+    expect(await duplicateRows(handle)).toEqual([
+      ['style', 'skill', 'cursor-rule', 1],
+      ['style-2', 'skill', 'skill-md', 1],
+    ]);
+    expect(await cardSlugs(handle, 'style')).toEqual(['style-2']);
+  });
+
+  it('regroups after the repository holding the highest version is removed (FR-126-23)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    const c = await local(handle, 'c');
+    const d = await local(handle, 'd');
+    await scan(handle, a, [single('.cursor/rules/style.mdc', rule)]);
+    await scan(handle, b, [single('.cursor/rules/style.mdc', rule)]); // linked (rule 3)
+    await scan(handle, b, [skill('.cursor/rules/style.mdc', skillMd('style'))]); // v2 skill-md
+    await scan(handle, c, [single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nOther.\n')]);
+    await scan(handle, d, [skill('skills/style', skillMd('style', 'A skill.'))]);
+    // While B holds v2 the artifact is a skill and groups with the skill.
+    expect(await duplicateRows(handle)).toEqual([
+      ['style', 'skill', 'skill-md', 1],
+      ['style-2', 'rule', 'cursor-rule', 0],
+      ['style-3', 'skill', 'skill-md', 1],
+    ]);
+    await removeRepository(handle, b);
+    expect(await duplicateRows(handle)).toEqual([
+      ['style', 'rule', 'skill-md', 1],
+      ['style-2', 'rule', 'cursor-rule', 1],
+      ['style-3', 'skill', 'skill-md', 0],
+    ]);
+    expect(await cardSlugs(handle, 'style')).toEqual(['style-2']);
+  });
+
+  it('keeps the format of a missing artifact, which stays in its group (§11.4 G13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    await scan(handle, a, [single('.cursor/rules/style.mdc', rule), single('AGENTS.md', '# A')]);
+    await scan(handle, b, [single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nOther.\n')]);
+    await scan(handle, a, [single('AGENTS.md', '# A')]);
+    expect(await bySlug(handle, 'style')).toMatchObject({ type: 'rule', format: 'cursor-rule' });
+    expect(await cardSlugs(handle, 'style-2')).toEqual(['style']);
+    expect((await listArtifacts(handle.db)).find((row) => row.slug === 'style')).toMatchObject({
+      missing: true,
+      possibleDuplicates: 1,
+    });
   });
 });
