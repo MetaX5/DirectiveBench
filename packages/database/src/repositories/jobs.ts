@@ -111,6 +111,12 @@ export const repositoryOverlapSchema = z
      * overlap, whose files both scans read.
      */
     userLevel: z.enum(['folder', 'inside-folder']).optional(),
+    /**
+     * With `userLevel` on an `inside` overlap: the new location's own scan does not skip it (a
+     * sibling home's folder below a registered ancestor of the home directory), so only the
+     * registered repository's scan does.
+     */
+    readOnItsOwn: z.literal(true).optional(),
   })
   .strict();
 export type RepositoryOverlap = z.infer<typeof repositoryOverlapSchema>;

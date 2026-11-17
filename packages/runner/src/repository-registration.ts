@@ -369,11 +369,18 @@ async function markUserLevelOverlaps(
 ): Promise<RepositoryOverlap[]> {
   return Promise.all(
     overlaps.map(async (overlap) => {
-      const userLevel =
-        overlap.relation === 'inside'
-          ? await userLevelOf(overlap.location, location, options)
-          : await userLevelOf(location, overlap.location, options);
-      return userLevel === undefined ? overlap : { ...overlap, userLevel };
+      if (overlap.relation === 'contains') {
+        const userLevel = await userLevelOf(location, overlap.location, options);
+        return userLevel === undefined ? overlap : { ...overlap, userLevel };
+      }
+      const userLevel = await userLevelOf(overlap.location, location, options);
+      if (userLevel === undefined) return overlap;
+      // A sibling home's folder is skipped only by a scan that contains the home directory, so
+      // the new location's own scan may still read it (Codex review of PR #261).
+      const ownScan = await userLevelOf(location, location, options);
+      return ownScan === undefined
+        ? { ...overlap, userLevel, readOnItsOwn: true as const }
+        : { ...overlap, userLevel };
     }),
   );
 }

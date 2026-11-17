@@ -728,12 +728,54 @@ describe('registerLocalPath', () => {
       ]);
     });
 
+    it("says when only the registered repository's scan skips a sibling home's folder", async () => {
+      // `/users` contains the home directory `/users/alice`, so its scan skips the agent folders
+      // of the sibling home `/users/bob`; a scan of `/users/bob/.claude` itself does not.
+      const users = makeDir('users');
+      const alice = makeDir('users', 'alice');
+      const bobClaude = makeDir('users', 'bob', '.claude');
+      const result = await registerLocalPath(
+        handle,
+        request(users, users),
+        options({ homeDir: alice, env: env() }),
+      );
+      if (!result.ok) throw new Error(JSON.stringify(result));
+      const outcome = await registerLocalPath(
+        handle,
+        request(bobClaude),
+        options({ homeDir: alice, env: env() }),
+      );
+      expect(outcome).toMatchObject({
+        code: 'confirmation-required',
+        overlaps: [
+          {
+            repositoryId: result.repositoryId,
+            location: users,
+            relation: 'inside',
+            userLevel: 'folder',
+            readOnItsOwn: true,
+          },
+        ],
+      });
+    });
+
     it("keeps a project's own .claude folder an ordinary overlap", async () => {
       const project = makeDir('project');
       const own = makeDir('project', '.claude');
       const projectId = await registered(project);
       expect(await overlapsOf(own)).toEqual([
         { repositoryId: projectId, name: 'project', location: project, relation: 'inside' },
+      ]);
+      // The other way round: a project containing its registered own `.claude` folder.
+      const other = makeDir('other');
+      const otherOwnId = await registered(makeDir('other', '.claude'));
+      expect(await overlapsOf(other)).toEqual([
+        {
+          repositoryId: otherOwnId,
+          name: '.claude',
+          location: join(other, '.claude'),
+          relation: 'contains',
+        },
       ]);
     });
   });

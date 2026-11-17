@@ -265,7 +265,11 @@ describe('describeRegistration', () => {
 describe('describeRegistration confirmation (FR-104-18)', () => {
   const confirm = (
     home: 'home' | 'contains-home' | null,
-    overlaps: { relation: 'inside' | 'contains'; userLevel?: 'folder' | 'inside-folder' }[],
+    overlaps: {
+      relation: 'inside' | 'contains';
+      userLevel?: 'folder' | 'inside-folder';
+      readOnItsOwn?: true;
+    }[],
   ) =>
     describeRegistration(
       registration({
@@ -321,6 +325,13 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
       'It is inside the registered repository skills (/home/me/skills), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.',
       'It contains the registered repository skills (/home/me/skills), a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
       'It contains the registered repository skills (/home/me/skills), which is inside a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
+    ]);
+  });
+
+  it("promises no empty scan when only the registered repository's scan skips the folder", () => {
+    const notice = confirm(null, [{ relation: 'inside', userLevel: 'folder', readOnItsOwn: true }]);
+    expect(notice.kind === 'confirm' && notice.reasons).toEqual([
+      'It is inside the registered repository skills (/home/me/skills), but it is a user-level agent folder: a scan of that repository skips it, so nothing is counted twice.',
     ]);
   });
 });

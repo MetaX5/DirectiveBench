@@ -225,8 +225,7 @@ type ConfirmationRequest = Extract<RepositoryRegistrationResult, { code: 'confir
  * a user-level agent folder the scan skips (issue 244, D05) does not, so it says that instead.
  */
 function overlapReason(
-  relation: RepositoryOverlap['relation'],
-  userLevel: RepositoryOverlap['userLevel'],
+  { relation, userLevel, readOnItsOwn }: RepositoryOverlap,
   subject: string,
 ): string {
   if (userLevel === undefined) {
@@ -237,7 +236,9 @@ function overlapReason(
   if (relation === 'inside') {
     const what =
       userLevel === 'folder' ? 'a user-level agent folder' : 'inside a user-level agent folder';
-    return `It is inside the registered repository ${subject}, but it is ${what}: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.`;
+    return readOnItsOwn
+      ? `It is inside the registered repository ${subject}, but it is ${what}: a scan of that repository skips it, so nothing is counted twice.`
+      : `It is inside the registered repository ${subject}, but it is ${what}: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.`;
   }
   const what =
     userLevel === 'folder'
@@ -266,7 +267,7 @@ export function confirmationReasons(request: ConfirmationRequest): string[] {
   }
   for (const overlap of request.overlaps) {
     const subject = `${overlap.name} (${overlap.location})`;
-    reasons.push(overlapReason(overlap.relation, overlap.userLevel, subject));
+    reasons.push(overlapReason(overlap, subject));
   }
   return reasons;
 }
