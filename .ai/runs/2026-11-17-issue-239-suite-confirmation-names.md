@@ -3,7 +3,7 @@ title: Suite assignment confirmations name a shared-name suite with its ID (issu
 date: 2026-11-17
 agent: Claude Code / claude-opus-5-5
 trigger: issue 239 (follow-up of the PR #238 review), run by the coordinator in two phases
-status: in-progress
+status: completed
 branch: fix/issue-239-suite-confirmation-names
 specs: [SPEC-101, SPEC-014]
 ---
@@ -41,7 +41,9 @@ Approved by the maintainer on 2026-11-17 from the phase 1 screenshots:
 
 - `6d8f9de` test: database outcome shape and clash flag, web messages, e2e confirmations (red).
 - `96a66c9` fix: `AssignmentSuite` in the outcome, `suiteLabel` in `artifact-metadata.ts`.
-- Spec SPEC-101 §11 "Detail editing" (Suites): the confirmation strings and the rule.
+- `f204a01` docs: SPEC-101 §11 "Detail editing" (Suites), the confirmation strings and the rule.
+- `86fae5b` docs: verification, implementation status for issue 239.
+- Draft PR #255; screenshots on branch `qa-evidence-pr-255`.
 
 ## Verification
 
@@ -76,6 +78,7 @@ horizontal scroll, no console errors or warnings. A forged suite ID shows "This 
 exists. Reload the page to see the current list." Screenshots on branch `qa-evidence-pr-255`.
 
 Codex adversarial review (`--scope branch --base main`) round 1: approve, no material findings.
+`om-auto-review-pr 255 --autofix`: approve, submitted as a COMMENT, no findings, no autofix.
 
 Not verified: the "already assigned" / "already unassigned" lines in a browser (a race between
 two tabs or the CLI; covered by unit tests only); Firefox and Safari; contrast was not
@@ -83,12 +86,15 @@ re-measured, because the line's colour and size did not change (`text-contrast.s
 
 ## Problems and deviations
 
-None so far.
+None. Phase 1's prototype (a `listSuiteNames` lookup in the web action) was replaced by the
+approved transactional design and never committed.
 
 ## Lessons recorded
 
-None so far.
+None: nothing non-obvious came up (the transactional read and the shared label rule follow the
+existing shared-names pattern).
 
 ## Follow-ups
 
-None so far.
+- The "already assigned" / "already unassigned" lines are checked by unit tests only.
+- The PR stays a draft by request; it needs manual QA (`needs-qa`) and a maintainer merge.
