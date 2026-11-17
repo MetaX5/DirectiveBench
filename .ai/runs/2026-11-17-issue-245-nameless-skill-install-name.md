@@ -3,7 +3,7 @@ title: Install a nameless skill under its folder name (issue 245)
 date: 2026-11-17
 agent: Claude Code / claude-opus-5-5
 trigger: issue 245, maintainer decision 2026-11-17 (option C)
-status: in-progress
+status: completed
 branch: fix/issue-245-nameless-skill-install-name
 specs: [SPEC-203, SPEC-118, SPEC-103, SPEC-107, SPEC-108]
 ---
@@ -76,6 +76,14 @@ coverage; mock agent only.
 - Not verified:
   - A real Claude Code session with a folder-named skill (no paid or authenticated runs).
   - Which skill wins when a name collides with one the CLI lists itself (#257).
+
+- Codex adversarial review (`--scope branch --base main`):
+  - Round 1, needs-attention: a rename rescanned between plan confirmation and the runner's load
+    changes the name. This is the risk the maintainer accepted with decision 5. It is now
+    documented in SPEC-203 §4.1 (`0c9b0ca`).
+  - Round 2: approve.
+- `om-auto-review-pr 256 --autofix`: submitted as a COMMENT. Approvable, with two minors (the
+  repeated ordering and the documented residual). Nothing to autofix.
 
 ## Problems and deviations
 
