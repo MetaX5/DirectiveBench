@@ -167,6 +167,7 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
         executionModel: 'claude-sonnet-4-5-20250929',
         auxiliaryModels: ['claude-haiku-4-5-20251001'],
         mismatchedMessageModels: [],
+        installedSkillName: 'pdf',
       },
     });
     expect(result.errorCode).toBeUndefined();
@@ -203,6 +204,37 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     const second = await adapter.run(await h.request());
     expect(first.metadata?.flagsHash).toMatch(/^[0-9a-f]{64}$/);
     expect(second.metadata?.flagsHash).toBe(first.metadata?.flagsHash);
+  });
+
+  it('runs a renamed nameless skill under its folder name and records it (issue 245, FR-118-04)', async () => {
+    const h = harness();
+    const adapter = h.adapter();
+    h.fake.setStream(fixture('skill-invoked'));
+    const named = await adapter.run(await h.request());
+    // The same stream, with the skill listed and invoked under its folder name.
+    h.fake.setStream(
+      fixture('skill-invoked')
+        .replaceAll('"pdf"', '"code-review"')
+        .replaceAll('Launching skill: pdf', 'Launching skill: code-review'),
+    );
+    const renamed = bundle(
+      'skill-md',
+      { 'SKILL.md': '---\ndescription: d\n---\nBody\n' },
+      { slug: 'pdf', folderName: 'code-review' },
+    );
+    const request = await h.request({ artifact: renamed });
+    const installed = await adapter.installArtifact(request.workspace, renamed);
+    expect(installed.paths).toEqual(['.claude/skills/code-review/SKILL.md']);
+    const result = await adapter.run({ ...request, installedPaths: installed.paths });
+    expect(result).toMatchObject({
+      status: 'completed',
+      skillActivation: { loaded: true, invoked: true, invocations: 1 },
+      metadata: { installedSkillName: 'code-review' },
+    });
+    expect(h.fake.argv()).toContain('Skill(code-review)');
+    expect(h.fake.argv()).not.toContain('Skill(pdf)');
+    // The installed name is recorded, not compared: the flags hash replaces it (FR-118-04).
+    expect(result.metadata?.flagsHash).toBe(named.metadata?.flagsHash);
   });
 
   it('runs API Key Mode with a run-local HOME and CLAUDE_CONFIG_DIR, the key only in the environment (AC-4, FR-118-02/03)', async () => {
