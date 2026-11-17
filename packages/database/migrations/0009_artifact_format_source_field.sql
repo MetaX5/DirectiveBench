@@ -29,24 +29,34 @@ WHERE `chosen`.`artifact_id` = `artifacts`.`id`;--> statement-breakpoint
 -- (2) No active occurrence: the highest version whose format's type is the artifact's (kept) type,
 -- else the latest version; an artifact without a version stays null. The CASE mirrors
 -- ARTIFACT_FORMAT_TYPES in @directivebench/core (pinned by the migration test for every format).
+-- The outer row is referenced only in WHERE clauses: SQLite before 3.53 rejects an outer column
+-- in a correlated subquery's ORDER BY ("no such column"), and Node 22.16 bundles 3.49.
 UPDATE `artifacts`
-SET `format` = (
-  SELECT `v`.`format`
-  FROM `artifact_versions` `v`
-  WHERE `v`.`artifact_id` = `artifacts`.`id`
-  ORDER BY
-    CASE `v`.`format`
-      WHEN 'skill-md' THEN 'skill'
-      WHEN 'agents-md' THEN 'instruction'
-      WHEN 'claude-md' THEN 'instruction'
-      WHEN 'copilot-instructions' THEN 'instruction'
-      WHEN 'claude-rule' THEN 'rule'
-      WHEN 'copilot-path-instructions' THEN 'rule'
-      WHEN 'cursor-rule' THEN 'rule'
-      WHEN 'gitlab-duo-chat-rules' THEN 'rule'
-    END IS `artifacts`.`type` DESC,
-    `v`.`version` DESC
-  LIMIT 1
+SET `format` = coalesce(
+  (
+    SELECT `v`.`format`
+    FROM `artifact_versions` `v`
+    WHERE `v`.`artifact_id` = `artifacts`.`id`
+      AND CASE `v`.`format`
+        WHEN 'skill-md' THEN 'skill'
+        WHEN 'agents-md' THEN 'instruction'
+        WHEN 'claude-md' THEN 'instruction'
+        WHEN 'copilot-instructions' THEN 'instruction'
+        WHEN 'claude-rule' THEN 'rule'
+        WHEN 'copilot-path-instructions' THEN 'rule'
+        WHEN 'cursor-rule' THEN 'rule'
+        WHEN 'gitlab-duo-chat-rules' THEN 'rule'
+      END = `artifacts`.`type`
+    ORDER BY `v`.`version` DESC
+    LIMIT 1
+  ),
+  (
+    SELECT `v`.`format`
+    FROM `artifact_versions` `v`
+    WHERE `v`.`artifact_id` = `artifacts`.`id`
+    ORDER BY `v`.`version` DESC
+    LIMIT 1
+  )
 )
 WHERE `format` IS NULL;--> statement-breakpoint
 CREATE INDEX `artifacts_format_name_idx` ON `artifacts` (`format`,`name`);
