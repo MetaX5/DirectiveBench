@@ -467,11 +467,11 @@ describe('user metadata editing (issue #64)', () => {
     const { artifactId, suiteId } = await seedTargets(handle);
     expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
       status: 'assigned',
-      suiteName: 'Suite',
+      suite: { name: 'Suite', slug: 'suite', nameShared: false },
     });
     expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
       status: 'already-assigned',
-      suiteName: 'Suite',
+      suite: { name: 'Suite', slug: 'suite', nameShared: false },
     });
     expect(await assignArtifactSuite(handle, 'art_missing', suiteId)).toEqual({
       status: 'missing-artifact',
@@ -483,11 +483,11 @@ describe('user metadata editing (issue #64)', () => {
 
     expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
       status: 'unassigned',
-      suiteName: 'Suite',
+      suite: { name: 'Suite', slug: 'suite', nameShared: false },
     });
     expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
       status: 'not-assigned',
-      suiteName: 'Suite',
+      suite: { name: 'Suite', slug: 'suite', nameShared: false },
     });
     expect(await unassignArtifactSuite(handle, artifactId, 'suite_missing')).toEqual({
       status: 'missing-suite',
@@ -496,6 +496,41 @@ describe('user metadata editing (issue #64)', () => {
       status: 'missing-artifact',
     });
     expect((await getArtifactDetail(handle.db, artifactId))?.suites).toEqual([]);
+  });
+
+  it('says when another suite has the name, at the time of the action (issue 239)', async () => {
+    const handle = getHandle();
+    const { artifactId, suiteId } = await seedTargets(handle);
+    const { suiteId: otherId } = await importSuiteVersion(
+      handle,
+      suiteInput('other', { slug: 'suite-copy', definition: { id: 'suite-copy' } }),
+    );
+    const shared = { name: 'Suite', slug: 'suite', nameShared: true };
+    expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'assigned',
+      suite: shared,
+    });
+    expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'already-assigned',
+      suite: shared,
+    });
+    expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'unassigned',
+      suite: shared,
+    });
+    expect(await unassignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'not-assigned',
+      suite: shared,
+    });
+    // Renamed apart, the name is unique again: the flag is read when the action runs.
+    await handle.db
+      .update(schema.benchmarkSuites)
+      .set({ name: 'Other suite' })
+      .where(eq(schema.benchmarkSuites.id, otherId));
+    expect(await assignArtifactSuite(handle, artifactId, suiteId)).toEqual({
+      status: 'assigned',
+      suite: { ...shared, nameShared: false },
+    });
   });
 
   it('keeps the runs of an unassigned suite', async () => {

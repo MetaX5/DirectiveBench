@@ -157,7 +157,7 @@ function removeSuiteCopy(): Promise<void> {
   });
 }
 
-test('two suites with one name get unique option labels and Unassign names (issues 219, 235)', async ({
+test('two suites with one name get unique option labels, Unassign names and confirmations (issues 219, 235, 239)', async ({
   page,
 }) => {
   await removeSuiteCopy();
@@ -175,9 +175,10 @@ test('two suites with one name get unique option labels and Unassign names (issu
     await expect(select.getByRole('option', { name: DEMO_SUITE, exact: true })).toHaveCount(0);
 
     // Both unassigned: the options add the ID and no two read alike.
+    // The confirmation names the suite the way the option and Unassign do (issue 239).
     await suites.getByRole('button', { name: `Unassign suite ${demoName}`, exact: true }).click();
     await expect(suites.getByRole('status')).toHaveText(
-      `Unassigned ${DEMO_SUITE}. Its results stay in Results by version.`,
+      `Unassigned ${demoName}. Its results stay in Results by version.`,
     );
     const options = await select.getByRole('option').allTextContents();
     expect(new Set(options).size).toBe(options.length);
@@ -190,7 +191,7 @@ test('two suites with one name get unique option labels and Unassign names (issu
       await select.selectOption({ label });
       await suites.getByRole('button', { name: 'Assign', exact: true }).click();
       await expect(suites.getByRole('status')).toHaveText(
-        `Assigned ${DEMO_SUITE}. Run it from its suite page.`,
+        `Assigned ${label}. Run it from its suite page.`,
       );
     }
 
@@ -210,7 +211,7 @@ test('two suites with one name get unique option labels and Unassign names (issu
     // The copy goes; the demo suite stays assigned, as other spec files expect.
     await list.getByRole('button', { name: `Unassign suite ${copyName}`, exact: true }).click();
     await expect(suites.getByRole('status')).toHaveText(
-      `Unassigned ${DEMO_SUITE}. Its results stay in Results by version.`,
+      `Unassigned ${copyName}. Its results stay in Results by version.`,
     );
     await expect(list.getByRole('button')).toHaveCount(1);
   } finally {
