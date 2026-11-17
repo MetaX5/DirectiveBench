@@ -20,14 +20,18 @@ the status message.
 2. A field error sits under its field, is linked with `aria-describedby`, uses
    `aria-invalid` and `role="alert"`. Source: WCAG 3.3.1, `app/repositories/page.tsx`.
 3. After a submit with errors, focus moves to the first invalid field. Source: SPEC-122 prompt
-   (stage 3); WCAG 3.3.1. The app does not do this yet: on "What is missing".
+   (stage 3); WCAG 3.3.1. `/repositories` does this also when the runner reports the error
+   after the check (issue 243).
 4. Entered data is kept after an error (`defaultValue` from the server's answer). Source:
    `app/repositories/page.tsx`.
 5. While the submit runs, the field and the button are disabled and a `role="status"` line says
    what is happening; a second press does nothing. Source: SPEC-122 §18 P11.
 6. An error that is not about one field goes above the form, says what happened and what to do.
    Source: SPEC-122 §18 Q1.
-7. Success is a `role="status"` line that names the result and the next step; no toast.
+7. Success is a `role="status"` line that names the result and the next step; no toast. When
+   the submit disabled or removed the focused control, that line takes focus once
+   (`tabIndex={-1}`, `outline-none`, no ring), so it is read out and focus never drops to the
+   page body; focus the user moved elsewhere stays. Source: Usage rule 7, issue 243.
 8. One `default` button per form. Source: SPEC-122 §18 P12.
 9. A card holds one form with a `default` button. Two independent forms (tags and notes) are
    two cards, not one card with two main actions. Source: SPEC-122 §18 P12, Card page.
