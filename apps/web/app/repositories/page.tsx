@@ -572,8 +572,12 @@ export default async function RepositoriesPage({
                     >
                       <TD className="font-medium">{repository.name}</TD>
                       <TD>{providerLabel(repository.provider)}</TD>
+                      {/* Issue 250: a truncated cell keeps its max width as a floor (lesson
+                          2026-10-29), so 20rem keeps the table, Remove included, inside the app
+                          at 1280px. The full location stays in the text (screen readers, copy)
+                          and in the title tooltip. */}
                       <TD
-                        className="max-w-md truncate font-mono text-ui"
+                        className="max-w-xs truncate font-mono text-ui"
                         title={repository.location}
                       >
                         {repository.location}
