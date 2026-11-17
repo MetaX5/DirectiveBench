@@ -59,9 +59,16 @@ test.beforeAll(() =>
     }
     for (const [index, id] of PAIR.entries()) {
       db.prepare(
-        `INSERT INTO artifacts (id, slug, name, type, created_at, updated_at)
-         VALUES (?, ?, ?, 'rule', ?, ?)`,
-      ).run(id, `${PAIR_NAME.replaceAll('_', '-')}-${index + 1}`, PAIR_NAME, now, now);
+        `INSERT INTO artifacts (id, slug, name, type, format, created_at, updated_at)
+         VALUES (?, ?, ?, 'rule', ?, ?, ?)`,
+      ).run(
+        id,
+        `${PAIR_NAME.replaceAll('_', '-')}-${index + 1}`,
+        PAIR_NAME,
+        index === 0 ? 'cursor-rule' : 'claude-rule',
+        now,
+        now,
+      );
       db.prepare(
         `INSERT INTO artifact_versions
            (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at)
@@ -93,13 +100,19 @@ test.afterAll(() =>
   }),
 );
 
-/** Gives the second rule of the pair the first one's format: they become possible duplicates. */
+/**
+ * Gives the second rule of the pair the first one's format (its version and the stored source
+ * field, issue 246): they become possible duplicates.
+ */
 function setPairDuplicated(duplicated: boolean) {
-  return withDatabase((db) =>
-    db
-      .prepare('UPDATE artifact_versions SET format = ? WHERE artifact_id = ?')
-      .run(duplicated ? 'cursor-rule' : 'claude-rule', PAIR[1]),
-  );
+  return withDatabase((db) => {
+    const format = duplicated ? 'cursor-rule' : 'claude-rule';
+    db.prepare('UPDATE artifact_versions SET format = ? WHERE artifact_id = ?').run(
+      format,
+      PAIR[1],
+    );
+    db.prepare('UPDATE artifacts SET format = ? WHERE id = ?').run(format, PAIR[1]);
+  });
 }
 
 /** The rendered width of the Name column header. */

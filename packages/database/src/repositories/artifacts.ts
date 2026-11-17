@@ -212,7 +212,7 @@ async function insertArtifact(
   db: Database,
   allocateSlug: SlugAllocator,
   slugBase: string,
-  input: Pick<VersionContent, 'name' | 'type' | 'description'>,
+  input: Pick<VersionContent, 'name' | 'type' | 'format' | 'description'>,
 ): Promise<{ id: string; createdAt: string }> {
   const now = nowIso();
   const id = createId('art');
@@ -221,6 +221,7 @@ async function insertArtifact(
     slug: await allocateSlug(slugBase),
     name: input.name,
     type: input.type,
+    format: input.format,
     description: input.description,
     createdAt: now,
     updatedAt: now,
@@ -340,7 +341,8 @@ async function insertOccurrence(
  * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
  * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
  * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
- * the occurrence at it, and sets the source fields (name, description, type) from this write.
+ * the occurrence at it, and sets the source fields (name, description, type, format) from this
+ * write.
  * Hashes are recomputed from the content (see `recomputeFiles`). User-managed metadata is never
  * touched.
  */
@@ -378,6 +380,7 @@ export async function importArtifactVersion(
           name: input.name,
           description: input.description,
           type: input.type,
+          format: input.format,
           updatedAt: nowIso(),
         })
         .where(eq(artifacts.id, artifactId));
@@ -995,12 +998,13 @@ function primaryPathOf(format: string, occurrencePath: string): string {
 }
 
 /**
- * Sets each artifact's name, description and type from its active occurrences (SPEC-126
+ * Sets each artifact's name, description, type and format from its active occurrences (SPEC-126
  * FR-126-07, A9; SPEC-103 FR-103-16), inside the caller's transaction: the active occurrence
  * holding the highest version number (ties: oldest occurrence `created_at`, then id) names it,
  * parsed with core's `parseArtifactFile` from that version's primary file at the path discovery
- * would read; the type is the type of that version's format, which needs no parse. Only changed
- * fields are written. An artifact with no active occurrence keeps all three; one whose chosen
+ * would read; the format is that version's format and the type its type, which need no parse
+ * (issue 246: all four come from one version). Only changed fields are written. An artifact with
+ * no active occurrence keeps all four; one whose chosen
  * version lacks its primary file or whose occurrence path does not classify as the version's
  * format keeps its name and description (rows DirectiveBench's scans never write: kept rather
  * than guessed) and still gets its type. The result depends only on the active occurrences and
@@ -1025,6 +1029,7 @@ export async function refreshSourceFields(
         name: artifacts.name,
         description: artifacts.description,
         type: artifacts.type,
+        storedFormat: artifacts.format,
       })
       .from(artifactOccurrences)
       .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
@@ -1072,8 +1077,13 @@ export async function refreshSourceFields(
       ]),
     );
     for (const row of chosen.values()) {
-      // The type needs no parse: it is the type of the version's stored format (FR-103-16).
-      const fields = { name: row.name, description: row.description, type: artifactTypeOf(row) };
+      // Format and type need no parse: the version's stored format and its type (FR-103-16).
+      const fields = {
+        name: row.name,
+        description: row.description,
+        type: artifactTypeOf(row),
+        format: row.format,
+      };
       const content = primaryContent.get(row.versionId);
       const primaryPath = primaryPathOf(row.format, row.path);
       // Only a path discovery would have read as this format can be parsed as it.
@@ -1085,7 +1095,8 @@ export async function refreshSourceFields(
       if (
         fields.name === row.name &&
         fields.description === row.description &&
-        fields.type === row.type
+        fields.type === row.type &&
+        fields.format === row.storedFormat
       ) {
         continue;
       }
@@ -1649,8 +1660,9 @@ export interface ArtifactListItem {
   benchmarkCount: number;
   latestEvaluation: LatestEvaluation | null;
   /**
-   * Other artifacts whose latest version has the same format and exactly the same name, for a
-   * format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11, FR-126-12); 0 otherwise.
+   * Other artifacts with the same stored format (`artifacts.format`, the chosen version's) and
+   * exactly the same name, for a format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11,
+   * FR-126-12, issue 246); 0 otherwise. Not `format` above, which is the latest version's.
    */
   possibleDuplicates: number;
   /**
@@ -1698,65 +1710,62 @@ const isLatestVersion = and(
   ),
 );
 
-/** The key of a possible-duplicate group: type, exact name and the latest version's format. */
-function duplicateKey(type: string, name: string, format: string): string {
-  return `${type}\u0000${name}\u0000${format}`;
+/**
+ * The key of a possible-duplicate group: the stored format (the chosen version's, FR-126-07) and
+ * the exact name (FR-126-11, issue 246). The type is the format's type, so it is not part of it.
+ */
+function duplicateKey(format: string, name: string): string {
+  return `${format}\u0000${name}`;
 }
 
 /** The others in an artifact's possible-duplicate group (FR-126-12); 0 outside any group. */
 function otherDuplicates(
   groups: ReadonlyMap<string, number>,
-  artifact: { type: string; name: string },
-  format: string | undefined,
+  artifact: { format: string | null; name: string },
 ): number {
   const size =
-    format === undefined
-      ? undefined
-      : groups.get(duplicateKey(artifact.type, artifact.name, format));
+    artifact.format === null ? undefined : groups.get(duplicateKey(artifact.format, artifact.name));
   return size === undefined ? 0 : size - 1;
 }
 
 /**
- * The size of every group of two or more artifacts with the same type, name and latest format
- * among `POSSIBLE_DUPLICATE_FORMATS` (FR-126-11), keyed by `duplicateKey`. One grouped statement
- * over all artifacts, walking `artifacts_type_name_idx` (NFR-126-02), whatever the list's filters:
- * a duplicate may be filtered out of the list and still count.
+ * The size of every group of two or more artifacts with the same stored format among
+ * `POSSIBLE_DUPLICATE_FORMATS` and the same name (FR-126-11), keyed by `duplicateKey`. One grouped
+ * statement over all artifacts that reads only the covering `artifacts_format_name_idx`
+ * (NFR-126-02, issue 246), whatever the list's filters: a duplicate may be filtered out of the
+ * list and still count.
  */
 async function possibleDuplicateGroups(db: Database): Promise<Map<string, number>> {
   const groups = await db
-    .select({
-      type: artifacts.type,
-      name: artifacts.name,
-      format: latestVersionRow.format,
-      size: count(),
-    })
+    .select({ format: artifacts.format, name: artifacts.name, size: count() })
     .from(artifacts)
-    .innerJoin(latestVersionRow, isLatestVersion)
-    .where(inArray(latestVersionRow.format, [...POSSIBLE_DUPLICATE_FORMATS]))
-    .groupBy(artifacts.type, artifacts.name, latestVersionRow.format)
+    .where(inArray(artifacts.format, [...POSSIBLE_DUPLICATE_FORMATS]))
+    .groupBy(artifacts.format, artifacts.name)
     .having(gt(count(), 1));
-  return new Map(groups.map((g) => [duplicateKey(g.type, g.name, g.format), g.size]));
+  // The filter excludes a null format; the type cannot say so.
+  return new Map(groups.map((g) => [duplicateKey(g.format as string, g.name), g.size]));
 }
 
 /**
  * The other artifacts of `artifact`'s possible-duplicate group (FR-126-13): at most
- * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A latest
- * format outside `POSSIBLE_DUPLICATE_FORMATS`, or no version, has none.
+ * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A stored
+ * format outside `POSSIBLE_DUPLICATE_FORMATS`, or none (no version), has none. The group is keyed
+ * on the stored format (issue 246); `sameLatestContent` still compares the latest versions.
  */
 async function readPossibleDuplicates(
   db: Database,
-  artifact: { id: string; type: ArtifactType; name: string },
-  latest: { format: string; contentHash: string } | undefined,
+  artifact: { id: string; format: string | null; name: string },
+  latest: { contentHash: string } | undefined,
 ): Promise<{ items: PossibleDuplicate[]; total: number }> {
-  if (!latest || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(latest.format)) {
+  const format = artifact.format;
+  if (format === null || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(format)) {
     return { items: [], total: 0 };
   }
-  // The type keeps `artifacts_type_name_idx` usable; the same format implies the same type.
+  // Seeks `artifacts_format_name_idx` (NFR-126-02).
   const sameGroup = and(
-    eq(artifacts.type, artifact.type),
+    eq(artifacts.format, format),
     eq(artifacts.name, artifact.name),
     ne(artifacts.id, artifact.id),
-    eq(latestVersionRow.format, latest.format),
   );
   const listed = await db
     .select({
@@ -1767,7 +1776,8 @@ async function readPossibleDuplicates(
       total: sql<number>`count(*) over ()`,
     })
     .from(artifacts)
-    .innerJoin(latestVersionRow, isLatestVersion)
+    // Left: the list counts the group from `artifacts` alone, so a row without a version counts.
+    .leftJoin(latestVersionRow, isLatestVersion)
     .where(sameGroup)
     .orderBy(artifacts.createdAt, artifacts.id)
     .limit(MAX_LISTED_DUPLICATES);
@@ -1805,7 +1815,7 @@ async function readPossibleDuplicates(
           found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.repositoryName }]),
         ).values(),
       ],
-      sameLatestContent: row.contentHash === latest.contentHash,
+      sameLatestContent: row.contentHash !== null && row.contentHash === latest?.contentHash,
     };
   });
   return { items, total };
@@ -2016,7 +2026,7 @@ export async function listArtifacts(
       missing: found.length === 0,
       benchmarkCount: assignmentsOf(row.id).length,
       latestEvaluation: latest.get(row.id) ?? null,
-      possibleDuplicates: otherDuplicates(duplicateGroups, row, latestVersion?.format),
+      possibleDuplicates: otherDuplicates(duplicateGroups, row),
       nameShared: row.nameShared,
     };
   });

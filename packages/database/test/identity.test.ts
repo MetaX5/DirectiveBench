@@ -1496,6 +1496,26 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
     expect(await duplicatesOf(handle, 'bare')).toEqual({ items: [], total: 0 });
   });
 
+  it('counts and lists a row with a stored format but no version alike (issue 246)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    await scan(handle, a, [skill('skills/review', skillMd('review'))]);
+    // A hand-made row scans never write: the list and the card read the same stored fields.
+    handle.sqlite
+      .prepare(
+        `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+         values ('art_bare', 'bare', 'review', 'skill', 'skill-md', 't', 't')`,
+      )
+      .run();
+    expect(await counts(handle)).toEqual({ review: 1, bare: 1 });
+    expect((await duplicatesOf(handle, 'review'))?.items).toEqual([
+      expect.objectContaining({ slug: 'bare', activeOccurrences: 0, sameLatestContent: false }),
+    ]);
+    expect((await duplicatesOf(handle, 'bare'))?.items).toEqual([
+      expect.objectContaining({ slug: 'review', sameLatestContent: false }),
+    ]);
+  });
+
   it('reads the groups in one grouped statement on the covering artifacts_format_name_idx (NFR-126-02, issue 246)', async () => {
     const handle = getHandle();
     const a = await local(handle, 'a');
@@ -1521,7 +1541,9 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
     // The stored source fields only: the covering index, no join to the versions and no
     // temp B-tree for the grouping (issue 246).
     expect(plan).toEqual([
-      expect.stringMatching(/^SEARCH artifacts USING COVERING INDEX artifacts_format_name_idx \(format=\?\)$/),
+      expect.stringMatching(
+        /^SEARCH artifacts USING COVERING INDEX artifacts_format_name_idx \(format=\?\)$/,
+      ),
     ]);
   });
 

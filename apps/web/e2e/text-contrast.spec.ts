@@ -129,8 +129,8 @@ for (const theme of ['light', 'dark'] as const) {
     await withDatabase((db) => {
       const now = new Date().toISOString();
       db.prepare(
-        `insert into artifacts (id, slug, name, type, created_at, updated_at)
-         select ?, ?, name, type, ?, ? from artifacts where id = ?`,
+        `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+         select ?, ?, name, type, format, ?, ? from artifacts where id = ?`,
       ).run(duplicate, `${DEMO_ARTIFACT}-e2e-duplicate`, now, now, artifactId);
       db.prepare(
         `insert into artifact_versions

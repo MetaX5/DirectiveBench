@@ -412,8 +412,8 @@ test.describe.serial('possible duplicates (SPEC-126 Phase 2)', () => {
     await withDatabase((db) => {
       const now = new Date().toISOString();
       db.prepare(
-        `insert into artifacts (id, slug, name, type, created_at, updated_at)
-         values (?, ?, ?, 'skill', ?, ?)`,
+        `insert into artifacts (id, slug, name, type, format, created_at, updated_at)
+         values (?, ?, ?, 'skill', 'skill-md', ?, ?)`,
       ).run(LEGACY.id, LEGACY.slug, DUP, now, now);
       db.prepare(
         `insert into artifact_versions

@@ -943,12 +943,6 @@ describe('additive migrations', () => {
       expect(after.art_gone).toEqual(['instruction', 'old']);
       expect(after.art_old?.[0]).toBe('rule');
 
-      // The runtime refresh makes the same choice for every row: it changes nothing more.
-      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
-      expect(Object.fromEntries(Object.entries(types()).map(([id, [type]]) => [id, type]))).toEqual(
-        Object.fromEntries(Object.entries(after).map(([id, [type]]) => [id, type])),
-      );
-
       // Down: a data-only migration has nothing to undo (the old type was stale by definition);
       // forgetting it and applying it again changes nothing.
       handle.sqlite.exec(
@@ -957,6 +951,17 @@ describe('additive migrations', () => {
       const before = types();
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 8))).applied).toBe(1);
       expect(types()).toEqual(before);
+
+      // The runtime refresh makes the same choice for every row: it changes no type. It reads the
+      // current schema, so the later migrations are applied first (none of them changes a type).
+      await migrateDatabase(handle, migrationsFolder);
+      expect(Object.fromEntries(Object.entries(types()).map(([id, [type]]) => [id, type]))).toEqual(
+        Object.fromEntries(Object.entries(after).map(([id, [type]]) => [id, type])),
+      );
+      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
+      expect(Object.fromEntries(Object.entries(types()).map(([id, [type]]) => [id, type]))).toEqual(
+        Object.fromEntries(Object.entries(after).map(([id, [type]]) => [id, type])),
+      );
     } finally {
       handle.close();
       temp.dispose();
@@ -1054,6 +1059,16 @@ describe('additive migrations', () => {
       insertOccurrence.run('occ_two_a', 'art_two', '.cursor/rules/two.mdc', 'artv_two_1', 'active');
       insertOccurrence.run('occ_two_b', 'art_two', 'skills/two', 'artv_two_2', 'active');
       insertOccurrence.run('occ_two_c', 'art_two', 'AGENTS.md', 'artv_two_3', 'removed');
+      // (2) Missing, for every format: its version of the artifact's type, not a later one of
+      // another type (pins the CASE to ARTIFACT_FORMAT_TYPES).
+      for (const format of ARTIFACT_FORMATS) {
+        const id = `art_missing_${format}`;
+        const other = ARTIFACT_FORMAT_TYPES[format] === 'skill' ? 'cursor-rule' : 'skill-md';
+        insertArtifact.run(id, `missing-${format}`, format, ARTIFACT_FORMAT_TYPES[format]);
+        insertVersion.run(`${id}_1`, id, 1, 'h1', format);
+        insertVersion.run(`${id}_2`, id, 2, 'h2', other);
+        insertOccurrence.run(`occ_missing_${format}`, id, `m/${format}`, `${id}_1`, 'removed');
+      }
       // (2) Missing: the highest version whose format's type is the artifact's type.
       insertArtifact.run('art_gone', 'gone', 'gone', 'skill');
       insertVersion.run('artv_gone_1', 'art_gone', 1, 'h1', 'cursor-rule');
@@ -1074,7 +1089,11 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(1);
       expect(columns(handle, 'artifacts')).toEqual([...columns(before, 'artifacts'), 'format']);
       const after = formats();
-      for (const format of ARTIFACT_FORMATS) expect(after[`art_${format}`]).toEqual([format, 'old']);
+      for (const format of ARTIFACT_FORMATS)
+        expect(after[`art_${format}`]).toEqual([format, 'old']);
+      for (const format of ARTIFACT_FORMATS) {
+        expect(after[`art_missing_${format}`], format).toEqual([format, 'old']);
+      }
       expect(after.art_rev).toEqual(['cursor-rule', 'old']);
       expect(after.art_two).toEqual(['skill-md', 'old']);
       expect(after.art_gone).toEqual(['skill-md', 'old']);
@@ -1089,9 +1108,9 @@ describe('additive migrations', () => {
 
       // The runtime refresh makes the same choice for every row with an active occurrence.
       await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
-      expect(Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format]))).toEqual(
-        Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])),
-      );
+      expect(
+        Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format])),
+      ).toEqual(Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])));
 
       // Down: drop the index and the column, forget the migration; it applies again.
       handle.sqlite.exec('drop index artifacts_format_name_idx');
@@ -1101,9 +1120,9 @@ describe('additive migrations', () => {
       );
       expect(columns(handle, 'artifacts')).toEqual(columns(before, 'artifacts'));
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(1);
-      expect(Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format]))).toEqual(
-        Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])),
-      );
+      expect(
+        Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format])),
+      ).toEqual(Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])));
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(0);
     } finally {
       before.close();
