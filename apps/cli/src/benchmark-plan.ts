@@ -30,7 +30,7 @@ import {
 } from '@directivebench/benchmark-engine';
 import { baselineArtifactIssue, type ArtifactBundle } from '@directivebench/core';
 import {
-  getInstallableArtifactBundle,
+  getArtifactBundle,
   resolveArtifactRef,
   suiteVersionApproval,
   type Database,
@@ -149,7 +149,7 @@ function refusal(code: string, lines: readonly string[]): CliError {
 export async function resolveVersions(db: Database, options: RunOptions): Promise<Resolved> {
   try {
     const ref = await resolveArtifactRef(db, options.artifact, options.version);
-    const candidate = (await getInstallableArtifactBundle(db, ref.version.id)) as ArtifactBundle;
+    const candidate = (await getArtifactBundle(db, ref.version.id)) as ArtifactBundle;
     if (options.baselineVersion === null) return { ref, candidate, baseline: null };
     if (ref.versionCount < 2) {
       throw usage(
@@ -157,10 +157,7 @@ export async function resolveVersions(db: Database, options: RunOptions): Promis
       );
     }
     const baselineRef = await resolveArtifactRef(db, ref.artifact.id, options.baselineVersion);
-    const baseline = (await getInstallableArtifactBundle(
-      db,
-      baselineRef.version.id,
-    )) as ArtifactBundle;
+    const baseline = (await getArtifactBundle(db, baselineRef.version.id)) as ArtifactBundle;
     const issue = baselineArtifactIssue(candidate, baseline);
     if (issue) throw usage(`Invalid baseline v${options.baselineVersion}: ${issue}`);
     return { ref, candidate, baseline };

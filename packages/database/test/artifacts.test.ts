@@ -815,6 +815,8 @@ describe('getArtifactBundle', () => {
       format: 'skill-md',
       contentHash: hashManifest([{ path: 'SKILL.md', sha256: sha256('v1') }]),
       files: [{ path: 'SKILL.md', sha256: sha256('v1'), size: 2, content: 'v1' }],
+      // Its bundled occurrence's folder (SPEC-203 §4.1, issue 245).
+      folderName: 'validate',
     });
     expect(await getArtifactBundle(handle.db, 'artv_missing')).toBeNull();
   });

@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import {
   and,
   count,
@@ -533,10 +534,33 @@ interface LinkCandidate {
   artifactCreatedAt: string;
 }
 
-/** Code-unit order (SPEC-126 FR-126-24), independent of the locale. */
+/**
+ * Code-unit order (SPEC-126 FR-126-24), independent of the locale. Branch-free, so its coverage
+ * does not depend on which of two random ids sorts first.
+ */
 function compareCodeUnits(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
+  return Number(a > b) - Number(a < b);
+}
+
+/** An active occurrence as FR-126-07 ranks it: the number of the version it holds, age and id. */
+interface RankedOccurrence {
+  id: string;
+  createdAt: string;
+  version: number;
+}
+
+/**
+ * The order that picks an artifact's representative active occurrence (SPEC-126 FR-126-07,
+ * SPEC-103 FR-103-16): the highest version number, then the oldest occurrence `created_at`, then
+ * id. Negative when `a` comes first. The source fields and a nameless skill's install folder
+ * (SPEC-203 §4.1, issue 245) both use it, so they always name the same occurrence.
+ */
+function compareRepresentative(a: RankedOccurrence, b: RankedOccurrence): number {
+  return (
+    b.version - a.version ||
+    compareCodeUnits(a.createdAt, b.createdAt) ||
+    compareCodeUnits(a.id, b.id)
+  );
 }
 
 /** Oldest artifact first (`created_at`, then id), the A7 choice among several candidates. */
@@ -1019,8 +1043,8 @@ export async function refreshSourceFields(
   for (let start = 0; start < artifactIds.length; start += IDENTITY_LOOKUP_BATCH_SIZE) {
     const rows = await db
       .select({
-        occurrenceId: artifactOccurrences.id,
-        occurrenceCreatedAt: artifactOccurrences.createdAt,
+        id: artifactOccurrences.id,
+        createdAt: artifactOccurrences.createdAt,
         artifactId: artifactOccurrences.artifactId,
         path: artifactOccurrences.path,
         versionId: artifactVersions.id,
@@ -1046,13 +1070,7 @@ export async function refreshSourceFields(
     const chosen = new Map<string, (typeof rows)[number]>();
     for (const row of rows) {
       const best = chosen.get(row.artifactId);
-      if (
-        !best ||
-        row.version > best.version ||
-        (row.version === best.version &&
-          (compareCodeUnits(row.occurrenceCreatedAt, best.occurrenceCreatedAt) ||
-            compareCodeUnits(row.occurrenceId, best.occurrenceId)) < 0)
-      ) {
+      if (!best || compareRepresentative(row, best) < 0) {
         chosen.set(row.artifactId, row);
       }
     }
@@ -2319,9 +2337,47 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
 
 export type ArtifactDetail = NonNullable<Awaited<ReturnType<typeof getArtifactDetail>>>;
 
+/** The last segment of a repository-relative path, or null for the repository root. */
+function folderOf(path: string | null): string | null {
+  return path ? posix.basename(path) : null;
+}
+
 /**
- * Loads one exact artifact version in the shape agent adapters install. Its `type` is the type of
- * the version's format, not the artifact's current type (SPEC-118 FR-118-25, SPEC-103 FR-103-16).
+ * The folder a skill version without a frontmatter `name` is installed in and named after
+ * (SPEC-203 §4.1, issue 245). The repository's own agent sees the folder of the current
+ * occurrence, so this is the basename of the path of the artifact's representative active
+ * occurrence (`compareRepresentative`, the one that names the artifact). A folder rename creates
+ * no version (FR-103-09), so the version's own `source_path` is only the fallback (no active
+ * occurrence, or one at the repository root); null when neither names a folder, and the adapter
+ * then uses the slug.
+ */
+async function skillFolderName(
+  db: Database,
+  artifactId: string,
+  sourcePath: string | null,
+): Promise<string | null> {
+  const occurrences = await db
+    .select({
+      id: artifactOccurrences.id,
+      path: artifactOccurrences.path,
+      createdAt: artifactOccurrences.createdAt,
+      version: artifactVersions.version,
+    })
+    .from(artifactOccurrences)
+    .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
+    .where(
+      and(eq(artifactOccurrences.artifactId, artifactId), eq(artifactOccurrences.status, 'active')),
+    );
+  const [chosen] = occurrences.sort(compareRepresentative);
+  return (chosen ? folderOf(chosen.path) : null) ?? folderOf(sourcePath);
+}
+
+/**
+ * Loads one exact artifact version as agent adapters install it. Its `type` is the type of the
+ * version's format, not the artifact's current type (SPEC-118 FR-118-25, SPEC-103 FR-103-16), and
+ * for a `skill-md` version `folderName` is the folder of SPEC-203 §4.1
+ * (`skillFolderName`; null for every other format). The CLI plan and the runner both load bundles
+ * through this function, so both resolve the same name for the same repository state.
  */
 export async function getArtifactBundle(
   db: Database,
@@ -2334,6 +2390,7 @@ export async function getArtifactBundle(
     .where(eq(artifactVersions.id, versionId))
     .get();
   if (!row) return null;
+  const format = row.version.format as ArtifactFormat;
   return {
     artifactId: row.artifact.id,
     versionId: row.version.id,
@@ -2341,9 +2398,13 @@ export async function getArtifactBundle(
     name: row.artifact.name,
     // The bundled version's own type: an artifact may hold versions of two formats (N2).
     type: artifactTypeOf(row.version),
-    format: row.version.format as ArtifactFormat,
+    format,
     contentHash: row.version.contentHash,
     files: row.version.files,
+    folderName:
+      format === 'skill-md'
+        ? await skillFolderName(db, row.artifact.id, row.version.sourcePath)
+        : null,
   };
 }
 
