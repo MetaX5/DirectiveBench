@@ -623,6 +623,13 @@ posix(
       expect(await refused(renamed, { baseline: 'v1' })).toMatch(
         /Refused \(baseline-skill-name-differs\)/,
       );
+      const reserved = await setup({
+        versions: [skill('x', 'name: doctor\ndescription: d\n')],
+      });
+      expect(await refused(reserved, {})).toMatch(
+        /Refused \(skill-name-reserved\):\n {2}- The skill name "doctor" is a name Claude Code 2\.1\.302 lists itself/,
+      );
+      expect(reserved.fake.starts()).toBe(0);
       const slash = await setup({
         definition: {
           cases: [

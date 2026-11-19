@@ -169,8 +169,9 @@ export async function resolveVersions(db: Database, options: RunOptions): Promis
 /**
  * Suite-level refusals before any database change (FR-118-05/12/25/26/33, §13): the agent must be
  * `claude-code`, the environment supported, cases without `agentOptions`, an Anthropic model with
- * a safe name (or the CLI default), the artifact type in `artifactTypes` and installable, both
- * versions free of executable customizations, an A/B pair on one skill name, a `/` prompt only
+ * a safe name (or the CLI default), the artifact type in `artifactTypes` and installable under a
+ * skill name Claude Code does not list itself (`skill-name-reserved`, issue 257), both versions
+ * free of executable customizations, an A/B pair on one skill name, a `/` prompt only
  * with an A/B baseline, and a suite that runs commands approved (now or earlier).
  */
 export async function checkSuite(
@@ -205,6 +206,8 @@ export async function checkSuite(
   try {
     // The adapter rejects these per run, after `setup` and for every run (Codex review round 2).
     claudeModelArgs(definition.execution.model);
+    // Resolves the skill name: an invalid one is `skill-name-unsupported`, a reserved one
+    // `skill-name-reserved`; a reserved baseline name is refused by the A/B check below.
     claudeArtifactProfile(candidate);
     if (baseline && candidate.format === 'skill-md') {
       const issue = baselineSkillNameIssue(candidate, baseline);

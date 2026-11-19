@@ -55,6 +55,84 @@ export function assertClaudeSkillName(name: string): void {
   }
 }
 
+/** The `claude` version {@link CLAUDE_RESERVED_SKILL_NAMES} was observed for (SPEC-203 §11). */
+export const CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION = '2.1.302';
+
+/**
+ * Names Claude Code lists itself, or answers to, in a run with DirectiveBench's settings, as
+ * observed for `claude` {@link CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION} (SPEC-203 §4.1 and §11,
+ * issue 257). An installed skill under one of these names may shadow the CLI's own, or be
+ * shadowed by it, so a benchmark could measure the wrong skill. Sources, all from the live check
+ * of 2026-10-26:
+ * - skills `system/init` still listed with `disableBundledSkills: true`: `design`, `doctor` and
+ *   the built-in plugin's `plugin-authoring`;
+ * - built-in slash commands: the `slash_commands` of the recorded `system/init`
+ *   (`test/fixtures/claude-code/2.1.302/live-subscription-*.ndjson`) that are not in its `skills`.
+ *   `__remote-workflow` is left out: it is not a valid skill name, so `skill-name-unsupported`
+ *   already refuses it;
+ * - `checkup`, the `/checkup` alias of `doctor` that `system/init` does not list (issue 103 live
+ *   check, `.ai/runs/2026-10-26-issue-103-live-check.md`; the stream parser already treats it as
+ *   another skill).
+ * Bundled skills that `disableBundledSkills` removes are not listed in a run and not reserved.
+ * A newer `claude` may list other names; the run-time check against `system/init` is a follow-up.
+ */
+export const CLAUDE_RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
+  // Skills listed with `disableBundledSkills: true`.
+  'design',
+  'doctor',
+  'plugin-authoring',
+  // The unlisted `/checkup` alias of `doctor`.
+  'checkup',
+  // Built-in slash commands.
+  'advisor',
+  'agents',
+  'auto-mode-setup',
+  'autocompact',
+  'clear',
+  'color',
+  'compact',
+  'config',
+  'context',
+  'design-consent',
+  'design-revoke',
+  'effort',
+  'extra-usage',
+  'fast',
+  'focus',
+  'goal',
+  'heapdump',
+  'import',
+  'init',
+  'insights',
+  'list-agents',
+  'mcp',
+  'model',
+  'output-style',
+  'recap',
+  'reload-plugins',
+  'reload-skills',
+  'rename',
+  'security-review',
+  'skill-doctor',
+  'team-onboarding',
+  'usage',
+  'usage-credits',
+  'workflow-launch-exec',
+]);
+
+/**
+ * Throws `skill-name-reserved` when `name` is one Claude Code lists itself
+ * ({@link CLAUDE_RESERVED_SKILL_NAMES}): which of the two a session would use is unknown.
+ */
+export function assertClaudeSkillNameNotReserved(name: string): void {
+  if (CLAUDE_RESERVED_SKILL_NAMES.has(name)) {
+    throw new ClaudeCodeError(
+      'skill-name-reserved',
+      `The skill name ${JSON.stringify(name)} is a name Claude Code ${CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION} lists itself (a skill or a built-in slash command), so the run could measure the CLI's own instead of the tested skill. Rename the skill (its frontmatter \`name\`, or its folder when it has none).`,
+    );
+  }
+}
+
 /** Where and under which name a `skill-md` artifact is installed (SPEC-203 §4.1). */
 export interface ClaudeSkillInstall {
   /** The name Claude Code resolves: the frontmatter `name`, else the install directory. */
@@ -70,7 +148,8 @@ export interface ClaudeSkillInstall {
  * own agent sees ({@link ArtifactBundle.folderName}), else the slug. Fails closed with
  * `skill-name-unsupported` when there is no `SKILL.md`, its frontmatter cannot be parsed, `name`
  * is not a string, or the resolved name is not a valid skill name: an invalid folder name such as
- * `Review_Tool` is refused, never replaced by the slug.
+ * `Review_Tool` is refused, never replaced by the slug. A valid name Claude Code lists itself is
+ * refused with `skill-name-reserved` (issue 257).
  */
 export function claudeSkillInstall(artifact: ArtifactBundle): ClaudeSkillInstall {
   const skillFile = artifact.files.find((file) => file.path === 'SKILL.md');
@@ -100,6 +179,7 @@ export function claudeSkillInstall(artifact: ArtifactBundle): ClaudeSkillInstall
       : artifact.slug;
   const name = declared ?? directory;
   assertClaudeSkillName(name);
+  assertClaudeSkillNameNotReserved(name);
   return { name, directory };
 }
 
