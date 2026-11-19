@@ -762,8 +762,8 @@ async function runAndDeliver(
  * The reserved-name check of an A/B run (SPEC-203 §4.1, SPEC-118 FR-118-08/15, ADR-0015): one
  * agent run with the variants' request but the fixed prompt, in an empty pinned workspace with
  * nothing installed, so the adapter sees a session that must not list the artifact's name. Fails
- * closed: anything but a completed session that reported its start stops the benchmark run with
- * the session's own code, else {@link RESERVED_NAME_CHECK_FAILED}.
+ * closed: anything but a completed session that reported its start and both name lists stops the
+ * benchmark run with the session's own code, else {@link RESERVED_NAME_CHECK_FAILED}.
  */
 async function runReservedNameCheck(
   input: RunBenchmarkInput,
