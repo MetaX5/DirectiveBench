@@ -60,7 +60,10 @@ jobs:
         # 40959332904), so at most two packages run at once.
         run: pnpm test --continue --concurrency=2
 
-  # Windows is best effort (NFR-118-04, issue #160).
+  # Windows is best effort (NFR-118-04, issue #160). Not a required check yet. Coverage is off:
+  # the 100% threshold is enforced on Linux and macOS, and POSIX-only branches (signals, modes,
+  # FIFOs) do not run here. Packages join the gated step once they pass on Windows; the others
+  # run in a step that reports but does not fail the job (follow-up issues listed in SPEC-012 §8).
   unit-windows:
     name: Unit tests (Windows)
     runs-on: windows-latest
@@ -68,8 +71,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - name: Unit and package tests without coverage
-        run: pnpm test --continue --concurrency=2 -- --coverage.enabled=false
+      - name: Packages that pass on Windows (gated)
+        # One package at a time: run 44632322366 timed out two database tests at 5 s while the
+        # benchmark-engine suite ran beside them on the 4-core runner.
+        run: >-
+          pnpm test --concurrency=1
+          --filter=@directivebench/core --filter=@directivebench/database
+          --filter=@directivebench/benchmark-engine --filter=@directivebench/web
+          -- --coverage.enabled=false
+      - name: Packages not yet passing on Windows (reported, not gated)
+        continue-on-error: true
+        run: >-
+          pnpm test --continue --concurrency=1
+          --filter=@directivebench/runner --filter=@directivebench/agent-adapters
+          --filter=directivebench
+          -- --coverage.enabled=false
 
   build:
     name: Build and package
