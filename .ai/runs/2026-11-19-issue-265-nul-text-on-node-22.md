@@ -3,7 +3,7 @@ title: Issue 265, node:sqlite on Node 22 truncates TEXT values at the first NUL 
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #265, maintainer-approved om-auto-fix-issue run (two phases, stop after analysis)
-status: in-progress
+status: completed
 branch: fix/issue-265-nul-text-on-node-22
 specs: [SPEC-004, SPEC-006, SPEC-102]
 ---
@@ -145,6 +145,10 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   reported `10/11 migrations applied`; after `demo` (which migrates) it read back
   `note\uFFFDhidden` (hex `6E6F7465EFBFBD68696464656E`), 11 migrations. `demo` itself on
   Node 22.16.0: verdict improved, exit 0.
+- CI on PR #274 (head `8bf1aeb`, run 44501562714): all jobs passed; `Oldest supported Node
+  (22.16.0)` ran core 353, agent-adapters 374, database 385, benchmark-engine 518, runner 313
+  and cli 210 tests on Node 22.16.0 / SQLite 3.49.1, then build and verify:pack.
+- Review: `om-auto-review-pr 274` posted as a COMMENT review (no blockers or majors, two nits).
 - Not verified: the web app with NUL input (its Zod schemas are a follow-up; a write with NUL
   now fails with `NulInTextError` instead of truncating); Windows and macOS.
 
@@ -162,6 +166,8 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
 
 ## Follow-ups
 
-- Web Zod schemas reject U+0000 in user input (after the #123 PR merges), and benchmark
+- #273: web Zod schemas reject U+0000 in user input (after the #123 PR merges), and benchmark
   definition strings (suite `name`/`description`) get a validation message instead of
-  `NulInTextError`: follow-up issue.
+  `NulInTextError`.
+- Optional: redact bound parameters from Drizzle's wrapped query errors (they list parameter
+  values for every failing query, not only this one).
