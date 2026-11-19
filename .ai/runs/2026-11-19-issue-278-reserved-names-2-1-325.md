@@ -62,6 +62,10 @@ next refresh is mechanical.
   210, agent-adapters 398 + 2 skipped, benchmark-engine 526, core 353, database 385, runner 313,
   web 655).
 - `pnpm build && pnpm verify:pack`: pass.
+- `pnpm format:check`: failed on three changed test files (found by Codex round 1), fixed with
+  Prettier in a style commit; passes now, and the `claude-code` tests still pass.
+- Codex adversarial review (`--scope branch --base origin/main`): round 1 `needs-attention`
+  (formatting only, no material finding); round 2 `approve`, no findings.
 - Real CLI (`apps/cli/dist/cli.js`, data directory under `/var/tmp`, skill `ultrareview` seeded
   with `importArtifactVersion` by a temporary vitest file, deleted; a fake `claude` 2.1.325 on
   `PATH` that logs every call): `benchmark run <suite> --artifact ultrareview --yes` printed
@@ -72,6 +76,7 @@ next refresh is mechanical.
 
 ## Problems and deviations
 
+- `pnpm format:check` is not part of the documented gate; Codex caught the formatting.
 - The issue 275 tests that used `ultrareview` as the name the static list misses would have been
   refused at plan time after the refresh; they now use a constructed variant of the recording.
 
