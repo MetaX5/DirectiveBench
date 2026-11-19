@@ -3,7 +3,7 @@ title: Fix the socket path hang on macOS and the theme transition race in e2e co
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: maintainer request after CI failures on Dependabot PRs 268 and 269 (issue 270)
-status: in-progress
+status: completed
 branch: fix/issue-270-ci-socket-path-and-theme-transition
 specs: []
 ---
@@ -44,11 +44,33 @@ contrast test 30 times under CPU load with one worker.
 
 ## Work performed
 
-See the PR commits.
+1. Issue 270 filed with the evidence from runs 44422570263 and 44422609915.
+2. `test(core)`: both "neither files, directories nor links" tests create a FIFO with
+   `execFileSync('mkfifo', [path])`, assert it is a FIFO, then check it is ignored.
+3. `test(web)`: `scanTextContrast` disables transitions before measuring; new
+   `apps/web/e2e/contrast.spec.ts` regression test (both switch directions).
+4. `docs(lessons)`: lesson and index entry, this run log.
 
 ## Verification
 
-Filled in below after the gate.
+All pnpm commands ran with `TMPDIR` under `/var/tmp`; e2e on port 4405.
+
+| Command | Result |
+| --- | --- |
+| core tests with a 96-byte `TMPDIR` (socket path at least 108 bytes), before | 2 failed: `listen EINVAL`, `Test timed out in 5000ms` |
+| same, after | 46 passed |
+| `playwright test e2e/contrast.spec.ts`, before (fix stashed) | 2 failed: placeholder ratio 2.58 / 2.68 mid-transition |
+| same, after | 2 passed |
+| `repository-branch.spec.ts -g "branch states meet contrast" --repeat-each 30 --workers 1` under 4 `yes` on cores 0,1 (taskset), before | 30 passed (race not hit; it is about 1 in 30) |
+| same, after | 30 passed |
+| `pnpm lint && pnpm typecheck && pnpm test` | pass, 100% coverage in every package |
+| `pnpm build` | pass |
+| `pnpm test:e2e` (full) | 202 passed |
+| Codex adversarial review, round 1 | approve, no findings |
+
+Not verified: the macOS job on the new runner image locally (no macOS here; the PR's CI run is
+the check); Windows (no CI job, `mkfifo` does not exist there, as `listen` on a file path did
+not work there before either).
 
 ## Problems and deviations
 
