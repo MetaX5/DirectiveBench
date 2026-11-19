@@ -243,7 +243,7 @@ export default async function ArtifactsPage({
                         className="max-w-60 truncate text-muted-foreground"
                         title={a.description ?? ''}
                       >
-                        {a.description ?? '—'}
+                        {a.description ?? 'No description'}
                       </TD>
                       <TD>
                         <div className="flex flex-wrap gap-1">
@@ -292,7 +292,7 @@ export default async function ArtifactsPage({
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(e?.delta)}</TD>
                       <TD className="text-ui text-muted-foreground">
-                        {e ? formatDate(e.finishedAt ?? e.startedAt) : '—'}
+                        {e ? formatDate(e.finishedAt ?? e.startedAt) : 'Not run'}
                       </TD>
                       <TD>
                         {e ? (

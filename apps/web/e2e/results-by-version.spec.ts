@@ -98,7 +98,7 @@ test('the run detail names the baseline and shows the agent profile, warnings, u
     'Skill invoked in 0/1 runs',
   );
   await expect(page.getByTestId('real-agent-badge')).toHaveText(
-    'Real agent — results vary between runs',
+    'Real agent: results vary between runs',
   );
   await expect(page.getByText(MOCK_LABEL)).toHaveCount(0);
 

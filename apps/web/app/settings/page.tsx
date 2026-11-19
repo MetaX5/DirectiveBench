@@ -28,7 +28,7 @@ export default function SettingsPage() {
       <PageHeader
         title="Settings"
         description="Read-only view of the resolved data directory and effective configuration. Edit config.json or use CLI flags."
-        actions={<Badge variant="muted">Planned — not implemented: settings editor</Badge>}
+        actions={<Badge variant="muted">Planned: not implemented: settings editor</Badge>}
       />
       <div className="grid gap-grid lg:grid-cols-2">
         <Card>
@@ -72,7 +72,7 @@ export default function SettingsPage() {
               'Import / export',
             ].map((item) => (
               <Badge key={item} variant="muted">
-                {item} — not implemented
+                {item}: not implemented
               </Badge>
             ))}
           </CardContent>
