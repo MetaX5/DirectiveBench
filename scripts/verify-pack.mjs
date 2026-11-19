@@ -104,7 +104,7 @@ check(version === manifest.version, `--version prints ${version}`);
 step('demo (headless mock benchmark)');
 const demo = run(bin, ['--data-dir', dataDir, 'demo'], { cwd: work });
 check(/Verdict:\s+improved/.test(demo), 'demo reports an improved verdict');
-check(demo.includes('Mock agent — not an AI evaluation'), 'demo labels mock results');
+check(demo.includes('Mock agent: not an AI evaluation'), 'demo labels mock results');
 
 step('benchmark export of the demo run (SPEC-123 §6.4)');
 const demoRunId = /Run id:\s+(\S+)/.exec(demo)?.[1];

@@ -17,6 +17,7 @@ import {
   TR,
   Table,
 } from '@/components/ui/primitives';
+import { MISSING_VALUE } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Agent Connections' };
 
@@ -45,7 +46,7 @@ function AuthCell({ detection }: { detection: AgentDetection }) {
           <li key={mode.mode} data-auth-mode={mode.mode}>
             <span className="font-medium">{MODE_LABELS[mode.mode] ?? mode.mode}:</span>{' '}
             {mode.ready ? 'ready' : `not ready (${mode.code})`}
-            <span className="text-muted-foreground"> — {mode.detail}</span>
+            <span className="text-muted-foreground">. {mode.detail}</span>
           </li>
         ))}
       </ul>
@@ -88,7 +89,7 @@ export default async function AgentsPage() {
                 <TD>
                   <Badge variant="success">supported</Badge>
                 </TD>
-                <TD className="text-ui text-muted-foreground">—</TD>
+                <TD className="text-ui text-muted-foreground">None</TD>
               </TR>
               {detections.map(({ descriptor, detection }) => (
                 <TR key={descriptor.id} data-agent={descriptor.id}>
@@ -105,7 +106,7 @@ export default async function AgentsPage() {
                       <Badge variant="muted">not found</Badge>
                     )}
                   </TD>
-                  <TD className="font-mono text-ui">{detection.version ?? '—'}</TD>
+                  <TD className="font-mono text-ui">{detection.version ?? MISSING_VALUE}</TD>
                   <AuthCell detection={detection} />
                   <TD>
                     <Badge variant="muted">not implemented</Badge>

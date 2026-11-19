@@ -68,6 +68,7 @@ function values(cell: string): number[] {
 }
 
 function ids(cell: string): string[] {
+  // eslint-disable-next-line no-restricted-syntax -- parses id ranges in tokeny.md, never displayed
   const [first, last] = cell.split('\u2013');
   if (!last) return [first!];
   const prefix = first!.charAt(0);

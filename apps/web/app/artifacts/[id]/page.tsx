@@ -67,7 +67,7 @@ import { categoriesCardModel, type CategoriesCardModel } from '@/lib/categories'
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { providerLabel } from '@/lib/repositories';
-import { cn, formatDate, formatDelta, formatScore } from '@/lib/utils';
+import { cn, formatDate, formatDelta, formatScore, MISSING_VALUE } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Artifact' };
 
@@ -302,7 +302,8 @@ function MetadataTab({ detail }: { detail: ArtifactDetail }) {
       <CardHeader>
         <CardTitle>Parsed metadata</CardTitle>
         <CardDescription>
-          Latest version{latest ? ` (v${latest.version})` : ''} · format {latest?.format ?? '—'}
+          Latest version{latest ? ` (v${latest.version})` : ''} · format{' '}
+          {latest?.format ?? MISSING_VALUE}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -524,7 +525,7 @@ function GroupTable({ group, several }: { group: ComparabilityGroup; several: bo
                 </div>
               </TD>
               <TD className="text-right tabular-nums">{formatDelta(row.delta)}</TD>
-              <TD className="text-ui">{row.confidence ?? '—'}</TD>
+              <TD className="text-ui">{row.confidence ?? MISSING_VALUE}</TD>
               <TD className="whitespace-nowrap text-ui text-muted-foreground">
                 {formatDate(row.startedAt)}
               </TD>

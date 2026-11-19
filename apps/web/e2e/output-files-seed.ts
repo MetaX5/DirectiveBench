@@ -31,6 +31,9 @@ export const HOSTILE_LINES = [
   'API key: [REDACTED]',
 ];
 
+/** Agent output with an en and an em dash, shown verbatim (issue 123: the copy rule is for app copy). */
+export const DASHED_LINE = '<p>Pages 8\u201312 \u2014 kept as the agent wrote them</p>';
+
 interface SeedFile {
   path: string;
   change: 'added' | 'modified' | 'deleted';
@@ -49,7 +52,7 @@ export const FILES: SeedFile[] = [
     sizeBytes: 120,
     kept: 'full',
     reason: null,
-    content: `${HOSTILE_LINES.join('\r\n')}\n`,
+    content: `${[...HOSTILE_LINES, DASHED_LINE].join('\r\n')}\n`,
     redactions: 1,
   },
   {

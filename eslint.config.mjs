@@ -88,6 +88,22 @@ const noConsoleOutsideCli = {
   rules: { 'no-console': 'error' },
 };
 
+// App-authored copy has no en or em dash (AGENTS.md §7, SPEC-116 FR-116-24, issue 123). The
+// selectors match the cooked value, so escapes such as `\u2014` are caught too, and HTML entities
+// in JSX. Comments and regular expressions are not string nodes and stay unchecked. Flat config
+// replaces a rule's options in a later block instead of merging them, so these selectors are
+// spread into the one `no-restricted-syntax` block of every file glob (designSystemComponents
+// and uiCopy below); apps/web/test/ui-copy-lint.test.ts checks both survive.
+const dashCharacter = '[\\u2013\\u2014]';
+const dashEntity = '&(?:ndash|mdash);|&#0*821[12];|&#x0*201[34];';
+const uiCopyMessage =
+  'App-authored copy must not contain an en or em dash (U+2013, U+2014). Use a colon, parentheses, a new sentence or a hyphen, and words such as n/a for a missing value (AGENTS.md §7, SPEC-116 FR-116-24).';
+const uiCopySelectors = [
+  { selector: `Literal[value=/${dashCharacter}|${dashEntity}/i]`, message: uiCopyMessage },
+  { selector: `TemplateElement[value.cooked=/${dashCharacter}/]`, message: uiCopyMessage },
+  { selector: `JSXText[value=/${dashCharacter}|${dashEntity}/i]`, message: uiCopyMessage },
+];
+
 // Pages and product components use the design-system components instead of raw form and table
 // elements (SPEC-121 FR-121-4). The scope file is shared with apps/web/test/design-tokens.test.ts.
 const designSystemScope = JSON.parse(
@@ -115,8 +131,23 @@ const designSystemComponents = {
           "JSXOpeningElement[name.name='input']:not(:has(JSXAttribute[name.name='type'][value.value='hidden']))",
         message: designSystemMessage,
       },
+      ...uiCopySelectors,
     ],
   },
+};
+
+// The rest of the copy scope (decision D6): the component library, web helpers, the CLI and the
+// packages, whose error and reason strings the web app and the CLI show. Tests, e2e and fixtures
+// stay outside: they hold imported and agent content with dashes on purpose. No glob here may
+// overlap designSystemComponents (see uiCopySelectors).
+const uiCopy = {
+  files: [
+    `apps/web/${designSystemScope.componentLibrary}/**/*.{ts,tsx}`,
+    'apps/web/lib/**/*.ts',
+    'apps/cli/src/**/*.ts',
+    'packages/*/src/**/*.ts',
+  ],
+  rules: { 'no-restricted-syntax': ['error', ...uiCopySelectors] },
 };
 
 export default tseslint.config(
@@ -168,4 +199,5 @@ export default tseslint.config(
   webBoundary,
   noConsoleOutsideCli,
   designSystemComponents,
+  uiCopy,
 );

@@ -778,7 +778,7 @@ describe('doctor', () => {
     expect(code).toBe(ExitCode.CheckFailed);
     expect(find(checks, 'port')).toMatchObject({
       status: 'fail',
-      detail: 'Invalid port "99999" (expected 1–65535)',
+      detail: 'Invalid port "99999" (expected 1 to 65535)',
       hint: expect.stringContaining('DIRECTIVEBENCH_PORT'),
     });
   });

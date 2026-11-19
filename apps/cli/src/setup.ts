@@ -158,7 +158,7 @@ export function resolveServerOptions(
   const rawPort = flags.port ?? env.DIRECTIVEBENCH_PORT ?? String(config.server.port);
   const port = Number(rawPort);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new CliError(`Invalid port "${rawPort}" (expected 1–65535)`, ExitCode.Usage);
+    throw new CliError(`Invalid port "${rawPort}" (expected 1 to 65535)`, ExitCode.Usage);
   }
   if (!isLoopbackHost(host) && !flags.allowNetworkAccess) {
     throw new CliError(

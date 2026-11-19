@@ -20,7 +20,7 @@ describe('webRunBlockers (SPEC-118 FR-118-05)', () => {
     const definition = await loadDefinitionFile(exampleDefinition);
     const claude = { ...definition, execution: { ...definition.execution, agent: 'claude-code' } };
     const refusal =
-      'This suite uses agent "claude-code". The web UI runs only mock-agent suites; real agents run from the CLI (planned — not implemented yet).';
+      'This suite uses agent "claude-code". The web UI runs only mock-agent suites; real agents run from the CLI (planned, not implemented yet).';
     expect(webRunBlockers(claude, true)).toEqual([refusal]);
     expect(webRunBlockers(claude, false)).toEqual([
       refusal,

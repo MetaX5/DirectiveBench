@@ -266,7 +266,7 @@ describe('searchPrefix (SPEC-126 §11.4 G10)', () => {
 
 describe('repositoriesLabel', () => {
   it('shows the first repository and how many more', () => {
-    expect(repositoriesLabel([])).toBe('—');
+    expect(repositoriesLabel([])).toBe('None');
     expect(repositoriesLabel([{ name: 'team' }])).toBe('team');
     expect(repositoriesLabel([{ name: 'a' }, { name: 'b' }, { name: 'c' }])).toBe('a +2');
   });

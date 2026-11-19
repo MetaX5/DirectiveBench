@@ -22,7 +22,7 @@ export function webRunBlockers(definition: BenchmarkDefinition, approved: boolea
   const blockers = executionBlockers(definition, approved);
   if (isMockAgent(definition.execution.agent)) return blockers;
   return [
-    `This suite uses agent "${definition.execution.agent}". The web UI runs only mock-agent suites; real agents run from the CLI (planned — not implemented yet).`,
+    `This suite uses agent "${definition.execution.agent}". The web UI runs only mock-agent suites; real agents run from the CLI (planned, not implemented yet).`,
     ...blockers,
   ];
 }

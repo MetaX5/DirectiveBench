@@ -151,7 +151,7 @@ test.describe.serial('missing occurrences (SPEC-125)', () => {
     await expect(page.getByTestId('scan-explanation')).toContainText(
       'A file that a later scan does not find is marked missing; its history is kept.',
     );
-    await expect(page.getByTestId('scan-explanation')).not.toContainText('—');
+    await expect(page.getByTestId('scan-explanation')).not.toContainText(/[\u2013\u2014]/);
     await expect(
       page.getByText('Planned: not implemented: private repositories, GitLab'),
     ).toBeVisible();
