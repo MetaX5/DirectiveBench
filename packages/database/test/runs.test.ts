@@ -98,6 +98,14 @@ function finished(overrides: Partial<FinishBenchmarkRunInput> = {}): FinishBench
 }
 
 describe('createBenchmarkRun and finishBenchmarkRun', () => {
+  it('stores an agent version holding U+0000 with U+FFFD (issue 282)', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets, { agentVersion: '2.1.302\0 (Claude Code)\0' });
+    const started = await getBenchmarkRunDetail(handle.db, runId);
+    expect(started?.run.agentVersion).toBe('2.1.302\uFFFD (Claude Code)\uFFFD');
+  });
+
   it('starts a run as running and records the final outcome', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
