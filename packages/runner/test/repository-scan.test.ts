@@ -776,6 +776,33 @@ describe('repository-scan jobs', () => {
     });
   });
 
+  it('stores a skill whose frontmatter name or description holds U+0000 without them (issue 265)', async () => {
+    // YAML turns "\0" into U+0000 although the file holds no NUL byte, and valid UTF-8 may hold
+    // U+0000 after the first 8 KiB that the binary check reads. Neither may reach a TEXT column:
+    // node:sqlite on Node 22 returns such a value truncated at the NUL.
+    const project = join(sources, 'project');
+    write(project, {
+      '.agents/skills/nul/SKILL.md':
+        '---\nname: "evil\\0hidden"\ndescription: "a\\0b"\n---\n# Nul\n',
+      'AGENTS.md': `${'x'.repeat(9000)}\n# Rules\0hidden\n`,
+    });
+    const repository = await register(project, 'local-directory');
+
+    expect(await scan(repository.id)).toMatchObject({ ok: true, discovered: 2, errorCount: 0 });
+    expect(
+      handle.sqlite.prepare('select type, name, description from artifacts order by type').all(),
+    ).toEqual([
+      { type: 'instruction', name: 'AGENTS.md', description: null },
+      { type: 'skill', name: 'nul', description: 'Nul' },
+    ]);
+    expect(storedOccurrences()[0]?.parsedMetadata).toMatchObject({
+      warnings: [
+        'Frontmatter `description` contains a NUL character (U+0000) and is ignored',
+        'Frontmatter `name` contains a NUL character (U+0000) and is ignored',
+      ],
+    });
+  });
+
   it('stores an artifact whose frontmatter JSON cannot represent, with a warning, next to the others', async () => {
     // YAML is not JSON: a self-referring alias parses to a circular object. Stored as is, it
     // threw inside the one scan transaction and failed every scan of the repository.

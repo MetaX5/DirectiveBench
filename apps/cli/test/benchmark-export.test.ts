@@ -92,7 +92,9 @@ const UNSAFE_PATHS = [
   './dot.txt',
   'a/./b.txt',
   'trail/',
-  'nul\0.txt',
+  // The database refuses text holding U+0000 (issue 265), so a stored path cannot hold one;
+  // another control character stands in for it here, and isSafeRelativePath checks NUL below.
+  'ctl\u0001.txt',
 ];
 
 beforeAll(async () => {
@@ -260,6 +262,7 @@ describe('isSafeRelativePath (SPEC-123 FR-123-42)', () => {
     for (const path of [
       '',
       ...UNSAFE_PATHS,
+      'nul\0.txt',
       '..',
       '.',
       '//server/share',
@@ -429,7 +432,7 @@ describe('benchmark export (SPEC-123 §6.4)', () => {
     // The summary names each file that was not written, quoted for the terminal.
     expect(output).toContain('Agent:            claude-code (version unknown)');
     expect(output).toContain(`Unsafe paths:     ${UNSAFE_PATHS.length + 2} (not written)`);
-    expect(output).toContain('Not written (unsafe-path): "case-a" candidate 1: "nul\\u0000.txt"');
+    expect(output).toContain('Not written (unsafe-path): "case-a" candidate 1: "ctl\\u0001.txt"');
     expect(output).toContain('Not written (unsafe-path): "../evil" candidate 1: "x.txt"');
     expect(output).toContain('Not written (path-collision): "case-a" candidate 1: "foo/bar.txt"');
     expect(output).toContain(

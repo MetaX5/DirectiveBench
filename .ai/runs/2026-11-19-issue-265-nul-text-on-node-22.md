@@ -5,7 +5,7 @@ agent: Claude Code / claude-opus-5-5
 trigger: issue #265, maintainer-approved om-auto-fix-issue run (two phases, stop after analysis)
 status: in-progress
 branch: fix/issue-265-nul-text-on-node-22
-specs: [SPEC-004]
+specs: [SPEC-004, SPEC-006, SPEC-102]
 ---
 
 # Run: Issue 265, NUL in TEXT values on Node 22
@@ -30,7 +30,18 @@ write the options and a recommendation, then stop for the maintainer's decision.
 
 ## Decisions
 
-None yet; the choice of fix is the maintainer's (a Node floor change would need an ADR).
+Maintainer decision (relayed 2026-11-19), options B + C of the phase A analysis:
+
+- Keep the Node 22.16 floor (no ADR needed).
+- B: the `sqlite-proxy` callback refuses a string parameter holding U+0000 with `NulInTextError`.
+- C: frontmatter `name`/`description` holding U+0000 are invalid values (warning, usual
+  fallback); NUL in error and message text becomes U+FFFD through one helper (`storedMessage`)
+  at the repository write boundary.
+- Web Zod schemas (`apps/web/lib`) are out of scope until the #123 PR merges (follow-up).
+
+Made without asking: a first `# ` heading holding U+0000 is not used as a fallback description
+(same rule as frontmatter, no warning because it is only a fallback); rule 3 linking
+(`isLinkable`) treats a `SKILL.md` name with NUL as no name, matching the parser.
 
 ## Work performed
 
@@ -81,18 +92,50 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   (error and message columns, user-entered names, notes and descriptions from the web app).
   Not exhaustively traced yet; phase B would do that with the chosen approach.
 
+### Implementation (phase B)
+
+- `packages/database/src/client.ts`: `NulInTextError` and `refuseNulText` before `prepare`.
+- `packages/database/src/stored-message.ts`: `storedMessage`, used by `insertAgentRun`
+  (`error`, `outputFilesReason`, assertion `message`), `finishBenchmarkRun`, `finishJob`,
+  `interruptJobs` and `markRepositoryScanFailed`.
+- `packages/core/src/artifacts.ts`: `frontmatterText` for `name`/`description`, `firstHeading`
+  ignores a heading with NUL; no duplicate "has no name/description" warning.
+- `packages/database/src/repositories/artifacts.ts`: `isLinkable` matches the parser.
+- Tests: `packages/database/test/nul-text.test.ts` (new), cases in `identity.test.ts`,
+  `core/test/artifacts.test.ts`, `runner/test/repository-scan.test.ts`; the CLI export test
+  stores `ctl\u0001.txt` instead of `nul\0.txt` (NUL can no longer be stored) and keeps NUL in
+  the `isSafeRelativePath` unit list.
+- Specs: SPEC-006 §1 (new "Text" convention) and status, SPEC-004 §3.1, SPEC-102 §14 and status.
+
 ## Verification
 
-Phase A only: reproduction commands above. No code changed.
+- Red first (source changes stashed, tests kept), Node 22.16.0: database `nul-text` 5 failed
+  (`promise resolved "{ rows: [] }" instead of rejecting`, `storedMessage is not a function`),
+  `identity` 1 failed (`createdArtifacts: 6` vs 7), core 2 failed, runner scan test 1 failed.
+- Green on Node 22.16.0 and 24.21.0 for every new or changed test file.
+- `pnpm --filter "./packages/*" --filter directivebench test` on Node 22.16.0: all packages and
+  `apps/cli` pass with the 100% coverage threshold (core 353, agent-adapters 374 + 2 skipped,
+  database 383, benchmark-engine 518, runner 312 + new, cli 208).
+- Node 24.21.0: `pnpm lint` 0, `pnpm typecheck` 0, `pnpm test` 0 (web 608, core 353,
+  agent-adapters 374, cli 208, benchmark-engine 518, runner 313, database 383; 100% coverage),
+  `pnpm format:check` clean, `pnpm build` 0, `pnpm verify:pack` passed.
+- Not verified: the web app with NUL input (its Zod schemas are a follow-up; a write with NUL
+  now fails with `NulInTextError` instead of truncating); `apps/cli` in the `oldest-node` CI job
+  (needs PR #267); Windows and macOS.
 
 ## Problems and deviations
 
-None.
+- Drizzle's `sqlite-proxy` wraps a callback error in its own query error whose message lists the
+  parameters, so the refused value appears in that wrapper's message (as for any failing query
+  before this change); `NulInTextError` itself, the `cause`, never contains the value.
 
 ## Lessons recorded
 
-None yet.
+- [2026-11-19-node-22-sqlite-truncates-text-at-nul.md](../lessons/2026-11-19-node-22-sqlite-truncates-text-at-nul.md)
 
 ## Follow-ups
 
-Await the maintainer's decision; phase B starts from main after PR #267 is merged.
+- Add `apps/cli` to the `oldest-node` CI job once PR #267 is merged.
+- Web Zod schemas reject U+0000 in user input (after the #123 PR merges), and benchmark
+  definition strings (suite `name`/`description`) get a validation message instead of
+  `NulInTextError`: follow-up issue.

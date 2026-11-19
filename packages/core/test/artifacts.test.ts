@@ -86,6 +86,28 @@ describe('parseArtifactFile', () => {
     expect(parsed.warnings).toHaveLength(2);
   });
 
+  it('ignores frontmatter name and description holding U+0000 with a warning (issue 265)', () => {
+    // YAML turns "\0" into U+0000 although the file bytes hold no NUL, so isBinary passes it.
+    const parsed = parseArtifactFile(
+      '.claude/skills/pdf-tools/SKILL.md',
+      '---\nname: "evil\\0hidden"\ndescription: "a\\0b"\n---\n# PDF tools\n',
+    );
+    expect(parsed.name).toBe('pdf-tools');
+    expect(parsed.description).toBe('PDF tools');
+    expect(parsed.activation).toEqual({});
+    expect(parsed.warnings).toEqual([
+      'Frontmatter `description` contains a NUL character (U+0000) and is ignored',
+      'Frontmatter `name` contains a NUL character (U+0000) and is ignored',
+    ]);
+  });
+
+  it('does not take a description from a heading holding U+0000 (issue 265)', () => {
+    // Valid UTF-8 may hold U+0000 after the first 8 KiB that isBinary checks.
+    const parsed = parseArtifactFile('AGENTS.md', `${'x'.repeat(9000)}\n# A\0B\n`);
+    expect(parsed.description).toBeNull();
+    expect(parsed.warnings).toEqual([]);
+  });
+
   it('preserves Cursor rule globs and alwaysApply', () => {
     const parsed = parseArtifactFile(
       '.cursor/rules/react.mdc',
