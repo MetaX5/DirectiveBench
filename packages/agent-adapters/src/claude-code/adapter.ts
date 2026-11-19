@@ -226,6 +226,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           refusal,
         );
       }
+      // Throws `skill-name-unsupported` or `skill-name-reserved` (issue 257) for the candidate's
+      // skill name, and the A/B check below for the baseline's, before claude is located.
       const artifact = claudeArtifactProfile(request.artifact);
       if (artifact.format === 'skill-md' && request.baselineArtifact !== null) {
         const issue = baselineSkillNameIssue(request.artifact, request.baselineArtifact);

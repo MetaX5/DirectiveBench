@@ -359,6 +359,34 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     expect(h.fake.invoked()).toBe(false);
   });
 
+  it.each([
+    ['candidate', { artifact: bundle('skill-md', { 'SKILL.md': '---\nname: doctor\n---\n' }) }],
+    [
+      'baseline',
+      {
+        baselineArtifact: bundle(
+          'skill-md',
+          { 'SKILL.md': '---\nname: doctor\n---\n' },
+          { versionId: 'ver_0' },
+        ),
+      },
+    ],
+  ] as const)(
+    'refuses a %s skill named like a name Claude Code lists itself (issue 257)',
+    async (_role, overrides) => {
+      const h = harness();
+      const result = await h.adapter().run(await h.request(overrides));
+      expect(result).toMatchObject({
+        status: 'infrastructure-error',
+        errorCode: 'skill-name-reserved',
+        trace: [],
+        usage: null,
+      });
+      expect(result.error).toMatch(/"doctor" is a name Claude Code 2\.1\.302 lists itself/);
+      expect(h.fake.invoked()).toBe(false);
+    },
+  );
+
   it('refuses a baseline whose skill name differs (FR-118-08)', async () => {
     const h = harness();
     const baseline = bundle(
