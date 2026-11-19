@@ -193,13 +193,45 @@ Decisions needed from the maintainer:
 3. Probe argv: identical to the runs (recommended, same listing) or forced to the cheapest model
    (cheaper, but a model-dependent listing could differ).
 
+## Maintainer decisions (2026-11-19, relayed, also on the issue)
+
+1. Option 1a: a session without the skill before the first repetition of every A/B run of a
+   `skill-md` artifact on `claude-code`; a listed name refuses with `skill-name-reserved` before
+   any variant. No check for the mock agent (only when the adapter offers it).
+2. A failed check ends the benchmark run `error` with the check's own stop code; the message names
+   the reserved-name check.
+3. Same argv, model and environment as the variants.
+4. ADR (Proposed) and SPEC-203 §4.1, SPEC-118 FR-118-08/15 before the code.
+5. Visible display only after approval of screenshots: backend now, UI proposal, then stop.
+6. Option 5 filed as a follow-up issue (#288).
+
 ## Plan
 
-Phase B is planned after the decision.
+1. ADR-0015 and spec updates (done before code).
+2. Red-first engine tests with a scripted adapter (`reserved-name-check.test.ts`) and end-to-end
+   tests with the real `ClaudeCodeAdapter` and a fake `claude` replaying the 2.1.325 recording.
+3. Contract: optional `AgentAdapter.needsReservedNameCheck(artifact)`; Claude Code: `skill-md`.
+4. Engine: `runReservedNameCheck` before the first repetition (empty pinned workspace
+   `<workRoot>/reserved-name-check/`, `installedPaths: []`, fixed prompt, variants' request),
+   fail closed, `onReservedNameCheck` callback.
+5. Storage: `setBenchmarkRunEnvironment` (database) and the runner stores
+   `environment.reservedNameCheck` (no migration).
+6. Gate, built CLI proof, UI proposal screenshots, stop for approval.
 
 ## Decisions
 
-None taken without asking; see the recommendation above.
+- **Fallback stop code `reserved-name-check-failed`** for a failed check without a code of its
+  own (a timeout, an adapter exception without a code, a completed session that reported no
+  `system/init`). The maintainer asked for the check's own stop code; these failures have none.
+- **Proof that the session start was seen:** a completed check must report
+  `metadata.executionModel`; otherwise it fails closed (documented on the contract method).
+- **Order:** the check runs before any variant workspace is prepared. A refusal of the artifact
+  versions themselves (bundle inspection) now stops the run through the check, before `claude`
+  starts, instead of refusing each agent run; a refusal of a variant's own workspace (fixture or
+  `setup` configuration, imports of an installed file) comes after the check session. Recorded in
+  SPEC-203 §4.1 and ADR-0015 (drawbacks); the plan-time refusals keep such suites from the runner.
+- **Storage** in `benchmark_runs.environment.reservedNameCheck` (status, code, error, duration,
+  usage, `claude` version, session model), written when the check ends, also when it stops the run.
 
 ## Work performed
 
@@ -208,11 +240,50 @@ None taken without asking; see the recommendation above.
 2. Inspected the `system/init` of the recordings of 2.1.302 and 2.1.325 (option 4 check, cost
    evidence).
 3. Created the worktree `.ai/tmp/issue-280-wt` on `feat/issue-280-ab-reserved-name-check` from
-   `origin/main` and this run log.
+   `origin/main` and this run log (commit 2649bdc).
+4. Phase B: ADR-0015, SPEC-203 §4.1 and SPEC-118 FR-118-08/15 (commit `docs(specs)`).
+5. Red-first tests, then the contract method, the Claude Code adapter method, the engine check,
+   the database function and the runner wiring (commit `feat(benchmark-engine)`). Existing A/B
+   end-to-end tests updated where the check now runs first (bundle refusals stop through the check;
+   fixture refusals start only the check session; stream indices shifted by one).
+6. UI proposal (not committed): a temporary Storybook story of the run page's "Environment and
+   versions" card, screenshots in `.ai/tmp/issue-280-shots/` (both themes, 1280 and 320 px, no
+   horizontal overflow), and the proposed CLI text in `cli-output-proposal.txt`. The story file was
+   removed from the worktree (a copy is in the shots folder).
+7. Follow-up issue #288 (option 5, base directory of an invoked skill).
 
 ## Verification
 
-Phase A is analysis only: no code changed, no tests run. No real `claude` session was started.
+Phase A: analysis only. Phase B (backend):
+
+| Command | Result |
+| --- | --- |
+| red first: `vitest run test/reserved-name-check.test.ts` before the code | 9 failed, 2 passed (missing exports) |
+| red first: `claude-code-adapter.test.ts -t "issue 280"` before the adapter method | 2 failed |
+| red first: database `runs.test.ts -t "issue 280"` | failed (`setBenchmarkRunEnvironment is not a function`) |
+| red first: runner `runner-acquired.test.ts -t "issue 280"` | failed (environment not stored) |
+| `pnpm lint` | pass |
+| `pnpm typecheck` | pass (7 tasks) |
+| `pnpm test` (coverage 100%) | pass after removing one unreachable branch |
+| `pnpm exec turbo run test --force` | 7/7 tasks; core 353, web 655, agent-adapters 399 (+2 skipped), cli 211, runner 314, database 387, benchmark-engine 540 |
+| `pnpm build` | pass |
+| `pnpm verify:pack` | pass ("Packaging verification passed") |
+
+Built CLI proof (`apps/cli/dist/cli.js`, data directory under `/var/tmp`, two versions of a skill
+`newer-built-in` seeded with `importArtifactVersion` from a temporary test file, deleted; a fake
+`claude` 2.1.325 on `PATH` replaying the 2.1.325 recording):
+
+- CLI-owned name (`/ultrareview` renamed to `newer-built-in`): `benchmark run --baseline v1 --yes`
+  printed `Result: error`, `Error: Stopped by the reserved-name check before any agent run
+  (skill-name-reserved): Claude Code lists the skill name "newer-built-in" itself ...`, exit 6,
+  one `claude` start in `<workRoot>/reserved-name-check/workspace`, no agent run stored, run
+  `environment.reservedNameCheck.errorCode = skill-name-reserved`.
+- Name not listed without the skill: `Result: passed`, exit 0, three starts (check, baseline,
+  candidate), `environment.reservedNameCheck.status = completed`.
+
+Not verified: a real `claude` session (no consent for this issue); `pnpm test:e2e` and
+`pnpm test:storybook` (no UI code changed yet); the Codex adversarial review, the PR and CI (after
+the UI approval).
 
 ## Problems and deviations
 
@@ -224,6 +295,8 @@ None yet.
 
 ## Follow-ups
 
-- Phase B after the decision.
-- Option 5 as possible hardening (separate issue if wanted).
+- Waiting for approval of the UI proposal (`.ai/tmp/issue-280-shots/`); then the CLI and web
+  display, Playwright/Storybook coverage, Codex review, draft PR.
+- The plan's `Cost:` line still counts only the variants' sessions until the CLI display lands.
+- Option 5 as possible hardening: #288.
 - Option 1c (init-only probe) needs a consented live check before it can be considered.
