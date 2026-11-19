@@ -106,6 +106,12 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   stores `ctl\u0001.txt` instead of `nul\0.txt` (NUL can no longer be stored) and keeps NUL in
   the `isSafeRelativePath` unit list.
 - Specs: SPEC-006 §1 (new "Text" convention) and status, SPEC-004 §3.1, SPEC-102 §14 and status.
+- Codex adversarial review round 1 (needs-attention, medium): existing databases may already
+  hold NUL in TEXT, which Node 22 still reads truncated. Fixed with the data-only migration
+  `0010_text_without_nul`: U+0000 becomes U+FFFD in 17 free-text columns. SQLite's `replace()`
+  and text `substr()` stop at a NUL (`replace(x, char(0), ...)` returned the value unchanged), so
+  each value is rewritten as a BLOB in a recursive CTE, one NUL per step. Regression test in
+  `client.test.ts` (red without the migration: `expected +0 to be 1`).
 
 ## Verification
 
@@ -119,12 +125,19 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
 - Node 24.21.0: `pnpm lint` 0, `pnpm typecheck` 0, `pnpm test` 0 (web 608, core 353,
   agent-adapters 374, cli 208, benchmark-engine 518, runner 313, database 383; 100% coverage),
   `pnpm format:check` clean, `pnpm build` 0, `pnpm verify:pack` passed.
+- Upgrade on Node 22.16.0 with the built CLI: a demo database migrated to `0009` (10 migrations),
+  `artifacts.notes` set to `note\0hidden` by raw `node:sqlite` read back as `note`; `doctor`
+  reported `10/11 migrations applied`; after `demo` (which migrates) it read back
+  `note\uFFFDhidden` (hex `6E6F7465EFBFBD68696464656E`), 11 migrations. `demo` itself on
+  Node 22.16.0: verdict improved, exit 0.
 - Not verified: the web app with NUL input (its Zod schemas are a follow-up; a write with NUL
   now fails with `NulInTextError` instead of truncating); `apps/cli` in the `oldest-node` CI job
   (needs PR #267); Windows and macOS.
 
 ## Problems and deviations
 
+- SQLite's `replace()` treats a pattern starting with NUL as empty, and text `substr()` stops at
+  NUL, so the repair works on BLOBs (see the migration header).
 - Drizzle's `sqlite-proxy` wraps a callback error in its own query error whose message lists the
   parameters, so the refused value appears in that wrapper's message (as for any failing query
   before this change); `NulInTextError` itself, the `cause`, never contains the value.

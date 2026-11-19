@@ -63,7 +63,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(10);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(11);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -1126,6 +1126,92 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(0);
     } finally {
       before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('replaces U+0000 in the free-text columns of a 0009 database with U+FFFD, and can be re-applied (issue 265)', async () => {
+    // Earlier versions stored such text whole; node:sqlite on Node 22 reads it truncated.
+    const freeText: Record<string, string[]> = {
+      categories: ['name', 'name_key', 'description'],
+      repositories: ['name', 'sync_error'],
+      artifacts: ['name', 'description', 'notes'],
+      benchmark_suites: ['name', 'description'],
+      jobs: ['error'],
+      benchmark_runs: ['agent_version', 'error'],
+      agent_runs: ['error', 'output_files_reason'],
+      assertion_results: ['message'],
+      blind_review_pairs: ['note'],
+    };
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    // Hex, because reading the text itself would truncate it on Node 22.
+    const stored = () =>
+      Object.fromEntries(
+        Object.entries(freeText).map(([table, cols]) => [
+          table,
+          handle.sqlite
+            .prepare(
+              `select ${cols.map((c) => `hex(${c}) as ${c}`).join(', ')}${
+                columns(handle, table).includes('updated_at') ? ', updated_at' : ''
+              } from ${table} order by id`,
+            )
+            .all(),
+        ]),
+      );
+    const hex = (text: string) => Buffer.from(text, 'utf8').toString('hex').toUpperCase();
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 10));
+      // Rows are inserted directly, below the client's NUL guard and without their parents.
+      handle.sqlite.exec('PRAGMA foreign_keys = OFF');
+      for (const [table, cols] of Object.entries(freeText)) {
+        const info = handle.sqlite.prepare(`pragma table_info(${table})`).all();
+        for (const [row, text] of [
+          ['1', (col: string) => `x\0${col}`],
+          ['2', () => 'ok'],
+        ] as const) {
+          const values: Record<string, string | number> = {};
+          for (const column of info) {
+            const name = String(column.name);
+            if (cols.includes(name)) values[name] = text(name);
+            else if (name === 'updated_at') values[name] = 'old';
+            else if (column.notnull && column.dflt_value === null) {
+              values[name] = String(column.type) === 'integer' ? 0 : `${name}-${row}`;
+            }
+          }
+          const names = Object.keys(values);
+          handle.sqlite
+            .prepare(
+              `insert into ${table} (${names.join(', ')}) values (${names.map(() => '?').join(', ')})`,
+            )
+            .run(...Object.values(values));
+        }
+      }
+
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      const after = stored();
+      for (const [table, cols] of Object.entries(freeText)) {
+        const [repaired, clean] = after[table] as Record<string, unknown>[];
+        for (const col of cols) {
+          expect(repaired?.[col], `${table}.${col}`).toBe(hex(`x�${col}`));
+          expect(clean?.[col], `${table}.${col}`).toBe(hex('ok'));
+        }
+        if ('updated_at' in repaired!) expect(repaired.updated_at).toBe('old');
+      }
+      // Read back through node:sqlite: whole on every Node version.
+      expect(handle.sqlite.prepare("select name from artifacts where id = 'id-1'").get()).toEqual({
+        name: 'x�name',
+      });
+
+      // Down: a data-only repair has nothing to undo (the truncated reads were the defect);
+      // forgetting it and applying it again changes nothing.
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      expect(stored()).toEqual(after);
+    } finally {
       handle.close();
       temp.dispose();
     }

@@ -28,6 +28,10 @@ frontmatter. Valid UTF-8 may also hold U+0000 after the first 8 KiB that `isBina
 - JSON columns (`mode: 'json'`) are safe: `JSON.stringify` writes `\u0000` as an escape.
 - Error and message columns pass through `storedMessage` (U+0000 becomes U+FFFD) so a failure is
   still recorded; frontmatter `name`/`description` holding NUL are ignored with a warning.
+- Repairing NUL inside SQLite: `replace(x, char(0), ...)` returns `x` unchanged (a pattern that
+  starts with NUL counts as empty) and text `substr()` stops at NUL. Work on
+  `CAST(x AS BLOB)` with `instr(b, x'00')` and blob `substr`, as migration
+  `0010_text_without_nul` does.
 - PostgreSQL also refuses NUL in text, so the rule holds for a future second backend.
 
 ## How to apply
