@@ -501,6 +501,99 @@ test.describe('overlap with a user-level agent folder (issue 244)', () => {
   });
 });
 
+// Issue 262: a user-level agent folder registered on its own (or a location inside one) asks for
+// a confirmation, since every scan skips it. The e2e server runs with the real HOME, so the suite
+// seeds finished registration jobs the way the runner stores them instead of registering there.
+test.describe('a user-level agent folder on its own (issue 262)', () => {
+  const home = '/home/e2e-issue-262';
+  const reason =
+    'This is a user-level agent folder. Every scan skips user-level agent folders (scanning them is a planned opt-in), so registering it finds no artifacts.';
+
+  function seedConfirmation(jobId: string, path: string, result: object): Promise<void> {
+    const now = new Date().toISOString();
+    return withDatabase((db) => {
+      db.prepare(
+        `insert into jobs (id, type, status, payload, result, attempts, created_at, finished_at)
+         values (?, 'repository-registration', 'completed', ?, ?, 1, ?, ?)`,
+      ).run(
+        jobId,
+        JSON.stringify({ path }),
+        JSON.stringify({ ok: false, code: 'confirmation-required', location: path, ...result }),
+        now,
+        now,
+      );
+    });
+  }
+
+  test.afterAll(async () => {
+    // The seeded jobs and the job Register anyway enqueued (its path does not exist here).
+    await withDatabase((db) =>
+      db
+        .prepare(
+          `delete from jobs where type = 'repository-registration'
+           and json_extract(payload, '$.path') like ?`,
+        )
+        .run(`${home}/%`),
+    );
+  });
+
+  test('asks before storing it, and shows an overlap reason too', async ({ page }) => {
+    const repositories = () =>
+      withDatabase((db) => count(db, 'select count(*) as n from repositories'));
+    const before = await repositories();
+    await seedConfirmation('job_e2e_issue_262_folder', `${home}/.claude`, {
+      home: null,
+      userLevel: 'folder',
+      overlaps: [],
+    });
+    await page.goto('/repositories?registration=job_e2e_issue_262_folder');
+    const confirmation = page.getByTestId('registration-confirmation');
+    await expect(confirmation).toContainText(`Register ${home}/.claude anyway?`);
+    await expect(confirmation.getByRole('listitem')).toHaveText([reason]);
+    expect(await repositories()).toBe(before);
+
+    // Register anyway sends the confirmed canonical location back to the runner.
+    await confirmation.getByRole('button', { name: 'Register anyway' }).click();
+    await expect(page.getByTestId('registration-confirmation')).toHaveCount(0);
+    const payload = await withDatabase((db) =>
+      db
+        .prepare(
+          `select payload from jobs where type = 'repository-registration'
+           and json_extract(payload, '$.confirmedLocation') = ?`,
+        )
+        .get(`${home}/.claude`),
+    );
+    expect(JSON.parse(String(payload?.payload))).toEqual({
+      path: `${home}/.claude`,
+      confirmedLocation: `${home}/.claude`,
+    });
+
+    await seedConfirmation('job_e2e_issue_262_inside', `${home}/.claude/skills`, {
+      home: null,
+      userLevel: 'inside-folder',
+      overlaps: [
+        {
+          repositoryId: 'repo_e2e_issue_262_home',
+          name: 'e2e-issue-262',
+          location: home,
+          relation: 'inside',
+          userLevel: 'inside-folder',
+        },
+      ],
+    });
+    await page.goto('/repositories?registration=job_e2e_issue_262_inside');
+    await expect(confirmation.getByRole('listitem')).toHaveText([
+      reason,
+      `It is inside the registered repository e2e-issue-262 (${home}), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.`,
+    ]);
+    await page.setViewportSize({ width: 320, height: 800 });
+    await expect(confirmation).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
+    ).toBeLessThanOrEqual(0);
+  });
+});
+
 // Public GitHub repositories by URL (issue #18). The suite never reaches the network: it tests
 // the web-side validation, and shows runner outcomes it seeds into the database itself. The
 // runner's git side is covered against a local bare repository in packages/runner.

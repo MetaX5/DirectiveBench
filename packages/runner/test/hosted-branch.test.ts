@@ -353,7 +353,7 @@ describe('the repository-branch job (issue 58)', realGit, () => {
     const local = await registerLocalRepository(
       handle,
       { provider: 'local-directory', name: 'local', location: '/srv/local', defaultBranch: null },
-      { homeDirectory: '/home/tester', confirmedLocation: null },
+      { homeDirectory: '/home/tester', confirmedLocation: null, userLevel: null },
     );
     if (local.status !== 'registered') throw new Error(local.status);
     expect(

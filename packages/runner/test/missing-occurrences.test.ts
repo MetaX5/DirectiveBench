@@ -102,7 +102,7 @@ async function register(location: string, provider: 'local-git' | 'local-directo
   const outcome = await registerLocalRepository(
     handle,
     { provider, name: 'skills', location, defaultBranch: null },
-    { homeDirectory: join(sources, 'home'), confirmedLocation: location },
+    { homeDirectory: join(sources, 'home'), confirmedLocation: location, userLevel: null },
   );
   if (outcome.status !== 'registered') throw new Error('not registered');
   return outcome.repository.id;
@@ -374,7 +374,7 @@ describe('local scans link exact copies (SPEC-126 Phase 1)', () => {
     const outcome = await registerLocalRepository(
       handle,
       { provider, name, location, defaultBranch: null },
-      { homeDirectory: join(sources, 'home'), confirmedLocation: location },
+      { homeDirectory: join(sources, 'home'), confirmedLocation: location, userLevel: null },
     );
     if (outcome.status !== 'registered') throw new Error('not registered');
     return outcome.repository.id;

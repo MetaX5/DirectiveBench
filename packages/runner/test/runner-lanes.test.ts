@@ -108,7 +108,7 @@ async function scanJob(location: string): Promise<string> {
   const outcome = await registerLocalRepository(
     handle,
     { provider: 'local-directory', name: location, location, defaultBranch: null },
-    { homeDirectory: '/home/tester', confirmedLocation: null },
+    { homeDirectory: '/home/tester', confirmedLocation: null, userLevel: null },
   );
   if (outcome.status !== 'registered') throw new Error('not registered');
   return (await enqueueRepositoryScanJob(handle, { repositoryId: outcome.repository.id })).job.id;

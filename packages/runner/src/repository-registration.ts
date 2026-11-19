@@ -395,8 +395,9 @@ export interface RegistrationRequest {
 /**
  * Executes a `repository-registration` job: inspects the path and stores the repository, or
  * returns the existing one for the same canonical location (FR-104-04). The filesystem root is
- * rejected; the home directory, its ancestors and locations that contain or lie inside another
- * registered local repository are stored only once the user confirmed exactly that canonical
+ * rejected; the home directory, its ancestors, a user-level agent folder (or a location inside
+ * one) that its own scan skips, and locations that contain or lie inside another registered
+ * local repository are stored only once the user confirmed exactly that canonical
  * location, otherwise the result asks for that confirmation (FR-104-18). A rejected path stores
  * nothing.
  */
@@ -413,6 +414,9 @@ export async function registerLocalPath(
       'The filesystem root cannot be registered: a scan would read the whole disk. Register a project directory instead.',
     );
   }
+  // Issue 262: a location its own scan skips (D05) finds nothing, so registering it is confirmed.
+  // A filesystem fact, not catalog state, so it is decided before the transaction that asks.
+  const userLevel = await userLevelOf(inspection.location, inspection.location, options);
   const outcome = await registerLocalRepository(
     handle,
     {
@@ -424,6 +428,7 @@ export async function registerLocalPath(
     {
       homeDirectory: await canonicalHome(options.homeDir),
       confirmedLocation: request.confirmedLocation,
+      userLevel: userLevel ?? null,
     },
   );
   if (outcome.status === 'confirmation-required') {
@@ -432,6 +437,7 @@ export async function registerLocalPath(
       code: 'confirmation-required',
       location: inspection.location,
       home: outcome.home,
+      ...(outcome.userLevel === null ? {} : { userLevel: outcome.userLevel }),
       overlaps: await markUserLevelOverlaps(inspection.location, outcome.overlaps, options),
     };
   }
