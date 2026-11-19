@@ -14,12 +14,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
   CLAUDE_CODE_ADAPTER_ID,
   ClaudeCodeAdapter,
+  installClaudeArtifact,
   type ClaudeCodeAdapterOptions,
 } from '../../src/claude-code';
 import type { AgentRunRequest } from '../../src/contract';
 import { pinWorkspace } from '../../src/workspace-pin';
 import { writeFakeClaude, type FakeClaude, type FakeClaudeOptions } from './fake-claude';
-import { bundle, fixture } from './helpers';
+import { bundle, fixture, recording325 } from './helpers';
 
 const posix = describe.skipIf(process.platform === 'win32');
 
@@ -79,9 +80,16 @@ function harness(fakeOptions: FakeClaudeOptions = {}): Harness {
       mkdirSync(workspaceDir);
       mkdirSync(scratchDir);
       writeFileSync(join(workspaceDir, 'README.md'), 'Plain fixture file.\n');
+      const workspace = await pinWorkspace(workspaceDir);
+      // Like the engine's candidate workspace, the default skill is installed unless the test
+      // names another artifact or its own installed paths (a `none` baseline installs nothing).
+      const installedPaths =
+        overrides.artifact === undefined && overrides.installedPaths === undefined
+          ? (await installClaudeArtifact(workspace, SKILL)).paths
+          : [];
       return {
-        workspace: await pinWorkspace(workspaceDir),
-        installedPaths: [],
+        workspace,
+        installedPaths,
         scratchDir,
         artifact: SKILL,
         baselineArtifact: null,
@@ -140,7 +148,7 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
 
   it('installs through the §4.1 convention into the pinned workspace', async () => {
     const h = harness();
-    const request = await h.request();
+    const request = await h.request({ installedPaths: [] });
     const installed = await h.adapter().installArtifact(request.workspace, SKILL);
     expect(installed.paths).toEqual(['.claude/skills/pdf/SKILL.md']);
   });
@@ -387,6 +395,31 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     },
   );
 
+  it('ends a run without the skill installed when the session lists the skill name itself (issue 275)', async () => {
+    // `ultrareview` passes the static 2.1.302 list; the recorded 2.1.325 session lists it.
+    const h = harness();
+    h.fake.setStream(recording325('live-subscription-reserved-doctor'));
+    const artifact = bundle('skill-md', { 'SKILL.md': '---\nname: ultrareview\n---\nBody\n' });
+    const result = await h.adapter().run(await h.request({ artifact, installedPaths: [] }));
+    expect(result).toMatchObject({
+      status: 'infrastructure-error',
+      errorCode: 'skill-name-reserved',
+      metadata: { installedSkillName: 'ultrareview', executionModel: 'claude-haiku-5-5' },
+    });
+    expect(result.error).toContain(
+      'Claude Code lists the skill name "ultrareview" itself: this agent run installed no skill',
+    );
+    expect(h.fake.invoked()).toBe(true);
+
+    // With the skill installed the single entry is the installed skill's own: no refusal.
+    const installedRun = await h.request({ artifact });
+    const installed = await h.adapter().installArtifact(installedRun.workspace, artifact);
+    const withSkill = await h
+      .adapter()
+      .run({ ...installedRun, installedPaths: installed.paths });
+    expect(withSkill.errorCode).not.toBe('skill-name-reserved');
+  });
+
   it('refuses a baseline whose skill name differs (FR-118-08)', async () => {
     const h = harness();
     const baseline = bundle(
@@ -449,7 +482,7 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
 
   it('ends a run the pre-spawn inspection refuses before claude starts (FR-118-06)', async () => {
     const h = harness();
-    const request = await h.request();
+    const request = await h.request({ installedPaths: [] });
     mkdirSync(join(request.workspace.path, '.claude'));
     writeFileSync(join(request.workspace.path, '.claude/settings.local.json'), '{}');
     const result = await h.adapter().run(request);

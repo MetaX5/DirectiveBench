@@ -264,6 +264,49 @@ export interface ClaudeRunConditions {
   skill: boolean;
   /** `skill-md` runs only: the installed skill's resolved name, recorded in the metadata. */
   skillName?: string;
+  /**
+   * `skill-md` runs only: false when this agent run installed nothing (the baseline of a `none`
+   * run), where the session must not list the skill name at all (SPEC-203 §4.1, issue 275).
+   * Absent counts as installed.
+   */
+  skillInstalled?: boolean;
+}
+
+/** The lists of `system/init` that hold the name, for a message. */
+function listedIn(entries: { skills: number; slashCommands: number }, minimum: number): string {
+  const lists = [
+    ...(entries.skills >= minimum ? ['skills'] : []),
+    ...(entries.slashCommands >= minimum ? ['slash_commands'] : []),
+  ];
+  return lists.join(' and ');
+}
+
+const RENAME_HINT =
+  'Rename the skill (its frontmatter `name`, or its folder when it has none).';
+
+/**
+ * Why the session's own start shows that Claude Code lists the skill name itself, or null: the
+ * run-time line behind the static plan-time list (SPEC-203 §4.1, SPEC-118 FR-118-08, issue 275).
+ * `system/init` lists an installed skill once in `skills` and once in `slash_commands`, and a
+ * name the CLI owns as well is listed only once (live check, `claude` 2.1.325), so the two cannot
+ * be told apart in a run that installed the skill. They can in a run that installed nothing (the
+ * baseline of a `none` run): any entry of the name there is the CLI's own. A run with the skill
+ * installed still fails closed on a name listed more than once.
+ */
+export function claudeSkillNameCollision(
+  parsed: ParsedClaudeStream,
+  conditions: ClaudeRunConditions,
+): string | null {
+  const name = conditions.skillName;
+  const init = parsed.init;
+  if (name === undefined || init === null) return null;
+  const entries = init.skillNameEntries;
+  if (conditions.skillInstalled === false) {
+    if (entries.skills === 0 && entries.slashCommands === 0) return null;
+    return `Claude Code lists the skill name "${name}" itself: this agent run installed no skill, yet the session start (system/init) lists the name in ${listedIn(entries, 1)}. A run with the skill could measure the CLI's own skill or command instead of the tested skill. ${RENAME_HINT}`;
+  }
+  if (entries.skills <= 1 && entries.slashCommands <= 1) return null;
+  return `Claude Code lists the skill name "${name}" more than once in the session start (system/init ${listedIn(entries, 2)}): a skill or command of the CLI shares the name with the installed skill, so the run could measure the CLI's own instead of the tested skill. ${RENAME_HINT}`;
 }
 
 /** Placeholder model for a model set that exceeded its bound, so the run cannot compare equal. */
@@ -314,6 +357,12 @@ export function claudeRunOutcome(
   knownSecrets: readonly string[] = [],
 ): Omit<AgentRunResult, 'durationMs'> {
   const classification = classifyClaudeRun(parsed, exit, conditions.authMode, knownSecrets);
+  // A name the CLI lists itself wins over the stream's own outcome: the run measured an unknown
+  // skill, whatever it did (issue 275).
+  const collision = claudeSkillNameCollision(parsed, conditions);
+  const status = collision === null ? classification.status : 'infrastructure-error';
+  const error = collision ?? classification.error;
+  const errorCode = collision === null ? classification.errorCode : 'skill-name-reserved';
   const usage = parsed.usage ? { ...parsed.usage } : null;
   if (usage && conditions.authMode === 'subscription') delete usage.costUsd;
   const skillActivation = conditions.skill ? claudeSkillActivation(parsed) : undefined;
@@ -325,14 +374,14 @@ export function claudeRunOutcome(
     });
   }
   return {
-    status: classification.status,
+    status,
     summary:
-      classification.error ??
+      error ??
       `Claude Code finished${parsed.result?.numTurns != null ? ` after ${parsed.result.numTurns} turn(s)` : ''}.`,
     trace,
     usage: usage && Object.keys(usage).length > 0 ? usage : null,
-    error: classification.error,
-    ...(classification.errorCode === null ? {} : { errorCode: classification.errorCode }),
+    error,
+    ...(errorCode === null ? {} : { errorCode }),
     warnings: classification.warnings,
     metadata: claudeRunMetadata(parsed, conditions),
     ...(skillActivation ? { skillActivation } : {}),

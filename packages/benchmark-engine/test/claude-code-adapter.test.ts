@@ -51,7 +51,8 @@ interface Fake {
 /**
  * A fake `claude`: `--version` and the readiness probe answer like the CLI; print mode records
  * argv, environment and working directory, reads the prompt, writes `output.md` and replays
- * `streams/<n>.ndjson` for its n-th start (else `streams/default.ndjson`).
+ * `streams/<n>.ndjson` for its n-th start (else `streams/default.ndjson`), without `pdf` in the
+ * `system/init` lists when the workspace has no `.claude/skills/pdf` (a `none` baseline).
  */
 function fakeClaude(root: string, streams: Record<string, string>, shebang = '#!/bin/sh'): Fake {
   const binDir = join(root, 'bin');
@@ -79,7 +80,9 @@ function fakeClaude(root: string, streams: Record<string, string>, shebang = '#!
       'pwd -P > "$dir/cwd"',
       'cat > /dev/null',
       "printf '# Report\\n' > output.md",
-      `if [ -f '${streamDir}'/$n.ndjson ]; then cat '${streamDir}'/$n.ndjson; else cat '${streamDir}/default.ndjson'; fi`,
+      // Like the CLI, the session start lists the project skill `pdf` only when it is installed.
+      `if [ -d .claude/skills/pdf ]; then strip=''; else strip='/"subtype": "init"/s/"pdf", //g'; fi`,
+      `if [ -f '${streamDir}'/$n.ndjson ]; then sed "$strip" '${streamDir}'/$n.ndjson; else sed "$strip" '${streamDir}/default.ndjson'; fi`,
       'exit 0',
       '',
     ].join('\n'),
@@ -388,6 +391,27 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(readFileSync(marker, 'utf8')).toBe('--version\n');
     expect(outcome.summary.verdict).toBe('not-comparable');
     expect(outcome.summary.reasons.join('\n')).toContain('agent version changed during the run');
+  });
+
+  it('stops a none run whose baseline session lists the skill name itself (issue 275)', async () => {
+    // The recorded 2.1.325 session lists the built-in `/ultrareview`, which the static 2.1.302
+    // list misses; the first agent run (baseline, nothing installed) shows the collision.
+    const recorded = readFileSync(
+      join(STREAMS, '../2.1.325/live-subscription-reserved-doctor.ndjson'),
+      'utf8',
+    );
+    const { fake, records, result } = await scenario('cc-runtime-reserved', {
+      streams: { default: recorded },
+      artifact: artifact({
+        'SKILL.md': '---\nname: ultrareview\ndescription: Writes reports\n---\nBody\n',
+      }),
+      suite: { repetitions: 2 },
+    });
+    const error = stopped(result, 'skill-name-reserved');
+    expect(error.message).toContain('baseline repetition 1 (skill-name-reserved)');
+    expect(summary(records)).toEqual([['baseline', 'infrastructure-error', 'skill-name-reserved']]);
+    expect(records[0]?.error).toContain('Claude Code lists the skill name "ultrareview" itself');
+    expect(fake.starts()).toHaveLength(1);
   });
 
   it('refuses a run whose launcher interpreter a setup command planted earlier on PATH (Codex round 3)', async () => {

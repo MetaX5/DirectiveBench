@@ -312,7 +312,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           requestedModel: request.model?.model ?? null,
           flagsHash,
           skill: skillName !== undefined,
-          ...(skillName === undefined ? {} : { skillName }),
+          // The baseline of a `none` run installs nothing: the session must not list the name.
+          ...(skillName === undefined
+            ? {}
+            : { skillName, skillInstalled: request.installedPaths.length > 0 }),
         },
         secrets,
       );
