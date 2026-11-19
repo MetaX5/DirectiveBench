@@ -61,6 +61,11 @@ and a Playwright test that checks a CRLF fixture byte for byte.
    identical status may not be re-announced) is shared with the hash Copy button and left as a
    follow-up.
 
+6. `om-auto-review-pr 294 --autofix` (engine `om-code-review`): one minor finding, fixed. The
+   empty Copy status line was `display: none` (`empty:hidden`); a live region outside the
+   accessibility tree may not announce the text it then gets, so it is `empty:sr-only` now.
+   Regression test red first (`not.toHaveCSS('display', 'none')` failed with `empty:hidden`).
+
 ## Verification
 
 | Command | Result |

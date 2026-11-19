@@ -139,6 +139,9 @@ test.describe.serial('exact bytes from the Content tab (issue #52)', () => {
       navigator.clipboard.writeText = () => Promise.reject(new DOMException('denied'));
     });
     await openContentTab(page);
+    // The empty live region stays in the accessibility tree (sr-only, never display: none), so
+    // screen readers announce the text it gets.
+    await expect(page.getByTestId('copy-file-status')).not.toHaveCSS('display', 'none');
     await page.getByRole('button', { name: 'Copy the content of SKILL.md' }).click();
     await expect(page.getByTestId('copy-file-status')).toHaveText(
       'Not copied: the browser blocked the clipboard. Use Download instead.',
