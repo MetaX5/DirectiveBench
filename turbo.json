@@ -13,7 +13,8 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/test-support/**",
-        "$TURBO_ROOT$/vitest.shared.ts"
+        "$TURBO_ROOT$/vitest.shared.ts",
+        "$TURBO_ROOT$/eslint.config.mjs"
       ],
       "outputs": ["coverage/**"]
     },
