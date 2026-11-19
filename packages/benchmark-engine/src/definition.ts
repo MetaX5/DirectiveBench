@@ -241,6 +241,29 @@ export const benchmarkCaseSchema = z
   });
 export type BenchmarkCase = z.infer<typeof benchmarkCaseSchema>;
 
+const NUL_TEXT_MESSAGE = 'must not contain a NUL character (U+0000)';
+const NUL_KEY_MESSAGE = 'must not have a key that contains a NUL character (U+0000)';
+
+/**
+ * Adds an issue for every string value or object key holding U+0000 (FR-108-17, issue 273).
+ * Suite text is stored in TEXT columns, which refuse NUL (SPEC-006 §1 "Text"), and the rest
+ * becomes process arguments or files, so no string anywhere in a definition may hold it. YAML
+ * `"\0"` produces U+0000 although the file holds no NUL byte.
+ */
+function refuseNulText(value: unknown, path: (string | number)[], ctx: z.RefinementCtx): void {
+  if (typeof value === 'string') {
+    if (value.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_TEXT_MESSAGE });
+  } else if (Array.isArray(value)) {
+    value.forEach((item, index) => refuseNulText(item, [...path, index], ctx));
+  } else if (typeof value === 'object' && value !== null) {
+    for (const [key, item] of Object.entries(value)) {
+      // The issue path never repeats the NUL: it names the object that holds the key.
+      if (key.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_KEY_MESSAGE });
+      refuseNulText(item, [...path, key], ctx);
+    }
+  }
+}
+
 export const benchmarkDefinitionSchema = z
   .object({
     schemaVersion: z.literal(CURRENT_SCHEMA_VERSION),
@@ -289,6 +312,7 @@ export const benchmarkDefinitionSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    refuseNulText(value, [], ctx);
     const seen = new Set<string>();
     value.cases.forEach((c, index) => {
       if (seen.has(c.id)) {

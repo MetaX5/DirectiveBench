@@ -4,6 +4,7 @@ import {
   MAX_ARTIFACT_TAGS,
 } from '@directivebench/database';
 import { z } from 'zod';
+import { hasNoNul, idSchema } from './form-input';
 
 /**
  * What an artifact's Tags, Notes or Benchmarks form shows after a submit (SPEC-101 §11, issue
@@ -28,8 +29,6 @@ export const SUITE_GONE_MESSAGE =
   'This suite no longer exists. Reload the page to see the current list.';
 
 const CONTROL_CHARACTER = /\p{Cc}/u;
-
-const idSchema = z.string().min(1);
 
 /**
  * A tag is free text, trimmed and lower-cased (FR-101-07). Commas and control characters are
@@ -61,7 +60,8 @@ export const removeTagSchema = z.object({ artifactId: idSchema, tag: z.string().
 
 /**
  * Browsers submit a textarea's line breaks as CR LF; notes are stored with LF, as typed. Notes
- * that are only whitespace are cleared (`null`).
+ * that are only whitespace are cleared (`null`). Line breaks and tabs are kept, U+0000 is refused
+ * (issue 273).
  */
 export const notesSchema = z.object({
   artifactId: idSchema,
@@ -74,7 +74,8 @@ export const notesSchema = z.object({
         .max(
           MAX_ARTIFACT_NOTES_LENGTH,
           `Notes can be at most ${MAX_ARTIFACT_NOTES_LENGTH.toLocaleString('en-US')} characters. Shorten them.`,
-        ),
+        )
+        .refine(hasNoNul, 'Notes cannot contain a NUL character (U+0000). Remove it.'),
     )
     .transform((value) => (value.trim() === '' ? null : value)),
 });

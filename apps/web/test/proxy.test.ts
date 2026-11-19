@@ -71,6 +71,25 @@ describe('proxy (DNS-rebinding protection)', () => {
     expect(proxy(request('bench.local')).status).toBe(403);
   });
 
+  it('refuses a path holding an encoded U+0000 before any page reads it (issue 273)', async () => {
+    const { proxy } = await loadProxy();
+    for (const path of ['/results/%00', '/benchmarks/a%00b/', '/results/run_1/agent-runs/%00']) {
+      const response = proxy(
+        new NextRequest(`http://127.0.0.1:3210${path}`, { headers: { host: 'localhost' } }),
+      );
+      expect(response.status).toBe(400);
+      expect(isForwarded(response)).toBe(false);
+      expect(await response.text()).toBe(
+        'Bad request: the address contains a NUL character (U+0000).',
+      );
+    }
+    // `%2500` is the text "%00", not a NUL character.
+    const literal = proxy(
+      new NextRequest('http://127.0.0.1:3210/results/%2500', { headers: { host: 'localhost' } }),
+    );
+    expect(isForwarded(literal)).toBe(true);
+  });
+
   it('runs for every path', async () => {
     const { config } = await loadProxy();
     expect(config).toEqual({ matcher: '/:path*' });

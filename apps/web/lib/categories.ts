@@ -23,6 +23,7 @@ import {
   type MetadataFormState,
 } from './artifact-metadata';
 import { artifactListFields, parseArtifactListForm } from './artifacts';
+import { idSchema } from './form-input';
 import { formatCount } from './utils';
 
 // Validation, messages and display rules of the category forms and pages (SPEC-124 §8.3, §11,
@@ -92,8 +93,6 @@ export const categoryDescriptionSchema = z
       ),
   )
   .transform((value) => (value === '' ? null : value));
-
-const idSchema = z.string().min(1);
 
 export const createCategorySchema = z.object({
   name: categoryNameSchema,

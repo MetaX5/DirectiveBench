@@ -158,6 +158,67 @@ describe('definition rules', () => {
   });
 });
 
+describe('U+0000 in definitions (issue 273)', () => {
+  const NUL_MESSAGE = 'must not contain a NUL character (U+0000)';
+
+  it('names every string field holding U+0000, wherever it is', () => {
+    const base = document();
+    const [firstCase] = base.cases;
+    const issues = issuePaths({
+      ...base,
+      name: 'Suite\0hidden',
+      description: '\0',
+      technologies: ['ts', 'js\0'],
+      execution: { agent: 'mock', model: { provider: 'p', model: 'm\0' } },
+      cases: [
+        {
+          ...firstCase,
+          name: 'C\0',
+          prompt: 'p\0',
+          setup: [['echo', 'a\0']],
+          agentOptions: { mock: { playbook: [{ write: 'x\0' }] }, 'key\0': 1 },
+        },
+      ],
+    });
+    expect(issues).toEqual([
+      `name: ${NUL_MESSAGE}`,
+      `description: ${NUL_MESSAGE}`,
+      `technologies.1: ${NUL_MESSAGE}`,
+      `execution.model.model: ${NUL_MESSAGE}`,
+      `cases.0.name: ${NUL_MESSAGE}`,
+      `cases.0.prompt: ${NUL_MESSAGE}`,
+      `cases.0.setup.0.1: ${NUL_MESSAGE}`,
+      `cases.0.agentOptions.mock.playbook.0.write: ${NUL_MESSAGE}`,
+      'cases.0.agentOptions: must not have a key that contains a NUL character (U+0000)',
+    ]);
+  });
+
+  it('refuses a YAML "\\0" escape in the suite name, although the file holds no NUL byte', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: "Suite\\0"\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }] }\n`;
+    expect(yaml.includes('\0')).toBe(false);
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [{ path: 'name', message: NUL_MESSAGE }],
+    });
+  });
+
+  it('accepts the two characters backslash and zero, as in a regular expression', () => {
+    const base = document();
+    const [firstCase] = base.cases;
+    expect(
+      issuePaths({
+        ...base,
+        cases: [
+          {
+            ...firstCase,
+            assertions: [{ id: 'a', type: 'file-contains', path: 'a.txt', pattern: 'a\\0' }],
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe('loading definitions', () => {
   it('reports root-level issues for documents that are not objects', () => {
     for (const input of [null, 'text', [1, 2]]) {
