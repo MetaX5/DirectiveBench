@@ -202,6 +202,30 @@ describe('U+0000 in definitions (issue 273)', () => {
     });
   });
 
+  it('reports a YAML alias cycle as an issue instead of overflowing the stack (Codex review)', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: Suite\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }], agentOptions: { mock: &loop { nested: [*loop] } } }\n`;
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [
+        {
+          path: 'cases.0.agentOptions.mock.nested.0',
+          message: 'must not refer to itself (a YAML alias cycle)',
+        },
+      ],
+    });
+  });
+
+  it('checks a value shared by two YAML aliases at each place it is used', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: Suite\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }], agentOptions: { a: &shared { text: "x\\0" }, b: *shared } }\n`;
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [
+        { path: 'cases.0.agentOptions.a.text', message: NUL_MESSAGE },
+        { path: 'cases.0.agentOptions.b.text', message: NUL_MESSAGE },
+      ],
+    });
+  });
+
   it('accepts the two characters backslash and zero, as in a regular expression', () => {
     const base = document();
     const [firstCase] = base.cases;

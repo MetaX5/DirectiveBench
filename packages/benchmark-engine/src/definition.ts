@@ -243,24 +243,41 @@ export type BenchmarkCase = z.infer<typeof benchmarkCaseSchema>;
 
 const NUL_TEXT_MESSAGE = 'must not contain a NUL character (U+0000)';
 const NUL_KEY_MESSAGE = 'must not have a key that contains a NUL character (U+0000)';
+const CYCLE_MESSAGE = 'must not refer to itself (a YAML alias cycle)';
 
 /**
  * Adds an issue for every string value or object key holding U+0000 (FR-108-17, issue 273).
  * Suite text is stored in TEXT columns, which refuse NUL (SPEC-006 §1 "Text"), and the rest
  * becomes process arguments or files, so no string anywhere in a definition may hold it. YAML
- * `"\0"` produces U+0000 although the file holds no NUL byte.
+ * `"\0"` produces U+0000 although the file holds no NUL byte. `ancestors` holds the arrays and
+ * objects on the current path: a YAML alias can make `agentOptions` (`z.unknown()`) refer to
+ * itself, which is reported instead of recursing forever; a value shared by two aliases is
+ * checked at each place it is used.
  */
-function refuseNulText(value: unknown, path: (string | number)[], ctx: z.RefinementCtx): void {
+function refuseNulText(
+  value: unknown,
+  path: (string | number)[],
+  ctx: z.RefinementCtx,
+  ancestors: ReadonlySet<object> = new Set(),
+): void {
   if (typeof value === 'string') {
     if (value.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_TEXT_MESSAGE });
-  } else if (Array.isArray(value)) {
-    value.forEach((item, index) => refuseNulText(item, [...path, index], ctx));
-  } else if (typeof value === 'object' && value !== null) {
-    for (const [key, item] of Object.entries(value)) {
-      // The issue path never repeats the NUL: it names the object that holds the key.
-      if (key.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_KEY_MESSAGE });
-      refuseNulText(item, [...path, key], ctx);
-    }
+    return;
+  }
+  if (typeof value !== 'object' || value === null) return;
+  if (ancestors.has(value)) {
+    ctx.addIssue({ code: 'custom', path, message: CYCLE_MESSAGE });
+    return;
+  }
+  const inner = new Set(ancestors).add(value);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => refuseNulText(item, [...path, index], ctx, inner));
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    // The issue path never repeats the NUL: it names the object that holds the key.
+    if (key.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_KEY_MESSAGE });
+    refuseNulText(item, [...path, key], ctx, inner);
   }
 }
 
