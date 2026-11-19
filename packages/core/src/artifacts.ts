@@ -115,6 +115,23 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
+/**
+ * A frontmatter string as {@link stringOrNull}, but a value holding U+0000 is invalid: it is
+ * ignored with a warning (issue 265). YAML turns `"\0"` into U+0000 although the file bytes hold
+ * no NUL, and the database refuses text holding NUL because `node:sqlite` on Node 22 truncates it
+ * on read.
+ */
+function frontmatterText(
+  frontmatter: Record<string, unknown>,
+  key: 'name' | 'description',
+  warnings: string[],
+): string | null {
+  const text = stringOrNull(frontmatter[key]);
+  if (!text?.includes('\0')) return text;
+  warnings.push(`Frontmatter \`${key}\` contains a NUL character (U+0000) and is ignored`);
+  return null;
+}
+
 function toGlobList(value: unknown): string[] | undefined {
   if (typeof value === 'string') {
     const parts = value
@@ -130,9 +147,11 @@ function toGlobList(value: unknown): string[] | undefined {
   return undefined;
 }
 
+/** The first `# ` heading, or null when there is none or it holds U+0000 (issue 265). */
 function firstHeading(body: string): string | null {
   const match = /^#\s+(.+)$/m.exec(body);
-  return match?.[1]?.trim() ?? null;
+  const heading = match?.[1]?.trim() ?? null;
+  return heading?.includes('\0') ? null : heading;
 }
 
 function extractReferences(body: string): string[] {
@@ -162,13 +181,17 @@ export function parseArtifactFile(relPath: string, content: string): ParsedArtif
   const path = normalize(relPath);
   const activation: ArtifactActivation = {};
   let name: string | null = null;
-  let description = stringOrNull(frontmatter.description);
+  let description = frontmatterText(frontmatter, 'description', warnings);
 
   switch (classification.format) {
     case 'skill-md': {
-      name = stringOrNull(frontmatter.name);
-      if (!name) warnings.push('SKILL.md has no `name` in frontmatter');
-      if (!description) warnings.push('SKILL.md has no `description` in frontmatter');
+      name = frontmatterText(frontmatter, 'name', warnings);
+      if (!name && !stringOrNull(frontmatter.name)) {
+        warnings.push('SKILL.md has no `name` in frontmatter');
+      }
+      if (!description && !stringOrNull(frontmatter.description)) {
+        warnings.push('SKILL.md has no `description` in frontmatter');
+      }
       if (description) activation.description = description;
       name ??= classification.rootDir ? posix.basename(classification.rootDir) : 'skill';
       break;

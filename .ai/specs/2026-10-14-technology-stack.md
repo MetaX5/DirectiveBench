@@ -3,7 +3,7 @@ id: SPEC-004
 title: Technology Stack
 status: draft
 created: 2026-10-14
-updated: 2026-11-17
+updated: 2026-11-19
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-009, SPEC-010, SPEC-012]
 ---
@@ -55,7 +55,8 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 
 - `node:sqlite` is usable without `--experimental-sqlite` from Node 22.13.0.
 - The database client (`packages/database/src/client.ts`) calls `StatementSync#setReturnArrays`, added in Node 22.16.0 / 24.0.0, because Drizzle `sqlite-proxy` expects rows as arrays. Therefore `engines.node` is **`>=22.16.0`** (as declared in the root `package.json`), not `>=22.13.0`.
-- Node 24 runs the full suite. Node 22.16.0 (SQLite 3.49.1) runs the `packages/*` tests, `pnpm build` and `pnpm verify:pack` in the CI job `oldest-node` ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions)); the `apps/cli` and `apps/web` unit tests do not pass there yet (issues #265, #266). Node versions between 22.16 and 24 are not tested individually.
+- Node 24 runs the full suite. Node 22.16.0 (SQLite 3.49.1) runs the `packages/*` and `apps/cli` unit tests, `pnpm build` and `pnpm verify:pack` in the CI job `oldest-node` ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions)); the `apps/web` unit tests do not pass there yet (issue #266). Node versions between 22.16 and 24 are not tested individually.
+- On Node 22 (every release up to 22.23.5), `node:sqlite` returns a TEXT value only up to its first U+0000; SQLite stores it whole. nodejs/node#61954 fixed the read in Node 24.16.0 and Node 26 only, and Node 22's `StatementSync` cannot read TEXT as bytes. The floor stays 22.16.0; stored text never holds U+0000 instead ([SPEC-006 §1](2026-10-14-database-schema.md#1-conventions), issue 265).
 - The runtime check compares the Node version against 22.16.0 for every command (exit 3); `doctor` additionally feature-detects `node:sqlite` by preparing a statement and calling `setReturnArrays`.
 - `node:sqlite` may emit an `ExperimentalWarning` on some Node versions; if so, the CLI suppresses only that specific warning.
 
