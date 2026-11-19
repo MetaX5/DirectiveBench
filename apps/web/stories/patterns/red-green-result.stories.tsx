@@ -262,6 +262,7 @@ export const ReservedNameCheck: Story = {
         usage: { inputTokens: 7100, outputTokens: 4 },
         adapterVersion: '2.1.325 (Claude Code)',
         executionModel: 'claude-haiku-5-5',
+        passed: true,
         ...overrides,
       },
     });
@@ -276,6 +277,7 @@ export const ReservedNameCheck: Story = {
           errorCode: 'skill-name-reserved',
           durationMs: 910,
           usage: null,
+          passed: false,
         }),
       },
     ];
@@ -293,7 +295,9 @@ export const ReservedNameCheck: Story = {
             <Card>
               <CardHeader>
                 <CardTitle>Environment and versions</CardTitle>
-                <CardDescription>Every result references exact, immutable versions.</CardDescription>
+                <CardDescription>
+                  Every result references exact, immutable versions.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <dl className="grid gap-1 text-ui md:grid-cols-2">

@@ -9,8 +9,7 @@ import { withDatabase } from './support';
  * in "Environment and versions", only for a run that had it. Seeded runs only, removed after.
  */
 
-const PASSED =
-  'Passed: 1 extra session without the skill (not scored), 1.0 s, 7,104 tokens';
+const PASSED = 'Passed: 1 extra session without the skill (not scored), 1.0 s, 7,104 tokens';
 const STOPPED =
   'Stopped the run (skill-name-reserved): 1 extra session without the skill (not scored), 910 ms';
 
@@ -23,6 +22,7 @@ function storeCheck(db: DatabaseSync, overrides: Record<string, unknown>): void 
     usage: { inputTokens: 7100, outputTokens: 4 },
     adapterVersion: '2.1.325 (Claude Code)',
     executionModel: 'claude-haiku-5-5',
+    passed: true,
     ...overrides,
   };
   db.prepare('update benchmark_runs set environment = ? where id = ?').run(
@@ -56,6 +56,7 @@ test('an A/B run shows its reserved-name check; a none run shows none', async ({
       errorCode: 'skill-name-reserved',
       durationMs: 910,
       usage: null,
+      passed: false,
     }),
   );
   await page.goto(`/results/${RUN.v2Ab}`);

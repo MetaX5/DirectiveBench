@@ -76,6 +76,8 @@ const COMPLETED: Omit<AgentRunResult, 'durationMs'> = {
     auxiliaryModels: [],
     mismatchedMessageModels: [],
     flagsHash: 'flags',
+    installedSkillName: 'validate-external-input',
+    nameListsReported: true,
   },
 };
 
@@ -184,6 +186,7 @@ describe('reserved-name check of an A/B run (issue 280)', () => {
         usage: { inputTokens: 7100, outputTokens: 4, costUsd: 0.0006 },
         adapterVersion: '2.1.325 (Claude Code)',
         executionModel: 'claude-test-model',
+        passed: true,
       },
     ]);
   }, 60_000);
@@ -252,6 +255,7 @@ describe('reserved-name check of an A/B run (issue 280)', () => {
         usage: null,
         adapterVersion: null,
         executionModel: null,
+        passed: false,
       },
     ]);
   });
@@ -270,6 +274,23 @@ describe('reserved-name check of an A/B run (issue 280)', () => {
         'the session did not report its start (system/init), so the names it lists are unknown',
       );
       expect(runs).toEqual([]);
+    }
+  });
+
+  it('fails closed when the session start did not report the name lists (Codex round 1)', async () => {
+    for (const nameListsReported of [false, undefined]) {
+      const { adapter, runs } = harness(async () => {
+        const metadata = { ...COMPLETED.metadata!, nameListsReported };
+        if (nameListsReported === undefined) delete metadata.nameListsReported;
+        return { ...COMPLETED, durationMs: 5, metadata };
+      });
+      const run = await input(adapter);
+      const error = await runBenchmark(run).catch((caught: unknown) => caught);
+      expect(stopped(error, RESERVED_NAME_CHECK_FAILED).message).toContain(
+        'the session start (system/init) did not report the names the agent lists itself, so they cannot be checked',
+      );
+      expect(runs).toEqual([]);
+      expect(run.records).toMatchObject([{ status: 'completed', passed: false }]);
     }
   });
 

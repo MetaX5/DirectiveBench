@@ -313,6 +313,7 @@ describe('runReport and reportText: the reserved-name check (issue 280)', () => 
       usage: { inputTokens: 2, outputTokens: 4, costUsd: 0.01 },
       adapterVersion: '2.1.325 (Claude Code)',
       executionModel: 'claude-haiku-5-5',
+      passed: true,
       ...overrides,
     },
   });
@@ -352,19 +353,24 @@ describe('runReport and reportText: the reserved-name check (issue 280)', () => 
   it('reports a check that stopped the run with its code or the fallback, and a cancelled one', () => {
     const cases: [Record<string, unknown>, string][] = [
       [
-        { status: 'infrastructure-error', errorCode: 'skill-name-reserved', durationMs: 910 },
+        {
+          status: 'infrastructure-error',
+          errorCode: 'skill-name-reserved',
+          durationMs: 910,
+          passed: false,
+        },
         'Reserved-name check: stopped the run (skill-name-reserved; 1 extra session, not scored, 0.9 s)',
       ],
       [
-        { status: 'timeout', usage: null },
+        { status: 'timeout', usage: null, passed: false },
         'Reserved-name check: stopped the run (reserved-name-check-failed; 1 extra session, not scored, 1.0 s)',
       ],
       [
-        { executionModel: null },
+        { executionModel: null, passed: false },
         'Reserved-name check: stopped the run (reserved-name-check-failed; 1 extra session, not scored, 1.0 s)',
       ],
       [
-        { status: 'cancelled', usage: null },
+        { status: 'cancelled', usage: null, passed: false },
         'Reserved-name check: cancelled (1 extra session, not scored, 1.0 s)',
       ],
     ];

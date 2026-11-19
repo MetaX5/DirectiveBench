@@ -242,6 +242,7 @@ describe('A/B baseline in the runner (SPEC-118 FR-118-11…13)', () => {
               auxiliaryModels: [],
               mismatchedMessageModels: [],
               flagsHash: 'flags',
+              nameListsReported: true,
             },
             ...checkEnd,
           };

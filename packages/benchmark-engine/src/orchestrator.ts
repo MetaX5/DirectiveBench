@@ -206,6 +206,11 @@ export interface ReservedNameCheckRecord {
   adapterVersion: string | null;
   /** The session model; null when the session start was not seen. */
   executionModel: string | null;
+  /**
+   * Whether the check passed: a completed session without a code that reported its start and the
+   * names it lists. Stored so every surface shows the engine's own decision.
+   */
+  passed: boolean;
 }
 
 export interface BenchmarkOutcome {
@@ -818,6 +823,16 @@ async function runReservedNameCheck(
       ...(error instanceof ClaudeCodeError ? { errorCode: error.code } : {}),
     };
   }
+  let detail: string | null = null;
+  if (result.status !== 'completed' || result.errorCode !== undefined) {
+    detail = result.error ?? result.summary;
+  } else if ((result.metadata?.executionModel ?? null) === null) {
+    detail =
+      'the session did not report its start (system/init), so the names it lists are unknown';
+  } else if (result.metadata?.nameListsReported !== true) {
+    detail =
+      'the session start (system/init) did not report the names the agent lists itself, so they cannot be checked';
+  }
   const record: ReservedNameCheckRecord = {
     status: result.status,
     errorCode: result.errorCode ?? null,
@@ -826,16 +841,10 @@ async function runReservedNameCheck(
     usage: result.usage ? { ...result.usage } : null,
     adapterVersion: result.metadata?.adapterVersion ?? null,
     executionModel: result.metadata?.executionModel ?? null,
+    passed: detail === null,
   };
   await input.onReservedNameCheck?.(record);
   if (input.signal.aborted || result.status === 'cancelled') throw new BenchmarkCancelledError();
-  let detail: string | null = null;
-  if (result.status !== 'completed' || result.errorCode !== undefined) {
-    detail = result.error ?? result.summary;
-  } else if (record.executionModel === null) {
-    detail =
-      'the session did not report its start (system/init), so the names it lists are unknown';
-  }
   if (detail === null) return;
   const code = record.errorCode ?? RESERVED_NAME_CHECK_FAILED;
   throw new BenchmarkStoppedError(

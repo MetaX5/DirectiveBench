@@ -489,11 +489,36 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     // Apart from the run-local directories, the same environment.
     const shared = (env: Record<string, string> | undefined) =>
       Object.fromEntries(
-        Object.entries(env ?? {}).filter(([name]) => !['PWD', 'TEMP', 'TMP', 'TMPDIR'].includes(name)),
+        Object.entries(env ?? {}).filter(
+          ([name]) => !['PWD', 'TEMP', 'TMP', 'TMPDIR'].includes(name),
+        ),
       );
     expect(shared(starts[0]?.env)).toEqual(shared(starts[1]?.env));
     expect(Object.keys(shared(starts[0]?.env))).toContain('HOME');
     expect(checks).toMatchObject([{ status: 'completed', errorCode: null }]);
+  });
+
+  it('stops an A/B run whose check session start lists no slash_commands (issue 280, Codex round 1)', async () => {
+    // Without the list, a missing name proves nothing: the check fails closed.
+    const recorded = readFileSync(
+      join(STREAMS, '../2.1.325/live-subscription-reserved-doctor.ndjson'),
+      'utf8',
+    );
+    const init = JSON.parse(recorded.split('\n')[0] as string) as Record<string, unknown>;
+    delete init.slash_commands;
+    const withoutList = [JSON.stringify(init), ...recorded.split('\n').slice(1)].join('\n');
+    const checks: ReservedNameCheckRecord[] = [];
+    const { fake, records, result } = await scenario('cc-ab-no-list', {
+      streams: { default: withoutList },
+      baselineArtifact: olderSkill(),
+      onReservedNameCheck: checks,
+    });
+    expect(stopped(result, 'reserved-name-check-failed').message).toContain(
+      'did not report the names the agent lists itself',
+    );
+    expect(records).toEqual([]);
+    expect(fake.starts()).toHaveLength(1);
+    expect(checks).toMatchObject([{ status: 'completed', errorCode: null, passed: false }]);
   });
 
   it('runs no reserved-name check in a none run (issue 280)', async () => {

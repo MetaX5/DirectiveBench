@@ -212,7 +212,7 @@ const reservedNameCheckSchema = z.object({
   errorCode: z.string().nullable(),
   durationMs: z.number(),
   usage: z.record(z.string(), z.number()).nullable(),
-  executionModel: z.string().nullable(),
+  passed: z.boolean(),
 });
 
 /** The reserved-name check as the summary and `--json` report it (issue 280). */
@@ -221,24 +221,16 @@ export interface ReservedNameCheckReport {
   errorCode: string | null;
   durationMs: number;
   usage: Record<string, number> | null;
-  /** Whether the check passed: a completed session that reported its start, no code. */
+  /** The engine's decision: a completed session that reported its start and name lists. */
   passed: boolean;
 }
 
 /** The run's reserved-name check, or null when it had none or it cannot be read. */
 function reservedNameCheckOf(environment: unknown): ReservedNameCheckReport | null {
-  const parsed = z
-    .object({ reservedNameCheck: reservedNameCheckSchema })
-    .safeParse(environment);
+  const parsed = z.object({ reservedNameCheck: reservedNameCheckSchema }).safeParse(environment);
   if (!parsed.success) return null;
-  const { status, errorCode, durationMs, usage, executionModel } = parsed.data.reservedNameCheck;
-  return {
-    status,
-    errorCode,
-    durationMs,
-    usage,
-    passed: status === 'completed' && errorCode === null && executionModel !== null,
-  };
+  const { status, errorCode, durationMs, usage, passed } = parsed.data.reservedNameCheck;
+  return { status, errorCode, durationMs, usage, passed };
 }
 
 /**

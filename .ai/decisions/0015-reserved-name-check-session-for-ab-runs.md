@@ -40,12 +40,13 @@ usually behind the user's installed version.
    ("Reply with the single word OK."). The adapter applies the existing rule for a session that
    installed nothing: any entry of the skill name in its `system/init` is the CLI's own.
 3. A listed name stops the benchmark run with `skill-name-reserved` before any variant starts.
-   Any other failure of the check (auth, rate limit, timeout, no `system/init`) also stops it,
+   Any other failure of the check (auth, rate limit, timeout, no `system/init`, or a
+   `system/init` without its `skills` or `slash_commands` list) also stops it,
    fail closed, with the session's own code, or `reserved-name-check-failed` when it has none; the
    message says the failure came from the reserved-name check.
 4. The check is never scored and never part of the RED/GREEN or A/B results. Its outcome (status,
-   code, duration, usage, `claude` version and session model) is stored with the benchmark run in
-   its `environment` record as `reservedNameCheck`, without a schema change.
+   code, duration, usage, `claude` version, session model and whether it passed) is stored with
+   the benchmark run in its `environment` record as `reservedNameCheck`, without a schema change.
 
 ## Alternatives considered
 

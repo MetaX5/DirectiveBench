@@ -384,6 +384,7 @@ describe('reservedNameCheckText (issue 280, SPEC-203 §4.1)', () => {
       usage: { inputTokens: 7100, outputTokens: 4 },
       adapterVersion: '2.1.325 (Claude Code)',
       executionModel: 'claude-haiku-5-5',
+      passed: true,
       ...overrides,
     },
   });
@@ -415,15 +416,21 @@ describe('reservedNameCheckText (issue 280, SPEC-203 §4.1)', () => {
   it('describes a check that stopped the run with its code, or the fallback code', () => {
     expect(
       reservedNameCheckText(
-        check({ status: 'infrastructure-error', errorCode: 'skill-name-reserved', usage: null }),
+        check({
+          status: 'infrastructure-error',
+          errorCode: 'skill-name-reserved',
+          usage: null,
+          passed: false,
+        }),
       ),
     ).toBe(
       'Stopped the run (skill-name-reserved): 1 extra session without the skill (not scored), 1.0 s',
     );
-    // A timeout, and a completed session that reported no start, have no code of their own.
+    // A timeout, and a completed session that reported no start or no name lists, have no code
+    // of their own.
     for (const overrides of [
-      { status: 'timeout', usage: null },
-      { executionModel: null, usage: null },
+      { status: 'timeout', usage: null, passed: false },
+      { executionModel: null, usage: null, passed: false },
     ]) {
       expect(reservedNameCheckText(check(overrides))).toBe(
         'Stopped the run (reserved-name-check-failed): 1 extra session without the skill (not scored), 1.0 s',
@@ -432,7 +439,7 @@ describe('reservedNameCheckText (issue 280, SPEC-203 §4.1)', () => {
   });
 
   it('describes a cancelled check', () => {
-    expect(reservedNameCheckText(check({ status: 'cancelled', usage: null }))).toBe(
+    expect(reservedNameCheckText(check({ status: 'cancelled', usage: null, passed: false }))).toBe(
       'Cancelled: 1 extra session without the skill (not scored), 1.0 s',
     );
   });

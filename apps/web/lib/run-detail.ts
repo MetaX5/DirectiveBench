@@ -365,7 +365,8 @@ const reservedNameCheckSchema = z.object({
   errorCode: z.string().nullable(),
   durationMs: z.number(),
   usage: usageSchema.nullable(),
-  executionModel: z.string().nullable(),
+  /** The engine's own decision (a completed session that reported its start and name lists). */
+  passed: z.boolean(),
 });
 
 /** The stop code of a failed check without a code of its own (the engine's fallback). */
@@ -374,8 +375,7 @@ const RESERVED_NAME_CHECK_FAILED = 'reserved-name-check-failed';
 /**
  * The "Reserved-name check" fact of a run (issue 280), from the run's stored `environment`: null
  * for a run without the check (a `none` run, the mock agent, a run stored before it existed),
- * "not reported" for one that cannot be read. Passed only for a completed session that reported
- * its start, exactly as the engine decides.
+ * "not reported" for one that cannot be read. Passed exactly as the engine decided.
  */
 export function reservedNameCheckText(environment: unknown): string | null {
   if (typeof environment !== 'object' || environment === null) return null;
@@ -384,7 +384,7 @@ export function reservedNameCheckText(environment: unknown): string | null {
   if (!parsed.success) return NOT_REPORTED;
   const check = parsed.data;
   let outcome: string;
-  if (check.status === 'completed' && check.errorCode === null && check.executionModel !== null) {
+  if (check.passed) {
     outcome = 'Passed';
   } else if (check.status === 'cancelled') {
     outcome = 'Cancelled';
