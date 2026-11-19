@@ -3,7 +3,7 @@ title: Key the turbo test cache on workspace dependencies (issue 281)
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #281, maintainer request
-status: in-progress
+status: completed
 branch: fix/issue-281-turbo-dependent-test-cache
 specs: [SPEC-004, SPEC-012]
 ---
@@ -68,6 +68,14 @@ See the PR description for the full command/result table. Summary:
   (`Cached: 2 cached, 7 total`); the next run was `FULL TURBO`. `--dry=json`: a `core` change
   misses all 7, a `database` change misses `database`, `runner`, `web`, `directivebench` only.
 - Real `pnpm typecheck` after the change: the same five misses, `core` and `database` hit.
+- `turbo run test --force` (no cache), same machine: with the fix 1m8.8s and 1m9.7s, without it
+  1m7.4s and 1m24.6s; the transit tasks add no measurable time (they run nothing).
+- Gate: `pnpm format:check`, `pnpm lint`, `pnpm typecheck` (7/7), `pnpm test` (7/7; all 152 test
+  files of the forced run passed, 1 skipped), `pnpm build` (2/2) and `pnpm verify:pack` all passed.
+- Codex adversarial review (branch vs `origin/main`), round 1: approve, no material findings.
+
+Not verified: macOS (`unit-macos` runs the same `turbo.json` with `--concurrency=2`; CI covers it),
+and turbo's remote cache (not configured in this repository).
 
 ## Problems and deviations
 
