@@ -15,6 +15,8 @@ export type ClaudeCodeErrorCode =
   | 'budget-invalid'
   /** A skill name an allow rule cannot carry safely (FR-118-08). */
   | 'skill-name-unsupported'
+  /** A skill name Claude Code lists itself, a skill or a built-in slash command (issue 257). */
+  | 'skill-name-reserved'
   /** The artifact format has no Claude Code install convention (SPEC-203 §4.1, FR-118-25). */
   | 'artifact-format-unsupported'
   /** The install target already exists or is not a plain path in the workspace (SPEC-203 §4.1). */
