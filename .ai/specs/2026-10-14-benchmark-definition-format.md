@@ -60,6 +60,7 @@ Benchmarks must be reviewable in pull requests, portable between machines, repro
 | FR-108-14 | **Import** (`prepareSuiteImport`) SHALL snapshot every fixture and overlay directory into `<dataDir>/fixtures/<sha256>/` and compute the suite content hash; identical content re-imported yields the existing suite version ([SPEC-107](2026-10-14-benchmark-engine.md) FR-107-02/03). |
 | FR-108-15 | A definition that runs commands (`definitionRunsCommands`) SHALL require execution approval of its suite version before running ([SPEC-110](2026-10-14-benchmark-execution.md) FR-110-46). |
 | FR-108-16 | Planned ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-06): for a `claude-code` suite, import SHALL refuse fixtures and overlays that contain Claude Code configuration at any depth (`.claude`, `.claude-plugin`, `.mcp.json`, `CLAUDE.local.md`, `.worktreeinclude`, `.claude.json`) and any file whose `@` import token resolves to an existing path outside the fixture (FR-118-27); execution approval does not lift this. |
+| FR-108-17 | No string in a definition SHALL hold U+0000 (NUL), and no object key either: validation reports `<path>: must not contain a NUL character (U+0000)` for each such string (a key: `<path of its object>: must not have a key that contains a NUL character (U+0000)`), alongside the other issues. Suite text is stored in TEXT columns, which refuse NUL ([SPEC-006 §1](2026-10-14-database-schema.md#1-conventions) "Text"), and the rest becomes process arguments or files. YAML `"\0"` produces U+0000 although the file holds no NUL byte; the two characters `\0` (for example in a regular expression) are allowed (issue 273). |
 
 ## 7. Non-functional requirements
 
@@ -363,6 +364,7 @@ flowchart LR
 - `verification.overlay` overwriting a fixture file → allowed and intended for hidden tests.
 - `changed-files` with only `forbidden` → any other change allowed.
 - A suite with no commands (only file assertions) needs no execution approval.
+- `name: "Suite\0"` in YAML → issue `name: must not contain a NUL character (U+0000)` (FR-108-17); nothing is imported.
 
 ## 15. Testing strategy
 
@@ -406,3 +408,4 @@ Per [SPEC-012](2026-10-14-testing-strategy.md):
 - **Implemented (2026-10-22, [SPEC-118](2026-10-22-benchmark-own-skills-s1.md) Phase 1):** the additive assertion types `markdown-sections`, `required-phrases` and `markdown-table-value` with their defaults and validation (invalid patterns and flags at their dotted paths, at least one of `min`/`max`, at most `MAX_MATCHERS_PER_ASSERTION` = 100 headings or phrases, patterns of at most `MAX_PATTERN_LENGTH` = 1 000 characters); existing definitions parse and hash exactly as before (pinned hashes of the three original examples in `test/definition.test.ts`); the specification-only example `examples/benchmarks/document-assertions/` validates and its sample documents are graded in `test/document-assertions.test.ts`.
 - **Partially implemented:** import UI/CLI (only `demo` imports the bundled example).
 - **Not implemented:** export bundles, `benchmark validate`/`import` CLI commands, JSON Schema publication, import-time validation of `agentOptions`, YAML source positions in errors, any v2 migration, docker execution.
+- **Implemented (issue 273, verified on 2026-11-19 by `packages/benchmark-engine/test/definition.test.ts` "U+0000 in definitions (issue 273)" and `directivebench benchmark run` of a YAML suite named `"Suite\0"` with the built CLI):** FR-108-17.
