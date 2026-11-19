@@ -31,6 +31,9 @@ run, in a test constant and in an `eslint.config.mjs` comment.
   (`new ESLint({ overrideConfigFile }).lintText(source, { filePath })`) and asserts both the new
   selectors and the old ones on the same file.
 - Escapes you meant to write may land as the characters they encode; check the bytes.
+- `new ESLint()` is cheap but the first `lintText` loads every plugin of the config: 8.2 s on the
+  loaded CI runner. Warm it up in `beforeAll` with a named timeout and give the cases the same
+  budget, or the first case times out in CI only.
 
 ## How to apply
 

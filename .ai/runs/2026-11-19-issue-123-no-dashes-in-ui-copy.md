@@ -112,6 +112,17 @@ a real screen reader.
 - `git fetch origin main:main` is refused while the main checkout has `main` checked out; the
   Codex review used `--base origin/main` (same commit).
 
+- CI (run 44500030707, "Unit tests (100% coverage)") failed: the first `lintText` call loads
+  the whole ESLint config and took 8.2 s on the loaded 2-core runner, past vitest's 5 s
+  default. Locally it took about a second. Fixed in `0567cf1`: a warm-up lint in `beforeAll`
+  (30 s budget) and the same named budget for every case. Recorded in the lesson.
+- After the PR was opened, #264, #267 and #271 landed; `origin/main` (27ab3b4) was merged in
+  (one conflict, the lessons index: both 2026-11-19 entries kept). #264's new CLI copy has no
+  dash (`pnpm lint` passes). The gate was re-run on the merge: format, lint, typecheck, build,
+  verify:pack pass; `pnpm test` failed once in `packages/core/test/linear-time.test.ts`
+  (timing assertion 0.116 < 0.1, unrelated to this change, the machine was loaded) and passed
+  on the re-run.
+
 ## Lessons recorded
 
 - [2026-11-19-flat-config-replaces-restricted-syntax.md](../lessons/2026-11-19-flat-config-replaces-restricted-syntax.md)
@@ -121,7 +132,5 @@ a real screen reader.
 - Spec text that quotes the old mock label with an em dash (SPEC-001, SPEC-002, SPEC-009,
   SPEC-012, SPEC-101, SPEC-107, SPEC-108, SPEC-111, SPEC-112, SPEC-113) could be aligned with the
   shipped `Mock agent: not an AI evaluation` label.
-- PRs #264 and #267 were still open when this PR was opened; merge `main` into this branch
-  after they land and re-run the gate.
 - If the maintainer dislikes the double colon, change `/settings` and `/repositories` badges
   together (D4 note).
