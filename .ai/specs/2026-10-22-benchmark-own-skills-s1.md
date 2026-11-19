@@ -718,6 +718,19 @@ changed before merge.
 
 ## 20. Implementation status
 
+- **Implemented for issue 280 (verified on 2026-11-19 by
+  `packages/benchmark-engine/test/reserved-name-check.test.ts`, `claude-code-adapter.test.ts`
+  "stops an A/B run whose reserved-name check session lists the skill name itself" and "runs the
+  reserved-name check of an A/B run with the variants argv", `packages/runner/test/runner-acquired.test.ts`,
+  `apps/cli/test/benchmark-report.test.ts`, `apps/web/test/run-detail.test.ts` and
+  `apps/web/e2e/reserved-name-check.spec.ts`, the unit and integration tests red on the old code,
+  and by the built CLI with a
+  fake `claude` replaying the 2.1.325 session start):** FR-118-08 and FR-118-15 reserved-name check
+  of an A/B run ([ADR-0015](../decisions/0015-reserved-name-check-session-for-ab-runs.md)): one
+  session without the skill before the first repetition, fail closed, stored as
+  `environment.reservedNameCheck`, shown in the CLI plan (counted in the sessions), the summary,
+  `--json` and the run page. Not verified: a real `claude` session; a name the CLI starts listing
+  between the check and a later variant session.
 - **Implemented for issue 275 (verified on 2026-11-19 by
   `packages/agent-adapters/test/claude-code/runtime-reserved-name.test.ts`, `adapter.test.ts`
   "ends a run without the skill installed when the session lists the skill name itself",
@@ -728,7 +741,7 @@ changed before merge.
   name, or a session that lists it more than once, ends `infrastructure-error`
   `skill-name-reserved` and stops the benchmark run. Not verified: a real session of a full
   benchmark run; which skill a session uses on a collision; a duplicate entry (no `claude` version
-  was seen to list one); A/B runs keep only the static list.
+  was seen to list one); A/B runs keep only the static list (closed by issue 280 above).
 - **Implemented for issue 257 (verified on 2026-11-19 by
   `packages/agent-adapters/test/claude-code/reserved-skill-name.test.ts`, `adapter.test.ts`
   "refuses a candidate/baseline skill named like a name Claude Code lists itself" and
