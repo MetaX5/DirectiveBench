@@ -112,6 +112,11 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   and text `substr()` stop at a NUL (`replace(x, char(0), ...)` returned the value unchanged), so
   each value is rewritten as a BLOB in a recursive CTE, one NUL per step. Regression test in
   `client.test.ts` (red without the migration: `expected +0 to be 1`).
+- Codex round 2 (needs-attention, high): U+FFFD is not injective, so an active category key
+  `x\0y` next to `x\uFFFDy` failed the migration on `categories_active_name_key_unique` and
+  blocked the upgrade. Fixed: such a category gets ` (<id>)` after its name and
+  ` (<lowercased id>)` after its key (still `categoryNameKey(name)`). Regression test red on the
+  previous migration with `UNIQUE constraint failed: categories.name_key`.
 
 ## Verification
 

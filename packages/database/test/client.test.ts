@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { eq, getTableName, is, sql } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ARTIFACT_FORMAT_TYPES, ARTIFACT_FORMATS } from '@directivebench/core';
+import { ARTIFACT_FORMAT_TYPES, ARTIFACT_FORMATS, categoryNameKey } from '@directivebench/core';
 import {
   ensureDatabaseDir,
   migrateDatabase,
@@ -1126,6 +1126,41 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(0);
     } finally {
       before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('keeps active category name keys unique when a repaired key equals another one (issue 265)', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 10));
+      const insert = handle.sqlite.prepare(
+        "insert into categories (id, slug, name, name_key, archived_at, created_at, updated_at) values (?, ?, ?, ?, ?, 't', 'old')",
+      );
+      insert.run('cat_NulA', 'nul-a', 'X\0y', 'x\0y', null);
+      insert.run('cat_Clean', 'clean', 'X\uFFFDy', 'x\uFFFDy', null);
+      insert.run('cat_Gone', 'gone', 'X\0y', 'x\0y', '2026-01-01T00:00:00.000Z');
+
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      const rows = handle.sqlite
+        .prepare(
+          'select id, name, name_key as nameKey, updated_at as updatedAt from categories order by id',
+        )
+        .all();
+      expect(rows).toEqual([
+        { id: 'cat_Clean', name: 'X\uFFFDy', nameKey: 'x\uFFFDy', updatedAt: 'old' },
+        { id: 'cat_Gone', name: 'X\uFFFDy', nameKey: 'x\uFFFDy', updatedAt: 'old' },
+        {
+          id: 'cat_NulA',
+          name: 'X\uFFFDy (cat_NulA)',
+          nameKey: 'x\uFFFDy (cat_nula)',
+          updatedAt: 'old',
+        },
+      ]);
+      for (const row of rows) expect(row.nameKey).toBe(categoryNameKey(String(row.name)));
+    } finally {
       handle.close();
       temp.dispose();
     }

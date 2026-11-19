@@ -6,6 +6,27 @@
 -- enums, timestamps, hashes, slugs and paths are never taken from text that can.
 -- SQLite's replace() and text substr() stop at a NUL, so each value is rewritten as a BLOB (byte
 -- offsets; U+0000 is the only UTF-8 sequence holding the byte 00), one NUL per recursion step.
+-- An active category's repaired name key can equal another active key (`x\0y` next to `x\uFFFDy`),
+-- which `categories_active_name_key_unique` refuses. Such a category keeps its id, slug and
+-- assignments and gets ` (<id>)` after its name and ` (<lowercased id>)` after its key, so the key
+-- stays `categoryNameKey(name)` (ids are ASCII). Its name is repaired by the next statement.
+WITH RECURSIVE `fix`(`id`, `v`) AS (
+  SELECT `id`, CAST(`name_key` AS BLOB) FROM `categories` WHERE instr(CAST(`name_key` AS BLOB), x'00') > 0
+  UNION ALL
+  SELECT `id`, CAST(substr(`v`, 1, instr(`v`, x'00') - 1) || x'EFBFBD' || substr(`v`, instr(`v`, x'00') + 1) AS BLOB)
+  FROM `fix` WHERE instr(`v`, x'00') > 0
+)
+UPDATE `categories` SET
+  `name_key` = CAST(`fix`.`v` AS TEXT) || CASE WHEN `categories`.`archived_at` IS NULL AND EXISTS (
+    SELECT 1 FROM `categories` AS `clash`
+    WHERE `clash`.`name_key` = CAST(`fix`.`v` AS TEXT) AND `clash`.`id` <> `categories`.`id` AND `clash`.`archived_at` IS NULL
+  ) THEN ' (' || lower(`categories`.`id`) || ')' ELSE '' END,
+  `name` = `categories`.`name` || CASE WHEN `categories`.`archived_at` IS NULL AND EXISTS (
+    SELECT 1 FROM `categories` AS `clash`
+    WHERE `clash`.`name_key` = CAST(`fix`.`v` AS TEXT) AND `clash`.`id` <> `categories`.`id` AND `clash`.`archived_at` IS NULL
+  ) THEN ' (' || `categories`.`id` || ')' ELSE '' END
+FROM `fix` WHERE `fix`.`id` = `categories`.`id` AND instr(`fix`.`v`, x'00') = 0;
+--> statement-breakpoint
 WITH RECURSIVE `fix`(`id`, `v`) AS (
   SELECT `id`, CAST(`name` AS BLOB) FROM `categories` WHERE instr(CAST(`name` AS BLOB), x'00') > 0
   UNION ALL
@@ -13,15 +34,6 @@ WITH RECURSIVE `fix`(`id`, `v`) AS (
   FROM `fix` WHERE instr(`v`, x'00') > 0
 )
 UPDATE `categories` SET `name` = CAST(`fix`.`v` AS TEXT)
-FROM `fix` WHERE `fix`.`id` = `categories`.`id` AND instr(`fix`.`v`, x'00') = 0;
---> statement-breakpoint
-WITH RECURSIVE `fix`(`id`, `v`) AS (
-  SELECT `id`, CAST(`name_key` AS BLOB) FROM `categories` WHERE instr(CAST(`name_key` AS BLOB), x'00') > 0
-  UNION ALL
-  SELECT `id`, CAST(substr(`v`, 1, instr(`v`, x'00') - 1) || x'EFBFBD' || substr(`v`, instr(`v`, x'00') + 1) AS BLOB)
-  FROM `fix` WHERE instr(`v`, x'00') > 0
-)
-UPDATE `categories` SET `name_key` = CAST(`fix`.`v` AS TEXT)
 FROM `fix` WHERE `fix`.`id` = `categories`.`id` AND instr(`fix`.`v`, x'00') = 0;
 --> statement-breakpoint
 WITH RECURSIVE `fix`(`id`, `v`) AS (
