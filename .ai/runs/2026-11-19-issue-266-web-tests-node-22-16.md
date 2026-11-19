@@ -67,8 +67,14 @@ against the bound 3.5), so step 3 became a measurement of the linear-time helper
 | `pnpm test` (100% coverage) | 24.21.0 | 7 of 7 packages pass (web 656, core 351 +2 skipped). A first run had runner coverage at 99.9% statements; the rerun of the runner and the full rerun were at 100%. The runner does not use the changed helper |
 | `pnpm build`, `pnpm verify:pack` | 24.21.0 | pass ("Packaging verification passed", highlighted file served) |
 
-Not verified locally: the `oldest-node` job on GitHub's Ubuntu runner (checked on the PR's CI);
-Node versions between 22.16 and 24 other than 22.22.
+CI on PR #292 (head `02b5632`): every check passed. `Oldest supported Node (22.16.0)` printed
+`Node v22.16.0, node:sqlite SQLite 3.49.1` and passed core 353, agent-adapters 398 (+2 skipped),
+database 387, benchmark-engine 526, runner 320, cli 211 and web 656 tests
+([run 44553242728](https://github.com/MetaX5/DirectiveBench/actions/runs/44553242728/job/135662290844)).
+
+Not verified: Node versions between 22.16 and 24 other than 22.22. No UI change, so no browser QA.
+Review: `om-auto-review-pr 292 --autofix` (engine `om-code-review`) found no blocker or major
+finding; posted as a comment review because GitHub does not allow approving one's own PR.
 
 ## Problems and deviations
 
