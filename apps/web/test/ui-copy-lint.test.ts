@@ -50,8 +50,8 @@ const inScope = [
 
 // The dashes are written as escapes here so this test file reads the same in any editor; the
 // sources below hold the real characters unless a case is about an escape form.
-const EN = '–';
-const EM = '—';
+const EN = '\u2013';
+const EM = '\u2014';
 
 describe('UI copy lint rule', () => {
   it.each([
