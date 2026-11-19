@@ -10,13 +10,16 @@ const repoRoot = join(import.meta.dirname, '..', '..', '..');
 const COPY_MESSAGE_START = 'App-authored copy must not contain an en or em dash';
 const DESIGN_SYSTEM_MESSAGE_START = 'Use the design-system component';
 
-// Loading the config (typescript-eslint, Next.js and React hooks plugins) takes about a second
-// alone and far longer on the loaded 2-core CI runner (#149).
+// ESLint loads the config (typescript-eslint, Next.js and React hooks plugins) on the first lint,
+// which takes about a second alone and over 8 s on the loaded 2-core CI runner while every
+// package's suite runs in parallel (#149). The warm-up lint in beforeAll takes that cost; every
+// test gets the same budget because each lint still parses TypeScript on that runner.
 const LINT_TIMEOUT_MS = 30_000;
 
 let eslint: ESLint;
-beforeAll(() => {
+beforeAll(async () => {
   eslint = new ESLint({ cwd: repoRoot, overrideConfigFile: join(repoRoot, 'eslint.config.mjs') });
+  await eslint.lintText('export {};', { filePath: join(repoRoot, 'apps/web/lib/warm-up.ts') });
 }, LINT_TIMEOUT_MS);
 
 async function restrictedSyntaxMessages(file: string, source: string): Promise<string[]> {
@@ -53,7 +56,7 @@ const inScope = [
 const EN = '\u2013';
 const EM = '\u2014';
 
-describe('UI copy lint rule', () => {
+describe('UI copy lint rule', { timeout: LINT_TIMEOUT_MS }, () => {
   it.each([
     ['an em dash in a string literal', `export const a = 'A ${EM} B';`],
     ['an en dash in a string literal', `export const a = 'pages 1${EN}2';`],
