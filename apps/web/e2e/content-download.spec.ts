@@ -28,10 +28,13 @@ const SKILL = [
   '',
 ].join('\r\n');
 const PAGE_HTML = '<!doctype html>\r\n<script>window.__pwned = 1</script>\r\n';
+/** A base name with a space and non-ASCII letters, for the Content-Disposition names. */
+const NOTES = 'notes zażółć.txt';
 
 const files: Record<string, string> = {
   [`${skillDir}/SKILL.md`]: SKILL,
   [`${skillDir}/assets/page.html`]: PAGE_HTML,
+  [`${skillDir}/${NOTES}`]: 'Zażółć\r\n',
 };
 
 /** Jobs that existed before the fixture repository was registered and scanned. */
@@ -104,7 +107,6 @@ test.describe.serial('exact bytes from the Content tab (issue #52)', () => {
     const raw = await page.getByTestId('artifact-raw').evaluate((el) => el.textContent ?? '');
     expect(raw.includes('\r')).toBe(false);
     await expect(page.getByTestId('raw-notice')).toContainText('Download and Copy give them');
-    await expect(page.getByTestId('bytes-notice')).toHaveCount(0);
 
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('link', { name: 'Download SKILL.md' }).click();
@@ -177,4 +179,60 @@ test.describe.serial('exact bytes from the Content tab (issue #52)', () => {
     expect((await page.request.get(`${base}?version=x&path=SKILL.md`)).status()).toBe(400);
     expect(await page.evaluate(() => (window as { __pwned?: unknown }).__pwned)).toBeUndefined();
   });
+
+  test('a file name with a space and non-ASCII letters downloads under its own name', async ({
+    page,
+  }) => {
+    await openContentTab(page);
+    await page.getByTestId('file-tree').getByRole('link', { name: NOTES }).click();
+    await expect(page.getByTestId('content-path')).toHaveText(NOTES);
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('link', { name: `Download ${NOTES}` }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(NOTES);
+    expect(
+      readFileSync(await download.path()).equals(readFileSync(join(repo, skillDir, NOTES))),
+    ).toBe(true);
+  });
+
+  test('another file starts with an empty Copy status (QA finding)', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await openContentTab(page);
+    await page.getByRole('button', { name: 'Copy the content of SKILL.md' }).click();
+    await expect(page.getByTestId('copy-file-status')).toHaveText('Copied.');
+    await page.getByTestId('file-tree').getByRole('link', { name: 'page.html' }).click();
+    await expect(page.getByTestId('content-path')).toHaveText('assets/page.html');
+    await expect(page.getByTestId('copy-file-status')).toHaveText('');
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`at 320px in ${theme}, a refused copy's message never moves the button (QA finding)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript(() => {
+        navigator.clipboard.writeText = () => Promise.reject(new DOMException('denied'));
+      });
+      await openContentTab(page);
+      const copy = page.getByRole('button', { name: 'Copy the content of SKILL.md' });
+      const download = page.getByRole('link', { name: 'Download SKILL.md' });
+      await copy.click();
+      await expect(page.getByTestId('copy-file-status')).toContainText('Not copied');
+      // Copy stays on Download's row, at Download's height; the message takes the next row.
+      const [copyBox, downloadBox, statusBox] = await Promise.all([
+        copy.boundingBox(),
+        download.boundingBox(),
+        page.getByTestId('copy-file-status').boundingBox(),
+      ]);
+      expect(copyBox!.y).toBe(downloadBox!.y);
+      expect(copyBox!.height).toBe(downloadBox!.height);
+      expect(statusBox!.y).toBeGreaterThanOrEqual(copyBox!.y + copyBox!.height);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    });
+  }
 });

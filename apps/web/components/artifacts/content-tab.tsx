@@ -20,7 +20,7 @@ import {
   type ContentSelection,
   type FileTreeNode,
 } from '@/lib/artifacts';
-import { artifactFileHref, exactBytesNotice } from '@/lib/artifact-download';
+import { artifactFileHref } from '@/lib/artifact-download';
 import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 
@@ -90,7 +90,6 @@ export function ContentTab({
   const markdown = isMarkdownPath(file.path);
   const tooLarge = file.content.length > MAX_RENDERED_MARKDOWN_CHARS;
   const crNotice = rawViewNotice(file.content);
-  const bytesNotice = exactBytesNotice(file);
 
   return (
     <div className="grid gap-grid lg:grid-cols-4">
@@ -191,13 +190,13 @@ export function ContentTab({
                   Download
                 </a>
               </Button>
-              <CopyFileButton content={file.content} path={file.path} />
+              {/* Keyed by file: another file starts with an empty status line. */}
+              <CopyFileButton
+                key={`${version.id}:${file.path}`}
+                content={file.content}
+                path={file.path}
+              />
             </div>
-            {bytesNotice ? (
-              <p className="mb-2 text-ui text-muted-foreground" data-testid="bytes-notice">
-                {bytesNotice}
-              </p>
-            ) : null}
             {crNotice ? (
               <p className="mb-2 text-ui text-muted-foreground" data-testid="raw-notice">
                 {crNotice}

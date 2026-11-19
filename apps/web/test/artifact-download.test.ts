@@ -5,7 +5,6 @@ import {
   artifactFileHref,
   artifactFileResponse,
   attachmentDisposition,
-  exactBytesNotice,
 } from '../lib/artifact-download';
 import { MAX_FILE_PARAM_LENGTH } from '../lib/artifacts';
 
@@ -90,6 +89,7 @@ describe('artifactFileResponse', () => {
     expect(response.status).toBe(404);
     expect(response.headers.get('content-disposition')).toBeNull();
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
     expect(await response.text()).toBe('Not found: no such artifact, version or file.');
   });
 
@@ -105,25 +105,7 @@ describe('artifactFileResponse', () => {
     const response = artifactFileResponse(versions, query(params));
     expect(response.status).toBe(400);
     expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(await response.text()).toBe('Bad request: give one version number and one file path.');
-  });
-});
-
-describe('exactBytesNotice', () => {
-  it('says nothing when the stored text is the repository bytes', () => {
-    expect(exactBytesNotice(stored('a.md', CRLF))).toBeNull();
-  });
-
-  it('says so when the file was not valid UTF-8 and the stored text differs', () => {
-    const source = Buffer.from([0x61, 0xff, 0x0d, 0x0a]);
-    const file = {
-      path: 'a.bin',
-      sha256: sha256(source),
-      size: source.length,
-      content: source.toString('utf8'),
-    };
-    expect(exactBytesNotice(file)).toBe(
-      'This file is not valid UTF-8 text. Download and Copy give the stored text, which differs from the bytes in the repository.',
-    );
   });
 });

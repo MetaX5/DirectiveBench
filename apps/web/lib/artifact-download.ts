@@ -1,10 +1,11 @@
-import { sha256 } from '@directivebench/core';
 import type { StoredArtifactFile } from '@directivebench/database';
 import { z } from 'zod';
 import { MAX_FILE_PARAM_LENGTH } from './artifacts';
 
 // Exact bytes of a stored file (issue #52, SPEC-101 §10 and §12). The page cannot show CR
-// characters (lesson 2026-10-20), so Download and Copy give the stored string itself.
+// characters (lesson 2026-10-20), so Download and Copy give the stored string itself. Discovery
+// stores only valid UTF-8 (FR-102-17, `isBinary`), so the UTF-8 encoding of the stored string is
+// the repository's bytes.
 
 interface VersionFiles {
   version: number;
@@ -45,6 +46,7 @@ function textResponse(status: 400 | 404, message: string): Response {
     headers: {
       'content-type': 'text/plain; charset=utf-8',
       'x-content-type-options': 'nosniff',
+      'content-security-policy': "sandbox; default-src 'none'",
       'cache-control': 'no-store',
     },
   });
@@ -82,14 +84,4 @@ export function artifactFileResponse(
       'cache-control': 'no-store',
     },
   });
-}
-
-/**
- * Said under the Raw view when the stored text is not the repository's bytes: discovery decodes
- * files as UTF-8, so invalid sequences were replaced and the text no longer hashes to `sha256`.
- */
-export function exactBytesNotice(file: StoredArtifactFile): string | null {
-  return sha256(Buffer.from(file.content, 'utf8')) === file.sha256
-    ? null
-    : 'This file is not valid UTF-8 text. Download and Copy give the stored text, which differs from the bytes in the repository.';
 }

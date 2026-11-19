@@ -9,6 +9,14 @@ const meta = {
   component: CopyFileButton,
   parameters: { layout: 'padded' },
   args: { content: CRLF, path: '.agents/skills/rules/SKILL.md' },
+  // As in the Content tab: the button sits in a wrapping row next to Download.
+  decorators: [
+    (Story) => (
+      <div className="flex max-w-80 flex-wrap items-center gap-inline">
+        <Story />
+      </div>
+    ),
+  ],
 } satisfies Meta<typeof CopyFileButton>;
 
 export default meta;
