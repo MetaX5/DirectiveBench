@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { lstatSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -131,15 +132,14 @@ describe('loadLocalArtifact', () => {
 
   it('ignores entries that are neither files, directories nor links', async () => {
     await write('skills/x/SKILL.md', SKILL);
-    const server: Server = createServer();
-    await new Promise<void>((resolve) => server.listen(join(root, 'skills/x/sock'), resolve));
-    try {
-      const loaded = await loadLocalArtifact(root, 'skills/x/SKILL.md');
-      expect(loaded.files.map((file) => file.path)).toEqual(['SKILL.md']);
-      expect(loaded.warnings).toEqual([]);
-    } finally {
-      await new Promise((resolve) => server.close(resolve));
-    }
+    // A FIFO, not a Unix socket: a socket path is limited to 104 bytes on macOS (108 on Linux)
+    // and a long TMPDIR exceeds it. mkfifo has no such limit and throws instead of hanging.
+    const fifo = join(root, 'skills/x/fifo');
+    execFileSync('mkfifo', [fifo]);
+    expect(lstatSync(fifo).isFIFO()).toBe(true);
+    const loaded = await loadLocalArtifact(root, 'skills/x/SKILL.md');
+    expect(loaded.files.map((file) => file.path)).toEqual(['SKILL.md']);
+    expect(loaded.warnings).toEqual([]);
   });
 
   it('keeps parser warnings for skills without metadata', async () => {
