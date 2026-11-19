@@ -77,10 +77,10 @@ Inventory of string inputs that reach a repository function:
 | Command | Result |
 | --- | --- |
 | `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass |
-| `pnpm test` (Node 24.21, 100% coverage) | pass: core 353, agent-adapters 374 (+2 skipped), database 385, benchmark-engine 524, runner 313, cli 210, web 655 |
+| `pnpm test` (Node 24.21, 100% coverage, after merging main `1b53490`) | pass: core 353, agent-adapters 384 (+2 skipped), database 385, benchmark-engine 524, runner 313, cli 210, web 655 |
 | `pnpm build`, `pnpm verify:pack` | pass |
-| `pnpm test:e2e` (port 4402, Chromium 1254) | 205 passed before the Codex fixes; rerun on the final build: see the PR |
-| `pnpm test:storybook` | 68 files, 342 tests passed |
+| `pnpm test:e2e` (port 4402) | 205 passed on the final head after merging main (Chromium 1255); also 205 passed twice before (Chromium 1254 through symlinks) |
+| `pnpm test:storybook` | 342 tests passed (after merging main too) |
 
 Red first (new tests with the source unchanged):
 - `apps/web/test/actions.test.ts`: 4 failed, each with `Failed query ... Caused by: NulInTextError`
@@ -113,9 +113,11 @@ Not verified:
 
 ## Problems and deviations
 
-- Playwright in `main` now wants Chromium revision 1255; only 1254 is installed. The e2e runs used
-  `PLAYWRIGHT_BROWSERS_PATH` pointing at a temporary directory of symlinks to the 1254 builds
-  (removed afterwards). CI installs its own browser.
+- Playwright in `main` wants Chromium revision 1255. Before it was installed, the first two e2e
+  runs used `PLAYWRIGHT_BROWSERS_PATH` pointing at a temporary directory of symlinks to the 1254
+  builds (removed afterwards); the final run used the installed 1255.
+- `main` moved (PR #276, #272) during the run; merged `origin/main` (clean, `.ai/lessons.md`
+  auto-merged) and reran the whole gate.
 
 ## Lessons recorded
 
@@ -124,6 +126,7 @@ Not verified:
 
 ## Follow-ups
 
-- Playwright now expects Chromium 1255 locally (`npx playwright install chromium`).
 - `benchmark_runs.agent_version` comes from the agent's `--version` output and is written as
   plain text; it is agent output, not user input, and was out of scope here.
+- `om-auto-review-pr 279`: COMMENT review, no blockers or majors; minor 1 (stored suite versions
+  are re-validated) addressed in FR-108-17; two nits left.
