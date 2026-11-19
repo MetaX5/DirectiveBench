@@ -87,7 +87,10 @@ const SPAWNABLE_EXTENSIONS = new Set(['.exe', '.com']);
  */
 const WINDOWS_DEFAULT_PATHEXT = '.COM;.EXE';
 
-/** Candidate file names: `git` on POSIX; on Windows (`PATHEXT` set) `git.exe`/`git.com` only. */
+/**
+ * Candidate file names: `git` on POSIX; `git.exe`/`git.com` only when `PATHEXT` is set or the
+ * platform is Windows (where a missing `PATHEXT` falls back to `.COM;.EXE`).
+ */
 function gitFileNames(env: NodeJS.ProcessEnv): string[] {
   const pathExt =
     env.PATHEXT ?? (process.platform === 'win32' ? WINDOWS_DEFAULT_PATHEXT : undefined);

@@ -71,11 +71,21 @@ cause is fixed or explained). The user allowed a coherent first PR with follow-u
 | `pnpm test` (macOS, Node 24, `TMPDIR` under `/var/tmp`) | ✅ every package, 100% coverage |
 | Linux and macOS CI on the branch (run 44632322366) | ✅ unit, unit-macos, oldest-node, lint, build, storybook |
 
-The gated job with `--concurrency=1` (run 44633328301) is recorded in the PR.
+| Gated Windows job with `--concurrency=1` on `9acc4db` ([run 44633696714](https://github.com/MetaX5/DirectiveBench/actions/runs/44633696714/job/135946883019)) | ✅ gated step: core 342 passed / 12 skipped, database 392 passed (no timeouts, 118 s alone), benchmark-engine 463 / 79 skipped, web 665. Reported step (`continue-on-error`): agent-adapters 19 failed, runner 25 failed, cli 31 failed, as in #301 to #303 |
+| Every other CI job on `9acc4db` (run 44633696714) | ✅ unit, unit-macos, oldest-node, lint, build, storybook, e2e |
+| Review gate (`om-auto-review-pr 296 --autofix`, worktree, macOS, Node 24.21): `pnpm format:check`, `lint`, `typecheck`, `test`, `build`, `verify:pack` | ✅ every command; 100% coverage in all seven packages |
 
 **Not verified:** a real Windows machine outside CI; the product on Windows end to end (CLI,
-registration and scan through the web app); ReFS or Dev Drive; whether the database timeouts
-are gone for good with one package at a time.
+registration and scan through the web app); ReFS or Dev Drive; whether the database tests stay
+within 5 s on every Windows run (one green run with one package at a time is the evidence).
+
+## Review
+
+`om-auto-review-pr 296 --autofix` (engine `om-code-review`), 2026-11-20: no blocker or major
+findings. One minor fixed in `fix(runner): document the Windows PATHEXT fallback`: the
+`gitFileNames` doc comment still said Windows was detected by `PATHEXT` alone. Nits left as they
+are: the platform stub in the git-lookup test is process-wide inside its `try`/`finally`; an empty
+`PATHEXT` on Windows still finds no git (behaviour unchanged by this PR).
 
 ## Problems and deviations
 
