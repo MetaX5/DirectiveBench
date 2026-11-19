@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { formatDuration } from './utils';
 
 /**
  * Presentation logic for stored benchmark runs of real agents (SPEC-118 FR-118-50…52, SPEC-113
@@ -356,4 +357,48 @@ export function assertionDetailLines(type: string, details: unknown): DetailLine
     ];
   }
   return [];
+}
+
+/** The stored outcome of an A/B run's reserved-name check (SPEC-203 §4.1, ADR-0015). */
+const reservedNameCheckSchema = z.object({
+  status: z.string(),
+  errorCode: z.string().nullable(),
+  durationMs: z.number(),
+  usage: usageSchema.nullable(),
+  executionModel: z.string().nullable(),
+});
+
+/** The stop code of a failed check without a code of its own (the engine's fallback). */
+const RESERVED_NAME_CHECK_FAILED = 'reserved-name-check-failed';
+
+/**
+ * The "Reserved-name check" fact of a run (issue 280), from the run's stored `environment`: null
+ * for a run without the check (a `none` run, the mock agent, a run stored before it existed),
+ * "not reported" for one that cannot be read. Passed only for a completed session that reported
+ * its start, exactly as the engine decides.
+ */
+export function reservedNameCheckText(environment: unknown): string | null {
+  if (typeof environment !== 'object' || environment === null) return null;
+  if (!('reservedNameCheck' in environment)) return null;
+  const parsed = reservedNameCheckSchema.safeParse(environment.reservedNameCheck);
+  if (!parsed.success) return NOT_REPORTED;
+  const check = parsed.data;
+  let outcome: string;
+  if (check.status === 'completed' && check.errorCode === null && check.executionModel !== null) {
+    outcome = 'Passed';
+  } else if (check.status === 'cancelled') {
+    outcome = 'Cancelled';
+  } else {
+    outcome = `Stopped the run (${check.errorCode ?? RESERVED_NAME_CHECK_FAILED})`;
+  }
+  const parts = [
+    '1 extra session without the skill (not scored)',
+    formatDuration(check.durationMs),
+  ];
+  const usage = check.usage;
+  if (usage && (usage.inputTokens !== undefined || usage.outputTokens !== undefined)) {
+    const tokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+    parts.push(`${tokens.toLocaleString('en-US')} tokens`);
+  }
+  return `${outcome}: ${parts.join(', ')}`;
 }

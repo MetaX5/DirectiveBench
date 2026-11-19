@@ -12,6 +12,7 @@ import {
   modelLabel,
   otherReportedModels,
   readSummary,
+  reservedNameCheckText,
   runWarnings,
   traceCounts,
   usageText,
@@ -369,5 +370,80 @@ describe('assertionDetailLines (SPEC-118 FR-118-40…46)', () => {
     expect(assertionDetailLines('markdown-sections', { file: 'x' })).toEqual([]);
     expect(assertionDetailLines('required-phrases', null)).toEqual([]);
     expect(assertionDetailLines('markdown-table-value', { file: 1 })).toEqual([]);
+  });
+});
+
+describe('reservedNameCheckText (issue 280, SPEC-203 §4.1)', () => {
+  const check = (overrides: Record<string, unknown> = {}) => ({
+    kind: 'local-process',
+    reservedNameCheck: {
+      status: 'completed',
+      errorCode: null,
+      error: null,
+      durationMs: 1040,
+      usage: { inputTokens: 7100, outputTokens: 4 },
+      adapterVersion: '2.1.325 (Claude Code)',
+      executionModel: 'claude-haiku-5-5',
+      ...overrides,
+    },
+  });
+
+  it('says nothing for a run without the check (none runs, the mock agent, older runs)', () => {
+    expect(reservedNameCheckText({ kind: 'local-process' })).toBeNull();
+    expect(reservedNameCheckText(null)).toBeNull();
+    expect(reservedNameCheckText('text')).toBeNull();
+  });
+
+  it('describes a passed check with its duration and tokens', () => {
+    expect(reservedNameCheckText(check())).toBe(
+      'Passed: 1 extra session without the skill (not scored), 1.0 s, 7,104 tokens',
+    );
+    expect(reservedNameCheckText(check({ usage: null, durationMs: 990 }))).toBe(
+      'Passed: 1 extra session without the skill (not scored), 990 ms',
+    );
+    expect(reservedNameCheckText(check({ usage: { outputTokens: 4 } }))).toBe(
+      'Passed: 1 extra session without the skill (not scored), 1.0 s, 4 tokens',
+    );
+    expect(reservedNameCheckText(check({ usage: { inputTokens: 5 } }))).toBe(
+      'Passed: 1 extra session without the skill (not scored), 1.0 s, 5 tokens',
+    );
+    expect(reservedNameCheckText(check({ usage: {} }))).toBe(
+      'Passed: 1 extra session without the skill (not scored), 1.0 s',
+    );
+  });
+
+  it('describes a check that stopped the run with its code, or the fallback code', () => {
+    expect(
+      reservedNameCheckText(
+        check({ status: 'infrastructure-error', errorCode: 'skill-name-reserved', usage: null }),
+      ),
+    ).toBe(
+      'Stopped the run (skill-name-reserved): 1 extra session without the skill (not scored), 1.0 s',
+    );
+    // A timeout, and a completed session that reported no start, have no code of their own.
+    for (const overrides of [
+      { status: 'timeout', usage: null },
+      { executionModel: null, usage: null },
+    ]) {
+      expect(reservedNameCheckText(check(overrides))).toBe(
+        'Stopped the run (reserved-name-check-failed): 1 extra session without the skill (not scored), 1.0 s',
+      );
+    }
+  });
+
+  it('describes a cancelled check', () => {
+    expect(reservedNameCheckText(check({ status: 'cancelled', usage: null }))).toBe(
+      'Cancelled: 1 extra session without the skill (not scored), 1.0 s',
+    );
+  });
+
+  it('reads an unreadable stored check as not reported, never as passed', () => {
+    expect(reservedNameCheckText({ reservedNameCheck: { status: 'completed' } })).toBe(
+      'not reported',
+    );
+  });
+
+  it('uses no en or em dash (AGENTS.md §7)', () => {
+    expect(reservedNameCheckText(check())).not.toMatch(/[\u2013\u2014]/);
   });
 });

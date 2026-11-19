@@ -166,6 +166,57 @@ describe('planText (FR-118-31)', () => {
   });
 });
 
+describe('planText: the reserved-name check of an A/B skill run (issue 280)', () => {
+  const prepared = {
+    contentHash: 'c'.repeat(64),
+    definition: {
+      id: 'suite',
+      name: 'Suite',
+      cases: [{ id: 'a', prompt: 'Do it', setup: [], assertions: [] }],
+      execution: { model: null, repetitions: 2 },
+    },
+  } as unknown as PreparedSuite;
+  const skill = {
+    ...candidate,
+    format: 'skill-md',
+    files: [{ path: 'SKILL.md', content: '---\nname: pdf\n---\n', sha256: 's', size: 1 }],
+  } satisfies ArtifactBundle;
+  const plan = (artifact: ArtifactBundle, baseline: boolean, authMode: RunOptions['authMode']) =>
+    planText({
+      prepared,
+      resolved: {
+        ref: { version: { version: 2 } },
+        candidate: artifact,
+        baseline: baseline ? { ...artifact, versionId: 'v1' } : null,
+      } as unknown as Resolved,
+      options: { ...options, authMode, baselineVersion: baseline ? 1 : null },
+      agentVersion: '2.1.325',
+      storedApproved: false,
+      runsCommands: false,
+    });
+
+  it('announces the extra session and counts it in the cost', () => {
+    const lines = plan(skill, true, 'subscription');
+    const runs = lines.indexOf('Agent runs: 4 (1 case(s) × 2 repetition(s) × 2 variants)');
+    expect(lines[runs + 1]).toBe(
+      'Reserved-name check: 1 extra session without the skill before the first agent run (not scored)',
+    );
+    expect(lines).toContain(
+      'Cost:       5 Claude Code sessions count against your Claude plan; other runs on the same plan share its rate limits.',
+    );
+    expect(plan(skill, true, 'api-key')).toContain(
+      'Cost:       5 Claude Code sessions are billed to your API key.',
+    );
+  });
+
+  it('has no check for a none run or an instruction artifact', () => {
+    for (const lines of [plan(skill, false, 'api-key'), plan(candidate, true, 'api-key')]) {
+      expect(lines.join('\n')).not.toContain('Reserved-name check');
+      expect(lines).toContain('Cost:       4 Claude Code sessions are billed to your API key.');
+    }
+  });
+});
+
 function detail(overrides: {
   run?: Partial<BenchmarkRunDetail['run']>;
   baseline?: number | null;
@@ -248,6 +299,88 @@ describe('runReport and reportText (FR-118-37)', () => {
     expect(text).toContain('Cost:       $0.2500 (estimated)');
     expect(text).toContain('Warning:    w');
     expect(text).not.toContain('Skill invoked');
+  });
+});
+
+describe('runReport and reportText: the reserved-name check (issue 280)', () => {
+  const environment = (overrides: Record<string, unknown> = {}) => ({
+    kind: 'local-process',
+    reservedNameCheck: {
+      status: 'completed',
+      errorCode: null,
+      error: null,
+      durationMs: 1040,
+      usage: { inputTokens: 2, outputTokens: 4, costUsd: 0.01 },
+      adapterVersion: '2.1.325 (Claude Code)',
+      executionModel: 'claude-haiku-5-5',
+      ...overrides,
+    },
+  });
+  const report = (env: unknown, authMode: 'api-key' | 'subscription' = 'api-key') =>
+    runReport(
+      detail({
+        run: { environment: env } as Partial<BenchmarkRunDetail['run']>,
+        usage: { inputTokens: 1, outputTokens: 2, costUsd: 0.25 },
+      }),
+      authMode,
+    );
+
+  it('reports a passed check, with its usage in the totals', () => {
+    const passed = report(environment());
+    expect(passed.reservedNameCheck).toEqual({
+      status: 'completed',
+      errorCode: null,
+      durationMs: 1040,
+      usage: { inputTokens: 2, outputTokens: 4, costUsd: 0.01 },
+      passed: true,
+    });
+    expect(passed.usage).toEqual({
+      inputTokens: 8,
+      outputTokens: 6,
+      costUsd: 0.26,
+      cost: 'estimated',
+    });
+    const text = reportText(passed);
+    const model = text.indexOf('Model:      not reported');
+    expect(text[model + 1]).toBe(
+      'Reserved-name check: passed (1 extra session, not scored, 1.0 s)',
+    );
+    expect(text).toContain('Tokens:     input 8, output 6 (including the reserved-name check)');
+    expect(report(environment(), 'subscription').usage.costUsd).toBeNull();
+  });
+
+  it('reports a check that stopped the run with its code or the fallback, and a cancelled one', () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [
+        { status: 'infrastructure-error', errorCode: 'skill-name-reserved', durationMs: 910 },
+        'Reserved-name check: stopped the run (skill-name-reserved; 1 extra session, not scored, 0.9 s)',
+      ],
+      [
+        { status: 'timeout', usage: null },
+        'Reserved-name check: stopped the run (reserved-name-check-failed; 1 extra session, not scored, 1.0 s)',
+      ],
+      [
+        { executionModel: null },
+        'Reserved-name check: stopped the run (reserved-name-check-failed; 1 extra session, not scored, 1.0 s)',
+      ],
+      [
+        { status: 'cancelled', usage: null },
+        'Reserved-name check: cancelled (1 extra session, not scored, 1.0 s)',
+      ],
+    ];
+    for (const [overrides, line] of cases) {
+      expect(reportText(report(environment(overrides)))).toContain(line);
+    }
+  });
+
+  it('has no check line or token note for a run without it, or with an unreadable one', () => {
+    for (const env of [{ kind: 'local-process' }, { reservedNameCheck: { status: 1 } }, null]) {
+      const plain = report(env);
+      expect(plain.reservedNameCheck).toBeNull();
+      const text = reportText(plain).join('\n');
+      expect(text).not.toContain('Reserved-name check');
+      expect(text).toContain('Tokens:     input 6, output 2\n');
+    }
   });
 });
 
