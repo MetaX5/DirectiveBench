@@ -112,3 +112,13 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   3,200) and keep the smallest size that still fails; then give the test its own named timeout
   sized from the full gate on two cores. Every test that runs real git over several scans also
   gets a named timeout (one took 5.4 s on CI against vitest's 5 s default).
+- Read a vitest timeout's reported duration before blaming the code under test (update
+  2026-11-19, issue #286). vitest fires its timer at the timeout, so a test whose asynchronous
+  work is merely slow is reported at ~5,000 ms; a report far beyond it (12,386 ms for a 5 s
+  timeout on the macOS runner) means the worker's event loop did not run for that long: a
+  synchronous call blocked it or the process was off the CPU. A 7 s `Atomics.wait` in the test
+  reproduces that signature (7,019 ms), a 7 s `setTimeout` does not (5,004 ms). The product's
+  abort path measured 102 to 128 ms from abort to result even on two loaded cores, so the fix was
+  the test's: every test that starts a child process gets a named timeout
+  (`FAKE_CLAUDE_TEST_TIMEOUT_MS`, 30 s) longer than its readiness wait, so a fake that never
+  starts still fails with the readiness message, not a generic timeout.

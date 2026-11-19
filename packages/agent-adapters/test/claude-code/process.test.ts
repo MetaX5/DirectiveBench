@@ -14,9 +14,17 @@ import {
 } from '../../src/claude-code';
 import { findExecutable } from '../../src/probe';
 import { PROCESS_KILL_CONFIRM_MS } from '../../src/process-group';
-import { alive, waitFor, writeFakeClaude, type FakeClaudeMode } from './fake-claude';
+import {
+  alive,
+  FAKE_CLAUDE_TEST_TIMEOUT_MS,
+  waitFor,
+  writeFakeClaude,
+  type FakeClaudeMode,
+} from './fake-claude';
 
 const posix = describe.skipIf(process.platform === 'win32');
+// These tests start the fake; a stalled worker must not fail them at vitest's 5 s (issue #286).
+const startsTheFake = { timeout: FAKE_CLAUDE_TEST_TIMEOUT_MS };
 
 const roots: string[] = [];
 const leftovers: number[] = [];
@@ -76,7 +84,7 @@ function track(...pids: (number | null)[]): void {
   for (const pid of pids) if (pid !== null) leftovers.push(pid);
 }
 
-posix('runClaudeProcess with a fake claude on PATH', () => {
+posix('runClaudeProcess with a fake claude on PATH', startsTheFake, () => {
   it('finds the fake on a test PATH like the readiness check does', async () => {
     const { fake, env } = setup('stream');
     expect(await findExecutable('claude', env)).toBe(fake.executable);
@@ -153,7 +161,7 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     expect(alive(pid)).toBe(false);
     expect(alive(child)).toBe(false);
     expect(alive(-pid)).toBe(false);
-  }, 30_000);
+  });
 
   it('gives up on a claude that cannot be killed (signals refused with EPERM) after a bound', async () => {
     const { fake, input } = setup('hang');
@@ -192,7 +200,7 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     expect(result).toMatchObject({ timedOut: true, exitCode: null, strayProcesses: true });
     expect(result.durationMs).toBeLessThan(PROCESS_KILL_CONFIRM_MS + 10_000);
     expect(claudeProcessEnd(result)?.errorCode).toBe('stray-processes');
-  }, 30_000);
+  });
 
   it('escalates a timeout from SIGTERM to SIGKILL after the grace period', async () => {
     const { fake, input } = setup('hang');
@@ -263,7 +271,7 @@ posix('runClaudeProcess with a fake claude on PATH', () => {
     expect(kept).toBeLessThanOrEqual(CLAUDE_STDOUT_MAX_BYTES);
     expect(result.lines.length).toBeGreaterThan(0);
     expect(result.lines.every((line) => line === 'x'.repeat(65_536))).toBe(true);
-  }, 30_000);
+  });
 
   it('keeps only the tail of stderr', async () => {
     const { input } = setup('stderr-flood');

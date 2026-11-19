@@ -193,8 +193,24 @@ export function alive(pid: number): boolean {
   }
 }
 
+/** How long {@link waitFor} waits for the fake's readiness signal by default. */
+export const FAKE_CLAUDE_READY_TIMEOUT_MS = 10_000;
+
+/**
+ * Timeout of every test that starts the fake (issue #286). A `hang` run aborted after its pid
+ * appears takes ~0.12 s alone and at most 0.2 s on two loaded cores, but the macOS runner once
+ * reported it after 12.4 s: the vitest worker stalled for over 7 s in a synchronous call or off
+ * the CPU (a slow asynchronous phase is reported at the 5,000 ms default, not later). Longer
+ * than {@link FAKE_CLAUDE_READY_TIMEOUT_MS}, so a fake that never starts fails with
+ * {@link waitFor}'s message instead of a generic timeout.
+ */
+export const FAKE_CLAUDE_TEST_TIMEOUT_MS = 30_000;
+
 /** Resolves once `read()` returns a value (a readiness signal), polling every 10 ms. */
-export async function waitFor<T>(read: () => T | null, timeoutMs = 10_000): Promise<T> {
+export async function waitFor<T>(
+  read: () => T | null,
+  timeoutMs = FAKE_CLAUDE_READY_TIMEOUT_MS,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = read();
