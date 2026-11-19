@@ -11,6 +11,7 @@ import {
   repositoryPathInputSchema,
 } from '@directivebench/core';
 import { withTransaction, type DatabaseHandle } from '../client';
+import { storedMessage } from '../stored-message';
 import type { Database } from '../client';
 import { artifactNameShared, suiteNameShared } from './shared-names';
 import {
@@ -730,7 +731,12 @@ export async function finishJob(
   // when a graceful shutdown timed out — is never overwritten by a late finish.
   await db
     .update(jobs)
-    .set({ status, error: error ?? null, result: result ?? null, finishedAt: nowIso() })
+    .set({
+      status,
+      error: storedMessage(error ?? null),
+      result: result ?? null,
+      finishedAt: nowIso(),
+    })
     .where(and(eq(jobs.id, jobId), inArray(jobs.status, ['pending', 'running'])));
 }
 
@@ -796,16 +802,17 @@ export async function interruptJobs(
 ): Promise<string[]> {
   if (jobIds.length === 0) return [];
   const now = nowIso();
+  const error = storedMessage(reason);
   const changed = await db
     .update(jobs)
-    .set({ status: 'interrupted', finishedAt: now, error: reason })
+    .set({ status: 'interrupted', finishedAt: now, error })
     .where(and(inArray(jobs.id, [...jobIds]), eq(jobs.status, 'running')))
     .returning({ id: jobs.id });
   const ids = changed.map((j) => j.id);
   if (ids.length > 0) {
     await db
       .update(benchmarkRuns)
-      .set({ status: 'interrupted', finishedAt: now, error: reason })
+      .set({ status: 'interrupted', finishedAt: now, error })
       .where(and(inArray(benchmarkRuns.jobId, ids), eq(benchmarkRuns.status, 'running')));
   }
   return ids;

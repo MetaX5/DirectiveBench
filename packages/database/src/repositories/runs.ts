@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, sql } from 'dr
 import { alias } from 'drizzle-orm/sqlite-core';
 import { createId, nowIso } from '@directivebench/core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
+import { storedMessage } from '../stored-message';
 import {
   agentRunFiles,
   agentRuns,
@@ -87,11 +88,20 @@ export async function insertAgentRun(
   const { assertions, outputFiles, ...run } = input;
   const id = createId('arun');
   await withTransaction(handle, async (db) => {
-    await db.insert(agentRuns).values({ id, ...run, createdAt: nowIso() });
+    await db.insert(agentRuns).values({
+      id,
+      ...run,
+      error: storedMessage(run.error),
+      outputFilesReason: storedMessage(run.outputFilesReason),
+      createdAt: nowIso(),
+    });
     for (const assertion of assertions) {
-      await db
-        .insert(assertionResults)
-        .values({ id: createId('ares'), agentRunId: id, ...assertion });
+      await db.insert(assertionResults).values({
+        id: createId('ares'),
+        agentRunId: id,
+        ...assertion,
+        message: storedMessage(assertion.message),
+      });
     }
     for (const file of outputFiles) {
       await db.insert(agentRunFiles).values({ id: createId('afile'), agentRunId: id, ...file });
@@ -203,7 +213,7 @@ export async function finishBenchmarkRun(
 ): Promise<void> {
   await db
     .update(benchmarkRuns)
-    .set({ ...input, finishedAt: nowIso() })
+    .set({ ...input, error: storedMessage(input.error), finishedAt: nowIso() })
     .where(eq(benchmarkRuns.id, runId));
 }
 
