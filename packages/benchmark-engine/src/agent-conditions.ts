@@ -33,6 +33,9 @@ export const STOP_CODES: readonly string[] = [
   // §12 (maintainer decision 2026-10-22): the pinned `claude` or its interpreter was replaced
   // (e.g. by a `setup` command); every further run would be refused the same way.
   'binary-replaced',
+  // SPEC-203 §4.1 (issue 275): Claude Code lists the tested skill's name itself; every further
+  // agent run would measure an unknown skill.
+  'skill-name-reserved',
 ];
 
 /** The agent-run facts these rules read. */

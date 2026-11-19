@@ -98,6 +98,11 @@ export interface ClaudeInitFacts {
   apiKeySource: string | null;
   /** Whether `slash_commands` lists the installed skill (it can be invoked as `/<name>`). */
   slashCommandListed: boolean;
+  /**
+   * How often `skills` and `slash_commands` each list the installed skill's name, for the
+   * run-time reserved-name check (SPEC-203 §4.1, issue 275); 0 without a skill name.
+   */
+  skillNameEntries: { skills: number; slashCommands: number };
   /** Other models reported by later `system/init` events (none expected). */
   laterModels: string[];
 }
@@ -255,6 +260,11 @@ class BoundedNames {
   sorted(): string[] {
     return [...this.names].sort();
   }
+}
+
+/** How often `list` holds `name`; 0 without a list or a name. */
+function entries(list: readonly string[] | undefined, name: string | undefined): number {
+  return name === undefined ? 0 : (list ?? []).filter((entry) => entry === name).length;
 }
 
 /** Starts with `/<name>` followed by the end or whitespace (FR-118-09). */
@@ -484,6 +494,10 @@ export class ClaudeStreamParser {
             : this.clip(data.apiKeySource, CLAUDE_STREAM_NAME_MAX_CHARS),
         slashCommandListed:
           skillName !== undefined && (data.slash_commands ?? []).includes(skillName),
+        skillNameEntries: {
+          skills: entries(data.skills, skillName),
+          slashCommands: entries(data.slash_commands, skillName),
+        },
         laterModels: [],
       };
       // A prompt starting with `/<command>` expands it without a trace in the stream (live check

@@ -68,3 +68,15 @@ export const STREAM_FIXTURES = join(import.meta.dirname, '../fixtures/claude-cod
 export function fixture(name: string): string {
   return readFileSync(join(STREAM_FIXTURES, `${name}.ndjson`), 'utf8');
 }
+
+/**
+ * Redacted recordings of `claude` 2.1.325 (issue 275 live check, 2026-11-19): `system/init` and
+ * `result` only, from one subscription session with a project skill named `doctor` installed and
+ * the production argv (model `haiku`, `--effort low`).
+ */
+export const RECORDED_2_1_325 = join(import.meta.dirname, '../fixtures/claude-code/2.1.325');
+
+/** The text of one 2.1.325 recording. */
+export function recording325(name: string): string {
+  return readFileSync(join(RECORDED_2_1_325, `${name}.ndjson`), 'utf8');
+}

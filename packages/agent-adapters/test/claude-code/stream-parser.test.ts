@@ -57,6 +57,7 @@ describe('parseClaudeStream on recorded-format fixtures', () => {
       skillListed: true,
       apiKeySource: 'none',
       slashCommandListed: true,
+      skillNameEntries: { skills: 1, slashCommands: 1 },
       laterModels: [],
     });
     expect(parsed.messageModels).toEqual(['claude-sonnet-4-5-20250929']);
@@ -360,6 +361,7 @@ describe('ClaudeStreamParser events', () => {
       skillListed: false,
       apiKeySource: null,
       slashCommandListed: false,
+      skillNameEntries: { skills: 0, slashCommands: 0 },
       laterModels: [],
     });
     expect(parsed.trace[0]).toEqual({
