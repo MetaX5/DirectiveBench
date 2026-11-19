@@ -12,6 +12,7 @@ import {
   filterNotice,
   formatBytes,
   invalidParamsNotice,
+  latestFormatHint,
   parseArtifactDetailParams,
   parseArtifactId,
   parseArtifactListForm,
@@ -167,7 +168,7 @@ describe('occurrenceVersionLabel (SPEC-126 UD-3, F4, F5)', () => {
 describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
   const duplicate = (
     n: number,
-    overrides: Partial<{ activeOccurrences: number; sameLatestContent: boolean }> = {},
+    overrides: Partial<{ activeOccurrences: number; sameContent: boolean }> = {},
   ) => ({
     id: `art_${n}`,
     slug: `review-${n}`,
@@ -177,7 +178,7 @@ describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
       { id: 'repo_a', name: 'acme/agent-skills' },
       { id: 'repo_b', name: 'client-b' },
     ],
-    sameLatestContent: false,
+    sameContent: false,
     ...overrides,
   });
   const review = { name: 'review', type: 'skill' } as const;
@@ -189,7 +190,7 @@ describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
   it('lists the slug, the active repositories or missing, and the content (G7 to G9)', () => {
     expect(
       possibleDuplicatesCard(review, {
-        items: [duplicate(2), duplicate(3, { activeOccurrences: 0, sameLatestContent: true })],
+        items: [duplicate(2), duplicate(3, { activeOccurrences: 0, sameContent: true })],
         total: 2,
       }),
     ).toEqual({
@@ -206,7 +207,7 @@ describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
           slug: 'review-3',
           href: '/artifacts/art_3',
           repositories: null,
-          content: 'Same latest content',
+          content: 'Same content',
         },
       ],
       more: null,
@@ -237,10 +238,30 @@ describe('possibleDuplicatesCard (SPEC-126 UD-5, §11.4 G7 to G12)', () => {
 
   it('keeps every app string free of en and em dashes (AGENTS.md §7)', () => {
     const card = possibleDuplicatesCard(review, {
-      items: [duplicate(2, { sameLatestContent: true })],
+      items: [duplicate(2, { sameContent: true })],
       total: 3,
     });
     expect(JSON.stringify(card)).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe('latestFormatHint (SPEC-126 §11.6 J1, issue 260)', () => {
+  it('names the latest version and its format only when it differs from the chosen format', () => {
+    expect(latestFormatHint('cursor-rule', { version: 2, format: 'skill-md' })).toBe(
+      'latest v2: skill-md',
+    );
+    expect(latestFormatHint('skill-md', { version: 2, format: 'skill-md' })).toBeNull();
+  });
+
+  it('shows nothing without a chosen format or a version', () => {
+    expect(latestFormatHint(null, { version: 1, format: 'skill-md' })).toBeNull();
+    expect(latestFormatHint('skill-md', undefined)).toBeNull();
+  });
+
+  it('starts the G11 note with the issue 260 wording', () => {
+    expect(SAME_CONTENT_NOTE.startsWith('Same content does not make them one artifact. ')).toBe(
+      true,
+    );
   });
 });
 
