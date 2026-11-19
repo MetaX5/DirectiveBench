@@ -73,7 +73,7 @@ describe('planText (FR-118-31)', () => {
       definition: {
         id: 'suite',
         name: 'Suite',
-        cases: [{ id: 'a', setup: [], assertions: [] }],
+        cases: [{ id: 'a', prompt: 'Review the diff', setup: [], assertions: [] }],
         execution: { model: null, repetitions: 1 },
       },
     } as unknown as PreparedSuite;
@@ -104,6 +104,65 @@ describe('planText (FR-118-31)', () => {
       'Skill name: code-review',
       'Baseline:   no artifact',
     ]);
+  });
+
+  it('warns beside the skill name about each case whose /command is not the installed name (issue 258)', () => {
+    const prompts = {
+      'by-slug': '/review the diff',
+      'by-name': '/code-review the diff',
+      'name-at-end': '/code-review',
+      'longer-command': '/code-reviewer the diff',
+      plain: 'Review the diff, then /review it',
+      bare: '/',
+    };
+    const prepared = {
+      contentHash: 'c'.repeat(64),
+      definition: {
+        id: 'suite',
+        name: 'Suite',
+        cases: Object.entries(prompts).map(([id, prompt]) => ({
+          id,
+          prompt,
+          setup: [],
+          assertions: [],
+        })),
+        execution: { model: null, repetitions: 1 },
+      },
+    } as unknown as PreparedSuite;
+    const content = '---\ndescription: d\n---\nBody\n';
+    const skill = {
+      ...candidate,
+      slug: 'review',
+      name: 'code-review',
+      type: 'skill',
+      format: 'skill-md',
+      files: [{ path: 'SKILL.md', sha256: 's', size: content.length, content }],
+      folderName: 'code-review',
+    } satisfies ArtifactBundle;
+    const lines = planText({
+      prepared,
+      resolved: {
+        ref: { version: { version: 2 } },
+        candidate: skill,
+        baseline: skill,
+      } as unknown as Resolved,
+      options: { ...options, baselineVersion: 1 },
+      agentVersion: '2.1.302',
+      storedApproved: false,
+      runsCommands: false,
+    });
+    const warning = (id: string) =>
+      `Warning:    case ${id}: the prompt starts with a / command other than /code-review (the installed skill name), so it does not invoke the skill.`;
+    expect(lines.slice(2, 7)).toEqual([
+      'Skill name: code-review',
+      warning('by-slug'),
+      warning('longer-command'),
+      warning('bare'),
+      'Baseline:   v1',
+    ]);
+    // No other line is a warning: the run is not refused, and prompts that invoke the skill or
+    // do not start with / pass silently.
+    expect(lines.filter((line) => line.startsWith('Warning:'))).toHaveLength(3);
   });
 });
 

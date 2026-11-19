@@ -139,7 +139,7 @@ Evidence keys C1–C12 and L1 refer to the source table of
 | ID | Requirement |
 | --- | --- |
 | FR-118-30 | `directivebench benchmark run <suite> --artifact <ref> [--artifact-version <n>] [--baseline none\|v<n>] [--auth subscription\|api-key] [--max-budget-usd <n>] [--approve-commands] [--yes] [--json]`. Defaults: latest version, `--baseline none`, `--auth subscription`. `--max-budget-usd` is accepted only with `--auth api-key` (exit 2 otherwise), because the CLI enforces it only in print mode with an API key (SPEC-203 §4). Subscription mode has no cost cap; the plan (FR-118-31) is the guard. |
-| FR-118-31 | Before starting, the CLI SHALL print the plan: suite (name, version, content hash prefix), candidate and baseline, agent and detected version, auth mode, isolation profile, model (or "CLI default — unpinned"), number of agent runs (`cases × repetitions × 2`), for a skill the name it is installed and invoked under (`Skill name: review`, FR-118-08, SPEC-203 §4.1, issue 245) and whether it sets `disable-model-invocation` (FR-118-09), and these notices: runs count against the user's Claude plan (subscription) or API spend (api-key); prompt, fixture files and the artifact are sent to Anthropic; **Not sandboxed**; in subscription mode "may include user-level instructions". |
+| FR-118-31 | Before starting, the CLI SHALL print the plan: suite (name, version, content hash prefix), candidate and baseline, agent and detected version, auth mode, isolation profile, model (or "CLI default — unpinned"), number of agent runs (`cases × repetitions × 2`), for a skill the name it is installed and invoked under (`Skill name: review`, FR-118-08, SPEC-203 §4.1, issue 245), beside it one `Warning:` line per case whose prompt starts with `/` but does not invoke that name (`promptInvokesSkill`; for example the slug of a renamed or suffixed nameless skill), naming the case and the installed name without refusing the run (issue 258), and whether it sets `disable-model-invocation` (FR-118-09), and these notices: runs count against the user's Claude plan (subscription) or API spend (api-key); prompt, fixture files and the artifact are sent to Anthropic; **Not sandboxed**; in subscription mode "may include user-level instructions". |
 | FR-118-32 | On an interactive terminal the CLI SHALL ask for confirmation; `--yes` skips it; without a TTY and without `--yes` it SHALL refuse with exit code 2. A confirmation that gets no answer (Ctrl-C, end of input) is a no. |
 | FR-118-33 | A suite version that runs commands (`definitionRunsCommands`) SHALL run only when execution-approved. Fixture configuration is never approvable in S1 (FR-118-06). `--approve-commands` SHALL print every `setup` and `command` argv of the suite version; approval with source `user` (SPEC-110 FR-110-46) is recorded only after the confirmation of FR-118-32, in the same transaction that creates the job. Without the flag such a suite is refused with exit code 2 and a message naming the flag. Approval is per suite version, so changing the suite requires approving again. |
 | FR-118-34 | The CLI SHALL create the benchmark job **already acquired by its own runner** (one statement inserting `status = 'running'` with its `runner_id`), heartbeat it and execute it in-process, so a concurrently running `serve` runner can never pick it up (SPEC-114). A CLI killed mid-run leaves the job to the existing stale-heartbeat recovery (`interrupted`). |
@@ -716,6 +716,12 @@ changed before merge.
 
 ## 20. Implementation status
 
+- **Implemented for issue 258 (verified on 2026-11-17 by `apps/cli/test/benchmark-report.test.ts`
+  "warns beside the skill name about each case whose /command is not the installed name" and
+  `apps/cli/test/benchmark-run.test.ts` "warns in the plan when a /<slug> prompt no longer names a
+  nameless skill, and still runs", both red on the old code):** FR-118-31: for a skill, the plan
+  prints one `Warning:` line beside `Skill name:` for each case whose prompt starts with `/` but
+  does not invoke the installed name (`promptInvokesSkill`), and the run still starts.
 - **Implemented for issue 66 (verified on 2026-11-16 by `apps/cli/test/benchmark-run.test.ts`
   "benchmark run after a rename or a type change (issue 66)" and `candidateLabel (Q5)`,
   `apps/cli/test/benchmark-init.test.ts` "scaffolds the type of the latest version" and

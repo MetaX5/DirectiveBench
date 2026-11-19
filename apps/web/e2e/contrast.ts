@@ -2,8 +2,17 @@ import type { Page } from '@playwright/test';
 
 // Measure computed colours, including translucent status surfaces; source token strings
 // can be normalized to different colour spaces by production CSS optimization.
+// A theme switch (emulateMedia) or a hover starts CSS transitions, such as the navigation
+// links' transition-colors, and a scan during one reads colours of neither state. The scan
+// first disables transitions, which cancels running ones, so it always measures settled colours.
 export async function scanTextContrast(page: Page) {
   return page.evaluate(() => {
+    if (!document.getElementById('e2e-no-transitions')) {
+      const style = document.createElement('style');
+      style.id = 'e2e-no-transitions';
+      style.textContent = '* { transition: none !important; }';
+      document.head.append(style);
+    }
     const ctx = document.createElement('canvas').getContext('2d')!;
     function pixel(colour: string) {
       ctx.clearRect(0, 0, 1, 1);
