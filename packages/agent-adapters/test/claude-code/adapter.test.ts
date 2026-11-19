@@ -19,10 +19,17 @@ import {
 } from '../../src/claude-code';
 import type { AgentRunRequest } from '../../src/contract';
 import { pinWorkspace } from '../../src/workspace-pin';
-import { writeFakeClaude, type FakeClaude, type FakeClaudeOptions } from './fake-claude';
+import {
+  FAKE_CLAUDE_TEST_TIMEOUT_MS,
+  writeFakeClaude,
+  type FakeClaude,
+  type FakeClaudeOptions,
+} from './fake-claude';
 import { bundle, fixture, newerSessionStart, UNLISTED_BUILT_IN } from './helpers';
 
 const posix = describe.skipIf(process.platform === 'win32');
+// These tests start the fake; a stalled worker must not fail them at vitest's 5 s (issue #286).
+const startsTheFake = { timeout: FAKE_CLAUDE_TEST_TIMEOUT_MS };
 
 const roots: string[] = [];
 afterAll(() => {
@@ -133,7 +140,7 @@ describe('ClaudeCodeAdapter options', () => {
   });
 });
 
-posix('ClaudeCodeAdapter with a fake claude', () => {
+posix('ClaudeCodeAdapter with a fake claude', startsTheFake, () => {
   it('offers the reserved-name check for a skill only (issue 280, ADR-0015)', () => {
     const adapter = new ClaudeCodeAdapter({}, {});
     expect(adapter.needsReservedNameCheck(SKILL)).toBe(true);
