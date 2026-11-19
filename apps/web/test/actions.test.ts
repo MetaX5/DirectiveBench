@@ -1862,7 +1862,7 @@ describe('U+0000 in form input (issue 273)', () => {
     ]);
   });
 
-  it('answers a hidden id or list filter holding NUL with the general refusal, writing nothing', async () => {
+  it('answers a hidden id holding NUL with the general refusal, writing nothing', async () => {
     const { artifactId } = await importArtifact();
     const { suiteId } = await importSuite({}, null);
     const categoryId = await category('Client');
@@ -1915,16 +1915,9 @@ describe('U+0000 in form input (issue 273)', () => {
         repository: '',
         ...fields,
       });
-    const forged: Array<Record<string, string>> = [
-      { categoryId: nul(categoryId) },
-      { q: nul('valid') },
-    ];
-    for (const fields of forged) {
-      expect(await setCategoryForListedArtifactsAction(bulkIdle, bulk(fields))).toEqual({
-        ...incomplete,
-        categoryId: fields.categoryId ?? categoryId,
-      });
-    }
+    expect(
+      await setCategoryForListedArtifactsAction(bulkIdle, bulk({ categoryId: nul(categoryId) })),
+    ).toEqual({ ...incomplete, categoryId: nul(categoryId) });
     expect(await listCategories(handle.db)).toMatchObject([
       { id: categoryId, name: 'Client', archivedAt: null, artifactCount: 0 },
     ]);

@@ -25,22 +25,10 @@ function hostname(hostHeader: string | null): string | null {
   return colon === -1 ? host : host.slice(0, colon);
 }
 
-/**
- * An encoded U+0000 (`%00`) in the path. Next.js decodes it into the route parameter, and the
- * database refuses text holding NUL even as a lookup (SPEC-006 §1 "Text", issue 273), so such a
- * request is refused here instead of failing in the page. `%2500` is the text "%00" and passes.
- */
-const ENCODED_NUL = /%00/;
-
 export function proxy(request: NextRequest) {
   const host = hostname(request.headers.get('host'));
   if (!host || !allowedHosts.has(host)) {
     return new NextResponse('Forbidden: unexpected Host header', { status: 403 });
-  }
-  if (ENCODED_NUL.test(request.nextUrl.pathname)) {
-    return new NextResponse('Bad request: the address contains a NUL character (U+0000).', {
-      status: 400,
-    });
   }
   return NextResponse.next();
 }

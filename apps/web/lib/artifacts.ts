@@ -5,7 +5,6 @@ import type {
   StoredArtifactFile,
 } from '@directivebench/database';
 import { z } from 'zod';
-import { hasNoNul } from './form-input';
 import { repositorySubject, type RepositoryProvider } from './repositories';
 import { formatDate } from './utils';
 
@@ -29,8 +28,7 @@ export const categorySlugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
 const listParamSchemas = {
-  // The search reaches the database as a parameter, which may not hold U+0000 (issue 273).
-  q: z.string().max(MAX_SEARCH_LENGTH).refine(hasNoNul),
+  q: z.string().max(MAX_SEARCH_LENGTH),
   type: z.enum(ARTIFACT_TYPES),
   category: categorySlugSchema,
   repository: z.string().regex(/^repo_[A-Za-z0-9_-]{1,64}$/),
