@@ -179,7 +179,7 @@ describe('registerLocalRepository', () => {
     location: '/srv/skills',
     defaultBranch: 'main',
   };
-  const scope = { homeDirectory: TEST_HOME, confirmedLocation: null };
+  const scope = { homeDirectory: TEST_HOME, confirmedLocation: null, userLevel: null };
 
   it('creates a repository that has never been synchronised', async () => {
     const handle = getHandle();
@@ -225,11 +225,13 @@ describe('registerLocalRepository', () => {
     expect(await at(TEST_HOME)).toEqual({
       status: 'confirmation-required',
       home: 'home',
+      userLevel: null,
       overlaps: [],
     });
     expect(await at('/home')).toEqual({
       status: 'confirmation-required',
       home: 'contains-home',
+      userLevel: null,
       overlaps: [],
     });
     expect(await at(`${TEST_HOME}/code/skills`)).toMatchObject({ status: 'registered' });
@@ -262,6 +264,7 @@ describe('registerLocalRepository', () => {
     expect(outer).toEqual({
       status: 'confirmation-required',
       home: null,
+      userLevel: null,
       overlaps: [
         { repositoryId: rules.id, name: 'rules', location: '/srv/rules', relation: 'contains' },
         { repositoryId: skills.id, name: 'skills', location: '/srv/skills', relation: 'contains' },
@@ -275,6 +278,7 @@ describe('registerLocalRepository', () => {
     expect(inner).toEqual({
       status: 'confirmation-required',
       home: null,
+      userLevel: null,
       overlaps: [
         { repositoryId: skills.id, name: 'skills', location: '/srv/skills', relation: 'inside' },
       ],
@@ -300,6 +304,37 @@ describe('registerLocalRepository', () => {
       { ...scope, confirmedLocation: TEST_HOME },
     );
     expect(home).toMatchObject({ status: 'registered', created: true });
+  });
+
+  it('asks to confirm a user-level agent folder on its own, with any overlap (issue 262)', async () => {
+    const handle = getHandle();
+    const claude = {
+      ...input,
+      provider: 'local-directory' as const,
+      location: `${TEST_HOME}/.claude`,
+    };
+    expect(
+      await registerLocalRepository(handle, claude, { ...scope, userLevel: 'folder' }),
+    ).toEqual({ status: 'confirmation-required', home: null, userLevel: 'folder', overlaps: [] });
+    expect(await handle.db.$count(schema.repositories)).toBe(0);
+    const { repository: home } = await registerLocal(handle, { location: TEST_HOME }, TEST_HOME);
+    const skills = { ...claude, location: `${TEST_HOME}/.claude/skills` };
+    expect(
+      await registerLocalRepository(handle, skills, { ...scope, userLevel: 'inside-folder' }),
+    ).toEqual({
+      status: 'confirmation-required',
+      home: null,
+      userLevel: 'inside-folder',
+      overlaps: [{ repositoryId: home.id, name: 'repo', location: TEST_HOME, relation: 'inside' }],
+    });
+    expect(
+      await registerLocalRepository(handle, claude, {
+        ...scope,
+        userLevel: 'folder',
+        confirmedLocation: claude.location,
+      }),
+    ).toMatchObject({ status: 'registered', created: true });
+    expect(await handle.db.$count(schema.repositories)).toBe(2);
   });
 
   it('fails loudly when the insert is dropped', async () => {

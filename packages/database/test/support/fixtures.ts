@@ -114,7 +114,7 @@ export async function registerLocal(
   const outcome = await registerLocalRepository(
     handle,
     { provider: 'local-directory', name: 'repo', defaultBranch: null, ...input },
-    { homeDirectory: TEST_HOME, confirmedLocation },
+    { homeDirectory: TEST_HOME, confirmedLocation, userLevel: null },
   );
   if (outcome.status !== 'registered') throw new Error(`${input.location} needs a confirmation`);
   return outcome;

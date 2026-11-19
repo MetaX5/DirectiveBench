@@ -185,7 +185,7 @@ async function register(location: string, provider: 'local-git' | 'local-directo
   const outcome = await registerLocalRepository(
     handle,
     { provider, name: location.split('/').pop() ?? location, location, defaultBranch: null },
-    { homeDirectory: join(sources, 'home'), confirmedLocation: location },
+    { homeDirectory: join(sources, 'home'), confirmedLocation: location, userLevel: null },
   );
   if (outcome.status !== 'registered') throw new Error('not registered');
   return outcome.repository;
