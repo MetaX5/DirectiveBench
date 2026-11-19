@@ -3,7 +3,7 @@ id: SPEC-004
 title: Technology Stack
 status: draft
 created: 2026-10-14
-updated: 2026-10-23
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-006, SPEC-009, SPEC-010, SPEC-012]
 ---
@@ -18,7 +18,7 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 
 | Technology | Version line | Rationale |
 |---|---|---|
-| Node.js | engines `>=22.16.0`; verified on Node 24.21 only (locally; CI workflow targets Node 24) | Built-in `node:sqlite` avoids native modules; the floor is set by the `node:sqlite` APIs actually used. See §3.1. |
+| Node.js | engines `>=22.16.0`; the full suite runs on Node 24 (locally and in CI); the CI job `oldest-node` runs the package tests, `pnpm build` and `pnpm verify:pack` on Node 22.16.0 (issue #263) | Built-in `node:sqlite` avoids native modules; the floor is set by the `node:sqlite` APIs actually used. See §3.1. |
 | npm | 11 (bundled with Node 24) | Distribution channel: `npx directivebench`. |
 | pnpm via corepack | 12 (root `packageManager: pnpm@12.11.2`) | Workspaces, strict dependency isolation, fast installs. |
 | Turborepo | 2.11 | Task graph and caching for `build`, `typecheck`, `test`. |
@@ -55,7 +55,7 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 
 - `node:sqlite` is usable without `--experimental-sqlite` from Node 22.13.0.
 - The database client (`packages/database/src/client.ts`) calls `StatementSync#setReturnArrays`, added in Node 22.16.0 / 24.0.0, because Drizzle `sqlite-proxy` expects rows as arrays. Therefore `engines.node` is **`>=22.16.0`** (as declared in the root `package.json`), not `>=22.13.0`.
-- **Only Node 24 (24.21) has been verified.** Node 22.16+ support is declared but untested — Assumption — requires validation.
+- Node 24 runs the full suite. Node 22.16.0 (SQLite 3.49.1) runs the `packages/*` tests, `pnpm build` and `pnpm verify:pack` in the CI job `oldest-node` ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions)); the `apps/cli` and `apps/web` unit tests do not pass there yet (issues #265, #266). Node versions between 22.16 and 24 are not tested individually.
 - The runtime check compares the Node version against 22.16.0 for every command (exit 3); `doctor` additionally feature-detects `node:sqlite` by preparing a statement and calling `setReturnArrays`.
 - `node:sqlite` may emit an `ExperimentalWarning` on some Node versions; if so, the CLI suppresses only that specific warning.
 
@@ -84,4 +84,5 @@ The CLI ships the prebuilt Next.js output in `dist/web` and spawns `next start` 
 - **Implemented — dependency policy §4.3 (verified on 2026-10-15 in the packed tarball by `pnpm verify:pack`):** `@directivebench/*`, `commander`, `drizzle-orm`, `yaml` and `zod` are bundled into `dist/cli.js` (with the `createRequire` banner); the published package's runtime `dependencies` are only `next`, `react`, `react-dom`.
 - **Implemented (verified by `pnpm test:e2e`, 17/17 passing against the built CLI on 2026-10-15):** Playwright 1.64 end-to-end tests (`apps/web/e2e/home.spec.ts`, `apps/web/e2e/management.spec.ts`).
 - **Implemented — CI:** the workflow (`.github/workflows/ci.yml`, Node 24 on `ubuntu-latest`: install, `pnpm audit --prod`, format check, lint, typecheck, test, build, `verify:pack`, Playwright) ran green on PR #1 on 2026-10-14 (before the audit step was added). §4.7 `pnpm audit --prod` is a CI step since 2026-10-15 and was clean when run locally that day; it has not yet run in CI.
-- **Not implemented / unverified:** CI on Node 22, Windows and macOS; dependency-direction checks in CI; suppression of the `node:sqlite` experimental warning; JSON Schema export for the benchmark format.
+- **Implemented — CI on the oldest supported Node (issue #263, verified on 2026-11-17 by the `Oldest supported Node (22.16.0)` job, [run](https://github.com/MetaX5/DirectiveBench/actions/runs/44127456059/job/134195228801)):** Node v22.16.0 with SQLite 3.49.1, `packages/*` tests without coverage (1,932 passed), `pnpm build`, `pnpm verify:pack` (all steps passed). The same job failed on the pre-fix migration `0009` SQL (`no such column: artifacts.type`, 367 database tests).
+- **Not implemented / unverified:** the `apps/cli` and `apps/web` unit tests on Node 22 (issues #265, #266); CI on Windows; dependency-direction checks in CI; suppression of the `node:sqlite` experimental warning; JSON Schema export for the benchmark format.
