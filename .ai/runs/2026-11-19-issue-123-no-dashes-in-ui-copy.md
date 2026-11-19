@@ -3,7 +3,7 @@ title: No en or em dash in app-authored UI copy, enforced by lint (issue 123, ph
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #123, maintainer decisions of 2026-11-19 on the phase 1 decision document
-status: in-progress
+status: completed
 branch: refactor/issue-123-no-dashes-in-ui-copy
 specs: [SPEC-116, SPEC-014, SPEC-121]
 ---
@@ -98,6 +98,9 @@ versions. Two low-severity wording findings, both maintainer decisions and left 
 other findings were pre-existing and unrelated (horizontal table scroll inside cards, no skip
 link). No confirmed defect needed a regression test.
 
+Codex adversarial review (`adversarial-review --scope branch --base origin/main`), round 1:
+**approve**, no material findings (it re-ran `pnpm format:check` and `pnpm lint`).
+
 Not verified: the `Not conclusive`, `Run in progress` and run-warning lines in a browser (no
 such state in demo data; changed literals are covered by the lint rule and code review only);
 a real screen reader.
@@ -118,5 +121,7 @@ a real screen reader.
 - Spec text that quotes the old mock label with an em dash (SPEC-001, SPEC-002, SPEC-009,
   SPEC-012, SPEC-101, SPEC-107, SPEC-108, SPEC-111, SPEC-112, SPEC-113) could be aligned with the
   shipped `Mock agent: not an AI evaluation` label.
+- PRs #264 and #267 were still open when this PR was opened; merge `main` into this branch
+  after they land and re-run the gate.
 - If the maintainer dislikes the double colon, change `/settings` and `/repositories` badges
   together (D4 note).
