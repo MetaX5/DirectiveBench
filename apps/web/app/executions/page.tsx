@@ -17,7 +17,7 @@ import {
 import { cancelJobAction } from '@/lib/actions';
 import { getDatabase } from '@/lib/db';
 import { cancelJobName, viewRunOfJobName } from '@/lib/row-names';
-import { formatDate } from '@/lib/utils';
+import { formatDate, MISSING_VALUE } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Executions' };
 
@@ -75,7 +75,7 @@ export default async function ExecutionsPage() {
                     <TR key={job.id} data-job-status={job.status}>
                       <TD className="font-mono text-ui">{job.id}</TD>
                       <TD>
-                        {suiteName ?? '—'}
+                        {suiteName ?? MISSING_VALUE}
                         {/* A name another suite has adds the suite ID (issue 227, K4). */}
                         {suiteNameShared ? (
                           <span className="text-ui text-muted-foreground" data-testid="suite-id">
@@ -84,7 +84,7 @@ export default async function ExecutionsPage() {
                         ) : null}
                       </TD>
                       <TD>
-                        {artifactName ?? '—'}
+                        {artifactName ?? MISSING_VALUE}
                         {/* A name another artifact has adds the slug (issue 236, L4). */}
                         {artifactNameShared ? (
                           <span

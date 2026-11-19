@@ -131,7 +131,7 @@ test.describe('repositories', () => {
       'plain-rules',
       'Local directory',
       plain,
-      '—',
+      'n/a',
       '0',
       'Never',
       'ScanRemove', // the actions cell: Scan, then Remove (SPEC-125 §11.3 D12)

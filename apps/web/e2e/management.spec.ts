@@ -67,6 +67,11 @@ test.describe('artifacts', () => {
     await page.getByRole('link', { name: 'Open run details and traces' }).click();
     await expect(page).toHaveURL(/\/results\/run_[\w-]+$/);
     await expect(page.getByTestId('verdict')).toHaveText('improved');
+    // Variant subtitles separate label and detail with a colon (issue 123).
+    await expect(
+      page.getByText(/^RED: (without the artifact|artifact v\d+ installed)$/),
+    ).toBeVisible();
+    await expect(page.getByText(/^GREEN: artifact v\d+ installed$/)).toBeVisible();
   });
 
   test('artifact filters narrow the list by text, type and category', async ({ page }) => {
@@ -117,6 +122,15 @@ test.describe('results', () => {
 });
 
 test.describe('benchmarks and executions', () => {
+  test('the benchmark page says whether each assertion is required in words', async ({ page }) => {
+    // A non-required assertion reads "no", not a dash placeholder (issue 123).
+    await openDemoBenchmark(page);
+    const required = (id: string) =>
+      page.getByRole('row').filter({ hasText: id }).getByRole('cell').last();
+    await expect(required('rejects-invalid-input')).toHaveText('yes');
+    await expect(required('explicit-error-type')).toHaveText('no');
+  });
+
   test('benchmark Run enqueues a job that the runner completes, linked to its result', async ({
     page,
   }) => {
@@ -371,6 +385,8 @@ test.describe('catalog and configuration', () => {
     await expect(mock).toContainText('1.0.0');
     await expect(mock).toContainText('not required');
     await expect(mock).toContainText('supported');
+    // An empty Specification cell says so in words, not with a dash glyph (issue 123).
+    await expect(mock.getByRole('cell').last()).toHaveText('None');
 
     // Real CLI agents are detected on PATH (machine dependent); execution is not implemented.
     const cliAgents = page.locator('tr[data-agent]');
@@ -391,10 +407,10 @@ test.describe('catalog and configuration', () => {
     await expect(claude).toContainText('2.1.302 (Claude Code)');
     await expect(claude.getByText('ready', { exact: true })).toBeVisible();
     await expect(claude.locator('[data-auth-mode="subscription"]')).toHaveText(
-      'Subscription: ready — Logged in (claude.ai).',
+      'Subscription: ready. Logged in (claude.ai).',
     );
     await expect(claude.locator('[data-auth-mode="api-key"]')).toHaveText(
-      "API key: not ready (auth-missing) — ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
+      "API key: not ready (auth-missing). ANTHROPIC_API_KEY is not set (or empty) in this process's environment.",
     );
     // Execution stays unavailable until the adapter is wired into `benchmark run` (E06-S04).
     await expect(claude).toContainText('not implemented');
@@ -408,7 +424,7 @@ test.describe('catalog and configuration', () => {
     const config: unknown = JSON.parse(readFileSync(join(dataDir(), 'config.json'), 'utf8'));
     await page.goto('/settings');
     await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
-    await expect(page.getByText('Planned — not implemented: settings editor')).toBeVisible();
+    await expect(page.getByText('Planned: not implemented: settings editor')).toBeVisible();
     await expect(page.getByText(dataDir(), { exact: true })).toBeVisible();
     await expect(page.getByText(`database: ${databasePath()}`)).toBeVisible();
 
@@ -420,7 +436,7 @@ test.describe('catalog and configuration', () => {
       page.getByText('.ai/specs/2026-10-14-settings-and-configuration.md'),
     ).toBeVisible();
     for (const item of ['Settings editor', 'Secret storage (OS keychain)', 'Backup and restore']) {
-      await expect(page.getByText(`${item} — not implemented`)).toBeVisible();
+      await expect(page.getByText(`${item}: not implemented`)).toBeVisible();
     }
   });
 });

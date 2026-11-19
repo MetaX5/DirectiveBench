@@ -5,6 +5,7 @@ import {
   CASE_ID,
   CODE_FILES,
   CODE_RUN,
+  DASHED_LINE,
   FILES,
   FILES_RUN,
   HOSTILE_LINES,
@@ -180,13 +181,13 @@ test('agent-written markup is shown as text, never run (SPEC-123 §12)', async (
   page.on('request', (request) => requested.push(request.url()));
   await page.goto(filesPage(FILES_RUN, AGENT_RUN.rich, '?path=a%2Fhostile.html'));
   const content = page.getByRole('region', { name: 'Content of a/hostile.html' });
-  for (const line of HOSTILE_LINES) await expect(content).toContainText(line);
+  for (const line of [...HOSTILE_LINES, DASHED_LINE]) await expect(content).toContainText(line);
   await expect(page.getByRole('status')).toContainText('1 secret redacted.');
   await expect(page.getByRole('status')).toContainText('Shown with LF line endings.');
   expect(await page.evaluate(() => (window as { __hostile?: number }).__hostile)).toBeUndefined();
   await expect(content.locator('script, img')).toHaveCount(0);
   // Highlighted since Phase 3a, and still text: tokens are React text nodes (AC-15).
-  await expect(content.locator('[data-highlighted]')).toHaveCount(HOSTILE_LINES.length);
+  await expect(content.locator('[data-highlighted]')).toHaveCount(HOSTILE_LINES.length + 1);
   // The <img src=x> was never created, so nothing fetched it.
   expect(requested.filter((url) => /\/x$/.test(url))).toEqual([]);
 });

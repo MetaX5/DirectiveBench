@@ -267,7 +267,7 @@ describe('assertionDetailLines (SPEC-118 FR-118-40…46)', () => {
       assertionDetailLines('markdown-sections', { file: '**/*.md', matches: [], matchCount: 0 }),
     ).toEqual([
       { label: 'File pattern', value: '**/*.md' },
-      { label: 'Matches (0)', value: '—' },
+      { label: 'Matches (0)', value: 'None' },
     ]);
     expect(
       assertionDetailLines('required-phrases', {
@@ -305,7 +305,7 @@ describe('assertionDetailLines (SPEC-118 FR-118-40…46)', () => {
     ).toEqual([
       { label: 'File', value: 'plan.md' },
       { label: 'Found', value: 'Risks, Estimate' },
-      { label: 'Missing', value: '—' },
+      { label: 'Missing', value: 'None' },
       { label: 'Out of order', value: 'Risks' },
     ]);
     expect(

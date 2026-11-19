@@ -61,6 +61,7 @@ import {
   urlFieldError,
   type RegistrationNotice,
 } from '@/lib/repositories';
+import { MISSING_VALUE } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Repositories' };
 
@@ -635,7 +636,9 @@ export default async function RepositoriesPage({
                         {repository.location}
                       </TD>
                       <TD className="text-ui">
-                        <span className="font-mono">{branchLabel(repository) ?? '—'}</span>
+                        <span className="font-mono">
+                          {branchLabel(repository) ?? MISSING_VALUE}
+                        </span>
                         {branchCaption(repository) ? (
                           <span className="block text-caption text-muted-foreground">
                             {branchCaption(repository)}

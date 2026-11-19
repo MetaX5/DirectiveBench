@@ -49,7 +49,7 @@ describe('demo', () => {
     expect(first.code).toBe(ExitCode.Ok);
     expect(first.output).toMatch(/^Artifact: {2}.+ v\S+ \(imported\)$/m);
     expect(first.output).toMatch(/^Benchmark: .+ v\S+ \(imported\)$/m);
-    expect(first.output).toContain('Mock agent — not an AI evaluation.');
+    expect(first.output).toContain('Mock agent: not an AI evaluation.');
     expect(first.output).toMatch(/Delta: +\+\d+\.\d points/);
     expect(first.output).toMatch(/Verdict: +improved \(confidence: \w+\)/);
     expect(first.output).toMatch(/Run id: +\S+/);

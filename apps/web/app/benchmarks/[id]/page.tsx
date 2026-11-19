@@ -124,7 +124,7 @@ export default async function BenchmarkPage({
                           <Badge variant="outline">{a.type}</Badge>
                         </TD>
                         <TD className="text-right tabular-nums">{a.weight}</TD>
-                        <TD>{a.required ? 'yes' : '—'}</TD>
+                        <TD>{a.required ? 'yes' : 'no'}</TD>
                       </TR>
                     ))}
                   </TBody>

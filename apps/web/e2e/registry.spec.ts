@@ -1,7 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { e2eTmpRoot, escapeRegExp } from './support';
+import { hashManifest, sha256 } from '@directivebench/core';
+import { e2eTmpRoot, escapeRegExp, withDatabase } from './support';
 
 /**
  * Issue #17 (E01-S03, SPEC-101): artifacts of two registered repositories in one list, filters in
@@ -41,9 +42,14 @@ const MALICIOUS_SKILL = [
   '',
 ].join('\n');
 
-/** Leading blank line, tabs, trailing spaces, non-ASCII text and no final newline. */
-const TRICKY_AGENTS =
-  '\n# Team rules\n\n\t- indented with a tab  \nZażółć gęślą jaźń — ✓ <b>raw</b>';
+/**
+ * Leading blank line, tabs, trailing spaces, non-ASCII text, both an en and an em dash (imported
+ * content keeps them, issue 123) and no final newline.
+ */
+const DASHED_LINE = 'Ranges 8\u201312 \u2014 kept';
+const TRICKY_AGENTS = `\n# Team rules\n\n\t- indented with a tab  \n${DASHED_LINE}\nZażółć gęślą jaźń \u2014 ✓ <b>raw</b>`;
+/** An imported description with both dashes, shown verbatim in the Artifacts list (issue 123). */
+const DASHED_DESCRIPTION = 'Style rules 8\u201312 \u2014 imported as written';
 
 const files: Record<string, Record<string, string>> = {
   [team]: {
@@ -54,7 +60,7 @@ const files: Record<string, Record<string, string>> = {
   },
   [client]: {
     'AGENTS.md': '# Client rules\n',
-    '.cursor/rules/e2e-style.mdc': '---\nglobs: "src/**/*.ts"\n---\n# Style\n',
+    '.cursor/rules/e2e-style.mdc': `---\ndescription: ${DASHED_DESCRIPTION}\nglobs: "src/**/*.ts"\n---\n# Style\n`,
   },
 };
 
@@ -112,7 +118,10 @@ test.describe.serial('artifact registry', () => {
     await expect(skill.getByRole('cell').nth(4)).toHaveText('registry-team');
     await expect(skill.getByRole('cell').nth(5)).toHaveText('1');
     // Never evaluated: no score and no mock label (FR-101-14 labels only mock results).
-    await expect(skill.getByTestId('latest-score')).toHaveText('—');
+    await expect(skill.getByTestId('latest-score')).toHaveText('n/a');
+    // Missing values read as words, never a dash glyph (issue 123).
+    await expect(skill.getByRole('cell').nth(8)).toHaveText('n/a');
+    await expect(skill.getByRole('cell').nth(9)).toHaveText('Not run');
     // Same-named instructions from two repositories stay two artifacts (SPEC-101 §8.3).
     for (const repository of ['registry-team', 'registry-client']) {
       const row = artifactRow(page, 'AGENTS.md', repository);
@@ -126,9 +135,11 @@ test.describe.serial('artifact registry', () => {
         row.getByRole('link', { name: `AGENTS.md, slug ${slug}`, exact: true }),
       ).toHaveCount(1);
     }
-    await expect(
-      artifactRow(page, 'e2e-style', 'registry-client').getByRole('cell').nth(1),
-    ).toHaveText('rule');
+    const style = artifactRow(page, 'e2e-style', 'registry-client');
+    await expect(style.getByRole('cell').nth(1)).toHaveText('rule');
+    // Imported text keeps its dashes: the copy rule never rewrites data (issue 123).
+    await expect(style.getByRole('cell').nth(2)).toHaveText(DASHED_DESCRIPTION);
+    await expect(style.getByRole('cell').nth(2)).toHaveAttribute('title', DASHED_DESCRIPTION);
   });
 
   test('filters by repository, type and category, reflected in the URL', async ({ page }) => {
@@ -299,6 +310,25 @@ test.describe.serial('artifact registry', () => {
     await expect(
       page.getByTestId('artifact-rendered').getByRole('heading', { name: 'Team rules' }),
     ).toBeVisible();
+    // Both dashes survive in the rendered view and in storage: the stored file is the source,
+    // and the version's content hash is the hash of the source bytes (issue 123).
+    await expect(page.getByTestId('artifact-rendered')).toContainText(DASHED_LINE);
+    const stored = await withDatabase(
+      (db) =>
+        db
+          .prepare(
+            `select v.content_hash as contentHash, v.files as files
+               from artifact_versions v
+               join artifact_occurrences o on o.latest_version_id = v.id
+               join repositories r on r.id = o.repository_id
+              where r.name = 'registry-team' and o.path = 'AGENTS.md'`,
+          )
+          .get() as { contentHash: string; files: string },
+    );
+    const [file] = JSON.parse(stored.files) as { path: string; sha256: string; content: string }[];
+    expect(file!.content).toBe(TRICKY_AGENTS);
+    expect(file!.sha256).toBe(sha256(source));
+    expect(stored.contentHash).toBe(hashManifest([{ path: file!.path, sha256: sha256(source) }]));
 
     // Unknown versions and files fall back to the latest version's primary file, with a notice.
     await page.goto(`${page.url().split('?')[0]}?tab=content&version=99&file=nope.md`);

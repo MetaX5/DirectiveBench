@@ -13,7 +13,7 @@ import { Card, CardContent, TBody, TD, TH, THead, TR, Table } from '@/components
 import { getDatabase } from '@/lib/db';
 import { isMockAgent } from '@/lib/mock-agent';
 import { resultRunName } from '@/lib/row-names';
-import { formatDate, formatDelta, formatScore } from '@/lib/utils';
+import { formatDate, formatDelta, formatScore, MISSING_VALUE } from '@/lib/utils';
 
 export const metadata: Metadata = { title: 'Results' };
 
@@ -115,7 +115,7 @@ export default async function ResultsPage() {
                         {formatScore(s?.candidate?.meanScore)}
                       </TD>
                       <TD className="text-right tabular-nums">{formatDelta(s?.delta)}</TD>
-                      <TD className="text-ui">{s?.confidence?.level ?? '—'}</TD>
+                      <TD className="text-ui">{s?.confidence?.level ?? MISSING_VALUE}</TD>
                       <TD className="text-ui text-muted-foreground">{formatDate(run.startedAt)}</TD>
                     </TR>
                   );

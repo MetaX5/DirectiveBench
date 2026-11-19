@@ -214,7 +214,7 @@ describe('enqueueBenchmarkRunAction', () => {
     );
 
     expect(new URL(url, 'http://localhost').searchParams.get('error')).toBe(
-      'This suite uses agent "claude-code". The web UI runs only mock-agent suites; real agents run from the CLI (planned — not implemented yet).',
+      'This suite uses agent "claude-code". The web UI runs only mock-agent suites; real agents run from the CLI (planned, not implemented yet).',
     );
     expect(url.startsWith(`/benchmarks/${suite.suiteId}?error=`)).toBe(true);
     expect(await listJobs(handle.db)).toEqual([]);

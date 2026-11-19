@@ -75,7 +75,14 @@ import {
   usageText,
   type AgentProfile,
 } from '@/lib/run-detail';
-import { cn, formatDate, formatDelta, formatDuration, formatScore } from '@/lib/utils';
+import {
+  cn,
+  formatDate,
+  formatDelta,
+  formatDuration,
+  formatScore,
+  MISSING_VALUE,
+} from '@/lib/utils';
 
 import { StartBlindReviewForm } from './blind-review/blind-review-forms';
 
@@ -512,8 +519,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             label={baselineName}
             subtitle={
               baselineArtifactVersion
-                ? `RED — artifact v${baselineArtifactVersion.version} installed`
-                : 'RED — without the artifact'
+                ? `RED: artifact v${baselineArtifactVersion.version} installed`
+                : 'RED: without the artifact'
             }
             tone="red"
             data={summary.baseline}
@@ -522,7 +529,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           />
           <VariantCard
             label={candidateName}
-            subtitle={`GREEN — artifact v${artifactVersion.version} installed`}
+            subtitle={`GREEN: artifact v${artifactVersion.version} installed`}
             tone="green"
             data={summary.candidate}
             invocation={invocationText(run.summary, 'candidate')}
@@ -540,7 +547,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <dt className="text-muted-foreground">Verdict</dt>
                 <dd data-testid="verdict">{summary.verdict}</dd>
                 <dt className="text-muted-foreground">Candidate outcome</dt>
-                <dd>{summary.candidateOutcome ?? '—'}</dd>
+                <dd>{summary.candidateOutcome ?? NOT_REPORTED}</dd>
                 <dt className="text-muted-foreground">Pass-rate delta</dt>
                 <dd className="tabular-nums">{formatDelta(summary.passRateDelta)}</dd>
                 <dt className="text-muted-foreground">Repetitions</dt>
@@ -550,7 +557,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               </dl>
               {mock ? null : (
                 <Badge variant="warning" data-testid="real-agent-badge">
-                  Real agent — results vary between runs
+                  Real agent: results vary between runs
                 </Badge>
               )}
               <p className="text-ui text-muted-foreground">{summary.confidence.reason}</p>
@@ -562,7 +569,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 </ul>
               ) : null}
               {summary.conclusive === false ? (
-                <Badge variant="warning">Not conclusive — single nondeterministic repetition</Badge>
+                <Badge variant="warning">Not conclusive: single nondeterministic repetition</Badge>
               ) : null}
             </CardContent>
           </Card>
@@ -571,7 +578,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
         <Card>
           <CardContent className="text-body text-muted-foreground">
             {run.status === 'running'
-              ? 'Run in progress — results appear as agent runs complete.'
+              ? 'Run in progress. Results appear as agent runs complete.'
               : 'No summary was recorded for this run.'}
           </CardContent>
         </Card>
@@ -607,7 +614,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
                 <li key={w.text} data-code={w.code ?? ''}>
                   <span className={w.code ? 'font-mono text-ui' : undefined}>{w.text}</span>
                   {w.explanation ? (
-                    <span className="text-foreground"> — {w.explanation}</span>
+                    <span className="text-foreground">: {w.explanation}</span>
                   ) : null}
                 </li>
               ))}
@@ -809,9 +816,9 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
               {run.agentAdapterId} {run.agentVersion}
             </dd>
             <dt className="text-muted-foreground">Model</dt>
-            <dd>{run.model ? `${run.model.provider}/${run.model.model}` : 'n/a'}</dd>
+            <dd>{run.model ? `${run.model.provider}/${run.model.model}` : MISSING_VALUE}</dd>
             <dt className="text-muted-foreground">Comparability key</dt>
-            <dd className="font-mono">{run.comparabilityKey?.slice(0, 16) ?? '—'}</dd>
+            <dd className="font-mono">{run.comparabilityKey?.slice(0, 16) ?? MISSING_VALUE}</dd>
             <dt className="text-muted-foreground">Finished</dt>
             <dd>{formatDate(run.finishedAt)}</dd>
           </dl>

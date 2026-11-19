@@ -270,7 +270,7 @@ export function possibleDuplicatesCard(
 
 export function repositoriesLabel(repositories: readonly { name: string }[]): string {
   const [first, ...rest] = repositories;
-  if (!first) return '—';
+  if (!first) return 'None';
   return rest.length ? `${first.name} +${rest.length}` : first.name;
 }
 
