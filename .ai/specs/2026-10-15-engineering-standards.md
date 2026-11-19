@@ -3,7 +3,7 @@ id: SPEC-014
 title: Engineering Standards
 status: draft
 created: 2026-10-15
-updated: 2026-10-15
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-007, SPEC-008, SPEC-012, ADR-0003, ADR-0006, ADR-0008]
 ---
@@ -186,6 +186,7 @@ When two principles conflict, prefer the one that keeps the change smaller and m
 | Console only in the CLI and scripts (§6.7) | ESLint `no-console` for `packages/*/src` and `apps/web` |
 | Formatting | Prettier (`pnpm format:check` in CI) |
 | Dependency audit (§5.6) | `pnpm audit --prod` in CI |
+| SQL runs on the oldest supported Node (§10) | CI job `oldest-node`: the `packages/*` tests (all migrations, repositories and the runner) without the coverage threshold, `pnpm build` and `pnpm verify:pack` on the `engines.node` minimum 22.16.0, whose `node:sqlite` bundles SQLite 3.49.1; it fails when `engines.node` and its Node version drift apart ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions), issue #263) |
 | Everything else | Code review against §10 |
 
 ## 10. Code review checklist
@@ -212,6 +213,11 @@ When two principles conflict, prefer the one that keeps the change smaller and m
 
 - [ ] A behaviour change ships with a test that fails on the old code; a bug fix with a
       regression test reproducing the bug.
+- [ ] SQL (migrations and queries) is valid on the SQLite of the oldest supported Node, not only on
+      Node 24's: `node:sqlite` bundles its own SQLite, and newer releases accept constructs older
+      ones reject (an outer column in a correlated subquery's `ORDER BY`). The CI `oldest-node`
+      job runs it; locally, run the database tests on Node 22.16
+      ([lesson](../lessons/2026-11-17-run-migration-sql-on-the-oldest-supported-sqlite.md)).
 - [ ] Concurrency-sensitive code (job acquisition, cancellation, shutdown) is tested for the
       concurrent or interrupted case, not only the happy path.
 - [ ] Tests need no paid API, credentials or network; they use the mock agent and temp dirs.

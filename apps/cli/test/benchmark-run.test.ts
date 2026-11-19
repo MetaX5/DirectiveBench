@@ -1051,6 +1051,41 @@ posix('benchmark run after a rename or a type change (issue 66, SPEC-103 FR-103-
     expect(s.output()).toContain('Skill name: pdf-report');
   });
 
+  it('warns in the plan when a /<slug> prompt no longer names a nameless skill, and still runs (issue 258)', async () => {
+    // A nameless skill is installed under its folder (`pdf-report`), not its slug (`pdf`).
+    const nameless = (body: string) => ({
+      ...skill(body, 'description: Writes reports\n'),
+      path: '.claude/skills/pdf-report',
+    });
+    const s = await setup({
+      versions: [nameless('Answer briefly.'), nameless('GOOD: write a summary.')],
+      definition: {
+        cases: ['/pdf write the report', '/pdf-report write the report'].map((prompt, index) => ({
+          id: index === 0 ? 'by-slug' : 'by-name',
+          name: 'Case',
+          prompt,
+          fixture: { path: 'fixtures/example' },
+          assertions: [
+            { id: 'sections', type: 'markdown-sections', file: 'output.md', headings: ['Summary'] },
+          ],
+        })),
+      },
+    });
+    const code = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', baseline: 'v1', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    );
+    // The run is not refused: it starts (the fake's recorded stream loads the skill as `pdf`, so
+    // the outcome itself is not what this test checks).
+    expect(code).not.toBe(ExitCode.Usage);
+    expect(s.fake.starts()).toBeGreaterThan(0);
+    const out = s.output();
+    expect(out).toContain(
+      'Skill name: pdf-report\nWarning:    case by-slug: the prompt starts with a / command other than /pdf-report (the installed skill name), so it does not invoke the skill.\nBaseline:   v1',
+    );
+    expect(out).not.toContain('case by-name:');
+  }, 60_000);
+
   it('gates each version with its own type after a type change (FR-118-25, N2)', async () => {
     const agents = '# Guide\n';
     const instruction = {

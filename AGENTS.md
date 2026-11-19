@@ -88,7 +88,10 @@ These rules are not optional. A task is not done until the applicable steps are 
 13. Run the quality gate and fix failures:
     `pnpm lint && pnpm typecheck && pnpm test` — plus `pnpm build && pnpm verify:pack` when you
     touched `apps/cli`, `apps/web`, packaging or dependencies, and `pnpm test:e2e` and
-    `pnpm test:storybook` for UI changes.
+    `pnpm test:storybook` for UI changes. SQL (migrations, queries) must also pass on the oldest
+    supported Node (`engines.node`, 22.16.0), whose `node:sqlite` bundles an older SQLite; the
+    CI job `oldest-node` checks it
+    ([lesson](.ai/lessons/2026-11-17-run-migration-sql-on-the-oldest-supported-sqlite.md)).
 14. **Prove the change works and review it critically.** Exercise the changed behaviour for real
     (run the CLI, open the page, run `directivebench demo`) and review your own diff as a
     sceptical reviewer would; do not open a PR until it passes that review. If a fix works but is

@@ -3,7 +3,7 @@ id: SPEC-012
 title: Testing Strategy
 status: draft
 created: 2026-10-14
-updated: 2026-10-29
+updated: 2026-11-17
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, SPEC-111, SPEC-112, ADR-0005, ADR-0006]
 ---
@@ -98,7 +98,7 @@ Real agent adapters ([SPEC-203](2026-10-14-integration-claude-code.md)–[SPEC-2
 
 ## 8. CI (GitHub Actions)
 
-Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Platforms: Node 24 on `ubuntu-latest` for every job, and the unit tests also on `macos-latest` (issue #120; not a required check for now: the maintainer decided on 2026-10-29 to watch it first). `windows-latest` (best effort, NFR-118-04) and the Node 22.x minimum supported version are targets: Windows failed 154 tests in its first full run and is tracked in issue #160. Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; all four are meant to be required status checks for merging (configured in the repository's branch protection settings, not in the workflow):
+Workflow `.github/workflows/ci.yml`, triggered on every pull request and on pushes to `main`. Platforms: Node 24 on `ubuntu-latest` for every job but `oldest-node`, and the unit tests also on `macos-latest` (issue #120; not a required check for now: the maintainer decided on 2026-10-29 to watch it first). The `oldest-node` job runs the `engines.node` minimum, Node 22.16.0, and is meant to be a required check (issue #263). `windows-latest` (best effort, NFR-118-04) is a target: Windows failed 154 tests in its first full run and is tracked in issue #160. Shared setup (Node, pnpm, `pnpm install --frozen-lockfile`) is the composite action `.github/actions/setup`. Jobs run in parallel; every job except `unit-macos` is meant to be a required status check for merging (configured in the repository's branch protection settings, not in the workflow):
 
 | Job | Steps |
 | --- | --- |
@@ -106,6 +106,7 @@ Workflow `.github/workflows/ci.yml`, triggered on every pull request and on push
 | `unit` | `pnpm test` with the 100% coverage threshold (§3); coverage reports uploaded as an artifact |
 | `unit-macos` | `pnpm test --continue` on `macos-latest` with the same 100% threshold; `--continue` reports every package's failures |
 | `build` | `pnpm build`, `pnpm verify:pack` (§5) |
+| `oldest-node` | On Node 22.16.0 (the `engines.node` minimum; `node:sqlite` bundles SQLite 3.49.1): prints the Node and SQLite versions and fails when `engines.node` in the root or CLI `package.json` is not `>=` that version; runs the `packages/*` tests (every migration from an empty and from an earlier database, repositories, runner, engine, adapters, core) without the coverage threshold, which `unit` and `unit-macos` enforce on Node 24; then `pnpm build` and `pnpm verify:pack`. The `apps/cli` and `apps/web` unit tests do not pass on 22.16 yet (issues #265, #266) |
 | `e2e` | `pnpm build`, install Playwright Chromium, `pnpm test:e2e` against a temporary instance with a SQLite data dir (§4); traces uploaded on failure |
 
 No secrets are configured for the default workflow.
@@ -116,5 +117,6 @@ No secrets are configured for the default workflow.
 - **Implemented (verified by `pnpm test:e2e`, 17/17 passing against the built CLI on 2026-10-15, three consecutive runs):** the browser integration tests of §4.
 - **Implemented — CI (§8):** four parallel jobs (`lint`, `unit`, `build`, `e2e`) with the shared setup action. The previous single-job workflow ran green on PR #1 on 2026-10-14; the four-job workflow is verified locally job by job (commands above) and has not run on GitHub yet. Making the jobs required checks is a repository setting.
 - **Implemented — macOS unit job (issue #120, verified by the `Unit tests (100% coverage, macOS)` job on PR #159):** the full suite with the 100% threshold on `macos-latest`. Not a required check for now (maintainer decision, 2026-10-29); making it one is a branch-protection setting. It made five tests portable: `setsid` replaced by Perl's `POSIX::setsid()`, kill-escalation tests timed out only after the fake is ready, a non-UTF-8 file name committed through the git index, the linear-time check of `resultsByVersion` moved to `expectLinearTime`, and a guard against `kill(0)`.
+- **Implemented: oldest supported Node job (issue #263, verified on 2026-11-17 on PR #267):** `oldest-node` printed `Node v22.16.0, node:sqlite SQLite 3.49.1` and passed (core 351, agent-adapters 374, database 377, benchmark-engine 518, runner 312 tests; `pnpm build`; every `pnpm verify:pack` step) in [run 44127456059](https://github.com/MetaX5/DirectiveBench/actions/runs/44127456059/job/134195228801). Red first: with the pre-fix migration `0009` SQL from PR #259 restored in a temporary commit it failed with `no such column: artifacts.type` (367 of 377 database tests) in [run 44127046218](https://github.com/MetaX5/DirectiveBench/actions/runs/44127046218/job/134193574720). Making it a required check is a repository setting.
 - **Implemented: temp-directory leak guard (§1 principle 4, issue #199, verified on 2026-11-10, Node 24.21, macOS):** every package's `vitest.config.ts` lists `tempDirGuard` (`test-support/temp-dir-guard.ts`, exported from `vitest.shared.ts`) as its `globalSetup`. It points `TMPDIR`/`TMP`/`TEMP` at a private directory for the run and fails the run when tests leave anything in it, apart from the runner's empty default workspace root `directivebench/workspaces`. `pnpm test --force` with an empty dedicated `TMPDIR` leaves only Node's own `node-compile-cache` there (before: 10 `directivebench-*` directories from the runner tests and 4 `db-cli-export-out-*` from the CLI export tests).
 - **Not implemented:** PostgreSQL backend tests with testcontainers (planned with the optional PostgreSQL backend), adapter conformance suite, recorded-fixture contract tests, live test gating, the Windows unit gate (issue #160), Node 22 CI matrix.

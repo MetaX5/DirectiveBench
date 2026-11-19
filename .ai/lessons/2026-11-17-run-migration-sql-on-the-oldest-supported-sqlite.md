@@ -18,15 +18,24 @@ on the supported minimum `engines.node >= 22.16.0` (SQLite 3.49.1).
 
 ## Lesson
 
-`node:sqlite` bundles its own SQLite, so the SQL dialect accepted depends on the Node version. CI
-tests only the `.nvmrc` version. Newer SQLite accepts constructs that older versions reject, such
-as an outer column in a correlated subquery's `ORDER BY`.
+`node:sqlite` bundles its own SQLite, so the SQL dialect accepted depends on the Node version.
+Newer SQLite accepts constructs that older versions reject, such as an outer column in a
+correlated subquery's `ORDER BY`. CI tested only the `.nvmrc` version (Node 24) until issue 263
+added the `oldest-node` job (`.github/workflows/ci.yml`), which runs the `packages/*` tests,
+`pnpm build` and `pnpm verify:pack` on Node 22.16.0 (SQLite 3.49.1) and prints both versions.
+
+The binding differs too, not only the SQL dialect: on Node 22 (22.16 and 22.23) `node:sqlite`
+returns a TEXT value only up to its first NUL character, while Node 24.21 returns all of it
+(issue 265).
 
 ## How to apply
 
 - Reference outer rows only in `WHERE` clauses of correlated subqueries. Use `coalesce` of
   filtered subqueries or a window over a join instead of an outer reference in `ORDER BY`.
-- Before pushing a migration with hand-written SQL, run the database tests on an older Node
-  22 as well, for example
+- The CI job `oldest-node` must pass. Before pushing a migration with hand-written SQL, also run
+  the database tests on Node 22.16 locally, for example
   `PATH=$HOME/.nvm/versions/node/v22.*/bin:$PATH node ../../node_modules/vitest/vitest.mjs run test/client.test.ts`
-  in `packages/database`, and check `process.versions.sqlite`.
+  in `packages/database`, and check `process.versions.sqlite`. Without a local Node 22.16,
+  download the official tarball into `/var/tmp` (not `/tmp`), check it against `SHASUMS256.txt`
+  and remove it afterwards. Turn coverage off there (`--coverage.enabled=false`): the threshold
+  belongs to the Node 24 jobs.
