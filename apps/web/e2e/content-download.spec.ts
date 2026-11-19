@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { e2eTmpRoot } from './support';
+import { e2eTmpRoot, withDatabase } from './support';
 
 /**
  * Issue #52 (SPEC-101 §10 to §12): the raw view cannot show CR characters (lesson 2026-10-20),
@@ -13,7 +13,8 @@ import { e2eTmpRoot } from './support';
 const RUNNER_TIMEOUT = 30_000;
 
 const sources = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'content-download-')));
-const repo = join(sources, 'crlf-download');
+const REPOSITORY = 'crlf-download';
+const repo = join(sources, REPOSITORY);
 const skillDir = '.agents/skills/e2e-crlf-download';
 
 const SKILL = [
@@ -33,14 +34,39 @@ const files: Record<string, string> = {
   [`${skillDir}/assets/page.html`]: PAGE_HTML,
 };
 
-test.beforeAll(() => {
+/** Jobs that existed before the fixture repository was registered and scanned. */
+let jobsBefore = new Set<string>();
+
+test.beforeAll(async () => {
+  jobsBefore = await withDatabase(
+    (db) => new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+  );
   for (const [relPath, content] of Object.entries(files)) {
     mkdirSync(dirname(join(repo, relPath)), { recursive: true });
     writeFileSync(join(repo, relPath), content);
   }
 });
 
-test.afterAll(() => rmSync(sources, { recursive: true, force: true }));
+// Other spec files count artifacts and jobs (home, management): remove the fixture repository,
+// its artifacts and the register and scan jobs again.
+test.afterAll(async () => {
+  await withDatabase((db) => {
+    const repository = db.prepare('select id from repositories where name = ?').get(REPOSITORY) as
+      { id: string } | undefined;
+    if (repository) {
+      db.prepare(
+        `delete from artifacts where id in (
+           select artifact_id from artifact_occurrences where repository_id = ?)`,
+      ).run(repository.id);
+      db.prepare('delete from repositories where id = ?').run(repository.id);
+    }
+    const remove = db.prepare('delete from jobs where id = ?');
+    for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+      if (!jobsBefore.has(id)) remove.run(id);
+    }
+  });
+  rmSync(sources, { recursive: true, force: true });
+});
 
 async function openContentTab(page: Page): Promise<void> {
   await page.goto('/artifacts?q=e2e-crlf-download');
