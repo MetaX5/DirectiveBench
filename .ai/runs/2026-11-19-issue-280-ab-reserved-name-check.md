@@ -3,7 +3,7 @@ title: Detect a CLI-owned skill name at run time in A/B runs (issue 280)
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #280, taken with the maintainer's approval; phase A (options and recommendation) before a product decision
-status: in-progress
+status: completed
 branch: feat/issue-280-ab-reserved-name-check
 specs: [SPEC-203, SPEC-118]
 ---
@@ -251,10 +251,29 @@ Decisions needed from the maintainer:
    horizontal overflow), and the proposed CLI text in `cli-output-proposal.txt`. The story file was
    removed from the worktree (a copy is in the shots folder).
 7. Follow-up issue #288 (option 5, base directory of an invoked skill).
+8. Maintainer approval of the display and of the three decisions (relayed 2026-11-19). Merged
+   `origin/main` (2154dba, #287; one conflict in `adapter.test.ts`, the new `startsTheFake`
+   timeout argument, resolved by keeping both).
+9. CLI and web display (commit `feat(cli,web)`): plan line and session count, summary line,
+   tokens including the check, `--json` `reservedNameCheck`; the run page fact in "Environment and
+   versions"; a kept Storybook story (`Patterns/RED-GREEN result`, `ReservedNameCheck`) with
+   pattern rule 7; Playwright `e2e/reserved-name-check.spec.ts`.
+10. Codex round 1 (needs-attention, high): a completed check passed although its `system/init`
+    lacked `skills` or `slash_commands`. Fixed red first (commit `fix(benchmark-engine)`): the
+    adapter reports `nameListsReported`, the check fails closed without it, and the stored record
+    carries the engine's `passed` decision, which the CLI and web read. Also ran Prettier on four
+    files `format:check` flagged.
+11. Codex round 2: no material findings (it could not run the gate in its read-only sandbox; the
+    gate below was run here).
+12. Browser QA agent (Playwright fallback, `agent-browser` not installed) on the built app with
+    seeded runs on port 4402: no findings (texts, contrast 6.01 to 19.8:1, no horizontal scroll at
+    320, keyboard order, console clean, not-found page).
+13. Lesson evidence: the `pkill -f` pitfall recurred; added to
+    `.ai/lessons/2026-10-14-testing-processes-and-http.md`.
 
 ## Verification
 
-Phase A: analysis only. Phase B (backend):
+Phase A: analysis only. Phase B, backend first:
 
 | Command | Result |
 | --- | --- |
@@ -281,22 +300,47 @@ Built CLI proof (`apps/cli/dist/cli.js`, data directory under `/var/tmp`, two ve
 - Name not listed without the skill: `Result: passed`, exit 0, three starts (check, baseline,
   candidate), `environment.reservedNameCheck.status = completed`.
 
-Not verified: a real `claude` session (no consent for this issue); `pnpm test:e2e` and
-`pnpm test:storybook` (no UI code changed yet); the Codex adversarial review, the PR and CI (after
-the UI approval).
+Phase B, after the display and the Codex fix (final code):
+
+| Command | Result |
+| --- | --- |
+| red first: CLI `benchmark-report.test.ts` before the display | 4 failed |
+| red first: web `run-detail.test.ts` before `reservedNameCheckText` | 6 failed |
+| red first: Codex fix, adapter `normalize`/`stream-parser` tests | 3 failed |
+| red first: Codex fix, engine `reserved-name-check` and `claude-code-adapter` tests | 4 failed |
+| `pnpm lint`, `pnpm typecheck`, `pnpm format:check` | pass |
+| `pnpm test` (coverage 100%) | pass |
+| `pnpm exec turbo run test --force` | 7/7 tasks; core 353, agent-adapters 400 (+2 skipped), web 661, cli 216, runner 314, database 387, benchmark-engine 542 |
+| `pnpm build`, `pnpm verify:pack` | pass ("Packaging verification passed") |
+| `pnpm test:storybook` | 68 files, 344 tests pass |
+| `pnpm test:e2e` (port 4402) | 208 passed (6.0 min), including `reserved-name-check.spec.ts` (3) |
+
+Built CLI with the final code (same fake `claude` set-up, data under `/var/tmp`, removed):
+
+- CLI-owned name: the plan shows `Reserved-name check: 1 extra session without the skill before
+  the first agent run (not scored)` and `Cost: 3 Claude Code sessions ...`; the summary shows
+  `Reserved-name check: stopped the run (skill-name-reserved; 1 extra session, not scored, 0.0 s)`,
+  `Tokens: input 2, output 4 (including the reserved-name check)`, the error, exit 6, one start.
+- Free name: `Reserved-name check: passed (1 extra session, not scored, 0.0 s)`, `Tokens: input
+  6, output 12 (including the reserved-name check)`, exit 0, three starts; `--json`
+  `reservedNameCheck` = `{"status":"completed","errorCode":null,"durationMs":24,...,"passed":true}`.
+
+Not verified: a real `claude` session (no consent for this issue); which entry a session uses on a
+real collision; a flag change between the check and a later variant session.
 
 ## Problems and deviations
 
-None.
+- `pkill -f "storybook dev -p 4402"` killed the agent's own shell (exit 144); Storybook was
+  stopped, the temporary story moved out by hand. Lesson evidence added.
+- The fake `claude` streams of the AC-18/AC-25 tests were shifted by one start (the check is
+  start 1), and five A/B refusal tests now expect the check first (decision 3).
 
 ## Lessons recorded
 
-None yet.
+- Evidence added to `.ai/lessons/2026-10-14-testing-processes-and-http.md` (`pkill -f` kills the
+  agent's own shell; kill by PID). No new index entry: the lesson exists.
 
 ## Follow-ups
 
-- Waiting for approval of the UI proposal (`.ai/tmp/issue-280-shots/`); then the CLI and web
-  display, Playwright/Storybook coverage, Codex review, draft PR.
-- The plan's `Cost:` line still counts only the variants' sessions until the CLI display lands.
 - Option 5 as possible hardening: #288.
 - Option 1c (init-only probe) needs a consented live check before it can be considered.
