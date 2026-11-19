@@ -1361,7 +1361,7 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
           name: 'review',
           activeOccurrences: 1,
           repositories: [{ id: b, name: 'b' }],
-          sameLatestContent: false,
+          sameContent: false,
         },
       ],
       total: 1,
@@ -1407,7 +1407,7 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
     expect(listed.style).toBe(0);
     expect(await duplicatesOf(handle, 'style')).toEqual({ items: [], total: 0 });
     expect(await duplicatesOf(handle, 'anon')).toMatchObject({
-      items: [{ slug: 'anon-2', sameLatestContent: true }],
+      items: [{ slug: 'anon-2', sameContent: true }],
     });
     const agents = (await listArtifacts(handle.db)).filter((row) => row.name === 'AGENTS.md');
     expect(agents.map((row) => row.possibleDuplicates)).toEqual([0, 0]);
@@ -1442,7 +1442,7 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
         item.slug,
         item.repositories.map((r) => r.id),
         item.activeOccurrences,
-        item.sameLatestContent,
+        item.sameContent,
       ]),
     ).toEqual([
       ['review', [expect.any(String)], 1, false],
@@ -1511,10 +1511,10 @@ describe('possible duplicates (SPEC-126 FR-126-11 to FR-126-13, AC-2)', () => {
       .run();
     expect(await counts(handle)).toEqual({ review: 1, bare: 1 });
     expect((await duplicatesOf(handle, 'review'))?.items).toEqual([
-      expect.objectContaining({ slug: 'bare', activeOccurrences: 0, sameLatestContent: false }),
+      expect.objectContaining({ slug: 'bare', activeOccurrences: 0, sameContent: false }),
     ]);
     expect((await duplicatesOf(handle, 'bare'))?.items).toEqual([
-      expect.objectContaining({ slug: 'review', sameLatestContent: false }),
+      expect.objectContaining({ slug: 'review', sameContent: false }),
     ]);
   });
 

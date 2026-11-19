@@ -57,6 +57,7 @@ describe('parseClaudeStream on recorded-format fixtures', () => {
       skillListed: true,
       apiKeySource: 'none',
       slashCommandListed: true,
+      slashCommandsListed: true,
       skillNameEntries: { skills: 1, slashCommands: 1 },
       laterModels: [],
     });
@@ -361,6 +362,7 @@ describe('ClaudeStreamParser events', () => {
       skillListed: false,
       apiKeySource: null,
       slashCommandListed: false,
+      slashCommandsListed: false,
       skillNameEntries: { skills: 0, slashCommands: 0 },
       laterModels: [],
     });

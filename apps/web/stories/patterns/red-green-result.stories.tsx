@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import { MockBadge, NotSandboxedBadge, PageHeader, StatusBadge } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { reservedNameCheckText } from '@/lib/run-detail';
 import { formatDelta, formatScore } from '@/lib/utils';
 
 // Pattern: a RED/GREEN result (SPEC-112, SPEC-118), modelled on /results/[id]. The same suite
@@ -239,6 +240,87 @@ export const DivergedVersions: Story = {
     await expect(v3).toHaveTextContent('Version regression vs v1');
     await expect(canvas.getByRole('region', { name: 'Version 2' })).not.toHaveTextContent(
       'edited from',
+    );
+  },
+};
+
+/**
+ * The reserved-name check of an A/B run of a skill with Claude Code (issue 280, SPEC-203 §4.1,
+ * ADR-0015): one session without the skill before the first agent run, never scored. A fact in
+ * "Environment and versions", only for runs that had the check; a check that stopped the run
+ * names its code, and the run's error says why above the cards.
+ */
+export const ReservedNameCheck: Story = {
+  render: () => {
+    const environment = (overrides: Record<string, unknown>) => ({
+      kind: 'local-process',
+      reservedNameCheck: {
+        status: 'completed',
+        errorCode: null,
+        error: null,
+        durationMs: 1040,
+        usage: { inputTokens: 7100, outputTokens: 4 },
+        adapterVersion: '2.1.325 (Claude Code)',
+        executionModel: 'claude-haiku-5-5',
+        passed: true,
+        ...overrides,
+      },
+    });
+    const runs = [
+      { label: 'Check passed', environment: environment({}) },
+      {
+        label: 'Check stopped the run',
+        error:
+          'Stopped by the reserved-name check before any agent run (skill-name-reserved): Claude Code lists the skill name "pdf-report" itself. Rename the skill (its frontmatter `name`, or its folder when it has none). The check is one session without the skill and is not scored.',
+        environment: environment({
+          status: 'infrastructure-error',
+          errorCode: 'skill-name-reserved',
+          durationMs: 910,
+          usage: null,
+          passed: false,
+        }),
+      },
+    ];
+    return (
+      <div className="max-w-content space-y-section">
+        {runs.map((run) => (
+          <section key={run.label} aria-label={run.label} className="space-y-stack">
+            {run.error ? (
+              <Card className="border-destructive/40">
+                <CardContent className="text-body text-destructive-foreground">
+                  {run.error}
+                </CardContent>
+              </Card>
+            ) : null}
+            <Card>
+              <CardHeader>
+                <CardTitle>Environment and versions</CardTitle>
+                <CardDescription>
+                  Every result references exact, immutable versions.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid gap-1 text-ui md:grid-cols-2">
+                  <dt className="text-muted-foreground">Agent</dt>
+                  <dd className="font-mono">claude-code 2.1.325 (Claude Code)</dd>
+                  <dt className="text-muted-foreground">Reserved-name check</dt>
+                  <dd>{reservedNameCheckText(run.environment)}</dd>
+                  <dt className="text-muted-foreground">Model</dt>
+                  <dd>anthropic/claude-sonnet-4-5</dd>
+                </dl>
+              </CardContent>
+            </Card>
+          </section>
+        ))}
+      </div>
+    );
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('region', { name: 'Check passed' })).toHaveTextContent(
+      'Passed: 1 extra session without the skill (not scored), 1.0 s, 7,104 tokens',
+    );
+    await expect(canvas.getByRole('region', { name: 'Check stopped the run' })).toHaveTextContent(
+      'Stopped the run (skill-name-reserved): 1 extra session without the skill (not scored), 910 ms',
     );
   },
 };

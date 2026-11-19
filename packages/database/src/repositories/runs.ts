@@ -219,6 +219,18 @@ export async function finishBenchmarkRun(
     .where(eq(benchmarkRuns.id, runId));
 }
 
+/**
+ * Replaces the stored environment of a benchmark run, e.g. with the outcome of its reserved-name
+ * check added (SPEC-203 §4.1, ADR-0015). Only the runner that owns the run calls it.
+ */
+export async function setBenchmarkRunEnvironment(
+  db: Database,
+  runId: string,
+  environment: Record<string, unknown>,
+): Promise<void> {
+  await db.update(benchmarkRuns).set({ environment }).where(eq(benchmarkRuns.id, runId));
+}
+
 export interface BenchmarkRunListItem {
   run: BenchmarkRunRecord;
   /** `nameShared`: another suite has the name, so lists add its ID (issue 227). */

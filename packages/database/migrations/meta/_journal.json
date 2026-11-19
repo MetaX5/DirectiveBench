@@ -78,6 +78,13 @@
       "when": 1795081454269,
       "tag": "0010_text_without_nul",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795098606211,
+      "tag": "0011_artifact_source_version",
+      "breakpoints": true
     }
   ]
 }

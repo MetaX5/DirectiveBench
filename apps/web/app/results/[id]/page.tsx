@@ -68,6 +68,7 @@ import {
   baselineLabel,
   candidateLabel,
   invocationText,
+  reservedNameCheckText,
   NOT_REPORTED,
   otherReportedModels,
   runWarnings,
@@ -465,6 +466,8 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
   const status = runDisplayStatus(run);
   const mock = isMockAgent(run.agentAdapterId);
   const profile = agentProfileOf(run.summary);
+  // An A/B run's session without the skill, before its first agent run (issue 280).
+  const reservedNameCheck = reservedNameCheckText(run.environment);
   const baselineName = baselineLabel(baselineArtifactVersion);
   const candidateName = candidateLabel(artifactVersion);
   const warnings = runWarnings(run.warnings, profile);
@@ -815,6 +818,12 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
             <dd className="font-mono">
               {run.agentAdapterId} {run.agentVersion}
             </dd>
+            {reservedNameCheck === null ? null : (
+              <>
+                <dt className="text-muted-foreground">Reserved-name check</dt>
+                <dd data-testid="reserved-name-check">{reservedNameCheck}</dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Model</dt>
             <dd>{run.model ? `${run.model.provider}/${run.model.model}` : MISSING_VALUE}</dd>
             <dt className="text-muted-foreground">Comparability key</dt>

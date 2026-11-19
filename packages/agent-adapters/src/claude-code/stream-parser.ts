@@ -98,6 +98,8 @@ export interface ClaudeInitFacts {
   apiKeySource: string | null;
   /** Whether `slash_commands` lists the installed skill (it can be invoked as `/<name>`). */
   slashCommandListed: boolean;
+  /** Whether `slash_commands` was present (the reserved-name check needs it, issue 280). */
+  slashCommandsListed: boolean;
   /**
    * How often `skills` and `slash_commands` each list the installed skill's name, for the
    * run-time reserved-name check (SPEC-203 §4.1, issue 275); 0 without a skill name.
@@ -494,6 +496,7 @@ export class ClaudeStreamParser {
             : this.clip(data.apiKeySource, CLAUDE_STREAM_NAME_MAX_CHARS),
         slashCommandListed:
           skillName !== undefined && (data.slash_commands ?? []).includes(skillName),
+        slashCommandsListed: data.slash_commands !== undefined,
         skillNameEntries: {
           skills: entries(data.skills, skillName),
           slashCommands: entries(data.slash_commands, skillName),

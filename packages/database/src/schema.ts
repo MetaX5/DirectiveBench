@@ -93,6 +93,12 @@ export const artifacts = sqliteTable(
      * (FR-126-11, issue 246). Null only for an artifact without a version.
      */
     format: text('format'),
+    /**
+     * Source field: the id of that same version (FR-126-07), whose content the Possible
+     * duplicates card compares (FR-126-13, issue 260). No foreign key: the reference would be
+     * circular, and a version is deleted only with its artifact. Null only without a version.
+     */
+    sourceVersionId: text('source_version_id'),
     description: text('description'),
     /** User-managed; never overwritten by synchronisation. */
     notes: text('notes'),

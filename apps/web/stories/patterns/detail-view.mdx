@@ -32,6 +32,9 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 7. An item that shares its name with other items lists them in a card under its occurrences,
    with where each one is and whether its content is the same; the card is not shown when there
    are none. Source: SPEC-126 §11.4 G3 to G12 (the Possible duplicates card on `/artifacts/[id]`).
+8. The header's type and format describe the version found in the item's places; when the latest
+   version has another format, a muted "latest v2: skill-md" Badge follows the format, so the tabs
+   that show the latest version are not a surprise. Source: SPEC-126 §11.6 J1 (issue 260).
 
 ## States
 
@@ -42,4 +45,5 @@ Modelled on `/artifacts/[id]` and `/benchmarks/[id]`.
 <Canvas of={Stories.SharedAcrossRepositories} />
 <Canvas of={Stories.PossibleDuplicates} />
 <Canvas of={Stories.PossibleDuplicatesOverflow} />
+<Canvas of={Stories.LatestVersionInAnotherFormat} />
 <Canvas of={Stories.LongTextNarrowScreen} />

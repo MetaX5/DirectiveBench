@@ -15,7 +15,13 @@ import { hashManifest, sha256, type ArtifactBundle } from '@directivebench/core'
 import { BenchmarkStoppedError } from '../src/agent-conditions';
 import type { BenchmarkDefinitionInput } from '../src/definition';
 import { prepareSuiteImport } from '../src/import';
-import { runBenchmark, type AgentRunRecord, type RunBenchmarkInput } from '../src/orchestrator';
+import {
+  RESERVED_NAME_CHECK_DIR,
+  runBenchmark,
+  type AgentRunRecord,
+  type ReservedNameCheckRecord,
+  type RunBenchmarkInput,
+} from '../src/orchestrator';
 import { useTempDirs } from './helpers';
 
 /**
@@ -205,6 +211,8 @@ interface Scenario {
   shebang?: string;
   /** Setup commands that need the fake's directory (the default PATH entry of `claude`). */
   setupFor?: (binDir: string) => string[][];
+  /** Collects the reserved-name check records of the run (issue 280). */
+  onReservedNameCheck?: ReservedNameCheckRecord[];
 }
 
 /** One benchmark run; resolves to the outcome or the error it rejected with. */
@@ -232,6 +240,13 @@ async function scenario(prefix: string, options: Scenario = {}) {
     onAgentRun: async (record) => {
       records.push(record);
     },
+    ...(options.onReservedNameCheck
+      ? {
+          onReservedNameCheck: async (record: ReservedNameCheckRecord) => {
+            options.onReservedNameCheck?.push(record);
+          },
+        }
+      : {}),
   };
   const result = await runBenchmark(input).catch((error: unknown) => error);
   return { root, home, fake, records, result };
@@ -417,6 +432,102 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(fake.starts()).toHaveLength(1);
   });
 
+  it('stops an A/B run whose reserved-name check session lists the skill name itself (issue 280)', async () => {
+    // As above, but an A/B run: both variants install the skill, so only the check session,
+    // which installs nothing, can show the CLI's own entry. No variant starts.
+    const recorded = readFileSync(
+      join(STREAMS, '../2.1.325/live-subscription-reserved-doctor.ndjson'),
+      'utf8',
+    );
+    const newer = recorded.replace('"ultrareview"', '"newer-built-in"');
+    const named = (description: string, versionId: string) =>
+      artifact(
+        { 'SKILL.md': `---\nname: newer-built-in\ndescription: ${description}\n---\nBody\n` },
+        { versionId },
+      );
+    const checks: ReservedNameCheckRecord[] = [];
+    const { root, fake, records, result } = await scenario('cc-ab-reserved', {
+      streams: { default: newer },
+      artifact: named('Writes reports', 'ver_2'),
+      baselineArtifact: named('Older', 'ver_1'),
+      onReservedNameCheck: checks,
+    });
+    const error = stopped(result, 'skill-name-reserved');
+    expect(error.message).toContain(
+      'Stopped by the reserved-name check before any agent run (skill-name-reserved): Claude Code lists the skill name "newer-built-in" itself',
+    );
+    expect(records).toEqual([]);
+    const starts = fake.starts();
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.cwd).toBe(join(root, 'work', RESERVED_NAME_CHECK_DIR, 'workspace'));
+    expect(checks).toMatchObject([
+      {
+        status: 'infrastructure-error',
+        errorCode: 'skill-name-reserved',
+        adapterVersion: '2.1.302 (Claude Code)',
+        executionModel: 'claude-haiku-5-5',
+      },
+    ]);
+  });
+
+  it('runs the reserved-name check of an A/B run with the variants argv, then both variants (issue 280)', async () => {
+    const checks: ReservedNameCheckRecord[] = [];
+    const { fake, records, result } = await scenario('cc-ab-check', {
+      baselineArtifact: olderSkill(),
+      onReservedNameCheck: checks,
+    });
+    outcomeOf(result);
+    expect(summary(records)).toEqual([
+      ['baseline', 'completed', null],
+      ['candidate', 'completed', null],
+    ]);
+    const starts = fake.starts();
+    expect(starts).toHaveLength(3);
+    // Same argv and environment as the variants (maintainer decision 2026-11-19).
+    expect(starts[0]?.argv).toEqual(starts[1]?.argv);
+    expect(starts[0]?.argv).toEqual(starts[2]?.argv);
+    // Apart from the run-local directories, the same environment.
+    const shared = (env: Record<string, string> | undefined) =>
+      Object.fromEntries(
+        Object.entries(env ?? {}).filter(
+          ([name]) => !['PWD', 'TEMP', 'TMP', 'TMPDIR'].includes(name),
+        ),
+      );
+    expect(shared(starts[0]?.env)).toEqual(shared(starts[1]?.env));
+    expect(Object.keys(shared(starts[0]?.env))).toContain('HOME');
+    expect(checks).toMatchObject([{ status: 'completed', errorCode: null }]);
+  });
+
+  it('stops an A/B run whose check session start lists no slash_commands (issue 280, Codex round 1)', async () => {
+    // Without the list, a missing name proves nothing: the check fails closed.
+    const recorded = readFileSync(
+      join(STREAMS, '../2.1.325/live-subscription-reserved-doctor.ndjson'),
+      'utf8',
+    );
+    const init = JSON.parse(recorded.split('\n')[0] as string) as Record<string, unknown>;
+    delete init.slash_commands;
+    const withoutList = [JSON.stringify(init), ...recorded.split('\n').slice(1)].join('\n');
+    const checks: ReservedNameCheckRecord[] = [];
+    const { fake, records, result } = await scenario('cc-ab-no-list', {
+      streams: { default: withoutList },
+      baselineArtifact: olderSkill(),
+      onReservedNameCheck: checks,
+    });
+    expect(stopped(result, 'reserved-name-check-failed').message).toContain(
+      'did not report the names the agent lists itself',
+    );
+    expect(records).toEqual([]);
+    expect(fake.starts()).toHaveLength(1);
+    expect(checks).toMatchObject([{ status: 'completed', errorCode: null, passed: false }]);
+  });
+
+  it('runs no reserved-name check in a none run (issue 280)', async () => {
+    const checks: ReservedNameCheckRecord[] = [];
+    const { fake } = await scenario('cc-none-no-check', { onReservedNameCheck: checks });
+    expect(fake.starts()).toHaveLength(2);
+    expect(checks).toEqual([]);
+  });
+
   it('refuses a run whose launcher interpreter a setup command planted earlier on PATH (Codex round 3)', async () => {
     const root = realpathSync(tmp('cc-interp'));
     const early = join(root, 'early-bin');
@@ -535,13 +646,16 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     expect(none.fake.starts()).toEqual([]);
     // A/B: the baseline version's installation meets the fixture's configuration first. A root
     // `.claude` fails the install closed (not a stop code, so every run is refused the same way);
-    // a nested one passes the install and is stopped by the pre-spawn check. claude never starts.
+    // a nested one passes the install and is stopped by the pre-spawn check. No variant starts
+    // claude; only the reserved-name check (issue 280), in its own empty workspace, ran before.
     // The plan-time refusal with `fixture-contains-claude-config` is the CLI's (E06-S04).
     const ab = await scenario('cc-fixture-skill-ab', {
       suite: { fixture: { 'README.md': 'x\n', ...fixture }, prompt },
       baselineArtifact: olderSkill(),
     });
-    expect(ab.fake.starts()).toEqual([]);
+    expect(ab.fake.starts().map((start) => start.cwd)).toEqual([
+      expect.stringMatching(/reserved-name-check[/\\]workspace$/),
+    ]);
     expect(ab.records.length).toBeGreaterThan(0);
     for (const record of ab.records) {
       expect(['artifact-install-conflict', 'workspace-contains-claude-config']).toContain(
@@ -605,14 +719,15 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
   ])(
     'never starts claude for an A/B baseline version with %s (AC-23, FR-118-26)',
     async (_name, extra) => {
-      const { fake, result } = await scenario('cc-baseline-bundle', {
+      const { fake, records, result } = await scenario('cc-baseline-bundle', {
         baselineArtifact: olderSkill('', extra),
       });
-      const outcome = outcomeOf(result);
-      expect(outcome.agentRuns.map((run) => run.errorCode)).toEqual([
-        'artifact-executes-code',
-        'artifact-executes-code',
-      ]);
+      // The reserved-name check of the A/B run (issue 280) meets the same refusal of both
+      // versions first, before claude starts, and stops the run fail closed.
+      expect(stopped(result, 'artifact-executes-code').message).toMatch(
+        /^Stopped by the reserved-name check before any agent run \(artifact-executes-code\): The artifact versions are refused before claude started: baseline /,
+      );
+      expect(records).toEqual([]);
       expect(fake.starts()).toEqual([]);
     },
   );
@@ -654,14 +769,17 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
     writeFileSync(hostFile, 'host\n');
     const importing = { 'reference.md': `Details: @${hostFile}\n` };
 
-    // A/B, baseline first: the baseline version's file is refused before any start.
+    // A/B, baseline first: the baseline version's file is refused before its start. Only the
+    // reserved-name check (issue 280), which installs nothing, ran before.
     const ab = await scenario('cc-bundle-import-ab', {
       baselineArtifact: olderSkill('', importing),
     });
     expect(stopped(ab.result, 'workspace-imports-outside').message).toContain(
       '.claude/skills/pdf/reference.md',
     );
-    expect(ab.fake.starts()).toEqual([]);
+    expect(ab.fake.starts().map((start) => start.cwd)).toEqual([
+      expect.stringMatching(/reserved-name-check[/\\]workspace$/),
+    ]);
 
     // A none baseline has nothing installed and runs; the candidate never starts claude.
     const none = await scenario('cc-bundle-import-none', {
@@ -759,9 +877,10 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
 
   it('makes the run not-comparable when the variants ran on different execution models (AC-18)', async () => {
     const { result } = await scenario('cc-models', {
+      // Start 1 is the reserved-name check of the A/B run (issue 280).
       streams: {
-        1: stream('skill-not-invoked'),
-        2: stream('skill-not-invoked').replaceAll(SONNET, OPUS),
+        default: stream('skill-not-invoked'),
+        3: stream('skill-not-invoked').replaceAll(SONNET, OPUS),
       },
       baselineArtifact: olderSkill(),
     });
@@ -774,7 +893,8 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
 
   it('makes the run not-comparable when a main-conversation message used another model (AC-25)', async () => {
     const { result } = await scenario('cc-message-model', {
-      streams: { 1: stream('skill-not-invoked'), 2: stream('model-mismatch') },
+      // Start 1 is the reserved-name check of the A/B run (issue 280).
+      streams: { default: stream('skill-not-invoked'), 3: stream('model-mismatch') },
       baselineArtifact: olderSkill(),
     });
     const outcome = outcomeOf(result);
