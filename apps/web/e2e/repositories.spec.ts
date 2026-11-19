@@ -551,6 +551,8 @@ test.describe('a user-level agent folder on its own (issue 262)', () => {
     await expect(confirmation).toContainText(`Register ${home}/.claude anyway?`);
     await expect(confirmation.getByRole('listitem')).toHaveText([reason]);
     expect(await repositories()).toBe(before);
+    // The form says up front which locations ask first.
+    await expect(page.getByText('a user-level agent folder (such as ~/.claude)')).toBeVisible();
 
     // Register anyway sends the confirmed canonical location back to the runner.
     await confirmation.getByRole('button', { name: 'Register anyway' }).click();
