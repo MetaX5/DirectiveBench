@@ -3,7 +3,7 @@ id: SPEC-012
 title: Testing Strategy
 status: draft
 created: 2026-10-14
-updated: 2026-11-17
+updated: 2026-11-19
 category: foundation
 related: [SPEC-003, SPEC-004, SPEC-006, SPEC-009, SPEC-013, SPEC-107, SPEC-110, SPEC-111, SPEC-112, ADR-0005, ADR-0006]
 ---
@@ -106,7 +106,7 @@ Workflow `.github/workflows/ci.yml`, triggered on every pull request and on push
 | `unit` | `pnpm test` with the 100% coverage threshold (§3); coverage reports uploaded as an artifact |
 | `unit-macos` | `pnpm test --continue` on `macos-latest` with the same 100% threshold; `--continue` reports every package's failures |
 | `build` | `pnpm build`, `pnpm verify:pack` (§5) |
-| `oldest-node` | On Node 22.16.0 (the `engines.node` minimum; `node:sqlite` bundles SQLite 3.49.1): prints the Node and SQLite versions and fails when `engines.node` in the root or CLI `package.json` is not `>=` that version; runs the `packages/*` tests (every migration from an empty and from an earlier database, repositories, runner, engine, adapters, core) without the coverage threshold, which `unit` and `unit-macos` enforce on Node 24; then `pnpm build` and `pnpm verify:pack`. The `apps/cli` and `apps/web` unit tests do not pass on 22.16 yet (issues #265, #266) |
+| `oldest-node` | On Node 22.16.0 (the `engines.node` minimum; `node:sqlite` bundles SQLite 3.49.1): prints the Node and SQLite versions and fails when `engines.node` in the root or CLI `package.json` is not `>=` that version; runs the `packages/*` tests (every migration from an empty and from an earlier database, repositories, runner, engine, adapters, core) and the `apps/cli` unit tests without the coverage threshold, which `unit` and `unit-macos` enforce on Node 24; then `pnpm build` and `pnpm verify:pack`. The `apps/web` unit tests do not pass on 22.16 yet (issue #266) |
 | `e2e` | `pnpm build`, install Playwright Chromium, `pnpm test:e2e` against a temporary instance with a SQLite data dir (§4); traces uploaded on failure |
 
 No secrets are configured for the default workflow.

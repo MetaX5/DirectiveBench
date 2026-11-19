@@ -122,6 +122,11 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   with NUL in its key gets the id suffix (two suffixed keys never meet: ids hold no ` (`), and one
   whose suffixed key equals a clean active key is archived. Regression test red on the round-2
   migration with `UNIQUE constraint failed: categories.name_key`.
+- Codex round 4: approve, no material findings.
+- Merged `origin/main` (27ab3b4: PR #267 `oldest-node` job, #264, #271); conflicts only in
+  `.ai/lessons.md` (both entries kept) and SPEC-004 §3.1 (main's CI bullet kept, `apps/cli` now
+  listed as tested on 22.16). `apps/cli` added to the `oldest-node` job
+  (`--filter directivebench`), SPEC-012 §8 row updated.
 
 ## Verification
 
@@ -141,8 +146,7 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   `note\uFFFDhidden` (hex `6E6F7465EFBFBD68696464656E`), 11 migrations. `demo` itself on
   Node 22.16.0: verdict improved, exit 0.
 - Not verified: the web app with NUL input (its Zod schemas are a follow-up; a write with NUL
-  now fails with `NulInTextError` instead of truncating); `apps/cli` in the `oldest-node` CI job
-  (needs PR #267); Windows and macOS.
+  now fails with `NulInTextError` instead of truncating); Windows and macOS.
 
 ## Problems and deviations
 
@@ -158,7 +162,6 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
 
 ## Follow-ups
 
-- Add `apps/cli` to the `oldest-node` CI job once PR #267 is merged.
 - Web Zod schemas reject U+0000 in user input (after the #123 PR merges), and benchmark
   definition strings (suite `name`/`description`) get a validation message instead of
   `NulInTextError`: follow-up issue.
