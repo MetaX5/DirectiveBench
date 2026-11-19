@@ -414,9 +414,7 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     // With the skill installed the single entry is the installed skill's own: no refusal.
     const installedRun = await h.request({ artifact });
     const installed = await h.adapter().installArtifact(installedRun.workspace, artifact);
-    const withSkill = await h
-      .adapter()
-      .run({ ...installedRun, installedPaths: installed.paths });
+    const withSkill = await h.adapter().run({ ...installedRun, installedPaths: installed.paths });
     expect(withSkill.errorCode).not.toBe('skill-name-reserved');
   });
 

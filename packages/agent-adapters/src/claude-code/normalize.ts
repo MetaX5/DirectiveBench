@@ -281,8 +281,7 @@ function listedIn(entries: { skills: number; slashCommands: number }, minimum: n
   return lists.join(' and ');
 }
 
-const RENAME_HINT =
-  'Rename the skill (its frontmatter `name`, or its folder when it has none).';
+const RENAME_HINT = 'Rename the skill (its frontmatter `name`, or its folder when it has none).';
 
 /**
  * Why the session's own start shows that Claude Code lists the skill name itself, or null: the

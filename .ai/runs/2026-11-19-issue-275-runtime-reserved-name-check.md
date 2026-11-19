@@ -79,7 +79,8 @@ it.
   `runtime-reserved-name.test.ts` and the new `adapter.test.ts` case failed (`skillNameEntries`
   undefined, `status: 'completed'`); engine: `stop-codes.test.ts` and the new end-to-end case
   failed (stopped with another code than `skill-name-reserved`).
-- `pnpm lint`: pass. `pnpm typecheck`: pass. `pnpm exec turbo run test --force`: pass, 100%
+- `pnpm lint`: pass. `pnpm typecheck`: pass. `pnpm format:check`: pass after Codex round 1 found
+  two unformatted files. `pnpm exec turbo run test --force`: pass, 100%
   coverage in every package (agent-adapters 393 + 2 skipped, benchmark-engine 520, cli 210, core
   353, database 385, runner 313, web 647). The first `pnpm test` replayed cached CLI results and
   hid 9 CLI failures (see the lesson).
@@ -100,6 +101,11 @@ it.
 - The turbo cache replayed dependent packages' test results after a change in `packages/*`.
 - The live session used `--model haiku` and `--effort low` on top of the production argv to keep
   it cheap; skill listing does not depend on the model.
+
+## Review
+
+- Codex adversarial review round 1 (`afbe6dc`..`b10e70e`): approve, no material findings;
+  `pnpm format:check` failed on `normalize.ts` and `adapter.test.ts` (fixed with Prettier).
 
 ## Lessons recorded
 
