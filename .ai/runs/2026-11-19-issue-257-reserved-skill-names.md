@@ -3,7 +3,7 @@ title: Refuse a skill named like a name Claude Code lists itself (issue 257)
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #257, maintainer decision 2026-11-17, started while PR #272 was open (approved)
-status: in-progress
+status: completed
 branch: feat/issue-257-reserved-skill-names
 specs: [SPEC-203, SPEC-118]
 ---
@@ -53,7 +53,9 @@ version. A run-time check against `system/init` is a separate follow-up issue.
 
 ## Work performed
 
-See the PR commits.
+1. `af33e0e` feat(agent-adapters): the constant, the check, the error code, tests.
+2. `1184475` docs(specs): SPEC-203, SPEC-118, run log, lesson.
+3. Follow-up issue #275 filed. Draft PR opened; `om-auto-review-pr` as a COMMENT review.
 
 ## Verification
 
@@ -61,13 +63,16 @@ See the PR commits.
   missing); both adapter tests fail with `status: 'agent-error'` (the fake `claude` was started);
   the CLI test fails with "expected null to be an instance of CliError" (the plan accepted the
   skill).
-- `pnpm lint && pnpm typecheck && pnpm test`: pass, 100% coverage in all 7 packages.
+- `pnpm lint && pnpm typecheck && pnpm test`: pass, 100% coverage in all 7 packages (cli 210,
+  agent-adapters 384 + 2 skipped, benchmark-engine 518, core 351, database 377, runner 312,
+  web 608), on the final code commit.
 - `pnpm build && pnpm verify:pack`: pass.
 - Real CLI (`apps/cli/dist/cli.js`, data directory under `/var/tmp`, fake `claude` on `PATH`,
   skill `doctor` seeded with `importArtifactVersion`): `benchmark run <suite> --artifact doctor
   --yes` printed `Refused (skill-name-reserved): The skill name "doctor" is a name Claude Code
   2.1.302 lists itself …` and exited 2; jobs, benchmark runs and suites stayed 0; the fake's
   records directory stayed empty.
+- Codex adversarial review (`--scope branch --base origin/main`), round 1: approve, no findings.
 - Not verified: a real `claude` session; which skill wins on a collision; a `claude` newer than
   2.1.302; e2e and Storybook (no UI change).
 
