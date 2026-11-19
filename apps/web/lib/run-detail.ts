@@ -281,7 +281,7 @@ export interface DetailLine {
 }
 
 function list(values: readonly string[]): string {
-  return values.length ? values.join(', ') : '—';
+  return values.length ? values.join(', ') : 'None';
 }
 
 /**

@@ -38,8 +38,8 @@ describe('formatDate', () => {
     expect(formatDate('2026-10-15T08:05:00.000Z')).toBe('15 Oct 2026, 08:05 UTC');
   });
 
-  it.each([null, undefined, ''])('renders a dash for a missing value (%j)', (value) => {
-    expect(formatDate(value)).toBe('—');
+  it.each([null, undefined, ''])('renders n/a, not a dash, for a missing value (%j)', (value) => {
+    expect(formatDate(value)).toBe('n/a');
   });
 });
 
@@ -53,8 +53,8 @@ describe('formatScore', () => {
     expect(formatScore(score)).toBe(expected);
   });
 
-  it.each([null, undefined])('renders a dash for %j', (score) => {
-    expect(formatScore(score)).toBe('—');
+  it.each([null, undefined])('renders n/a, not a dash, for %j', (score) => {
+    expect(formatScore(score)).toBe('n/a');
   });
 });
 
@@ -68,8 +68,8 @@ describe('formatDelta', () => {
     expect(formatDelta(delta)).toBe(expected);
   });
 
-  it.each([null, undefined])('renders a dash for %j', (delta) => {
-    expect(formatDelta(delta)).toBe('—');
+  it.each([null, undefined])('renders n/a, not a dash, for %j', (delta) => {
+    expect(formatDelta(delta)).toBe('n/a');
   });
 });
 
@@ -83,8 +83,8 @@ describe('formatDuration', () => {
     expect(formatDuration(ms)).toBe(expected);
   });
 
-  it.each([null, undefined])('renders a dash for %j', (ms) => {
-    expect(formatDuration(ms)).toBe('—');
+  it.each([null, undefined])('renders n/a, not a dash, for %j', (ms) => {
+    expect(formatDuration(ms)).toBe('n/a');
   });
 });
 
