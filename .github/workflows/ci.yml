@@ -62,14 +62,14 @@ jobs:
 
   # Windows is best effort (NFR-118-04, issue #160).
   unit-windows:
-    name: Unit tests (100% coverage, Windows)
+    name: Unit tests (Windows)
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - name: Unit and package tests with the 100% coverage threshold
-        run: pnpm test --continue --concurrency=2
+      - name: Unit and package tests without coverage
+        run: pnpm test --continue --concurrency=2 -- --coverage.enabled=false
 
   build:
     name: Build and package

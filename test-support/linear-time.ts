@@ -15,8 +15,9 @@
  *   stretch a sample (they did, unevenly, by whole scheduler time slices): the test thread's for
  *   synchronous code, the whole process's for asynchronous code, whose work may run on libuv's
  *   thread pool;
- * - every sample repeats the call until it has used `MIN_SAMPLE_MS` of CPU time, so timer
- *   resolution cannot dominate a small input;
+ * - every sample repeats the call until it has used `MIN_SAMPLE_MS` of CPU time, and at least
+ *   `MIN_SAMPLE_TICKS` ticks of a coarse CPU clock (Windows), so timer resolution cannot dominate
+ *   a small input;
  * - one discarded warm-up round lets the JIT optimise the code first;
  * - the four series (code and baseline, small and large) are sampled in interleaved rounds and
  *   each keeps its fastest sample, so a disturbance slows a sample down but cannot fake growth;
@@ -50,6 +51,16 @@ export const LINEAR_TIME_ROUNDS = 3;
 
 /** Minimum CPU time of one sample; short calls are repeated until it is reached. */
 export const MIN_SAMPLE_MS = 20;
+
+/**
+ * A sample also lasts at least this many ticks of the CPU clock. Linux and macOS count CPU time in
+ * microseconds, but Windows counts it in scheduler ticks of about 15.6 ms (issue 160): a 20 ms
+ * sample read as one or two ticks, and an N^1.5 control measured 2.9 instead of about 5.7.
+ */
+export const MIN_SAMPLE_TICKS = 10;
+
+/** Ticks observed to estimate a clock's resolution. */
+const RESOLUTION_PROBE_TICKS = 3;
 
 /** Per-test timeout for linear-time tests on a loaded 2-core CI runner. */
 export const LINEAR_TIME_TEST_TIMEOUT_MS = 60_000;
@@ -97,7 +108,7 @@ export interface LinearTimeCase<T> {
   size: number;
 }
 
-type Clock = () => number;
+export type Clock = () => number;
 
 /**
  * CPU time of the calling thread, in milliseconds (user and system), for synchronous code.
@@ -122,6 +133,31 @@ function cpuMs({ user, system }: NodeJS.CpuUsage): number {
   return (user + system) / 1000;
 }
 
+/** The smallest step of `clock` seen over a few ticks, by spinning until it advances. */
+function clockResolutionMs(clock: Clock): number {
+  let smallest = Number.POSITIVE_INFINITY;
+  let previous = clock();
+  for (let tick = 0; tick < RESOLUTION_PROBE_TICKS; tick += 1) {
+    let now = clock();
+    while (now === previous) now = clock();
+    smallest = Math.min(smallest, now - previous);
+    previous = now;
+  }
+  return smallest;
+}
+
+const minSampleMs = new Map<Clock, number>();
+
+/** Minimum CPU time of one sample on `clock`: `MIN_SAMPLE_MS`, or more for a coarse clock. */
+export function minSampleMsOf(clock: Clock): number {
+  let min = minSampleMs.get(clock);
+  if (min === undefined) {
+    min = Math.max(MIN_SAMPLE_MS, MIN_SAMPLE_TICKS * clockResolutionMs(clock));
+    minSampleMs.set(clock, min);
+  }
+  return min;
+}
+
 /**
  * CPU milliseconds per call of `fn(input)`, measured over at least `MIN_SAMPLE_MS` of CPU time.
  * CPU time, not wall-clock time: on a loaded runner the scheduler takes the core away for whole
@@ -131,6 +167,7 @@ function cpuMs({ user, system }: NodeJS.CpuUsage): number {
  * microsecond) inflated the baseline on small inputs, where one call takes about as long.
  */
 async function sample<T>(clock: Clock, fn: (input: T) => unknown, input: T): Promise<number> {
+  const minMs = minSampleMsOf(clock);
   let calls = 0;
   let batch = 1;
   const started = clock();
@@ -145,7 +182,7 @@ async function sample<T>(clock: Clock, fn: (input: T) => unknown, input: T): Pro
     calls += batch;
     batch *= 2;
     elapsed = clock() - started;
-  } while (elapsed < MIN_SAMPLE_MS);
+  } while (elapsed < minMs);
   return elapsed / calls;
 }
 

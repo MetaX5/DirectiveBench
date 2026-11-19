@@ -67,8 +67,10 @@ let remotes: string;
 let locked: string[];
 
 beforeEach(async () => {
-  dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-cache-errors-')));
-  remotes = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-cache-errors-remotes-')));
+  dataDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-cache-errors-')));
+  remotes = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'directivebench-cache-errors-remotes-')),
+  );
   locked = [];
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);

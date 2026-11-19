@@ -25,6 +25,9 @@ import { buildDiscoveryFixture } from './discovery-fixture';
  * implementation.
  */
 const hooks = vi.hoisted(() => ({
+  /** Paths reach the hooks with `/` on every platform, so `endsWith` checks work on Windows. */
+  posix: (path: string): string =>
+    process.platform === 'win32' ? path.replaceAll('\\', '/') : path,
   reorderEntries: null as ((entries: Dirent[]) => Dirent[]) | null,
   failOpen: null as ((path: string) => Error | null) | null,
   failParse: false,
@@ -59,15 +62,15 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     readdir: async (path: string, options: { withFileTypes: true }) => {
       const entries = await actual.readdir(path, options);
-      hooks.afterList?.(path);
+      hooks.afterList?.(hooks.posix(path));
       return hooks.reorderEntries ? hooks.reorderEntries(entries) : entries;
     },
     open: async (path: string, flags: number) => {
-      const failure = hooks.failOpen?.(path);
+      const failure = hooks.failOpen?.(hooks.posix(path));
       if (failure) throw failure;
-      hooks.beforeOpen?.(path);
+      hooks.beforeOpen?.(hooks.posix(path));
       const handle = await actual.open(path, flags);
-      hooks.afterOpen?.(path);
+      hooks.afterOpen?.(hooks.posix(path));
       const stat = handle.stat.bind(handle);
       handle.stat = (async (options: { bigint: true }) => {
         const stats = await stat(options);

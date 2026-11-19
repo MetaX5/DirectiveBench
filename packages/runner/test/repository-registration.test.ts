@@ -54,8 +54,9 @@ const FIXTURE_GIT_ENV = { ...process.env, ...NO_USER_CONFIG, ...GIT_IDENTITY };
 let root: string;
 
 beforeEach(() => {
-  // realpath: on macOS the temp directory is behind the /var → /private/var symlink.
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-registration-')));
+  // realpath: on macOS the temp directory is behind the /var → /private/var symlink. `.native`
+  // also expands Windows 8.3 names (RUNNER~1) as the runner's own realpath does (issue 160).
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-registration-')));
 });
 
 afterEach(() => {
@@ -514,6 +515,19 @@ describe('git invocation', () => {
     expect(await findGitExecutable({ PATH: shims, PATHEXT: '.CMD;.BAT' })).toBeNull();
   });
 
+  it('on Windows without PATHEXT still looks for git.exe and git.com (issue 160)', async () => {
+    const bin = makeDir('win-bin');
+    writeFileSync(join(bin, 'git'), '', { mode: 0o755 });
+    writeFileSync(join(bin, 'git.exe'), '', { mode: 0o755 });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      expect(await findGitExecutable({ PATH: bin })).toBe(join(bin, 'git.exe'));
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
+  });
+
   it('builds the environment from an allowlist plus fixed safety settings', () => {
     const env = buildGitEnv({
       PATH: `/usr/bin${delimiter}${delimiter}.`,
@@ -733,7 +747,7 @@ describe('registerLocalPath', () => {
     const env = (extra: NodeJS.ProcessEnv = {}) => ({ PATH: process.env.PATH, ...extra });
 
     async function registered(path: string, extra: NodeJS.ProcessEnv = {}): Promise<string> {
-      const location = realpathSync(path);
+      const location = realpathSync.native(path);
       const result = await registerLocalPath(
         handle,
         request(path, location),

@@ -79,7 +79,7 @@ let marker: string;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-hosted-data-'));
-  remotes = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-hosted-remotes-')));
+  remotes = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-hosted-remotes-')));
   marker = join(remotes, 'executed.marker');
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);

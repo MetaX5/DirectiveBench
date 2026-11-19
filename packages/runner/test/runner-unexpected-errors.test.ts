@@ -42,7 +42,7 @@ let sources: string;
 let entries: LogEntry[];
 
 beforeEach(async () => {
-  dataDir = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-runner-unexpected-')));
+  dataDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-runner-unexpected-')));
   sources = join(dataDir, 'sources');
   mkdirSync(join(sources, 'local'), { recursive: true });
   writeFileSync(join(sources, 'local', 'AGENTS.md'), '# Rules\n');

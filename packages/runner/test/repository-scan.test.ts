@@ -100,8 +100,9 @@ let marker: string;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-scan-data-'));
-  // realpath: on macOS the temp directory is behind the /var → /private/var symlink.
-  sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-scan-sources-')));
+  // realpath: on macOS the temp directory is behind the /var → /private/var symlink. `.native`
+  // also expands Windows 8.3 names (RUNNER~1) as the runner's own realpath does (issue 160).
+  sources = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-scan-sources-')));
   marker = join(sources, 'executed.marker');
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);

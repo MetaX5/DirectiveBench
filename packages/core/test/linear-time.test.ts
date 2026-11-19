@@ -9,6 +9,9 @@ import {
   LINEAR_TIME_TEST_TIMEOUT_MS,
   linearTimeRatio,
   MAX_LINEAR_RATIO,
+  MIN_SAMPLE_MS,
+  MIN_SAMPLE_TICKS,
+  minSampleMsOf,
   textBaseline,
 } from '../../../test-support/linear-time';
 
@@ -97,6 +100,17 @@ describe('expectLinearTime', () => {
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
   );
+
+  it('lengthens samples on a coarse CPU clock such as Windows ticks (issue 160)', () => {
+    // A clock that advances in 15.625 ms steps, one step every 1,000 reads.
+    let reads = 0;
+    const coarse = () => Math.floor(reads++ / 1_000) * 15.625;
+    expect(minSampleMsOf(coarse)).toBe(MIN_SAMPLE_TICKS * 15.625);
+    // A fine clock keeps the fixed minimum.
+    let fineReads = 0;
+    const fine = () => fineReads++ * 0.001;
+    expect(minSampleMsOf(fine)).toBe(MIN_SAMPLE_MS);
+  });
 
   it('rejects a size that is not a multiple of the size step (review of PR #121)', async () => {
     const odd = { build: words, run: countSpaces, baseline: textBaseline, size: 1_000 };

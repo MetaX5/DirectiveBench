@@ -1,2 +1,6 @@
+# LF in every checkout, also on Windows with core.autocrlf (issue 160): fixtures, examples and
+# hashed content must be byte-identical on every platform (NFR-102-04, SPEC-118 §8.3).
+* text=auto eol=lf
 *.sh  text eol=lf
-*.ps1 text
+# PowerShell scripts keep the platform's line endings.
+*.ps1 text !eol
