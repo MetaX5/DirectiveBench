@@ -55,27 +55,31 @@ export function assertClaudeSkillName(name: string): void {
   }
 }
 
-/** The `claude` version {@link CLAUDE_RESERVED_SKILL_NAMES} was observed for (SPEC-203 §11). */
-export const CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION = '2.1.302';
+/** The newest `claude` version {@link CLAUDE_RESERVED_SKILL_NAMES} was refreshed for (SPEC-203 §4.1). */
+export const CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION = '2.1.325';
 
 /**
  * Names Claude Code lists itself, or answers to, in a run with DirectiveBench's settings, as
- * observed for `claude` {@link CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION} (SPEC-203 §4.1 and §11,
- * issue 257). An installed skill under one of these names may shadow the CLI's own, or be
- * shadowed by it, so a benchmark could measure the wrong skill. Sources, all from the live check
- * of 2026-10-26:
- * - skills `system/init` still listed with `disableBundledSkills: true`: `design`, `doctor` and
- *   the built-in plugin's `plugin-authoring`;
- * - built-in slash commands: the `slash_commands` of the recorded `system/init`
- *   (`test/fixtures/claude-code/2.1.302/live-subscription-*.ndjson`) that are not in its `skills`.
- *   `__remote-workflow` is left out: it is not a valid skill name, so `skill-name-unsupported`
- *   already refuses it;
- * - `checkup`, the `/checkup` alias of `doctor` that `system/init` does not list (issue 103 live
+ * observed up to `claude` {@link CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION} (SPEC-203 §4.1 and §11,
+ * issues 257 and 278). An installed skill under one of these names may shadow the CLI's own, or
+ * be shadowed by it, so a benchmark could measure the wrong skill. The list is the union over the
+ * observed versions, so an older supported `claude` keeps its names. Sources:
+ * - `claude` 2.1.302, live check of 2026-10-26: the skills `system/init` still listed with
+ *   `disableBundledSkills: true` (`design`, `doctor` and the built-in plugin's
+ *   `plugin-authoring`) and the built-in slash commands, which are the `slash_commands` of the
+ *   recorded `system/init` (`test/fixtures/claude-code/2.1.302/live-subscription-*.ndjson`) that
+ *   are not in its `skills`;
+ * - `claude` 2.1.325, live check of 2026-11-19 (issue 275, recording
+ *   `test/fixtures/claude-code/2.1.325/live-subscription-reserved-doctor.ndjson`): every name of
+ *   `skills`, `slash_commands` and `terminal_slash_commands` except the installed test skill
+ *   `doctor`. It lists every 2.1.302 name above except `checkup`, plus `ultrareview`;
+ * - `checkup`, the `/checkup` alias of `doctor` that neither `system/init` lists (issue 103 live
  *   check, `.ai/runs/2026-10-26-issue-103-live-check.md`; the stream parser already treats it as
  *   another skill).
- * Bundled skills that `disableBundledSkills` removes are not listed in a run and not reserved.
- * A newer `claude` may list other names: `claudeSkillNameCollision` checks the session's own
- * `system/init` after the spawn (issue 275).
+ * `__remote-workflow`, listed by both versions, is left out: it is not a valid skill name, so
+ * `skill-name-unsupported` already refuses it. Bundled skills that `disableBundledSkills` removes
+ * are not listed in a run and not reserved. A newer `claude` may list other names:
+ * `claudeSkillNameCollision` checks the session's own `system/init` after the spawn (issue 275).
  */
 export const CLAUDE_RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   // Skills listed with `disableBundledSkills: true`.
@@ -84,7 +88,7 @@ export const CLAUDE_RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   'plugin-authoring',
   // The unlisted `/checkup` alias of `doctor`.
   'checkup',
-  // Built-in slash commands.
+  // Built-in slash commands listed by 2.1.302 and 2.1.325.
   'advisor',
   'agents',
   'auto-mode-setup',
@@ -119,6 +123,8 @@ export const CLAUDE_RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   'usage',
   'usage-credits',
   'workflow-launch-exec',
+  // Built-in slash command first listed by 2.1.325 (issue 278).
+  'ultrareview',
 ]);
 
 /**

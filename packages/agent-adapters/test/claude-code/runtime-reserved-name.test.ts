@@ -6,7 +6,7 @@ import {
   parseClaudeStream,
   type ClaudeRunConditions,
 } from '../../src/claude-code';
-import { recording325 } from './helpers';
+import { newerSessionStart, recording325, UNLISTED_BUILT_IN } from './helpers';
 
 // Issue 275 (SPEC-203 §4.1, SPEC-118 FR-118-08): after the spawn, the skill name is compared with
 // the session's own `system/init` `skills` and `slash_commands`. The recording comes from one real
@@ -48,9 +48,18 @@ describe('the recorded 2.1.325 session start with a colliding skill (issue 275 l
     expect(parsed.result?.text).toBe('OK');
   });
 
-  it('lists `ultrareview`, a built-in slash command the static 2.1.302 list misses', () => {
-    expect(CLAUDE_RESERVED_SKILL_NAMES.has('ultrareview')).toBe(false);
+  it('lists `ultrareview`, a built-in slash command the static list holds since issue 278', () => {
+    expect(CLAUDE_RESERVED_SKILL_NAMES.has('ultrareview')).toBe(true);
     const parsed = parseClaudeStream(RECORDED, { skillName: 'ultrareview', prompt: PROMPT });
+    expect(parsed.init?.skillNameEntries).toEqual({ skills: 0, slashCommands: 1 });
+  });
+
+  it('finds a built-in the static list misses in a newer session start', () => {
+    expect(CLAUDE_RESERVED_SKILL_NAMES.has(UNLISTED_BUILT_IN)).toBe(false);
+    const parsed = parseClaudeStream(newerSessionStart(), {
+      skillName: UNLISTED_BUILT_IN,
+      prompt: PROMPT,
+    });
     expect(parsed.init?.skillNameEntries).toEqual({ skills: 0, slashCommands: 1 });
   });
 });
