@@ -308,7 +308,7 @@ describe('rule 3: exact copies link (SPEC-126 FR-126-01 to FR-126-06)', () => {
     ]);
   });
 
-  it('links the named rule formats and never instructions, Duo chat rules or skills named by their directory (A2, A3, AC-6)', async () => {
+  it('links the named rule formats and never instructions, Duo chat rules or skills named by their directory (A2, A3, AC-6, issue 265)', async () => {
     const handle = getHandle();
     const a = await local(handle, 'a');
     const b = await local(handle, 'b');
@@ -322,12 +322,14 @@ describe('rule 3: exact copies link (SPEC-126 FR-126-01 to FR-126-06)', () => {
       single('.gitlab/duo/chat-rules.md', '# Duo\n'),
       skill('skills/anon', skillMd(null)),
       skill('skills/blank', skillMd('"  "')),
+      // A name holding U+0000 is ignored, so the skill is named by its directory (issue 265).
+      skill('skills/nul', skillMd('"nul\\0name"')),
     ];
     await scan(handle, a, found);
     expect(await scan(handle, b, found)).toEqual({
       ...none,
-      createdArtifacts: 6,
-      createdVersions: 6,
+      createdArtifacts: 7,
+      createdVersions: 7,
       linkedOccurrences: 3,
     });
     const linked = (await snapshot(handle)).filter((row) => row.occurrences.length === 2);

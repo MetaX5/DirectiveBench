@@ -40,8 +40,9 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): D
       for (let open = foreignTransaction(sqlite); open; open = foreignTransaction(sqlite)) {
         await open;
       }
-      const statement = sqlite.prepare(query);
       const values = params as SQLInputValue[];
+      refuseNulText(values);
+      const statement = sqlite.prepare(query);
       if (method === 'run') {
         statement.run(...values);
         return { rows: [] };
@@ -63,6 +64,31 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): D
       if (sqlite.isOpen) sqlite.close();
     },
   };
+}
+
+/**
+ * A string parameter holds U+0000. `node:sqlite` on Node 22 returns a TEXT value only up to its
+ * first NUL (fixed upstream by nodejs/node#61954, released in Node 24.16), so such a value would
+ * be stored whole but read back truncated. PostgreSQL refuses NUL in text outright. The message
+ * names the parameter by position and never contains its value, which may be a secret.
+ */
+export class NulInTextError extends Error {
+  override name = 'NulInTextError';
+  constructor(
+    /** 1-based position of the parameter in the statement. */
+    readonly parameterIndex: number,
+  ) {
+    super(
+      `Parameter ${parameterIndex} of a database statement contains a NUL character (U+0000); ` +
+        'text holding NUL is not stored because node:sqlite on Node 22 truncates it on read',
+    );
+  }
+}
+
+/** Fails closed before a statement runs with a string parameter holding U+0000 (issue 265). */
+function refuseNulText(values: readonly SQLInputValue[]): void {
+  const index = values.findIndex((value) => typeof value === 'string' && value.includes('\0'));
+  if (index !== -1) throw new NulInTextError(index + 1);
 }
 
 /** Applies pending Drizzle migrations (forward-only) inside a single transaction. */

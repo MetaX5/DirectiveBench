@@ -41,6 +41,7 @@ import {
 } from '@directivebench/core';
 import { alias } from 'drizzle-orm/sqlite-core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
+import { storedMessage } from '../stored-message';
 import type { CategoryRef } from './catalog';
 import {
   BranchChangedError,
@@ -519,7 +520,9 @@ function isLinkable(
   if (input.format !== 'skill-md') return false;
   const primary = files.find((file) => file.path === input.primaryFile);
   const name: unknown = primary ? parseFrontmatter(primary.content).frontmatter.name : undefined;
-  return typeof name === 'string' && name.trim() !== '';
+  // A name holding U+0000 is ignored by parseArtifactFile (issue 265), so the skill is named by
+  // its directory and identified by location only.
+  return typeof name === 'string' && name.trim() !== '' && !name.includes('\0');
 }
 
 /** The rule-3 key: equal content hash and equal format (A2). */
@@ -1227,7 +1230,7 @@ export async function markRepositoryScanFailed(
 ): Promise<void> {
   await db
     .update(repositories)
-    .set({ syncStatus: 'error', syncError: message, updatedAt: nowIso() })
+    .set({ syncStatus: 'error', syncError: storedMessage(message), updatedAt: nowIso() })
     .where(eq(repositories.id, repositoryId));
 }
 

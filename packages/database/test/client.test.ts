@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { eq, getTableName, is, sql } from 'drizzle-orm';
 import { getTableConfig, SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ARTIFACT_FORMAT_TYPES, ARTIFACT_FORMATS } from '@directivebench/core';
+import { ARTIFACT_FORMAT_TYPES, ARTIFACT_FORMATS, categoryNameKey } from '@directivebench/core';
 import {
   ensureDatabaseDir,
   migrateDatabase,
@@ -63,7 +63,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(10);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(11);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -1126,6 +1126,163 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(0);
     } finally {
       before.close();
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('keeps active category name keys unique when repaired keys would meet (issue 265)', async () => {
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 10));
+      const insert = handle.sqlite.prepare(
+        "insert into categories (id, slug, name, name_key, archived_at, created_at, updated_at) values (?, ?, ?, ?, ?, 't', 'old')",
+      );
+      const archived = '2026-01-01T00:00:00.000Z';
+      // Two dirty keys that repair to the same `x\uFFFD\uFFFDy`.
+      insert.run('cat_NulA', 'nul-a', 'X\0\uFFFDy', 'x\0\uFFFDy', null);
+      insert.run('cat_NulB', 'nul-b', 'X\uFFFD\0y', 'x\uFFFD\0y', null);
+      // A dirty key that repairs to a clean active key.
+      insert.run('cat_NulC', 'nul-c', 'Z\0', 'z\0', null);
+      insert.run('cat_CleanZ', 'clean-z', 'Z\uFFFD', 'z\uFFFD', null);
+      // A clean active key already equal to the suffixed key of a dirty one.
+      insert.run('cat_NulD', 'nul-d', 'W\0', 'w\0', null);
+      insert.run('cat_Squat', 'squat', 'W\uFFFD (cat_NulD)', 'w\uFFFD (cat_nuld)', null);
+      // Archived: repaired only; the partial unique index does not cover it.
+      insert.run('cat_Gone', 'gone', 'Z\0', 'z\0', archived);
+
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      const rows = handle.sqlite
+        .prepare(
+          'select id, name, name_key as nameKey, archived_at as archivedAt from categories order by id',
+        )
+        .all();
+      expect(rows).toEqual([
+        { id: 'cat_CleanZ', name: 'Z\uFFFD', nameKey: 'z\uFFFD', archivedAt: null },
+        { id: 'cat_Gone', name: 'Z\uFFFD', nameKey: 'z\uFFFD', archivedAt: archived },
+        {
+          id: 'cat_NulA',
+          name: 'X\uFFFD\uFFFDy (cat_NulA)',
+          nameKey: 'x\uFFFD\uFFFDy (cat_nula)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulB',
+          name: 'X\uFFFD\uFFFDy (cat_NulB)',
+          nameKey: 'x\uFFFD\uFFFDy (cat_nulb)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulC',
+          name: 'Z\uFFFD (cat_NulC)',
+          nameKey: 'z\uFFFD (cat_nulc)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulD',
+          name: 'W\uFFFD (cat_NulD)',
+          nameKey: 'w\uFFFD (cat_nuld)',
+          archivedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) as unknown,
+        },
+        {
+          id: 'cat_Squat',
+          name: 'W\uFFFD (cat_NulD)',
+          nameKey: 'w\uFFFD (cat_nuld)',
+          archivedAt: null,
+        },
+      ]);
+      for (const row of rows) expect(row.nameKey).toBe(categoryNameKey(String(row.name)));
+    } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('replaces U+0000 in the free-text columns of a 0009 database with U+FFFD, and can be re-applied (issue 265)', async () => {
+    // Earlier versions stored such text whole; node:sqlite on Node 22 reads it truncated.
+    const freeText: Record<string, string[]> = {
+      categories: ['name', 'name_key', 'description'],
+      repositories: ['name', 'sync_error'],
+      artifacts: ['name', 'description', 'notes'],
+      benchmark_suites: ['name', 'description'],
+      jobs: ['error'],
+      benchmark_runs: ['agent_version', 'error'],
+      agent_runs: ['error', 'output_files_reason'],
+      assertion_results: ['message'],
+      blind_review_pairs: ['note'],
+    };
+    const temp = makeTempDir();
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    // Hex, because reading the text itself would truncate it on Node 22.
+    const stored = () =>
+      Object.fromEntries(
+        Object.entries(freeText).map(([table, cols]) => [
+          table,
+          handle.sqlite
+            .prepare(
+              `select ${cols.map((c) => `hex(${c}) as ${c}`).join(', ')}${
+                columns(handle, table).includes('updated_at') ? ', updated_at' : ''
+              } from ${table} order by id`,
+            )
+            .all(),
+        ]),
+      );
+    const hex = (text: string) => Buffer.from(text, 'utf8').toString('hex').toUpperCase();
+    try {
+      await migrateDatabase(handle, partialMigrations(temp.dir, 10));
+      // Rows are inserted directly, below the client's NUL guard and without their parents.
+      handle.sqlite.exec('PRAGMA foreign_keys = OFF');
+      for (const [table, cols] of Object.entries(freeText)) {
+        const info = handle.sqlite.prepare(`pragma table_info(${table})`).all();
+        for (const [row, text] of [
+          ['1', (col: string) => `x\0${col}`],
+          ['2', () => 'ok'],
+        ] as const) {
+          const values: Record<string, string | number> = {};
+          for (const column of info) {
+            const name = String(column.name);
+            if (cols.includes(name)) values[name] = text(name);
+            else if (name === 'updated_at') values[name] = 'old';
+            else if (column.notnull && column.dflt_value === null) {
+              values[name] = String(column.type) === 'integer' ? 0 : `${name}-${row}`;
+            }
+          }
+          const names = Object.keys(values);
+          handle.sqlite
+            .prepare(
+              `insert into ${table} (${names.join(', ')}) values (${names.map(() => '?').join(', ')})`,
+            )
+            .run(...Object.values(values));
+        }
+      }
+
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      const after = stored();
+      for (const [table, cols] of Object.entries(freeText)) {
+        const [repaired, clean] = after[table] as Record<string, unknown>[];
+        // An active category also gets its id after its name and key (see the next test).
+        const expected = (t: string, col: string) =>
+          t === 'categories' && col.startsWith('name') ? `x\uFFFD${col} (id-1)` : `x\uFFFD${col}`;
+        for (const col of cols) {
+          expect(repaired?.[col], `${table}.${col}`).toBe(hex(expected(table, col)));
+          expect(clean?.[col], `${table}.${col}`).toBe(hex('ok'));
+        }
+        if ('updated_at' in repaired!) expect(repaired.updated_at).toBe('old');
+      }
+      // Read back through node:sqlite: whole on every Node version.
+      expect(handle.sqlite.prepare("select name from artifacts where id = 'id-1'").get()).toEqual({
+        name: 'x\uFFFDname',
+      });
+
+      // Down: a data-only repair has nothing to undo (the truncated reads were the defect);
+      // forgetting it and applying it again changes nothing.
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
+      expect(stored()).toEqual(after);
+    } finally {
       handle.close();
       temp.dispose();
     }

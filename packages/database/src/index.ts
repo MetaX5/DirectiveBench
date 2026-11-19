@@ -1,4 +1,5 @@
 export * from './client';
+export { storedMessage } from './stored-message';
 export * as schema from './schema';
 export {
   JOB_STATUSES,
