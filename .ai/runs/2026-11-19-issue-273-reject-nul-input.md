@@ -3,7 +3,7 @@ title: Reject U+0000 in web input and benchmark definitions before the database 
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #273 (maintainer approved taking it now)
-status: in-progress
+status: completed
 branch: fix/issue-273-reject-nul-input
 specs: [SPEC-006, SPEC-101, SPEC-104, SPEC-108, SPEC-123, SPEC-124, SPEC-014]
 ---
@@ -53,6 +53,10 @@ JavaScript, not passed to SQL. Both changes were reverted to keep the change to 
 2. `fix(web): refuse U+0000 in form fields, ids and URLs before the database` (refinements,
    `jobIdParam`, definition walk); the proxy and `q` parts were later reverted (see Plan).
 3. e2e in `apps/web/e2e/artifact-metadata.spec.ts`; specs; lesson update.
+4. Codex round 1: a YAML alias cycle in `agentOptions` overflowed the recursive walk; fixed by
+   tracking ancestors. Round 2: 5,000 nested JSON objects still overflowed; the walk now keeps an
+   explicit stack, checks cycles along the parent chain and reports nesting deeper than
+   `MAX_DEFINITION_DEPTH` (100) as an issue (FR-108-17). Round 3: approve.
 
 Inventory of string inputs that reach a repository function:
 
@@ -70,7 +74,42 @@ Inventory of string inputs that reach a repository function:
 
 ## Verification
 
-(see the PR description for the final table; filled in below)
+| Command | Result |
+| --- | --- |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass |
+| `pnpm test` (Node 24.21, 100% coverage) | pass: core 353, agent-adapters 374 (+2 skipped), database 385, benchmark-engine 524, runner 313, cli 210, web 655 |
+| `pnpm build`, `pnpm verify:pack` | pass |
+| `pnpm test:e2e` (port 4402, Chromium 1254) | 205 passed before the Codex fixes; rerun on the final build: see the PR |
+| `pnpm test:storybook` | 68 files, 342 tests passed |
+
+Red first (new tests with the source unchanged):
+- `apps/web/test/actions.test.ts`: 4 failed, each with `Failed query ... Caused by: NulInTextError`
+  (blind review note, notes, a hidden artifact id, a repository id); the tag/category and the
+  repository path tests passed already (existing rules).
+- `apps/web/test/repositories.test.ts`: 2 failed (`jobIdParam is not a function`).
+- `packages/benchmark-engine/test/definition.test.ts`: 2 failed (U+0000 accepted); the cycle test
+  failed with `RangeError: Maximum call stack size exceeded`, the deep nesting test likewise
+  against the round-1 walk.
+- e2e against the pre-fix build: the notes test failed (no field error); `curl` on the pre-fix
+  server: `/repositories?registration=%00` and `?scan=job%00` returned 500 with
+  `NulInTextError` in the log, `/results/%00` and `/benchmarks/x%00` 404, `/artifacts?q=%00` 200.
+
+Real app (built CLI, `demo` data, port 4402):
+- A crafted no-JS multipart POST of the Notes form with `notes=before\0after` returned 200 with
+  the field error "Notes cannot contain a NUL character (U+0000). Remove it." in the rendered
+  state; the stored notes stayed `null`; the same POST with valid text saved it (control).
+- `/repositories?registration=job_%00`, `?scan=%00`, `?branchChange=x%00`: 200; no
+  `NulInTextError` in the server log.
+- `directivebench benchmark run nulsuite --artifact validate-external-input` with
+  `name: "Suite\0hidden"` (no NUL byte in the file; a fake `claude` that refuses everything
+  first on PATH): exit 2, `- name: must not contain a NUL character (U+0000)`, no suite stored.
+- Browser QA agent (Claude in Chrome): notes and blind review note errors, keyboard only, both
+  themes (error contrast 9.34:1 dark, 8.36:1 light), 320px (no horizontal scroll), the three
+  Repositories URLs and the console: all pass, no findings.
+
+Not verified:
+- Node 22.16.0 for these tests (no SQL changed; the `oldest-node` CI job runs the engine tests).
+- Windows and macOS.
 
 ## Problems and deviations
 
@@ -84,3 +123,7 @@ Inventory of string inputs that reach a repository function:
   the guard fires on lookups; Next.js 404s `%00` path segments; prove a suspected path first.
 
 ## Follow-ups
+
+- Playwright now expects Chromium 1255 locally (`npx playwright install chromium`).
+- `benchmark_runs.agent_version` comes from the agent's `--version` output and is written as
+  plain text; it is agent output, not user input, and was out of scope here.
