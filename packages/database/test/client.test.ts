@@ -1131,7 +1131,7 @@ describe('additive migrations', () => {
     }
   });
 
-  it('keeps active category name keys unique when a repaired key equals another one (issue 265)', async () => {
+  it('keeps active category name keys unique when repaired keys would meet (issue 265)', async () => {
     const temp = makeTempDir();
     const handle = openDatabase(join(temp.dir, 'data.db'));
     try {
@@ -1139,24 +1139,57 @@ describe('additive migrations', () => {
       const insert = handle.sqlite.prepare(
         "insert into categories (id, slug, name, name_key, archived_at, created_at, updated_at) values (?, ?, ?, ?, ?, 't', 'old')",
       );
-      insert.run('cat_NulA', 'nul-a', 'X\0y', 'x\0y', null);
-      insert.run('cat_Clean', 'clean', 'X\uFFFDy', 'x\uFFFDy', null);
-      insert.run('cat_Gone', 'gone', 'X\0y', 'x\0y', '2026-01-01T00:00:00.000Z');
+      const archived = '2026-01-01T00:00:00.000Z';
+      // Two dirty keys that repair to the same `x\uFFFD\uFFFDy`.
+      insert.run('cat_NulA', 'nul-a', 'X\0\uFFFDy', 'x\0\uFFFDy', null);
+      insert.run('cat_NulB', 'nul-b', 'X\uFFFD\0y', 'x\uFFFD\0y', null);
+      // A dirty key that repairs to a clean active key.
+      insert.run('cat_NulC', 'nul-c', 'Z\0', 'z\0', null);
+      insert.run('cat_CleanZ', 'clean-z', 'Z\uFFFD', 'z\uFFFD', null);
+      // A clean active key already equal to the suffixed key of a dirty one.
+      insert.run('cat_NulD', 'nul-d', 'W\0', 'w\0', null);
+      insert.run('cat_Squat', 'squat', 'W\uFFFD (cat_NulD)', 'w\uFFFD (cat_nuld)', null);
+      // Archived: repaired only; the partial unique index does not cover it.
+      insert.run('cat_Gone', 'gone', 'Z\0', 'z\0', archived);
 
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
       const rows = handle.sqlite
         .prepare(
-          'select id, name, name_key as nameKey, updated_at as updatedAt from categories order by id',
+          'select id, name, name_key as nameKey, archived_at as archivedAt from categories order by id',
         )
         .all();
       expect(rows).toEqual([
-        { id: 'cat_Clean', name: 'X\uFFFDy', nameKey: 'x\uFFFDy', updatedAt: 'old' },
-        { id: 'cat_Gone', name: 'X\uFFFDy', nameKey: 'x\uFFFDy', updatedAt: 'old' },
+        { id: 'cat_CleanZ', name: 'Z\uFFFD', nameKey: 'z\uFFFD', archivedAt: null },
+        { id: 'cat_Gone', name: 'Z\uFFFD', nameKey: 'z\uFFFD', archivedAt: archived },
         {
           id: 'cat_NulA',
-          name: 'X\uFFFDy (cat_NulA)',
-          nameKey: 'x\uFFFDy (cat_nula)',
-          updatedAt: 'old',
+          name: 'X\uFFFD\uFFFDy (cat_NulA)',
+          nameKey: 'x\uFFFD\uFFFDy (cat_nula)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulB',
+          name: 'X\uFFFD\uFFFDy (cat_NulB)',
+          nameKey: 'x\uFFFD\uFFFDy (cat_nulb)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulC',
+          name: 'Z\uFFFD (cat_NulC)',
+          nameKey: 'z\uFFFD (cat_nulc)',
+          archivedAt: null,
+        },
+        {
+          id: 'cat_NulD',
+          name: 'W\uFFFD (cat_NulD)',
+          nameKey: 'w\uFFFD (cat_nuld)',
+          archivedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/) as unknown,
+        },
+        {
+          id: 'cat_Squat',
+          name: 'W\uFFFD (cat_NulD)',
+          nameKey: 'w\uFFFD (cat_nuld)',
+          archivedAt: null,
         },
       ]);
       for (const row of rows) expect(row.nameKey).toBe(categoryNameKey(String(row.name)));
@@ -1228,15 +1261,18 @@ describe('additive migrations', () => {
       const after = stored();
       for (const [table, cols] of Object.entries(freeText)) {
         const [repaired, clean] = after[table] as Record<string, unknown>[];
+        // An active category also gets its id after its name and key (see the next test).
+        const expected = (t: string, col: string) =>
+          t === 'categories' && col.startsWith('name') ? `x\uFFFD${col} (id-1)` : `x\uFFFD${col}`;
         for (const col of cols) {
-          expect(repaired?.[col], `${table}.${col}`).toBe(hex(`x�${col}`));
+          expect(repaired?.[col], `${table}.${col}`).toBe(hex(expected(table, col)));
           expect(clean?.[col], `${table}.${col}`).toBe(hex('ok'));
         }
         if ('updated_at' in repaired!) expect(repaired.updated_at).toBe('old');
       }
       // Read back through node:sqlite: whole on every Node version.
       expect(handle.sqlite.prepare("select name from artifacts where id = 'id-1'").get()).toEqual({
-        name: 'x�name',
+        name: 'x\uFFFDname',
       });
 
       // Down: a data-only repair has nothing to undo (the truncated reads were the defect);

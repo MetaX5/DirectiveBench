@@ -6,10 +6,14 @@
 -- enums, timestamps, hashes, slugs and paths are never taken from text that can.
 -- SQLite's replace() and text substr() stop at a NUL, so each value is rewritten as a BLOB (byte
 -- offsets; U+0000 is the only UTF-8 sequence holding the byte 00), one NUL per recursion step.
--- An active category's repaired name key can equal another active key (`x\0y` next to `x\uFFFDy`),
--- which `categories_active_name_key_unique` refuses. Such a category keeps its id, slug and
--- assignments and gets ` (<id>)` after its name and ` (<lowercased id>)` after its key, so the key
--- stays `categoryNameKey(name)` (ids are ASCII). Its name is repaired by the next statement.
+-- Active category name keys are unique (`categories_active_name_key_unique`), and U+FFFD is not
+-- injective: `x\0y` may meet a clean `x\uFFFDy`, and `x\0\uFFFDy` meets `x\uFFFD\0y`. So every
+-- active category with a NUL in its key keeps its id, slug and assignments and gets ` (<id>)` after
+-- its name and ` (<lowercased id>)` after its key (still `categoryNameKey(name)`, ids are ASCII).
+-- Two such keys never meet: an id holds no ` (`, so equal keys would need equal ids. One that
+-- meets a clean active key (a category deliberately named after another one's id) is archived,
+-- which the partial index allows. Archived categories only get the repair. The name itself is
+-- repaired by the next statement.
 WITH RECURSIVE `fix`(`id`, `v`) AS (
   SELECT `id`, CAST(`name_key` AS BLOB) FROM `categories` WHERE instr(CAST(`name_key` AS BLOB), x'00') > 0
   UNION ALL
@@ -17,14 +21,12 @@ WITH RECURSIVE `fix`(`id`, `v`) AS (
   FROM `fix` WHERE instr(`v`, x'00') > 0
 )
 UPDATE `categories` SET
-  `name_key` = CAST(`fix`.`v` AS TEXT) || CASE WHEN `categories`.`archived_at` IS NULL AND EXISTS (
+  `name_key` = CASE WHEN `categories`.`archived_at` IS NULL THEN CAST(`fix`.`v` AS TEXT) || ' (' || lower(`categories`.`id`) || ')' ELSE CAST(`fix`.`v` AS TEXT) END,
+  `name` = CASE WHEN `categories`.`archived_at` IS NULL THEN `categories`.`name` || ' (' || `categories`.`id` || ')' ELSE `categories`.`name` END,
+  `archived_at` = CASE WHEN `categories`.`archived_at` IS NULL AND EXISTS (
     SELECT 1 FROM `categories` AS `clash`
-    WHERE `clash`.`name_key` = CAST(`fix`.`v` AS TEXT) AND `clash`.`id` <> `categories`.`id` AND `clash`.`archived_at` IS NULL
-  ) THEN ' (' || lower(`categories`.`id`) || ')' ELSE '' END,
-  `name` = `categories`.`name` || CASE WHEN `categories`.`archived_at` IS NULL AND EXISTS (
-    SELECT 1 FROM `categories` AS `clash`
-    WHERE `clash`.`name_key` = CAST(`fix`.`v` AS TEXT) AND `clash`.`id` <> `categories`.`id` AND `clash`.`archived_at` IS NULL
-  ) THEN ' (' || `categories`.`id` || ')' ELSE '' END
+    WHERE `clash`.`archived_at` IS NULL AND `clash`.`id` <> `categories`.`id` AND `clash`.`name_key` = CAST(`fix`.`v` AS TEXT) || ' (' || lower(`categories`.`id`) || ')'
+  ) THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE `categories`.`archived_at` END
 FROM `fix` WHERE `fix`.`id` = `categories`.`id` AND instr(`fix`.`v`, x'00') = 0;
 --> statement-breakpoint
 WITH RECURSIVE `fix`(`id`, `v`) AS (

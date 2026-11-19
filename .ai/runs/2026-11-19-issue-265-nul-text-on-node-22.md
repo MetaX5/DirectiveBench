@@ -117,6 +117,11 @@ fix reads generically; `cast(x as blob)` works but only per column in each query
   blocked the upgrade. Fixed: such a category gets ` (<id>)` after its name and
   ` (<lowercased id>)` after its key (still `categoryNameKey(name)`). Regression test red on the
   previous migration with `UNIQUE constraint failed: categories.name_key`.
+- Codex round 3 (needs-attention, high): two dirty keys can converge (`x\0\uFFFDy`,
+  `x\uFFFD\0y`) and the suffix could meet an existing clean key. Fixed: every active category
+  with NUL in its key gets the id suffix (two suffixed keys never meet: ids hold no ` (`), and one
+  whose suffixed key equals a clean active key is archived. Regression test red on the round-2
+  migration with `UNIQUE constraint failed: categories.name_key`.
 
 ## Verification
 
