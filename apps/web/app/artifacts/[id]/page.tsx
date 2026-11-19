@@ -51,6 +51,7 @@ import {
   ARTIFACT_TABS,
   artifactHref,
   invalidParamsNotice,
+  latestFormatHint,
   missingNote,
   occurrenceStatusLabel,
   occurrenceVersionLabel,
@@ -673,6 +674,7 @@ export default async function ArtifactPage({
   const { value: query, invalid } = parseArtifactDetailParams(await searchParams);
   const { artifact, versions } = detail;
   const latest = versions[0];
+  const formatHint = latestFormatHint(artifact.format, latest);
   const selection = selectContent(versions, query);
   const notices = [
     invalidParamsNotice(invalid),
@@ -687,7 +689,14 @@ export default async function ArtifactPage({
         actions={
           <>
             <Badge variant="outline">{artifact.type}</Badge>
-            {latest ? <Badge variant="secondary">{latest.format}</Badge> : null}
+            {/* The chosen version's format, like the type; the latest one only when it differs
+                (SPEC-126 §11.6 J1, issue 260). */}
+            {artifact.format ? <Badge variant="secondary">{artifact.format}</Badge> : null}
+            {formatHint ? (
+              <Badge variant="muted" data-testid="latest-format">
+                {formatHint}
+              </Badge>
+            ) : null}
             {detail.missing ? <Badge variant="muted">Missing</Badge> : null}
             {/* Shown on every tab, not only with the Overview card (SPEC-126 §11.4 G3). */}
             {detail.possibleDuplicates.total > 0 ? (

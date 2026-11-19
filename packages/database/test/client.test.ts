@@ -63,7 +63,7 @@ describe('openDatabase', () => {
         journal_mode: 'memory',
       });
       expect(existsSync(':memory:')).toBe(false);
-      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(11);
+      expect((await migrateDatabase(handle, migrationsFolder)).applied).toBe(12);
       expect(tableNames(handle)).toContain('jobs');
     } finally {
       handle.close();
@@ -1106,12 +1106,6 @@ describe('additive migrations', () => {
           .all(),
       ).toEqual([{ name: 'format' }, { name: 'name' }]);
 
-      // The runtime refresh makes the same choice for every row with an active occurrence.
-      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
-      expect(
-        Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format])),
-      ).toEqual(Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])));
-
       // Down: drop the index and the column, forget the migration; it applies again.
       handle.sqlite.exec('drop index artifacts_format_name_idx');
       handle.sqlite.exec('alter table artifacts drop column format');
@@ -1124,6 +1118,14 @@ describe('additive migrations', () => {
         Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format])),
       ).toEqual(Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])));
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 10))).applied).toBe(0);
+
+      // The runtime refresh makes the same choice for every row with an active occurrence. It
+      // reads the current schema, so the later migrations are applied first.
+      await migrateDatabase(handle, migrationsFolder);
+      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
+      expect(
+        Object.fromEntries(Object.entries(formats()).map(([id, [format]]) => [id, format])),
+      ).toEqual(Object.fromEntries(Object.entries(after).map(([id, [format]]) => [id, format])));
     } finally {
       before.close();
       handle.close();
@@ -1283,6 +1285,125 @@ describe('additive migrations', () => {
       expect((await migrateDatabase(handle, partialMigrations(temp.dir, 11))).applied).toBe(1);
       expect(stored()).toEqual(after);
     } finally {
+      handle.close();
+      temp.dispose();
+    }
+  });
+
+  it('adds artifacts.source_version_id backfilled from the chosen version on a 0010 database, and can be rolled back (issue 260)', async () => {
+    const temp = makeTempDir();
+    const before = openDatabase(join(temp.dir, 'before.db'));
+    const handle = openDatabase(join(temp.dir, 'data.db'));
+    const chosen = () =>
+      Object.fromEntries(
+        handle.sqlite
+          .prepare('select id, source_version_id, updated_at from artifacts order by id')
+          .all()
+          .map((row) => [String(row.id), [row.source_version_id, String(row.updated_at)]]),
+      );
+    try {
+      await migrateDatabase(before, partialMigrations(temp.dir, 11));
+      await migrateDatabase(handle, partialMigrations(temp.dir, 11));
+      const insertVersion = handle.sqlite.prepare(
+        "insert into artifact_versions (id, artifact_id, version, content_hash, format, primary_file, files, parsed_metadata, created_at) values (?, ?, ?, ?, ?, 'x', '[]', '{}', 't')",
+      );
+      const insertOccurrence = handle.sqlite.prepare(
+        "insert into artifact_occurrences (id, artifact_id, repository_id, path, latest_version_id, status, last_seen_at, created_at, updated_at) values (?, ?, 'repo_1', ?, ?, ?, 't', ?, 't')",
+      );
+      const insertArtifact = handle.sqlite.prepare(
+        "insert into artifacts (id, slug, name, type, format, created_at, updated_at) values (?, ?, ?, ?, ?, 't', 'old')",
+      );
+      handle.sqlite.exec(
+        "insert into repositories (id, provider, name, location, created_at, updated_at) values ('repo_1', 'local-directory', 'r', '/r', 't', 't')",
+      );
+      // (1) A revert: the active occurrence holds v1 (a cursor rule), the latest is v2 (a skill).
+      insertArtifact.run('art_rev', 'rev', 'rev', 'rule', 'cursor-rule');
+      insertVersion.run('artv_rev_1', 'art_rev', 1, 'h1', 'cursor-rule');
+      insertVersion.run('artv_rev_2', 'art_rev', 2, 'h2', 'skill-md');
+      insertOccurrence.run(
+        'occ_rev',
+        'art_rev',
+        '.cursor/rules/rev.mdc',
+        'artv_rev_1',
+        'active',
+        't',
+      );
+      // (1) The highest version held by an active occurrence wins over a removed one's higher one;
+      // two active occurrences of the same version: the oldest occurrence (same version id).
+      insertArtifact.run('art_two', 'two', 'two', 'skill', 'skill-md');
+      insertVersion.run('artv_two_1', 'art_two', 1, 'h1', 'skill-md');
+      insertVersion.run('artv_two_2', 'art_two', 2, 'h2', 'skill-md');
+      insertVersion.run('artv_two_3', 'art_two', 3, 'h3', 'skill-md');
+      insertOccurrence.run('occ_two_a', 'art_two', 'a/two', 'artv_two_2', 'active', 't2');
+      insertOccurrence.run('occ_two_b', 'art_two', 'b/two', 'artv_two_2', 'active', 't1');
+      insertOccurrence.run('occ_two_c', 'art_two', 'c/two', 'artv_two_1', 'active', 't0');
+      insertOccurrence.run('occ_two_d', 'art_two', 'd/two', 'artv_two_3', 'removed', 't');
+      // (2) Missing: the highest version of its stored format, not a later one of another format.
+      insertArtifact.run('art_gone', 'gone', 'gone', 'rule', 'cursor-rule');
+      insertVersion.run('artv_gone_1', 'art_gone', 1, 'h1', 'cursor-rule');
+      insertVersion.run('artv_gone_2', 'art_gone', 2, 'h2', 'cursor-rule');
+      insertVersion.run('artv_gone_3', 'art_gone', 3, 'h3', 'skill-md');
+      insertOccurrence.run(
+        'occ_gone',
+        'art_gone',
+        '.cursor/rules/gone.mdc',
+        'artv_gone_1',
+        'removed',
+        't',
+      );
+      // (2) No occurrence at all (a raw-SQL seed): its version.
+      insertArtifact.run('art_seed', 'seed', 'seed', 'skill', 'skill-md');
+      insertVersion.run('artv_seed', 'art_seed', 1, 'h', 'skill-md');
+      // (2) No version of its stored format (or a null format): the latest version.
+      insertArtifact.run('art_stale', 'stale', 'stale', 'instruction', 'agents-md');
+      insertVersion.run('artv_stale_1', 'art_stale', 1, 'h1', 'skill-md');
+      insertVersion.run('artv_stale_2', 'art_stale', 2, 'h2', 'cursor-rule');
+      insertArtifact.run('art_null', 'null', 'null', 'skill', null);
+      insertVersion.run('artv_null_1', 'art_null', 1, 'h1', 'skill-md');
+      // (3) No version: stays null.
+      insertArtifact.run('art_bare', 'bare', 'bare', 'skill', null);
+
+      // Up: the column and its backfill; nothing else changes.
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 12))).applied).toBe(1);
+      expect(columns(handle, 'artifacts')).toEqual([
+        ...columns(before, 'artifacts'),
+        'source_version_id',
+      ]);
+      const after = chosen();
+      expect(after).toEqual({
+        art_bare: [null, 'old'],
+        art_gone: ['artv_gone_2', 'old'],
+        art_null: ['artv_null_1', 'old'],
+        art_rev: ['artv_rev_1', 'old'],
+        art_seed: ['artv_seed', 'old'],
+        art_stale: ['artv_stale_2', 'old'],
+        art_two: ['artv_two_2', 'old'],
+      });
+
+      const ids = (rows: Record<string, unknown[]>) =>
+        Object.fromEntries(Object.entries(rows).map(([id, [version]]) => [id, version]));
+
+      // Down: drop the column, forget the migration; it applies again.
+      handle.sqlite.exec('alter table artifacts drop column source_version_id');
+      handle.sqlite.exec(
+        'delete from __drizzle_migrations where created_at = (select max(created_at) from __drizzle_migrations)',
+      );
+      expect(columns(handle, 'artifacts')).toEqual(columns(before, 'artifacts'));
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 12))).applied).toBe(1);
+      expect(ids(chosen())).toEqual(ids(after));
+      expect((await migrateDatabase(handle, partialMigrations(temp.dir, 12))).applied).toBe(0);
+
+      // The runtime refresh makes the same choice for every row with an active occurrence, and a
+      // new chosen version alone keeps `updated_at` (nothing shown changes). It reads the current
+      // schema, so the later migrations are applied first.
+      await migrateDatabase(handle, migrationsFolder);
+      handle.sqlite.exec(
+        "update artifacts set source_version_id = 'artv_rev_2' where id = 'art_rev'",
+      );
+      await withTransaction(handle, (db) => refreshSourceFields(db, Object.keys(after)));
+      expect(chosen()).toEqual(after);
+    } finally {
+      before.close();
       handle.close();
       temp.dispose();
     }

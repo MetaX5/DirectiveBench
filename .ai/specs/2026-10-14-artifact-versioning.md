@@ -3,7 +3,7 @@ id: SPEC-103
 title: Artifact Versioning
 status: draft
 created: 2026-10-14
-updated: 2026-11-17
+updated: 2026-11-19
 category: feature
 related: [SPEC-101, SPEC-102, SPEC-105, SPEC-005, SPEC-006, SPEC-110, SPEC-111, SPEC-112, SPEC-113]
 ---
@@ -169,7 +169,7 @@ flowchart TD
   9. *A skill folder without a frontmatter `name` is renamed*: a move (FR-103-09); the name follows the folder, the slug stays. No version is created, so the version's `source_path` still names the old folder; agent adapters install such a skill under the folder of the representative active occurrence (the new folder), not under the slug or the version's `source_path` ([SPEC-203](2026-10-14-integration-claude-code.md) §4.1, issue 245).
   10. *A bundled example whose format changes in a new release*: `importArtifactVersion` sets `type` and `format` from its input like `name`; its slug-or-name identity is unchanged (SPEC-126 A5).
   11. *A slug equal to another artifact's id*: the id wins in the CLI ([SPEC-118](2026-10-22-benchmark-own-skills-s1.md) FR-118-22), unchanged.
-  12. *Revert at the same path to a version of another format* (a cursor rule v1 becomes a skill v2 and then the cursor rule v1 again, or the repository holding v2 is removed): the chosen version is v1, so `name`, `type` and `format` are v1's and the artifact is a possible duplicate of same-named cursor rules, not of same-named skills, although its latest version (v2, shown in the list's Format column and the header) is a skill (issue 246; SPEC-126 FR-126-11).
+  12. *Revert at the same path to a version of another format* (a cursor rule v1 becomes a skill v2 and then the cursor rule v1 again, or the repository holding v2 is removed): the chosen version is v1, so `name`, `type` and `format` are v1's and the artifact is a possible duplicate of same-named cursor rules, not of same-named skills, although its latest version (v2) is a skill (issue 246; SPEC-126 FR-126-11). The artifact page header shows type and format of v1 and a muted "latest v2: skill-md" Badge; the Possible duplicates card compares v1's content (`artifacts.source_version_id`, issue 260; SPEC-126 §11.6).
 
 ## 15. Testing strategy
 

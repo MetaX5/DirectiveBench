@@ -39,7 +39,6 @@ import {
   slugify,
   unseenOccurrencePaths,
 } from '@directivebench/core';
-import { alias } from 'drizzle-orm/sqlite-core';
 import { withTransaction, type Database, type DatabaseHandle } from '../client';
 import { storedMessage } from '../stored-message';
 import type { CategoryRef } from './catalog';
@@ -343,8 +342,8 @@ async function insertOccurrence(
  * a suffix, the same name and type); otherwise a new artifact with the first free slug (rule 4).
  * Rule 3 never applies here (SPEC-126 FR-126-05), so a scanned skill never attaches to the bundled
  * demo skill and vice versa. Adds an immutable version only when the content hash is new, points
- * the occurrence at it, and sets the source fields (name, description, type, format) from this
- * write.
+ * the occurrence at it, and sets the source fields (name, description, type, format and the
+ * written version's id, `sourceVersionId`) from this write.
  * Hashes are recomputed from the content (see `recomputeFiles`). User-managed metadata is never
  * touched.
  */
@@ -412,6 +411,11 @@ export async function importArtifactVersion(
       input,
       recomputed,
     );
+    // The version this write holds is the one the source fields came from (issue 260).
+    await db
+      .update(artifacts)
+      .set({ sourceVersionId: result.versionId })
+      .where(eq(artifacts.id, artifactId));
     return result;
   });
 }
@@ -1025,7 +1029,8 @@ function primaryPathOf(format: string, occurrencePath: string): string {
 }
 
 /**
- * Sets each artifact's name, description, type and format from its active occurrences (SPEC-126
+ * Sets each artifact's name, description, type, format and `sourceVersionId` (the chosen version's
+ * id, issue 260) from its active occurrences (SPEC-126
  * FR-126-07, A9; SPEC-103 FR-103-16), inside the caller's transaction: the active occurrence
  * holding the highest version number (ties: oldest occurrence `created_at`, then id) names it,
  * parsed with core's `parseArtifactFile` from that version's primary file at the path discovery
@@ -1057,6 +1062,7 @@ export async function refreshSourceFields(
         description: artifacts.description,
         type: artifacts.type,
         storedFormat: artifacts.format,
+        storedVersionId: artifacts.sourceVersionId,
       })
       .from(artifactOccurrences)
       .innerJoin(artifactVersions, eq(artifactVersions.id, artifactOccurrences.latestVersionId))
@@ -1113,17 +1119,20 @@ export async function refreshSourceFields(
         fields.name = parsed.name;
         fields.description = parsed.description;
       }
-      if (
-        fields.name === row.name &&
-        fields.description === row.description &&
-        fields.type === row.type &&
-        fields.format === row.storedFormat
-      ) {
-        continue;
-      }
+      const shownChanged =
+        fields.name !== row.name ||
+        fields.description !== row.description ||
+        fields.type !== row.type ||
+        fields.format !== row.storedFormat;
+      if (!shownChanged && row.versionId === row.storedVersionId) continue;
+      // A new chosen version alone changes nothing shown, so `updated_at` stays (issue 260).
       await db
         .update(artifacts)
-        .set({ ...fields, updatedAt: nowIso() })
+        .set({
+          ...fields,
+          sourceVersionId: row.versionId,
+          ...(shownChanged ? { updatedAt: nowIso() } : {}),
+        })
         .where(eq(artifacts.id, row.artifactId));
     }
   }
@@ -1668,7 +1677,9 @@ export interface ArtifactListItem {
   name: string;
   type: ArtifactType;
   description: string | null;
+  /** `artifacts.format`: the chosen version's format, like `type` (issue 260, SPEC-126 §11.6 J2). */
   format: string | null;
+  /** The highest version number, not necessarily the one `format` comes from. */
   latestVersion: number | null;
   /** Active categories first, then archived ones, each by name (SPEC-124 §8.2). */
   categories: ArtifactCategory[];
@@ -1683,7 +1694,7 @@ export interface ArtifactListItem {
   /**
    * Other artifacts with the same stored format (`artifacts.format`, the chosen version's) and
    * exactly the same name, for a format of `POSSIBLE_DUPLICATE_FORMATS` (SPEC-126 FR-126-11,
-   * FR-126-12, issue 246); 0 otherwise. Not `format` above, which is the latest version's.
+   * FR-126-12, issue 246); 0 otherwise.
    */
   possibleDuplicates: number;
   /**
@@ -1717,19 +1728,12 @@ export interface PossibleDuplicate {
   activeOccurrences: number;
   /** Repositories with at least one active occurrence, ordered by name (§11.4 G8, FR-101-10). */
   repositories: { id: string; name: string }[];
-  /** Its latest version's `content_hash` equals this artifact's latest one. */
-  sameLatestContent: boolean;
+  /**
+   * Its chosen version's `content_hash` (`artifacts.source_version_id`, FR-126-07) equals this
+   * artifact's chosen version's; false when either has none (FR-126-13, issue 260).
+   */
+  sameContent: boolean;
 }
-
-/** Each artifact's latest version, joined as `latest` (the highest number, SPEC-101 §8.2). */
-const latestVersionRow = alias(artifactVersions, 'latest');
-const isLatestVersion = and(
-  eq(latestVersionRow.artifactId, artifacts.id),
-  eq(
-    latestVersionRow.version,
-    sql`(select max(${artifactVersions.version}) from ${artifactVersions} where ${artifactVersions.artifactId} = ${artifacts.id})`,
-  ),
-);
 
 /**
  * The key of a possible-duplicate group: the stored format (the chosen version's, FR-126-07) and
@@ -1771,12 +1775,14 @@ async function possibleDuplicateGroups(db: Database): Promise<Map<string, number
  * The other artifacts of `artifact`'s possible-duplicate group (FR-126-13): at most
  * `MAX_LISTED_DUPLICATES`, oldest first (`created_at`, then `id`), with the total. A stored
  * format outside `POSSIBLE_DUPLICATE_FORMATS`, or none (no version), has none. The group is keyed
- * on the stored format (issue 246); `sameLatestContent` still compares the latest versions.
+ * on the stored format (issue 246); `sameContent` compares the chosen versions, the ones
+ * `artifacts.source_version_id` names (issue 260), so the content compared is the content the
+ * group was formed by.
  */
 async function readPossibleDuplicates(
   db: Database,
   artifact: { id: string; format: string | null; name: string },
-  latest: { contentHash: string } | undefined,
+  chosen: { contentHash: string } | undefined,
 ): Promise<{ items: PossibleDuplicate[]; total: number }> {
   const format = artifact.format;
   if (format === null || !(POSSIBLE_DUPLICATE_FORMATS as readonly string[]).includes(format)) {
@@ -1793,12 +1799,12 @@ async function readPossibleDuplicates(
       id: artifacts.id,
       slug: artifacts.slug,
       name: artifacts.name,
-      contentHash: latestVersionRow.contentHash,
+      contentHash: artifactVersions.contentHash,
       total: sql<number>`count(*) over ()`,
     })
     .from(artifacts)
     // Left: the list counts the group from `artifacts` alone, so a row without a version counts.
-    .leftJoin(latestVersionRow, isLatestVersion)
+    .leftJoin(artifactVersions, eq(artifactVersions.id, artifacts.sourceVersionId))
     .where(sameGroup)
     .orderBy(artifacts.createdAt, artifacts.id)
     .limit(MAX_LISTED_DUPLICATES);
@@ -1836,7 +1842,7 @@ async function readPossibleDuplicates(
           found.map((o) => [o.repositoryId, { id: o.repositoryId, name: o.repositoryName }]),
         ).values(),
       ],
-      sameLatestContent: row.contentHash !== null && row.contentHash === latest?.contentHash,
+      sameContent: row.contentHash !== null && row.contentHash === chosen?.contentHash,
     };
   });
   return { items, total };
@@ -1974,7 +1980,6 @@ export async function listArtifacts(
     .select({
       artifactId: artifactVersions.artifactId,
       version: artifactVersions.version,
-      format: artifactVersions.format,
     })
     .from(artifactVersions)
     .where(inArray(artifactVersions.artifactId, ids))
@@ -2035,7 +2040,8 @@ export async function listArtifacts(
       name: row.name,
       type: row.type,
       description: row.description,
-      format: latestVersion?.format ?? null,
+      // The chosen version's format, like `type` (issue 260, SPEC-126 §11.6 J2).
+      format: row.format,
       latestVersion: latestVersion?.version ?? null,
       categories: categoriesOf(row.id).map(toArtifactCategory),
       repositories: [
@@ -2320,7 +2326,11 @@ export async function getArtifactDetail(db: Database, artifactId: string) {
       }
     }
   }
-  const possibleDuplicates = await readPossibleDuplicates(db, artifact, versions[0]);
+  const possibleDuplicates = await readPossibleDuplicates(
+    db,
+    artifact,
+    versions.find((version) => version.id === artifact.sourceVersionId),
+  );
   return {
     artifact,
     missing,
