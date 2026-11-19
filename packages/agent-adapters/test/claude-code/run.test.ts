@@ -21,10 +21,17 @@ import {
   type ClaudeRunInput,
 } from '../../src/claude-code';
 import { pinWorkspace } from '../../src/workspace-pin';
-import { waitFor, writeFakeClaude, type FakeClaudeMode } from './fake-claude';
+import {
+  FAKE_CLAUDE_TEST_TIMEOUT_MS,
+  waitFor,
+  writeFakeClaude,
+  type FakeClaudeMode,
+} from './fake-claude';
 import { bundle } from './helpers';
 
 const posix = describe.skipIf(process.platform === 'win32');
+// These tests start the fake; a stalled worker must not fail them at vitest's 5 s (issue #286).
+const startsTheFake = { timeout: FAKE_CLAUDE_TEST_TIMEOUT_MS };
 
 const roots: string[] = [];
 afterAll(() => {
@@ -65,7 +72,7 @@ async function setup(mode: FakeClaudeMode = 'stream') {
   return { root, fake, workspace, workspaceDir, home, input };
 }
 
-posix('runClaudeCode: pre-spawn inspection, then the process', () => {
+posix('runClaudeCode: pre-spawn inspection, then the process', startsTheFake, () => {
   it('runs claude in the canonical workspace and leaves parsing to the stream parser', async () => {
     const { fake, workspace, input } = await setup();
     const outcome = await runClaudeCode(input());
