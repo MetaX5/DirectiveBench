@@ -652,7 +652,7 @@ describe('changeRepositoryBranchAction (issue 58)', () => {
     const local = await registerLocalRepository(
       handle,
       { provider: 'local-git', name: 'local', location: '/srv/local', defaultBranch: 'main' },
-      { homeDirectory: '/home/me', confirmedLocation: null },
+      { homeDirectory: '/home/me', confirmedLocation: null, userLevel: null },
     );
     if (local.status !== 'registered') throw new Error('not registered');
     expect(
@@ -716,7 +716,7 @@ describe('scanRepositoryAction', () => {
     const outcome = await registerLocalRepository(
       handle,
       { provider: 'local-directory', name: 'skills', location: '/srv/skills', defaultBranch: null },
-      { homeDirectory: '/home/me', confirmedLocation: null },
+      { homeDirectory: '/home/me', confirmedLocation: null, userLevel: null },
     );
     if (outcome.status !== 'registered') throw new Error('not registered');
     return outcome.repository.id;

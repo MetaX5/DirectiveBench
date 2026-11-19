@@ -97,6 +97,13 @@ export const REPOSITORY_REGISTRATION_ERROR_CODES = [
 ] as const;
 export type RepositoryRegistrationErrorCode = (typeof REPOSITORY_REGISTRATION_ERROR_CODES)[number];
 
+/**
+ * How a location relates to the user-level agent folders a scan skips (D05): `folder` when it is
+ * one, `inside-folder` when it lies inside one.
+ */
+const userLevelSchema = z.enum(['folder', 'inside-folder']);
+export type UserLevelRelation = z.infer<typeof userLevelSchema>;
+
 /** A registered local repository that the new location contains or lies inside (FR-104-18). */
 export const repositoryOverlapSchema = z
   .object({
@@ -111,7 +118,7 @@ export const repositoryOverlapSchema = z
      * `folder` when it is one, `inside-folder` when it lies inside one. Absent for an ordinary
      * overlap, whose files both scans read.
      */
-    userLevel: z.enum(['folder', 'inside-folder']).optional(),
+    userLevel: userLevelSchema.optional(),
     /**
      * With `userLevel` on an `inside` overlap: the new location's own scan does not skip it (a
      * sibling home's folder below a registered ancestor of the home directory), so only the
@@ -143,6 +150,12 @@ export const repositoryRegistrationResultSchema = z.union([
       location: repositoryLocationSchema,
       /** `home`: the location is the home directory; `contains-home`: it is above it. */
       home: z.enum(['home', 'contains-home']).nullable(),
+      /**
+       * Issue 262: set when the location's own scan skips it (D05): `folder` when it is a
+       * user-level agent folder, `inside-folder` when it lies inside one. Absent otherwise, and
+       * in results stored before issue 262.
+       */
+      userLevel: userLevelSchema.optional(),
       overlaps: z.array(repositoryOverlapSchema),
     })
     .strict(),

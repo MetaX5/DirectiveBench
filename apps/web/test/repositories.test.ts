@@ -271,6 +271,7 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
       userLevel?: 'folder' | 'inside-folder';
       readOnItsOwn?: true;
     }[],
+    userLevel?: 'folder' | 'inside-folder',
   ) =>
     describeRegistration(
       registration({
@@ -279,6 +280,7 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
           code: 'confirmation-required',
           location: '/home/me',
           home,
+          ...(userLevel === undefined ? {} : { userLevel }),
           overlaps: overlaps.map((overlap) => ({
             repositoryId: 'repo_1',
             name: 'skills',
@@ -326,6 +328,25 @@ describe('describeRegistration confirmation (FR-104-18)', () => {
       'It is inside the registered repository skills (/home/me/skills), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.',
       'It contains the registered repository skills (/home/me/skills), a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
       'It contains the registered repository skills (/home/me/skills), which is inside a user-level agent folder. A scan skips that folder, so nothing is counted twice.',
+    ]);
+  });
+
+  it('explains that a user-level agent folder on its own finds no artifacts (issue 262)', () => {
+    const reason =
+      'This is a user-level agent folder. Every scan skips user-level agent folders (scanning them is a planned opt-in), so registering it finds no artifacts.';
+    for (const userLevel of ['folder', 'inside-folder'] as const) {
+      const notice = confirm(null, [], userLevel);
+      expect(notice.kind === 'confirm' && notice.reasons).toEqual([reason]);
+    }
+    // With an overlap (PR #261), both reasons are shown: the location's own first.
+    const both = confirm(
+      null,
+      [{ relation: 'inside', userLevel: 'inside-folder' }],
+      'inside-folder',
+    );
+    expect(both.kind === 'confirm' && both.reasons).toEqual([
+      reason,
+      'It is inside the registered repository skills (/home/me/skills), but it is inside a user-level agent folder: every scan skips it, so nothing is counted twice and a scan of it finds no artifacts.',
     ]);
   });
 

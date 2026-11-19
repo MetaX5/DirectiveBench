@@ -642,6 +642,92 @@ describe('registerLocalPath', () => {
     });
   });
 
+  describe('a user-level agent folder registered on its own (issue 262, D05)', () => {
+    /** No CLAUDE_CONFIG_DIR, CODEX_HOME or XDG_CONFIG_HOME from the machine running the tests. */
+    const env = (extra: NodeJS.ProcessEnv = {}) => ({ PATH: process.env.PATH, ...extra });
+
+    async function register(path: string, confirmed: string | null, extra = {}) {
+      return registerLocalPath(handle, request(path, confirmed), options({ env: env(extra) }));
+    }
+
+    it('asks to confirm the folder itself and stores it only once exactly that is confirmed', async () => {
+      // `options()` uses `root` as the home directory.
+      const claude = makeDir('.claude');
+      expect(await register(claude, null)).toEqual({
+        ok: false,
+        code: 'confirmation-required',
+        location: claude,
+        home: null,
+        userLevel: 'folder',
+        overlaps: [],
+      });
+      expect(await handle.db.$count(schema.repositories)).toBe(0);
+      // A confirmation for another location does not count.
+      expect(await register(claude, root)).toMatchObject({ code: 'confirmation-required' });
+      expect(await handle.db.$count(schema.repositories)).toBe(0);
+      expect(await register('~/.claude', claude)).toMatchObject({ ok: true, created: true });
+      expect(await handle.db.$count(schema.repositories)).toBe(1);
+    });
+
+    it('asks to confirm a location inside one, for every agent', async () => {
+      for (const segments of [
+        ['.claude', 'skills'],
+        ['.codex', 'prompts'],
+        ['.agents', 'skills'],
+        ['.cursor', 'rules'],
+        ['.config', 'cursor', 'rules'],
+      ]) {
+        const location = makeDir(...segments);
+        expect(await register(location, null)).toMatchObject({
+          code: 'confirmation-required',
+          home: null,
+          userLevel: 'inside-folder',
+          overlaps: [],
+        });
+      }
+      expect(await handle.db.$count(schema.repositories)).toBe(0);
+    });
+
+    it('follows the CLAUDE_CONFIG_DIR and CODEX_HOME overrides', async () => {
+      const claudeConfig = makeDir('elsewhere', 'claude-config');
+      const codexHome = makeDir('elsewhere', 'codex-home');
+      const extra = { CLAUDE_CONFIG_DIR: claudeConfig, CODEX_HOME: codexHome };
+      expect(await register(claudeConfig, null, extra)).toMatchObject({ userLevel: 'folder' });
+      expect(
+        await register(makeDir('elsewhere', 'codex-home', 'skills'), null, extra),
+      ).toMatchObject({ userLevel: 'inside-folder' });
+      // Without the overrides they are ordinary directories, registered without a question.
+      expect(await register(claudeConfig, null)).toMatchObject({ ok: true, created: true });
+    });
+
+    it('resolves a symlinked folder to the location the scan skips', async () => {
+      const dotfiles = makeDir('dotfiles', 'claude');
+      symlinkSync(dotfiles, join(root, '.claude'));
+      expect(await register('~/.claude', null)).toMatchObject({
+        location: dotfiles,
+        userLevel: 'folder',
+      });
+    });
+
+    it("registers a project's own .claude folder without a question", async () => {
+      const own = makeDir('project', '.claude');
+      expect(await register(own, null)).toMatchObject({ ok: true, created: true });
+    });
+
+    it("leaves another user's folder ordinary, as its own scan reads it", async () => {
+      // The scan of `/users/bob/.claude` does not skip it when the home directory is alice's.
+      const alice = makeDir('users', 'alice');
+      const bobClaude = makeDir('users', 'bob', '.claude');
+      expect(
+        await registerLocalPath(
+          handle,
+          request(bobClaude),
+          options({ homeDir: alice, env: env() }),
+        ),
+      ).toMatchObject({ ok: true, created: true });
+    });
+  });
+
   describe('an overlap with a user-level agent folder the scan skips (issue 244, D05)', () => {
     /** No CLAUDE_CONFIG_DIR, CODEX_HOME or XDG_CONFIG_HOME from the machine running the tests. */
     const env = (extra: NodeJS.ProcessEnv = {}) => ({ PATH: process.env.PATH, ...extra });
@@ -754,6 +840,28 @@ describe('registerLocalPath', () => {
             relation: 'inside',
             userLevel: 'folder',
             readOnItsOwn: true,
+          },
+        ],
+      });
+    });
+
+    it('also flags the new location itself when its own scan skips it (issue 262)', async () => {
+      const skills = makeDir('.claude', 'skills');
+      const home = await registered(root);
+      const result = await registerLocalPath(handle, request(skills), options({ env: env() }));
+      expect(result).toEqual({
+        ok: false,
+        code: 'confirmation-required',
+        location: skills,
+        home: null,
+        userLevel: 'inside-folder',
+        overlaps: [
+          {
+            repositoryId: home,
+            name: basename(root),
+            location: root,
+            relation: 'inside',
+            userLevel: 'inside-folder',
           },
         ],
       });

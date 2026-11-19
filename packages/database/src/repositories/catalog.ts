@@ -16,7 +16,7 @@ import {
   categories,
   repositories,
 } from '../schema';
-import { LOCAL_PROVIDERS, type RepositoryOverlap } from './jobs';
+import { LOCAL_PROVIDERS, type RepositoryOverlap, type UserLevelRelation } from './jobs';
 import { countRunsByVerdict, listBenchmarkRuns } from './runs';
 import { refreshSourceFields } from './artifacts';
 
@@ -523,6 +523,11 @@ export interface RegistrationConfirmationScope {
   homeDirectory: string;
   /** The canonical location the user already confirmed, if any (job payload). */
   confirmedLocation: string | null;
+  /**
+   * Whether the location's own scan skips it as a user-level agent folder (D05, issue 262),
+   * decided by the runner with the scan's skip list; null when it does not.
+   */
+  userLevel: UserLevelRelation | null;
 }
 
 export type LocalRepositoryRegistrationOutcome =
@@ -531,6 +536,8 @@ export type LocalRepositoryRegistrationOutcome =
       status: 'confirmation-required';
       /** `home`: the location is the home directory; `contains-home`: it is above it. */
       home: 'home' | 'contains-home' | null;
+      /** The location is, or lies inside, a user-level agent folder its scan skips. */
+      userLevel: UserLevelRelation | null;
       /** Registered local repositories the location contains or lies inside. */
       overlaps: RepositoryOverlap[];
     };
@@ -545,7 +552,8 @@ function homeRelation(location: string, homeDirectory: string): 'home' | 'contai
 /**
  * Registers a local repository, or returns the one already registered at the same provider and
  * location (FR-104-04, returned unchanged). A new location that is the home directory (or above
- * it), or that contains or lies inside another registered local repository, is registered only
+ * it), that is or lies inside a user-level agent folder its scan skips (issue 262), or that
+ * contains or lies inside another registered local repository, is registered only
  * when `confirmedLocation` equals it (FR-104-18); otherwise the outcome lists what the user must
  * confirm. The same location under the other local provider is not an overlap (OQ-104-05). The
  * check and the insert run in one transaction, so concurrent registrations cannot both skip it.
@@ -583,8 +591,9 @@ export async function registerLocalRepository(
         });
       }
     }
-    if ((home !== null || overlaps.length > 0) && scope.confirmedLocation !== input.location) {
-      return { status: 'confirmation-required', home, overlaps };
+    const asks = home !== null || scope.userLevel !== null || overlaps.length > 0;
+    if (asks && scope.confirmedLocation !== input.location) {
+      return { status: 'confirmation-required', home, userLevel: scope.userLevel, overlaps };
     }
 
     const now = nowIso();

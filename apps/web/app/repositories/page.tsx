@@ -217,10 +217,11 @@ export default async function RepositoriesPage({
               registered at its top-level directory with its current branch; any other directory as
               a plain folder. Read-only: DirectiveBench runs only read-only git commands with hooks
               disabled and never writes to the repository. The filesystem root cannot be registered;
-              your home directory and paths that overlap a registered repository ask for a
-              confirmation first. A GitHub URL is registered without credentials (a URL that
-              contains any is rejected). A GitHub repository is scanned on its default branch unless
-              you name another branch. A local repository is scanned from its working tree.
+              your home directory, a user-level agent folder (such as ~/.claude) and paths that
+              overlap a registered repository ask for a confirmation first. A GitHub URL is
+              registered without credentials (a URL that contains any is rejected). A GitHub
+              repository is scanned on its default branch unless you name another branch. A local
+              repository is scanned from its working tree.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-stack">

@@ -364,6 +364,8 @@ describe('getRepositoryRegistration', () => {
       code: 'confirmation-required',
       location: '/srv',
       home: null,
+      // Issue 262: the location itself is a user-level agent folder its own scan skips.
+      userLevel: 'folder',
       overlaps: [
         { repositoryId: 'repo_a', name: 'a', location: '/srv/a', relation: 'contains' },
         // Issue 244: a user-level agent folder that the scan skips.
@@ -396,6 +398,19 @@ describe('getRepositoryRegistration', () => {
       { ...base, id: 'job_bad_result', payload: { path: '/srv' }, result: { ok: 'yes' } },
       {
         ...base,
+        id: 'job_bad_own_user_level',
+        payload: { path: '/srv' },
+        result: {
+          ok: false,
+          code: 'confirmation-required',
+          location: '/srv',
+          home: null,
+          userLevel: 'yes',
+          overlaps: [],
+        },
+      },
+      {
+        ...base,
         id: 'job_bad_user_level',
         payload: { path: '/srv' },
         result: {
@@ -420,6 +435,7 @@ describe('getRepositoryRegistration', () => {
     expect(await getRepositoryRegistration(handle.db, 'job_bad_payload')).toBeNull();
     expect(await getRepositoryRegistration(handle.db, 'job_bad_result')).toBeNull();
     expect(await getRepositoryRegistration(handle.db, 'job_bad_user_level')).toBeNull();
+    expect(await getRepositoryRegistration(handle.db, 'job_bad_own_user_level')).toBeNull();
   });
 
   it('describes a pending job, a rejection and a registered repository', async () => {

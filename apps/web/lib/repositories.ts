@@ -249,9 +249,10 @@ function overlapReason(
 }
 
 /**
- * The FR-104-18 explanation: why this location needs a confirmation — the size of a scan and the
- * same files counted as occurrences of two repositories. User-level agent folders are never part
- * of it: a scan always skips them (product decision D05).
+ * The FR-104-18 explanation: why this location needs a confirmation — the size of a scan, a
+ * location every scan skips (a user-level agent folder or a location inside one, issue 262), and
+ * the same files counted as occurrences of two repositories. User-level agent folders are never
+ * part of a scan: it always skips them (product decision D05).
  */
 export function confirmationReasons(request: ConfirmationRequest): string[] {
   const reasons: string[] = [];
@@ -264,6 +265,11 @@ export function confirmationReasons(request: ConfirmationRequest): string[] {
   } else if (request.home === 'contains-home') {
     reasons.push(
       `This directory contains your home directory. A scan reads every file below it (except .git and node_modules), which can take very long. ${userLevel}`,
+    );
+  }
+  if (request.userLevel !== undefined) {
+    reasons.push(
+      'This is a user-level agent folder. Every scan skips user-level agent folders (scanning them is a planned opt-in), so registering it finds no artifacts.',
     );
   }
   for (const overlap of request.overlaps) {
