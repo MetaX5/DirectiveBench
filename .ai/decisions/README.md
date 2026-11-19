@@ -31,6 +31,7 @@ repeating the rationale.
 | [ADR-0012](0012-partial-fetch-of-candidate-paths.md) | Fetch only candidate paths of hosted repositories with a git partial clone | Proposed | 2026-10-17 |
 | [ADR-0013](0013-hand-written-gfm-block-scanner.md) | Read Markdown with a hand-written GFM block scanner, verified against cmark-gfm | Accepted | 2026-10-22 |
 | [ADR-0014](0014-server-side-syntax-highlighting-with-shiki.md) | Server-side syntax highlighting of output files with Shiki | Accepted | 2026-10-29 |
+| [ADR-0015](0015-reserved-name-check-session-for-ab-runs.md) | A session without the skill checks the skill name before every A/B run | Proposed | 2026-11-19 |
 
 ADR-0001 to ADR-0010 were written during project bootstrap; all ADRs above are pending maintainer
 review (see the "Deciders" field in each record).
