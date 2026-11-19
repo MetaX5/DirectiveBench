@@ -80,3 +80,20 @@ export const RECORDED_2_1_325 = join(import.meta.dirname, '../fixtures/claude-co
 export function recording325(name: string): string {
   return readFileSync(join(RECORDED_2_1_325, `${name}.ndjson`), 'utf8');
 }
+
+/**
+ * A built-in slash command the static reserved list does not hold, as a `claude` newer than the
+ * list would add one (issue 278). Not observed: substituted into a recording for the run-time check.
+ */
+export const UNLISTED_BUILT_IN = 'newer-built-in';
+
+/**
+ * The 2.1.325 recording with its `ultrareview` built-in renamed to {@link UNLISTED_BUILT_IN}: a
+ * session start of a `claude` that lists a name the static list misses. Constructed, not recorded.
+ */
+export function newerSessionStart(): string {
+  const recorded = recording325('live-subscription-reserved-doctor');
+  if (!recorded.includes('"ultrareview"'))
+    throw new Error('the recording no longer lists ultrareview');
+  return recorded.replace('"ultrareview"', JSON.stringify(UNLISTED_BUILT_IN));
+}

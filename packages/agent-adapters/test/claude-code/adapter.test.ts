@@ -20,7 +20,7 @@ import {
 import type { AgentRunRequest } from '../../src/contract';
 import { pinWorkspace } from '../../src/workspace-pin';
 import { writeFakeClaude, type FakeClaude, type FakeClaudeOptions } from './fake-claude';
-import { bundle, fixture, recording325 } from './helpers';
+import { bundle, fixture, newerSessionStart, UNLISTED_BUILT_IN } from './helpers';
 
 const posix = describe.skipIf(process.platform === 'win32');
 
@@ -390,24 +390,38 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
         trace: [],
         usage: null,
       });
-      expect(result.error).toMatch(/"doctor" is a name Claude Code 2\.1\.302 lists itself/);
+      expect(result.error).toMatch(/"doctor" is a name Claude Code 2\.1\.325 lists itself/);
       expect(h.fake.invoked()).toBe(false);
     },
   );
 
-  it('ends a run without the skill installed when the session lists the skill name itself (issue 275)', async () => {
-    // `ultrareview` passes the static 2.1.302 list; the recorded 2.1.325 session lists it.
+  it('refuses a candidate named like the 2.1.325 built-in `/ultrareview` before the spawn (issue 278)', async () => {
     const h = harness();
-    h.fake.setStream(recording325('live-subscription-reserved-doctor'));
     const artifact = bundle('skill-md', { 'SKILL.md': '---\nname: ultrareview\n---\nBody\n' });
+    const result = await h.adapter().run(await h.request({ artifact }));
+    expect(result).toMatchObject({
+      status: 'infrastructure-error',
+      errorCode: 'skill-name-reserved',
+    });
+    expect(result.error).toMatch(/"ultrareview" is a name Claude Code 2\.1\.325 lists itself/);
+    expect(h.fake.invoked()).toBe(false);
+  });
+
+  it('ends a run without the skill installed when the session lists the skill name itself (issue 275)', async () => {
+    // The name passes the static list; the session start of a newer `claude` lists it.
+    const h = harness();
+    h.fake.setStream(newerSessionStart());
+    const artifact = bundle('skill-md', {
+      'SKILL.md': `---\nname: ${UNLISTED_BUILT_IN}\n---\nBody\n`,
+    });
     const result = await h.adapter().run(await h.request({ artifact, installedPaths: [] }));
     expect(result).toMatchObject({
       status: 'infrastructure-error',
       errorCode: 'skill-name-reserved',
-      metadata: { installedSkillName: 'ultrareview', executionModel: 'claude-haiku-5-5' },
+      metadata: { installedSkillName: UNLISTED_BUILT_IN, executionModel: 'claude-haiku-5-5' },
     });
     expect(result.error).toContain(
-      'Claude Code lists the skill name "ultrareview" itself: this agent run installed no skill',
+      `Claude Code lists the skill name "${UNLISTED_BUILT_IN}" itself: this agent run installed no skill`,
     );
     expect(h.fake.invoked()).toBe(true);
 

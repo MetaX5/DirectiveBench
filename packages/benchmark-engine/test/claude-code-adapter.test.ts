@@ -394,23 +394,26 @@ posix('runBenchmark with ClaudeCodeAdapter and a fake claude (#96 end to end)', 
   });
 
   it('stops a none run whose baseline session lists the skill name itself (issue 275)', async () => {
-    // The recorded 2.1.325 session lists the built-in `/ultrareview`, which the static 2.1.302
-    // list misses; the first agent run (baseline, nothing installed) shows the collision.
+    // The recorded 2.1.325 session start with its built-in `/ultrareview` renamed to a name the
+    // static list misses (constructed: a newer `claude`, issue 278); the first agent run
+    // (baseline, nothing installed) shows the collision.
     const recorded = readFileSync(
       join(STREAMS, '../2.1.325/live-subscription-reserved-doctor.ndjson'),
       'utf8',
     );
+    expect(recorded).toContain('"ultrareview"');
+    const newer = recorded.replace('"ultrareview"', '"newer-built-in"');
     const { fake, records, result } = await scenario('cc-runtime-reserved', {
-      streams: { default: recorded },
+      streams: { default: newer },
       artifact: artifact({
-        'SKILL.md': '---\nname: ultrareview\ndescription: Writes reports\n---\nBody\n',
+        'SKILL.md': '---\nname: newer-built-in\ndescription: Writes reports\n---\nBody\n',
       }),
       suite: { repetitions: 2 },
     });
     const error = stopped(result, 'skill-name-reserved');
     expect(error.message).toContain('baseline repetition 1 (skill-name-reserved)');
     expect(summary(records)).toEqual([['baseline', 'infrastructure-error', 'skill-name-reserved']]);
-    expect(records[0]?.error).toContain('Claude Code lists the skill name "ultrareview" itself');
+    expect(records[0]?.error).toContain('Claude Code lists the skill name "newer-built-in" itself');
     expect(fake.starts()).toHaveLength(1);
   });
 
