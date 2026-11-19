@@ -121,7 +121,8 @@ a real screen reader.
   dash (`pnpm lint` passes). The gate was re-run on the merge: format, lint, typecheck, build,
   verify:pack pass; `pnpm test` failed once in `packages/core/test/linear-time.test.ts`
   (timing assertion 0.116 < 0.1, unrelated to this change, the machine was loaded) and passed
-  on the re-run.
+  on the re-run. After the merge: `pnpm test:e2e` 203 passed, `pnpm test:storybook` 342 passed;
+  Codex round 2 (`--base origin/main` = 27ab3b4): approve, no material findings.
 
 ## Lessons recorded
 
