@@ -3,7 +3,7 @@ title: Issue 282, agent --version line with U+0000 no longer fails the run
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #282 (maintainer approved), om-auto-fix-issue
-status: in-progress
+status: completed
 branch: fix/issue-282-agent-version-nul
 specs: [SPEC-006, SPEC-203, SPEC-111]
 ---
@@ -66,7 +66,22 @@ product choice:
 
 ## Verification
 
-Filled in below as the gate runs.
+All on Node 24 (local), `TMPDIR=/var/tmp/issue282-*`:
+
+| Command | Result |
+| --- | --- |
+| Red first: `vitest run test/runs.test.ts -t "issue 282"` (database) before the fix | failed: `Failed query: insert into "benchmark_runs"` (the client's `NulInTextError`) |
+| Red first: `vitest run test/benchmark-run.test.ts -t "issue 282"` (cli) before the fix | failed: `CliError: The benchmark job failed: The benchmark run failed unexpectedly.` |
+| Both after the fix | passed |
+| `pnpm lint` | passed |
+| `pnpm typecheck` | passed |
+| `pnpm exec turbo run test --force` | 7/7 tasks; 2837 passed, 2 skipped; 100% coverage in every package |
+| `pnpm build` / `pnpm verify:pack` | passed / "Packaging verification passed" |
+| Real run: built `apps/cli/dist/cli.js` `demo`, then `benchmark run` of a one-case suite against `validate-external-input` with a fake `claude` on `PATH` whose `--version` prints `2.1.302\0 (Claude Code)` | exit 0, `Result: passed (verdict: unchanged)`; `benchmark_runs.agent_version` = `2.1.302\uFFFD (Claude Code)` (code points checked), status `completed` |
+| Codex adversarial review, round 1 | approve, no material findings |
+
+Not verified: Node 22.16 locally (no SQL changed; CI `oldest-node` covers it), Windows, a real
+`claude` binary (never started, per the brief).
 
 ## Problems and deviations
 
@@ -75,8 +90,10 @@ Filled in below as the gate runs.
 
 ## Lessons recorded
 
-None yet.
+None: the fix applies the existing `storedMessage` rule; nothing non-obvious was learned beyond
+the trace above.
 
 ## Follow-ups
 
-None yet.
+- `pnpm test -- --force` does not bypass the turbo cache: the flag reaches Vitest, which rejects
+  it (`Unknown option --force`). `pnpm exec turbo run test --force` works. Relevant to #281.
