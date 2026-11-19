@@ -399,7 +399,10 @@ posix('ClaudeCodeAdapter with a fake claude', () => {
     const h = harness();
     const artifact = bundle('skill-md', { 'SKILL.md': '---\nname: ultrareview\n---\nBody\n' });
     const result = await h.adapter().run(await h.request({ artifact }));
-    expect(result).toMatchObject({ status: 'infrastructure-error', errorCode: 'skill-name-reserved' });
+    expect(result).toMatchObject({
+      status: 'infrastructure-error',
+      errorCode: 'skill-name-reserved',
+    });
     expect(result.error).toMatch(/"ultrareview" is a name Claude Code 2\.1\.325 lists itself/);
     expect(h.fake.invoked()).toBe(false);
   });

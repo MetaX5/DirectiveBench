@@ -93,6 +93,7 @@ export const UNLISTED_BUILT_IN = 'newer-built-in';
  */
 export function newerSessionStart(): string {
   const recorded = recording325('live-subscription-reserved-doctor');
-  if (!recorded.includes('"ultrareview"')) throw new Error('the recording no longer lists ultrareview');
+  if (!recorded.includes('"ultrareview"'))
+    throw new Error('the recording no longer lists ultrareview');
   return recorded.replace('"ultrareview"', JSON.stringify(UNLISTED_BUILT_IN));
 }

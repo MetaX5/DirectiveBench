@@ -55,7 +55,9 @@ const SKILL_NAME_FORM = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  */
 function cliOwnedNames(init: InitNames, installed: readonly string[]): string[] {
   const all = [...init.skills, ...init.slash_commands, ...init.terminal_slash_commands];
-  return [...new Set(all)].filter((name) => !installed.includes(name) && SKILL_NAME_FORM.test(name));
+  return [...new Set(all)].filter(
+    (name) => !installed.includes(name) && SKILL_NAME_FORM.test(name),
+  );
 }
 
 describe('skill names Claude Code lists itself (issue 257)', () => {
@@ -81,7 +83,10 @@ describe('skill names Claude Code lists itself (issue 257)', () => {
       // longer lists (not reserved), so only the slash commands that are not skills count.
       const builtIns = init.slash_commands.filter((entry) => !init.skills.includes(entry));
       const owned = cliOwnedNames({ ...init, skills: [], slash_commands: builtIns }, []);
-      expect(owned.filter((entry) => !CLAUDE_RESERVED_SKILL_NAMES.has(entry)), name).toEqual([]);
+      expect(
+        owned.filter((entry) => !CLAUDE_RESERVED_SKILL_NAMES.has(entry)),
+        name,
+      ).toEqual([]);
     }
   });
 
@@ -113,7 +118,9 @@ describe('skill names Claude Code lists itself (issue 257)', () => {
     expect(() => assertClaudeSkillNameNotReserved('doctor')).toThrow(
       /"doctor" is a name Claude Code 2\.1\.325 lists itself/,
     );
-    expect(codeOf(() => assertClaudeSkillNameNotReserved('ultrareview'))).toBe('skill-name-reserved');
+    expect(codeOf(() => assertClaudeSkillNameNotReserved('ultrareview'))).toBe(
+      'skill-name-reserved',
+    );
     expect(codeOf(() => assertClaudeSkillNameNotReserved('pdf'))).toBeUndefined();
   });
 
