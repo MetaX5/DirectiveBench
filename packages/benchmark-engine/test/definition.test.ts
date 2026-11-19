@@ -8,6 +8,7 @@ import {
   definitionRunsCommands,
   executionBlockers,
   isDeterministicAssertion,
+  MAX_DEFINITION_DEPTH,
   MAX_MATCHERS_PER_ASSERTION,
   MAX_PATTERN_LENGTH,
   type BenchmarkDefinitionInput,
@@ -155,6 +156,128 @@ describe('definition rules', () => {
       if (!parsedAssertion) throw new Error('expected an assertion');
       expect(isDeterministicAssertion(parsedAssertion)).toBe(true);
     }
+  });
+});
+
+describe('U+0000 in definitions (issue 273)', () => {
+  const NUL_MESSAGE = 'must not contain a NUL character (U+0000)';
+
+  it('names every string field holding U+0000, wherever it is', () => {
+    const base = document();
+    const [firstCase] = base.cases;
+    const issues = issuePaths({
+      ...base,
+      name: 'Suite\0hidden',
+      description: '\0',
+      technologies: ['ts', 'js\0'],
+      execution: { agent: 'mock', model: { provider: 'p', model: 'm\0' } },
+      cases: [
+        {
+          ...firstCase,
+          name: 'C\0',
+          prompt: 'p\0',
+          setup: [['echo', 'a\0']],
+          agentOptions: { mock: { playbook: [{ write: 'x\0' }] }, 'key\0': 1 },
+        },
+      ],
+    });
+    expect(issues).toEqual([
+      `name: ${NUL_MESSAGE}`,
+      `description: ${NUL_MESSAGE}`,
+      `technologies.1: ${NUL_MESSAGE}`,
+      `execution.model.model: ${NUL_MESSAGE}`,
+      `cases.0.name: ${NUL_MESSAGE}`,
+      `cases.0.prompt: ${NUL_MESSAGE}`,
+      `cases.0.setup.0.1: ${NUL_MESSAGE}`,
+      'cases.0.agentOptions: must not have a key that contains a NUL character (U+0000)',
+      `cases.0.agentOptions.mock.playbook.0.write: ${NUL_MESSAGE}`,
+    ]);
+  });
+
+  it('refuses a YAML "\\0" escape in the suite name, although the file holds no NUL byte', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: "Suite\\0"\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }] }\n`;
+    expect(yaml.includes('\0')).toBe(false);
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [{ path: 'name', message: NUL_MESSAGE }],
+    });
+  });
+
+  it('reports a YAML alias cycle as an issue instead of overflowing the stack (Codex review)', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: Suite\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }], agentOptions: { mock: &loop { nested: [*loop] } } }\n`;
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [
+        {
+          path: 'cases.0.agentOptions.mock.nested.0',
+          message: 'must not refer to itself (a YAML alias cycle)',
+        },
+      ],
+    });
+  });
+
+  it('reports deep nesting as an issue instead of overflowing the stack (Codex review)', () => {
+    const nested = (depth: number): unknown => {
+      let value: unknown = 'leaf';
+      for (let level = 0; level < depth; level++) value = { n: value };
+      return value;
+    };
+    const definition = (mock: unknown) => {
+      const base = document();
+      const [firstCase] = base.cases;
+      return JSON.stringify({ ...base, cases: [{ ...firstCase, agentOptions: { mock } }] });
+    };
+    // `cases.0.agentOptions.mock` is 4 levels deep; the limit counts every level from the root.
+    const allowed = MAX_DEFINITION_DEPTH - 4;
+    expect(parseDefinitionText(definition(nested(allowed)), 'json').success).toBe(true);
+    const deepPath = ['cases', '0', 'agentOptions', 'mock', ...Array<string>(allowed).fill('n')];
+    expect(parseDefinitionText(definition(nested(allowed + 1)), 'json')).toEqual({
+      success: false,
+      issues: [
+        {
+          path: deepPath.join('.'),
+          message: `must not nest deeper than ${MAX_DEFINITION_DEPTH} levels`,
+        },
+      ],
+    });
+    // 5,000 levels overflowed the recursive walk (Codex review); the text is built by hand,
+    // because JSON.stringify would overflow too.
+    const levels = 5_000;
+    const text = definition('MOCK').replace(
+      '"MOCK"',
+      `${'{"n":'.repeat(levels)}"leaf"${'}'.repeat(levels)}`,
+    );
+    const deep = parseDefinitionText(text, 'json');
+    expect(deep.success ? [] : deep.issues.map((issue) => issue.message)).toEqual([
+      `must not nest deeper than ${MAX_DEFINITION_DEPTH} levels`,
+    ]);
+  });
+
+  it('checks a value shared by two YAML aliases at each place it is used', () => {
+    const yaml = `schemaVersion: 1\nid: suite\nname: Suite\nexecution: { agent: mock }\ncases:\n  - { id: c, name: C, prompt: p, fixture: { path: f }, assertions: [{ id: a, type: file-exists, path: a }], agentOptions: { a: &shared { text: "x\\0" }, b: *shared } }\n`;
+    expect(parseDefinitionText(yaml, 'yaml')).toEqual({
+      success: false,
+      issues: [
+        { path: 'cases.0.agentOptions.a.text', message: NUL_MESSAGE },
+        { path: 'cases.0.agentOptions.b.text', message: NUL_MESSAGE },
+      ],
+    });
+  });
+
+  it('accepts the two characters backslash and zero, as in a regular expression', () => {
+    const base = document();
+    const [firstCase] = base.cases;
+    expect(
+      issuePaths({
+        ...base,
+        cases: [
+          {
+            ...firstCase,
+            assertions: [{ id: 'a', type: 'file-contains', path: 'a.txt', pattern: 'a\\0' }],
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 });
 

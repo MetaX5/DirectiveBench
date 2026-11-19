@@ -335,3 +335,55 @@ test('a slow save does not take focus from a field the user moved to', async ({ 
     );
   }
 });
+
+// Issue 273: a browser field cannot hold U+0000, but a crafted request can. The request is
+// rewritten on its way out, as a crafted one would be, and the database is never reached.
+test('notes holding U+0000 get a field message and nothing is saved', async ({ page }) => {
+  const artifactId = await demoArtifactId();
+  await page.goto(`/artifacts/${artifactId}`);
+  const marker = 'NUL-MARKER-273';
+  await page.route(`**/artifacts/${artifactId}`, async (route) => {
+    const body = route.request().postDataBuffer();
+    if (route.request().method() !== 'POST' || body === null) return route.continue();
+    const text = body.toString('utf8');
+    await route.continue({ postData: Buffer.from(text.replaceAll(marker, '\u0000'), 'utf8') });
+  });
+  const notes = card(page, 'Notes');
+  const field = notes.getByRole('textbox', { name: 'Notes' });
+  try {
+    await field.fill(`before${marker}after`);
+    await notes.getByRole('button', { name: 'Save notes' }).click();
+    await expect(notes.getByRole('alert')).toHaveText(
+      'Notes cannot contain a NUL character (U+0000). Remove it.',
+    );
+    await expect(field).toHaveAttribute('aria-invalid', 'true');
+    await expect(field).toBeFocused();
+    const stored = await withDatabase(
+      (db) =>
+        (
+          db.prepare('select notes from artifacts where id = ?').get(artifactId) as {
+            notes: string | null;
+          }
+        ).notes,
+    );
+    expect(stored).toBeNull();
+  } finally {
+    await page.unrouteAll();
+    await withDatabase((db) =>
+      db.prepare('update artifacts set notes = null where id = ?').run(artifactId),
+    );
+  }
+});
+
+test('a URL holding an encoded U+0000 is never a server error', async ({ page, request }) => {
+  // Next.js answers a path segment holding %00 with Not Found before any page reads it.
+  for (const path of ['/results/%00', '/benchmarks/%00', '/artifacts/%00']) {
+    expect((await request.get(path)).status()).toBe(404);
+  }
+  // A job id holding NUL shows nothing, as an unknown id does (issue 273).
+  const repositories = await page.goto(
+    '/repositories?registration=job_%00&scan=%00&branchChange=%00',
+  );
+  expect(repositories?.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 1, name: 'Repositories' })).toBeVisible();
+});

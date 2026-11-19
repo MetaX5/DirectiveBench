@@ -47,6 +47,7 @@ import {
   describeScan,
   echoedBranch,
   isHosted,
+  jobIdParam,
   lastScanLabel,
   mayCarryCredentials,
   parseChangeBranchParam,
@@ -96,8 +97,10 @@ export default async function RepositoriesPage({
       </>
     );
   const params = await searchParams;
-  const registration = params.registration
-    ? await getRepositoryRegistration(handle.db, params.registration)
+  // A job id holding U+0000 shows nothing, as an unknown one does (issue 273).
+  const registrationId = jobIdParam(params.registration);
+  const registration = registrationId
+    ? await getRepositoryRegistration(handle.db, registrationId)
     : null;
   let notice: RegistrationNotice | null = registration ? describeRegistration(registration) : null;
   const invalidPath = !notice && params.path !== undefined ? pathFieldError(params.path) : null;
@@ -131,7 +134,8 @@ export default async function RepositoriesPage({
   if (invalidUrl !== null) {
     notice = { kind: 'fieldError', field: 'path', path: '', branch: '', message: invalidUrl };
   }
-  const scan = params.scan ? await getRepositoryScan(handle.db, params.scan) : null;
+  const scanId = jobIdParam(params.scan);
+  const scan = scanId ? await getRepositoryScan(handle.db, scanId) : null;
   const scanNotice = scan ? describeScan(scan) : null;
   const scanError = scanRequestError(params.scanError);
   const repositories = await listRepositories(handle.db);
@@ -157,8 +161,9 @@ export default async function RepositoriesPage({
 
   // Issue 58: the Change branch panel (`?changeBranch=`), a branch change job (`?branchChange=`)
   // and why a change could not be enqueued (`?branchChangeError=`).
-  const branchChange = params.branchChange
-    ? await getRepositoryBranchChange(handle.db, params.branchChange)
+  const branchChangeId = jobIdParam(params.branchChange);
+  const branchChange = branchChangeId
+    ? await getRepositoryBranchChange(handle.db, branchChangeId)
     : null;
   const changeNotice = branchChange ? describeBranchChange(branchChange) : null;
   const panelTarget = parseChangeBranchParam(params.changeBranch);

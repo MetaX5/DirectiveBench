@@ -241,6 +241,75 @@ export const benchmarkCaseSchema = z
   });
 export type BenchmarkCase = z.infer<typeof benchmarkCaseSchema>;
 
+const NUL_TEXT_MESSAGE = 'must not contain a NUL character (U+0000)';
+const NUL_KEY_MESSAGE = 'must not have a key that contains a NUL character (U+0000)';
+const CYCLE_MESSAGE = 'must not refer to itself (a YAML alias cycle)';
+
+/**
+ * How deeply a definition may nest arrays and objects (FR-108-17). The format itself needs about
+ * ten levels; the bound keeps the walk below, and later steps that recurse over the definition,
+ * far from the stack limit when free-form `agentOptions` nest deeply.
+ */
+export const MAX_DEFINITION_DEPTH = 100;
+const DEPTH_MESSAGE = `must not nest deeper than ${MAX_DEFINITION_DEPTH} levels`;
+
+interface WalkFrame {
+  value: unknown;
+  path: (string | number)[];
+  /** The frame of the array or object that holds this value, or null at the root. */
+  parent: WalkFrame | null;
+}
+
+/** Whether `value` is the array or object of a frame on the path to `frame` (a cycle). */
+function onPath(frame: WalkFrame | null, value: object): boolean {
+  for (let current = frame; current !== null; current = current.parent) {
+    if (current.value === value) return true;
+  }
+  return false;
+}
+
+/**
+ * Adds an issue for every string value or object key holding U+0000 (FR-108-17, issue 273).
+ * Suite text is stored in TEXT columns, which refuse NUL (SPEC-006 §1 "Text"), and the rest
+ * becomes process arguments or files, so no string anywhere in a definition may hold it. YAML
+ * `"\0"` produces U+0000 although the file holds no NUL byte. The walk uses its own stack, never
+ * the call stack: a YAML alias can make free-form `agentOptions` (`z.unknown()`) refer to itself,
+ * and a JSON document can nest deeply, so both are reported as issues instead. A value shared by
+ * two aliases is checked at each place it is used.
+ */
+function refuseNulText(root: unknown, ctx: z.RefinementCtx): void {
+  const stack: WalkFrame[] = [{ value: root, path: [], parent: null }];
+  for (let frame = stack.pop(); frame !== undefined; frame = stack.pop()) {
+    const { value, path, parent } = frame;
+    if (typeof value === 'string') {
+      if (value.includes('\0')) ctx.addIssue({ code: 'custom', path, message: NUL_TEXT_MESSAGE });
+      continue;
+    }
+    if (typeof value !== 'object' || value === null) continue;
+    if (onPath(parent, value)) {
+      ctx.addIssue({ code: 'custom', path, message: CYCLE_MESSAGE });
+      continue;
+    }
+    if (path.length >= MAX_DEFINITION_DEPTH) {
+      ctx.addIssue({ code: 'custom', path, message: DEPTH_MESSAGE });
+      continue;
+    }
+    const entries: [string | number, unknown][] = Array.isArray(value)
+      ? value.map((item, index) => [index, item])
+      : Object.entries(value);
+    for (const [key] of entries) {
+      // The issue path never repeats the NUL: it names the object that holds the key.
+      if (typeof key === 'string' && key.includes('\0')) {
+        ctx.addIssue({ code: 'custom', path, message: NUL_KEY_MESSAGE });
+      }
+    }
+    // Pushed in reverse, so the issues come in document order.
+    for (const [key, item] of entries.reverse()) {
+      stack.push({ value: item, path: [...path, key], parent: frame });
+    }
+  }
+}
+
 export const benchmarkDefinitionSchema = z
   .object({
     schemaVersion: z.literal(CURRENT_SCHEMA_VERSION),
@@ -289,6 +358,7 @@ export const benchmarkDefinitionSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    refuseNulText(value, ctx);
     const seen = new Set<string>();
     value.cases.forEach((c, index) => {
       if (seen.has(c.id)) {

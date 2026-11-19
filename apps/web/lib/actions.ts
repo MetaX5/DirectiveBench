@@ -84,6 +84,7 @@ import {
   type CategoryValues,
 } from './categories';
 import { requireDatabase } from './db';
+import { idSchema } from './form-input';
 import { webRunBlockers } from './run-guard';
 import {
   echoedBranch,
@@ -92,10 +93,7 @@ import {
   type RejectedInputCode,
 } from './repositories';
 
-const enqueueSchema = z.object({
-  suiteVersionId: z.string().min(1),
-  artifactId: z.string().min(1),
-});
+const enqueueSchema = z.object({ suiteVersionId: idSchema, artifactId: idSchema });
 
 /**
  * Enqueues a benchmark run for the latest version of an artifact. The suite version must exist,
@@ -129,7 +127,7 @@ export async function enqueueBenchmarkRunAction(formData: FormData): Promise<voi
 }
 
 export async function cancelJobAction(formData: FormData): Promise<void> {
-  const jobId = z.string().min(1).parse(formData.get('jobId'));
+  const jobId = idSchema.parse(formData.get('jobId'));
   await requestJobCancellation(requireDatabase().db, jobId);
   revalidatePath('/executions');
 }
@@ -232,7 +230,7 @@ export async function registerRepositoryAction(formData: FormData): Promise<void
   redirect(`/repositories?registration=${encodeURIComponent(job.id)}`);
 }
 
-const scanRepositorySchema = z.object({ repositoryId: z.string().min(1) });
+const scanRepositorySchema = z.object({ repositoryId: idSchema });
 
 /** Enqueues the scan, or names why it cannot be scanned (the page shows a fixed message). */
 async function enqueueScan(
@@ -313,7 +311,7 @@ export async function changeRepositoryBranchAction(formData: FormData): Promise<
   redirect(`/repositories?branchChange=${encodeURIComponent(outcome.job.id)}#branch-panel`);
 }
 
-const removeRepositorySchema = z.object({ repositoryId: z.string().min(1) });
+const removeRepositorySchema = z.object({ repositoryId: idSchema });
 
 /**
  * Removes a registered repository after the Risky-action panel (SPEC-125 FR-125-16): its

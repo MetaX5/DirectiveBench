@@ -41,3 +41,11 @@ frontmatter. Valid UTF-8 may also hold U+0000 after the first 8 KiB that `isBina
   pass it through `storedMessage` if it is an error or message.
 - Run the database and runner tests on Node 22.16.0 (the `oldest-node` CI job) when touching
   text storage; Node 24.16+ hides this bug.
+- Updated 2026-11-19 (issue 273): the guard checks every statement, reads included, so a NUL in
+  a lookup parameter (a hidden form id, a job id in a query string) fails the page or action as
+  well. Validate every string that reaches a repository function, not only stored text: web
+  forms use `hasNoNul`/`idSchema` (`apps/web/lib/form-input.ts`), benchmark definitions refuse
+  NUL in any string (SPEC-108 FR-108-17). Next.js answers a path segment holding `%00` with Not
+  Found before a page runs, so dynamic route ids are safe; query parameters and form bodies are
+  not. Prove a suspected path with the built app before guarding it: `/results/%00` (Not Found
+  from Next.js) and `/artifacts?q=%00` (matched in JavaScript) never reached the database.

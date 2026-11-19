@@ -18,6 +18,7 @@ import {
   type RepositoryScan,
 } from '@directivebench/database';
 import { z } from 'zod';
+import { idSchema } from './form-input';
 import { INCOMPLETE_FORM_MESSAGE } from './artifact-metadata';
 import { formatCount, formatDate, formatDuration } from './utils';
 
@@ -571,6 +572,15 @@ export function branchChangeRequestError(code: string | undefined): string | nul
 /** The repository whose Change branch panel to show (`?changeBranch=`), or null. */
 export function parseChangeBranchParam(value: string | string[] | undefined): string | null {
   return parsed(repositoryIdSchema, value);
+}
+
+/**
+ * A job id the page reads from its URL (`registration`, `scan`, `branchChange`), or null when it
+ * is missing, repeated or holds U+0000, which the database refuses even as a lookup (issue 273):
+ * such an id shows nothing, as an unknown one does.
+ */
+export function jobIdParam(value: string | string[] | undefined): string | null {
+  return parsed(idSchema, value);
 }
 
 /**

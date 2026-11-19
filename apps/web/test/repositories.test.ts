@@ -17,6 +17,7 @@ import {
   describeBranchChange,
   echoedBranch,
   isHosted,
+  jobIdParam,
   parseChangeBranchParam,
   scannedBranchHint,
   canRemove,
@@ -770,6 +771,17 @@ describe('parseRemovalParams (SPEC-125 §10)', () => {
     ).toBeNull();
     expect(parseRemovalParams({ removeError: 'boom' }).error).toBeNull();
     expect(parseRemovalParams({ removeError: ['failed'] }).error).toBeNull();
+  });
+});
+
+describe('jobIdParam (issue 273)', () => {
+  it('reads one job id from the URL', () => {
+    expect(jobIdParam('job_ab-C_9')).toBe('job_ab-C_9');
+  });
+
+  it('ignores a missing, empty or repeated id and one holding U+0000', () => {
+    for (const value of [undefined, '', ['job_a', 'job_b'], 'job_a\u0000'])
+      expect(jobIdParam(value)).toBeNull();
   });
 });
 

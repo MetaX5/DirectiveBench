@@ -12,6 +12,7 @@ import type {
 } from '@directivebench/database';
 import { z } from 'zod';
 import { parsePathParam } from './agent-run-files';
+import { hasNoNul } from './form-input';
 import type { MetadataFormState } from './artifact-metadata';
 
 /** The longest note a verdict may carry, in characters (SPEC-123 A11, §8.2). */
@@ -26,13 +27,14 @@ export const BLIND_VERDICT_LABELS: Record<BlindVerdict, string> = {
   tie: 'About the same',
 };
 
-const idSchema = z.string().min(1).max(200);
+const idSchema = z.string().min(1).max(200).refine(hasNoNul);
 
 export const startBlindReviewSchema = z.object({ benchmarkRunId: idSchema });
 
 /**
  * A verdict for one pair. The note is the reviewer's own text: CR LF becomes LF (as typed), the
- * length is checked after that, and a note of only whitespace is no note.
+ * length is checked after that, U+0000 is refused (issue 273), and a note of only whitespace is
+ * no note.
  */
 export const recordBlindVerdictSchema = z.object({
   benchmarkRunId: idSchema,
@@ -47,7 +49,8 @@ export const recordBlindVerdictSchema = z.object({
         .max(
           BLIND_REVIEW_NOTE_MAX_CHARS,
           `A note can be at most ${BLIND_REVIEW_NOTE_MAX_CHARS.toLocaleString('en-US')} characters. Shorten it.`,
-        ),
+        )
+        .refine(hasNoNul, 'A note cannot contain a NUL character (U+0000). Remove it.'),
     )
     .transform((value) => (value.trim() === '' ? null : value)),
 });

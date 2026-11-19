@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { MAX_REPOSITORY_PATH_LENGTH, idListFingerprint } from '@directivebench/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ZodError } from 'zod';
 import { loadDefinitionFile } from '@directivebench/benchmark-engine/load';
 import {
   acquireNextJob,
@@ -1195,6 +1196,45 @@ describe('blind review actions (SPEC-123 §10)', () => {
     expect((await getBlindReviewForReviewer(handle.db, runId))!.pairs[0]!.note).toBeNull();
   });
 
+  it('keeps a note holding U+0000 in the form and refuses ids holding it, storing nothing (issue 273)', async () => {
+    const { runId, reviewId, pairId } = await startedReview();
+    vi.clearAllMocks();
+    const note = 'tie\u0000hidden';
+    expect(
+      await recordBlindVerdictAction(
+        idle,
+        form({ benchmarkRunId: runId, pairId, verdict: 'a', note }),
+      ),
+    ).toEqual({
+      kind: 'fieldError',
+      message: 'A note cannot contain a NUL character (U+0000). Remove it.',
+      value: note,
+    });
+    const incomplete = { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+    const nul = (id: string) => `${id}\u0000`;
+    expect(await startBlindReviewAction(idle, form({ benchmarkRunId: nul(runId) }))).toEqual(
+      incomplete,
+    );
+    for (const fields of [
+      { benchmarkRunId: nul(runId), pairId },
+      { benchmarkRunId: runId, pairId: nul(pairId) },
+    ]) {
+      expect(
+        await recordBlindVerdictAction(idle, form({ ...fields, verdict: 'a', note: '' })),
+      ).toEqual(incomplete);
+    }
+    for (const fields of [
+      { benchmarkRunId: nul(runId), reviewId },
+      { benchmarkRunId: runId, reviewId: nul(reviewId) },
+    ]) {
+      expect(await revealBlindReviewAction(idle, form(fields))).toEqual(incomplete);
+    }
+    const view = (await getBlindReviewForReviewer(handle.db, runId))!;
+    expect(view.pairs[0]).toMatchObject({ verdict: null, note: null });
+    expect(view.review.revealedAt).toBeNull();
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
   it('refuses an unknown verdict or a missing pair as an incomplete form', async () => {
     const { runId, pairId } = await startedReview();
     const forged: Record<string, string>[] = [{ pairId, verdict: 'baseline' }, { verdict: 'a' }];
@@ -1758,5 +1798,160 @@ describe('bulk category action (SPEC-124 Phase 4, FR-124-13)', () => {
       categoryId: python,
     });
     expect(await assigned(python)).toBe(1);
+  });
+});
+
+describe('U+0000 in form input (issue 273)', () => {
+  // The database refuses text holding U+0000 (`NulInTextError`, issue 265). Every field a form
+  // posts is checked first: user text gets a field message, a hidden id the general refusal.
+  const NUL = '\u0000';
+  const idle: MetadataFormState = { kind: 'idle' };
+  const categoryIdle: CategoryFormState = { kind: 'idle' };
+  const bulkIdle: BulkCategoryFormState = { kind: 'idle' };
+  const incomplete = { kind: 'error', message: INCOMPLETE_FORM_MESSAGE };
+  const nul = (value: string) => `${value}${NUL}`;
+
+  function stored(artifactId: string) {
+    return handle.sqlite
+      .prepare('select tags, notes from artifacts where id = ?')
+      .get(artifactId) as { tags: string; notes: string | null };
+  }
+
+  async function category(name: string): Promise<string> {
+    await createCategoryAction(categoryIdle, form({ name, description: '' }));
+    return ((await listCategories(handle.db)).find((c) => c.name === name) as { id: string }).id;
+  }
+
+  it('keeps notes holding NUL in the field with a message and stores nothing', async () => {
+    const { artifactId } = await importArtifact();
+    const notes = `before${NUL}after`;
+    expect(await saveArtifactNotesAction(idle, form({ artifactId, notes }))).toEqual({
+      kind: 'fieldError',
+      message: 'Notes cannot contain a NUL character (U+0000). Remove it.',
+      value: notes,
+    });
+    expect(stored(artifactId).notes).toBeNull();
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('refuses a tag, category name or description holding NUL as a control character', async () => {
+    const { artifactId } = await importArtifact();
+    expect(await addArtifactTagAction(idle, form({ artifactId, tag: nul('a') }))).toEqual({
+      kind: 'fieldError',
+      message: 'A tag cannot contain line breaks or other control characters.',
+      value: nul('a'),
+    });
+    expect(JSON.parse(stored(artifactId).tags)).toEqual([]);
+    const values = { name: nul('Client'), description: '' };
+    expect(await createCategoryAction(categoryIdle, form(values))).toEqual({
+      kind: 'fieldError',
+      message: 'A name cannot contain line breaks or other control characters.',
+      field: 'name',
+      values,
+    });
+    const id = await category('Client');
+    const described = { name: 'Client', description: nul('Ours') };
+    expect(await updateCategoryAction(categoryIdle, form({ id, ...described }))).toEqual({
+      kind: 'fieldError',
+      message: 'A description cannot contain line breaks or other control characters.',
+      field: 'description',
+      values: described,
+    });
+    expect((await listCategories(handle.db)).map((c) => [c.name, c.description])).toEqual([
+      ['Client', null],
+    ]);
+  });
+
+  it('answers a hidden id holding NUL with the general refusal, writing nothing', async () => {
+    const { artifactId } = await importArtifact();
+    const { suiteId } = await importSuite({}, null);
+    const categoryId = await category('Client');
+    vi.clearAllMocks();
+    const art = nul(artifactId);
+    expect(await addArtifactTagAction(idle, form({ artifactId: art, tag: 'x' }))).toEqual(
+      incomplete,
+    );
+    expect(await removeArtifactTagAction(idle, form({ artifactId: art, tag: 'x' }))).toEqual(
+      incomplete,
+    );
+    expect(await saveArtifactNotesAction(idle, form({ artifactId: art, notes: 'x' }))).toEqual(
+      incomplete,
+    );
+    for (const fields of [
+      { artifactId: art, suiteId },
+      { artifactId, suiteId: nul(suiteId) },
+    ]) {
+      expect(await assignArtifactSuiteAction(idle, form(fields))).toEqual(incomplete);
+      expect(await unassignArtifactSuiteAction(idle, form(fields))).toEqual(incomplete);
+    }
+    expect(next.revalidatePath).not.toHaveBeenCalled();
+    for (const fields of [
+      { artifactId: art, categoryId },
+      { artifactId, categoryId: nul(categoryId) },
+    ]) {
+      expect(await assignArtifactCategoryAction(idle, form(fields))).toEqual(incomplete);
+      expect(await unassignArtifactCategoryAction(idle, form(fields))).toEqual(incomplete);
+    }
+    expect(
+      await updateCategoryAction(
+        categoryIdle,
+        form({ id: nul(categoryId), name: 'Renamed', description: '' }),
+      ),
+    ).toEqual(incomplete);
+    expect(
+      await setCategoryArchivedAction(
+        categoryIdle,
+        form({ id: nul(categoryId), intent: 'archive' }),
+      ),
+    ).toEqual(incomplete);
+    const bulk = (fields: Record<string, string>) =>
+      form({
+        categoryId,
+        mode: 'assign',
+        listFingerprint: idListFingerprint([artifactId]),
+        q: '',
+        type: '',
+        category: '',
+        repository: '',
+        ...fields,
+      });
+    expect(
+      await setCategoryForListedArtifactsAction(bulkIdle, bulk({ categoryId: nul(categoryId) })),
+    ).toEqual({ ...incomplete, categoryId: nul(categoryId) });
+    expect(await listCategories(handle.db)).toMatchObject([
+      { id: categoryId, name: 'Client', archivedAt: null, artifactCount: 0 },
+    ]);
+    expect(stored(artifactId)).toEqual({ tags: '[]', notes: null });
+  });
+
+  it('refuses repository and job ids holding NUL like any other invalid id', async () => {
+    const { artifactId } = await importArtifact();
+    const repositoryId = (
+      handle.sqlite.prepare('select id from repositories').get() as { id: string }
+    ).id;
+    expect(await redirectOf(scanRepositoryAction(form({ repositoryId: nul(repositoryId) })))).toBe(
+      '/repositories?scanError=invalid',
+    );
+    expect(
+      await redirectOf(removeRepositoryAction(form({ repositoryId: nul(repositoryId) }))),
+    ).toBe('/repositories?removeError=invalid#remove-result');
+    expect(await getRepository(handle.db, repositoryId)).not.toBeNull();
+    const suite = await importSuite(await exampleDefinitionDocument(), 'bundled-example');
+    for (const fields of [
+      { suiteVersionId: nul(suite.versionId), artifactId },
+      { suiteVersionId: suite.versionId, artifactId: nul(artifactId) },
+    ]) {
+      await expect(enqueueBenchmarkRunAction(form(fields))).rejects.toBeInstanceOf(ZodError);
+    }
+    await expect(cancelJobAction(form({ jobId: nul('job_x') }))).rejects.toBeInstanceOf(ZodError);
+    expect(await listJobs(handle.db)).toEqual([]);
+  });
+
+  it('returns a repository path holding NUL to the form without a job', async () => {
+    const path = `/srv/a${NUL}b`;
+    expect(await redirectOf(registerRepositoryAction(form({ path })))).toBe(
+      `/repositories?${new URLSearchParams({ path }).toString()}`,
+    );
+    expect(await listJobs(handle.db)).toEqual([]);
   });
 });
