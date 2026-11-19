@@ -30,6 +30,7 @@ const MALICIOUS_SKILL = [
   '',
   'A [bad link](javascript:window.__pwned=1) and a [good link](https://example.com/docs).',
   'Also [a relative link](references/guide.md) and ![a tracking pixel](https://example.com/p.png).',
+  'Never [an escape](../../../AGENTS.md) or [an absolute path](/etc/passwd).',
   '',
   '```sh',
   'echo "<b>not bold</b>"',
@@ -54,7 +55,8 @@ const DASHED_DESCRIPTION = 'Style rules 8\u201312 \u2014 imported as written';
 const files: Record<string, Record<string, string>> = {
   [team]: {
     [`${skillDir}/SKILL.md`]: MALICIOUS_SKILL,
-    [`${skillDir}/references/guide.md`]: '# Guide\n\nRead me.\n',
+    [`${skillDir}/references/guide.md`]:
+      '# Guide\n\nRead me, then [back to the skill](../SKILL.md#rules), never [outside](../../SKILL.md).\n',
     [`${skillDir}/scripts/setup.sh`]: '#!/bin/sh\necho "<script>alert(1)</script>" > /tmp/pwned\n',
     'AGENTS.md': TRICKY_AGENTS,
   },
@@ -254,7 +256,11 @@ test.describe.serial('artifact registry', () => {
     await expect(rendered).toContainText('echo "<b>not bold</b>"');
     await expect(rendered.locator('script, img, iframe, b')).toHaveCount(0);
     await expect(page.locator('a[href^="javascript:" i]')).toHaveCount(0);
-    await expect(rendered.locator('[data-inert-link]')).toHaveText(['bad link', 'a relative link']);
+    await expect(rendered.locator('[data-inert-link]')).toHaveText([
+      'bad link',
+      'an escape',
+      'an absolute path',
+    ]);
     await expect(rendered.locator('[data-inert-image]')).toHaveText('[image: a tracking pixel]');
     await expect(rendered.getByRole('link', { name: 'good link' })).toHaveAttribute(
       'href',
@@ -292,6 +298,45 @@ test.describe.serial('artifact registry', () => {
     const script = readFileSync(join(team, skillDir, 'scripts', 'setup.sh'));
     expect(Buffer.from(await rawText(page), 'utf8').equals(script)).toBe(true);
     expect(await page.evaluate(() => (window as { __pwned?: unknown }).__pwned)).toBeUndefined();
+  });
+
+  test('a relative link to a file of the same version opens it in the Content tab (issue 55)', async ({
+    page,
+  }) => {
+    await page.goto('/artifacts');
+    await artifactRow(page, 'e2e-safe-preview', 'registry-team')
+      .getByRole('link', { name: 'e2e-safe-preview' })
+      .click();
+    await page
+      .getByRole('navigation', { name: 'Artifact sections' })
+      .getByRole('link', { name: 'Content' })
+      .click();
+    const rendered = page.getByTestId('artifact-rendered');
+    const tree = page.getByTestId('file-tree');
+
+    // Escapes and absolute paths stay inert and lead nowhere (FR-101-18).
+    await rendered.getByText('an escape').click();
+    await rendered.getByText('an absolute path').click();
+    await expect(page.getByTestId('content-path')).toHaveText('SKILL.md');
+
+    // A sibling file opens in the Content tab of the same version, by keyboard too.
+    const sibling = rendered.getByRole('link', { name: 'a relative link' });
+    await expect(sibling).not.toHaveAttribute('target');
+    await sibling.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/[?&]tab=content&version=1&file=references%2Fguide\.md$/);
+    await expect(page.getByTestId('content-path')).toHaveText('references/guide.md');
+    await expect(tree.getByRole('link', { name: 'guide.md' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(rendered.getByRole('heading', { name: 'Guide' })).toBeVisible();
+
+    // From a subdirectory, `..` back inside the skill resolves; one above its root stays inert.
+    await expect(rendered.locator('[data-inert-link]')).toHaveText(['outside']);
+    await rendered.getByRole('link', { name: 'back to the skill' }).click();
+    await expect(page).toHaveURL(/[?&]file=SKILL\.md$/);
+    await expect(page.getByTestId('content-path')).toHaveText('SKILL.md');
   });
 
   test('the raw view keeps leading newlines, tabs, non-ASCII text and a missing final newline', async ({
