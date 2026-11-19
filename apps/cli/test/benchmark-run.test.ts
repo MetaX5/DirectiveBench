@@ -243,6 +243,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
     const out = s.output();
     expect(out).toContain('Agent runs: 2 (1 case(s) × 1 repetition(s) × 2 variants)');
     expect(out).toContain('Baseline:   no artifact');
+    expect(out).toContain('Model:      CLI default (unpinned)');
     expect(out).toContain('Candidate:  pdf v2');
     expect(out).toContain('count against your Claude plan');
     expect(out).toContain('sent to Anthropic');
@@ -388,7 +389,7 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
       s.terminal,
     );
     expect(code).toBe(ExitCode.CheckFailed);
-    expect(s.output()).toContain('the result measures a skill that was never used');
+    expect(s.output()).toContain('runs; the result measures a skill that was never used');
     expect(s.output()).toContain('the skill sets disable-model-invocation');
     expect(s.output()).toMatch(/Result: +failed/);
   }, 60_000);

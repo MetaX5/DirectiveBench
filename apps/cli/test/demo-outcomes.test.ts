@@ -102,7 +102,7 @@ describe('demo outcomes', () => {
     >); // only `run.summary` is read by the demo command
 
     expect(await demoCommand({ dataDir })).toBe(ExitCode.CheckFailed);
-    expect(output).toContain('  Baseline (RED):    score —, pass rate —');
+    expect(output).toContain('  Baseline (RED):    score n/a, pass rate n/a');
     expect(output).toContain('  Candidate (GREEN): score 50.0%, pass rate 25.0%');
     expect(output).toContain('  Delta:             -12.5 points');
     expect(output).toContain('  Verdict:           regressed (confidence: low)');

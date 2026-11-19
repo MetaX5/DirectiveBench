@@ -124,7 +124,7 @@ export function planText(input: {
     `Baseline:   ${resolved.baseline ? `v${options.baselineVersion}` : 'no artifact'}`,
     `Agent:      Claude Code ${input.agentVersion ?? '(version unknown)'}`,
     `Auth mode:  ${options.authMode === 'subscription' ? 'Local Subscription Mode (isolation: user-profile)' : 'API Key Mode (isolation: isolated)'}`,
-    `Model:      ${model ? `${model.provider}/${model.model}` : 'CLI default — unpinned'}`,
+    `Model:      ${model ? `${model.provider}/${model.model}` : 'CLI default (unpinned)'}`,
     `Agent runs: ${runs} (${definition.cases.length} case(s) × ${definition.execution.repetitions} repetition(s) × 2 variants)`,
   ];
   if (resolved.candidate.format === 'skill-md') {
@@ -255,7 +255,7 @@ export function runReport(detail: BenchmarkRunDetail, authMode: ClaudeAuthMode):
 }
 
 function pct(value: number | null): string {
-  return value === null ? '—' : `${(value * 100).toFixed(1)}%`;
+  return value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 }
 
 /** The human-readable summary (FR-118-37). */
@@ -265,12 +265,12 @@ export function reportText(report: RunReport): string[] {
     `Result:     ${report.displayStatus}${report.verdict ? ` (verdict: ${report.verdict}${report.confidence ? `, confidence: ${report.confidence}` : ''})` : ''}`,
     `Baseline (${baseline}):  score ${pct(report.baselineScore)}`,
     `Candidate (v${report.candidate.version}):  score ${pct(report.candidateScore)}`,
-    `Delta:      ${report.delta === null ? '—' : `${report.delta > 0 ? '+' : ''}${(report.delta * 100).toFixed(1)} points`}`,
+    `Delta:      ${report.delta === null ? 'n/a' : `${report.delta > 0 ? '+' : ''}${(report.delta * 100).toFixed(1)} points`}`,
   ];
   if (report.skillInvocation) {
     const { baseline: b, candidate: c } = report.skillInvocation;
     lines.push(
-      `Skill invoked: candidate ${c.invoked}/${c.runs} runs, baseline ${b.invoked}/${b.runs} runs${c.invoked === 0 ? ' — the result measures a skill that was never used' : ''}`,
+      `Skill invoked: candidate ${c.invoked}/${c.runs} runs, baseline ${b.invoked}/${b.runs} runs${c.invoked === 0 ? '; the result measures a skill that was never used' : ''}`,
     );
   }
   lines.push(`Model:      ${report.executionModel ?? 'not reported'}`);

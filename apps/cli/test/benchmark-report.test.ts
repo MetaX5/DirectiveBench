@@ -152,8 +152,8 @@ describe('runReport and reportText (FR-118-37)', () => {
     ).toMatchObject({ displayStatus: 'cancelled' });
     const text = reportText(report);
     expect(text).toContain('Result:     error (verdict: error)');
-    expect(text).toContain('Baseline (no artifact):  score —');
-    expect(text).toContain('Delta:      —');
+    expect(text).toContain('Baseline (no artifact):  score n/a');
+    expect(text).toContain('Delta:      n/a');
     expect(text).toContain('Model:      not reported');
     expect(text).toContain('Tokens:     input 5, output not reported');
     expect(text).toContain('Cost:       not reported');

@@ -411,7 +411,7 @@ export async function doctorCommand(flags: { dataDir?: string; json?: boolean })
 }
 
 function pct(value: number | null | undefined): string {
-  return value === null || value === undefined ? '—' : `${(value * 100).toFixed(1)}%`;
+  return value === null || value === undefined ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 }
 
 /** Imports the bundled example and runs it headless with the deterministic mock agent. */
@@ -463,7 +463,7 @@ export async function demoCommand(flags: { dataDir?: string }): Promise<number> 
     if (!summary) throw new CliError('Demo run has no summary', ExitCode.CheckFailed);
     console.log('');
     console.log(
-      'Mock agent — not an AI evaluation. Scores come from real assertions on generated files.',
+      'Mock agent: not an AI evaluation. Scores come from real assertions on generated files.',
     );
     console.log(
       `  Baseline (RED):    score ${pct(summary.baseline.meanScore)}, pass rate ${pct(summary.baseline.passRate)}`,
