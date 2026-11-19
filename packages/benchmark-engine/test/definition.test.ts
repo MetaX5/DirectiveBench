@@ -8,6 +8,7 @@ import {
   definitionRunsCommands,
   executionBlockers,
   isDeterministicAssertion,
+  MAX_DEFINITION_DEPTH,
   MAX_MATCHERS_PER_ASSERTION,
   MAX_PATTERN_LENGTH,
   type BenchmarkDefinitionInput,
@@ -188,8 +189,8 @@ describe('U+0000 in definitions (issue 273)', () => {
       `cases.0.name: ${NUL_MESSAGE}`,
       `cases.0.prompt: ${NUL_MESSAGE}`,
       `cases.0.setup.0.1: ${NUL_MESSAGE}`,
-      `cases.0.agentOptions.mock.playbook.0.write: ${NUL_MESSAGE}`,
       'cases.0.agentOptions: must not have a key that contains a NUL character (U+0000)',
+      `cases.0.agentOptions.mock.playbook.0.write: ${NUL_MESSAGE}`,
     ]);
   });
 
@@ -213,6 +214,43 @@ describe('U+0000 in definitions (issue 273)', () => {
         },
       ],
     });
+  });
+
+  it('reports deep nesting as an issue instead of overflowing the stack (Codex review)', () => {
+    const nested = (depth: number): unknown => {
+      let value: unknown = 'leaf';
+      for (let level = 0; level < depth; level++) value = { n: value };
+      return value;
+    };
+    const definition = (mock: unknown) => {
+      const base = document();
+      const [firstCase] = base.cases;
+      return JSON.stringify({ ...base, cases: [{ ...firstCase, agentOptions: { mock } }] });
+    };
+    // `cases.0.agentOptions.mock` is 4 levels deep; the limit counts every level from the root.
+    const allowed = MAX_DEFINITION_DEPTH - 4;
+    expect(parseDefinitionText(definition(nested(allowed)), 'json').success).toBe(true);
+    const deepPath = ['cases', '0', 'agentOptions', 'mock', ...Array<string>(allowed).fill('n')];
+    expect(parseDefinitionText(definition(nested(allowed + 1)), 'json')).toEqual({
+      success: false,
+      issues: [
+        {
+          path: deepPath.join('.'),
+          message: `must not nest deeper than ${MAX_DEFINITION_DEPTH} levels`,
+        },
+      ],
+    });
+    // 5,000 levels overflowed the recursive walk (Codex review); the text is built by hand,
+    // because JSON.stringify would overflow too.
+    const levels = 5_000;
+    const text = definition('MOCK').replace(
+      '"MOCK"',
+      `${'{"n":'.repeat(levels)}"leaf"${'}'.repeat(levels)}`,
+    );
+    const deep = parseDefinitionText(text, 'json');
+    expect(deep.success ? [] : deep.issues.map((issue) => issue.message)).toEqual([
+      `must not nest deeper than ${MAX_DEFINITION_DEPTH} levels`,
+    ]);
   });
 
   it('checks a value shared by two YAML aliases at each place it is used', () => {
