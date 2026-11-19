@@ -101,6 +101,7 @@ interface Setup {
 async function setup(
   options: {
     mode?: FakeClaudeMode;
+    versionOutput?: string;
     versions?: ImportArtifactInput[];
     definition?: Record<string, unknown>;
     fixture?: Record<string, string>;
@@ -149,7 +150,7 @@ async function setup(
       ...options.definition,
     }),
   );
-  const fake = writeFakeClaude(root, options.mode ?? 'skill');
+  const fake = writeFakeClaude(root, options.mode ?? 'skill', options.versionOutput);
   const home = join(root, 'home');
   mkdirSync(home);
   let handler: (() => void) | null = null;
@@ -268,6 +269,25 @@ posix('benchmark run with a fake claude (SPEC-118 §6.4)', () => {
       ),
     ).toBe(ExitCode.Ok);
     expect(await s.counts()).toMatchObject({ jobs: 2, suiteVersions: 1, runs: 2, assignments: 1 });
+  }, 60_000);
+
+  it('stores a --version line holding U+0000 with U+FFFD instead of failing the run (issue 282)', async () => {
+    const s = await setup({ versionOutput: '2.1.302\\000 (Claude Code)\\n' });
+    const code = await benchmarkRunCommand(
+      { suite: s.suite, artifact: 'pdf', dataDir: s.dataDir, yes: true },
+      s.terminal,
+    );
+    expect(code).toBe(ExitCode.Ok);
+    const stored = openDatabase(join(s.dataDir, 'directivebench.db'), { readOnly: true });
+    try {
+      const runs = await stored.db
+        .select({ status: schema.benchmarkRuns.status, version: schema.benchmarkRuns.agentVersion })
+        .from(schema.benchmarkRuns);
+      expect(runs).toEqual([{ status: 'completed', version: '2.1.302\uFFFD (Claude Code)' }]);
+    } finally {
+      stored.close();
+    }
+    expect(s.output()).toContain('Agent:      Claude Code 2.1.302');
   }, 60_000);
 
   it('compares with another version (A/B), stores the baseline and exits 6 on a regression (AC-3, AC-11)', async () => {

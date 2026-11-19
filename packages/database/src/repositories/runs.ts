@@ -45,6 +45,8 @@ export async function createBenchmarkRun(
   await db.insert(benchmarkRuns).values({
     id,
     ...input,
+    // Agent text: the first line of the agent CLI's `--version` output (issue 282).
+    agentVersion: storedMessage(input.agentVersion),
     status: 'running',
     startedAt: nowIso(),
   });

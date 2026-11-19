@@ -28,8 +28,15 @@ export interface FakeClaude {
   started(): boolean;
 }
 
-/** Writes a POSIX `sh` fake `claude` into `root/bin`, its records into `root/records`. */
-export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude {
+/**
+ * Writes a POSIX `sh` fake `claude` into `root/bin`, its records into `root/records`.
+ * `versionOutput` is a `printf` format for `claude --version` (default `2.1.302 (Claude Code)`).
+ */
+export function writeFakeClaude(
+  root: string,
+  mode: FakeClaudeMode,
+  versionOutput = '2.1.302 (Claude Code)\\n',
+): FakeClaude {
   const binDir = join(root, 'bin');
   const records = join(root, 'records');
   mkdirSync(binDir, { recursive: true });
@@ -63,7 +70,7 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
     [
       '#!/bin/sh',
       'case "$1" in',
-      '  --version) echo "2.1.302 (Claude Code)"; exit 0 ;;',
+      `  --version) printf '${versionOutput}'; exit 0 ;;`,
       '  --setting-sources) echo \'{"loggedIn":true,"authMethod":"claude.ai"}\'; exit 0 ;;',
       'esac',
       `echo start >> ${q('starts')}`,
