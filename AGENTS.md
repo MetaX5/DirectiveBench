@@ -198,8 +198,10 @@ stops it and removes its `/var/tmp` data (`om-prepare-test-env` runs and repairs
   notices, tooltips, accessible names and missing-value placeholders. Use a colon,
   parentheses, a separate sentence or a normal hyphen where appropriate. Preserve imported
   content, user data, raw agent output and benchmark evidence verbatim; do not apply a
-  blanket replacement to rendered or stored data. Existing-copy cleanup and automated
-  enforcement are tracked in [issue #123](https://github.com/MetaX5/DirectiveBench/issues/123).
+  blanket replacement to rendered or stored data. Write a missing value in words (`n/a`,
+  `None`, `Not run`), never as a lone glyph. `pnpm lint` enforces the rule
+  (`no-restricted-syntax` in `eslint.config.mjs`, SPEC-116 FR-116-24); an exception needs an
+  `eslint-disable-next-line no-restricted-syntax -- <reason>` comment that review can see.
 - Verify all visible text contrast (at least 4.5:1 for normal-size text, 3:1 for large text)
   in both themes, including muted text, navigation, status badges, errors and placeholders
   on their actual backgrounds. Check enabled buttons in rest, hover and focus states;
