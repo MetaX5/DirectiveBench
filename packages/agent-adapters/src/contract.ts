@@ -201,6 +201,14 @@ export interface AgentAdapter {
   installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact>;
   run(request: AgentRunRequest): Promise<AgentRunResult>;
   /**
+   * Whether an A/B run of `artifact` needs the reserved-name check before its first repetition
+   * (SPEC-203 §4.1, ADR-0015, issue 280): one `run` without anything installed, whose session
+   * must not list the artifact's name itself. Such a run has to report `metadata` with the
+   * session's `executionModel`, which proves the session start was seen. Absent: never checked
+   * (the mock agent).
+   */
+  needsReservedNameCheck?(artifact: ArtifactBundle): boolean;
+  /**
    * The ranges of `text` (an output file the agent wrote, or a window of one) that this adapter's
    * own redaction would replace, as UTF-16 offsets with `end` exclusive (SPEC-123 FR-123-60):
    * secrets only the adapter knows (e.g. its API key) plus the core rules of `findSecretRanges`,

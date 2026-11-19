@@ -3,6 +3,7 @@ import {
   countRunsByVerdict,
   importArtifactVersion,
   finishBenchmarkRun,
+  setBenchmarkRunEnvironment,
   getBenchmarkRunDetail,
   getBenchmarkRunHeader,
   getAgentRunSummary,
@@ -151,6 +152,25 @@ describe('createBenchmarkRun and finishBenchmarkRun', () => {
       comparabilityKey: 'k',
       warnings: ['w'],
       finishedAt: '2026-03-01T00:05:00.000Z',
+    });
+  });
+});
+
+describe('setBenchmarkRunEnvironment (issue 280)', () => {
+  it('replaces the environment of one run only, keeping it through finishBenchmarkRun', async () => {
+    const handle = getHandle();
+    const targets = await seedTargets(handle);
+    const runId = await seedRun(handle, targets, { environment: { kind: 'local-process' } });
+    const other = await seedRun(handle, targets, { environment: { kind: 'local-process' } });
+    const environment = {
+      kind: 'local-process',
+      reservedNameCheck: { status: 'completed', errorCode: null, durationMs: 990 },
+    };
+    await setBenchmarkRunEnvironment(handle.db, runId, environment);
+    await finishBenchmarkRun(handle.db, runId, finished({ status: 'error', verdict: 'error' }));
+    expect((await getBenchmarkRunDetail(handle.db, runId))?.run.environment).toEqual(environment);
+    expect((await getBenchmarkRunDetail(handle.db, other))?.run.environment).toEqual({
+      kind: 'local-process',
     });
   });
 });

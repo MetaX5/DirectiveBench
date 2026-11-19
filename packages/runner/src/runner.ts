@@ -19,6 +19,7 @@ import {
   benchmarkJobPayloadSchema,
   createBenchmarkRun,
   finishBenchmarkRun,
+  setBenchmarkRunEnvironment,
   finishJob,
   getArtifactBundle,
   getJob,
@@ -665,6 +666,12 @@ export class LocalRunner {
           executionApproved: Boolean(suiteVersion.version.executionApprovedAt),
           signal: controller.signal,
           onAgentRun: (record, capture) => this.persistAgentRun(runId, record, capture),
+          // Stored with the run before it goes on or stops (SPEC-203 §4.1, ADR-0015).
+          onReservedNameCheck: (reservedNameCheck) =>
+            setBenchmarkRunEnvironment(db, runId, {
+              kind: definition.execution.environment.kind,
+              reservedNameCheck,
+            }),
         });
         await finishBenchmarkRun(db, runId, {
           status: 'completed',

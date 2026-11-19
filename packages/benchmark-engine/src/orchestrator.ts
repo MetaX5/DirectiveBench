@@ -27,6 +27,7 @@ import {
   assertNotStopped,
   observedAgentProfile,
   skillInvocationRates,
+  BenchmarkStoppedError,
   STOP_CODES,
 } from './agent-conditions';
 import { evaluateAssertion, type AssertionResult } from './assertions';
@@ -175,6 +176,36 @@ export interface RunBenchmarkInput {
    * FR-123-10). Without this callback the engine captures no output files.
    */
   onAgentRun?: (record: AgentRunRecord, capture: OutputFilesCapture | null) => Promise<void>;
+  /**
+   * Called once with the outcome of the reserved-name check of an A/B run, before the run goes
+   * on or stops (SPEC-203 §4.1, ADR-0015), so callers can store it with the benchmark run.
+   */
+  onReservedNameCheck?: (record: ReservedNameCheckRecord) => Promise<void>;
+}
+
+/** The fixed prompt of the reserved-name check session (SPEC-203 §4.1, issue 280). */
+export const RESERVED_NAME_CHECK_PROMPT = 'Reply with the single word OK.';
+
+/** The check's run-local directory below `workRoot`, beside the cases' directories. */
+export const RESERVED_NAME_CHECK_DIR = 'reserved-name-check';
+
+/** The stop code of a failed reserved-name check that has no code of its own (ADR-0015). */
+export const RESERVED_NAME_CHECK_FAILED = 'reserved-name-check-failed';
+
+/**
+ * What the reserved-name check session of an A/B run ended with (SPEC-203 §4.1, ADR-0015). Never
+ * scored and never an agent run of either variant.
+ */
+export interface ReservedNameCheckRecord {
+  status: AgentRunResult['status'];
+  errorCode: string | null;
+  error: string | null;
+  durationMs: number;
+  usage: Record<string, number> | null;
+  /** The agent version the session reported, null when it reported none. */
+  adapterVersion: string | null;
+  /** The session model; null when the session start was not seen. */
+  executionModel: string | null;
 }
 
 export interface BenchmarkOutcome {
@@ -723,6 +754,97 @@ async function runAndDeliver(
 }
 
 /**
+ * The reserved-name check of an A/B run (SPEC-203 §4.1, SPEC-118 FR-118-08/15, ADR-0015): one
+ * agent run with the variants' request but the fixed prompt, in an empty pinned workspace with
+ * nothing installed, so the adapter sees a session that must not list the artifact's name. Fails
+ * closed: anything but a completed session that reported its start stops the benchmark run with
+ * the session's own code, else {@link RESERVED_NAME_CHECK_FAILED}.
+ */
+async function runReservedNameCheck(
+  input: RunBenchmarkInput,
+  baselineArtifact: ArtifactBundle,
+): Promise<void> {
+  const { definition, adapter } = input;
+  const dir = join(input.workRoot, RESERVED_NAME_CHECK_DIR);
+  const workspaceDir = join(dir, 'workspace');
+  const scratchDir = join(dir, 'agent');
+  const timeoutMs = definition.execution.timeoutSeconds * 1000;
+  const started = performance.now();
+  let result: AgentRunResult;
+  try {
+    await mkdir(workspaceDir, { recursive: true });
+    await mkdir(scratchDir, { mode: 0o700 });
+    const workspace = await pinWorkspace(workspaceDir);
+    // Never start the session after cancellation; also a precondition of agentAbortSignal.
+    if (input.signal.aborted) throw new BenchmarkCancelledError();
+    const agentAbort = agentAbortSignal(input.signal, timeoutMs);
+    try {
+      result = await withTimeout(
+        adapter.run({
+          workspace,
+          installedPaths: [],
+          scratchDir,
+          artifact: input.artifact,
+          baselineArtifact,
+          prompt: RESERVED_NAME_CHECK_PROMPT,
+          timeoutMs,
+          signal: agentAbort.signal,
+          model: definition.execution.model,
+          options: undefined,
+        }),
+        timeoutMs + AGENT_STOP_GRACE_MS,
+        () => ({
+          status: 'timeout',
+          durationMs: timeoutMs,
+          summary: 'Timed out',
+          trace: [],
+          usage: null,
+          error: 'Agent did not stop after timeout',
+        }),
+      );
+    } finally {
+      agentAbort.dispose();
+    }
+  } catch (error) {
+    if (error instanceof BenchmarkCancelledError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    result = {
+      status: 'infrastructure-error',
+      durationMs: Math.round(performance.now() - started),
+      summary: message,
+      trace: [],
+      usage: null,
+      error: message,
+      ...(error instanceof ClaudeCodeError ? { errorCode: error.code } : {}),
+    };
+  }
+  const record: ReservedNameCheckRecord = {
+    status: result.status,
+    errorCode: result.errorCode ?? null,
+    error: result.error,
+    durationMs: result.durationMs,
+    usage: result.usage ? { ...result.usage } : null,
+    adapterVersion: result.metadata?.adapterVersion ?? null,
+    executionModel: result.metadata?.executionModel ?? null,
+  };
+  await input.onReservedNameCheck?.(record);
+  if (input.signal.aborted || result.status === 'cancelled') throw new BenchmarkCancelledError();
+  let detail: string | null = null;
+  if (result.status !== 'completed' || result.errorCode !== undefined) {
+    detail = result.error ?? result.summary;
+  } else if (record.executionModel === null) {
+    detail =
+      'the session did not report its start (system/init), so the names it lists are unknown';
+  }
+  if (detail === null) return;
+  const code = record.errorCode ?? RESERVED_NAME_CHECK_FAILED;
+  throw new BenchmarkStoppedError(
+    code,
+    `Stopped by the reserved-name check before any agent run (${code}): ${detail.replace(/\.$/, '')}. The check is one session without the skill and is not scored.`,
+  );
+}
+
+/**
  * RED/GREEN evaluation. For each case and repetition the baseline (no artifact, or the exact
  * baseline version installed) and candidate (exact artifact version installed) run in fresh,
  * independent workspaces from the same fixture snapshot with identical prompt, adapter, model and
@@ -764,6 +886,11 @@ export async function runBenchmark(input: RunBenchmarkInput): Promise<BenchmarkO
   const abBaseline = input.baselineArtifact !== undefined;
   const agentRuns: AgentRunRecord[] = [];
   try {
+    // An A/B run has no variant without the artifact: one session without it checks the name
+    // first, when the adapter offers it (SPEC-203 §4.1, ADR-0015).
+    if (input.baselineArtifact && adapter.needsReservedNameCheck?.(input.artifact) === true) {
+      await runReservedNameCheck(input, input.baselineArtifact);
+    }
     for (const benchmarkCase of definition.cases) {
       for (let repetition = 1; repetition <= definition.execution.repetitions; repetition += 1) {
         const order: Variant[] =

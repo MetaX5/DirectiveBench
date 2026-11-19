@@ -76,6 +76,11 @@ usually behind the user's installed version.
   on haiku with `--effort low`, took 1 turn, 990 ms and $0.00058 (about 7.1k input tokens, mostly
   cache reads). A larger model costs more (not measured). On a subscription it uses a small part of
   the plan quota.
+- The check runs before any variant workspace is prepared. A refusal of a variant's own
+  workspace (configuration from the fixture or a `setup` command, an import in an installed file)
+  therefore comes after the check session, which then was spent for nothing; the plan-time
+  refusals keep such suites from reaching the runner. A refusal of the artifact versions
+  themselves stops the run through the check before `claude` starts.
 - A name the CLI adds between the check and a later variant session is not detected (a flag
   change within one run). A name that is reachable but not listed (the `/checkup` alias) stays the
   static list's job.

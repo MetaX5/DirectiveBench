@@ -9,6 +9,7 @@ import {
   type AgentRunRequest,
   type AgentRunResult,
 } from '@directivebench/agent-adapters';
+import { RESERVED_NAME_CHECK_PROMPT } from '@directivebench/benchmark-engine';
 import { loadLocalArtifact, nowIso, sha256 } from '@directivebench/core';
 import {
   createAcquiredBenchmarkJob,
@@ -208,6 +209,97 @@ describe('A/B baseline in the runner (SPEC-118 FR-118-11…13)', () => {
       baselineArtifactVersionId: null,
       comparabilityKey: MOCK_EXAMPLE_KEY,
     });
+  }, 60_000);
+
+  it('stores the reserved-name check of an A/B run in the run environment, also when it stops the run (issue 280)', async () => {
+    const handle = connect();
+    const { example, v1 } = await abExample(handle);
+    /** The mock agent offering the check, whose check session ends as `checkEnd` says. */
+    const checking = (checkEnd: Partial<AgentRunResult>) =>
+      new (class extends MockAgentAdapter {
+        checks = 0;
+        needsReservedNameCheck(): boolean {
+          return true;
+        }
+        override async run(request: AgentRunRequest): Promise<AgentRunResult> {
+          if (request.prompt !== RESERVED_NAME_CHECK_PROMPT) return super.run(request);
+          this.checks += 1;
+          return {
+            status: 'completed',
+            durationMs: 990,
+            summary: 'OK',
+            trace: [],
+            usage: { inputTokens: 7100, outputTokens: 4 },
+            error: null,
+            metadata: {
+              adapterVersion: '2.1.325 (Claude Code)',
+              authMode: 'subscription',
+              isolationProfile: 'user-profile',
+              permissionProfile: 'edit-only',
+              requestedModel: null,
+              executionModel: 'claude-test-model',
+              reportedModels: [],
+              auxiliaryModels: [],
+              mismatchedMessageModels: [],
+              flagsHash: 'flags',
+            },
+            ...checkEnd,
+          };
+        }
+      })();
+    const enqueue = () =>
+      enqueueBenchmarkJob(handle.db, {
+        suiteVersionId: example.suite.versionId,
+        artifactVersionId: example.artifact.versionId,
+        baselineArtifactVersionId: v1,
+      });
+    const storedRun = async (benchmarkRunId: string | null | undefined) =>
+      (await getBenchmarkRunDetail(handle.db, benchmarkRunId as string))?.run;
+
+    const passing = checking({});
+    await enqueue();
+    const [passed] = await createRunner(handle, {
+      adapters: new Map<string, AgentAdapter>([['mock', passing]]),
+    }).runUntilIdle();
+    expect(passing.checks).toBe(1);
+    expect(await storedRun(passed?.benchmarkRunId)).toMatchObject({
+      status: 'completed',
+      environment: {
+        kind: 'local-process',
+        reservedNameCheck: {
+          status: 'completed',
+          errorCode: null,
+          error: null,
+          durationMs: 990,
+          usage: { inputTokens: 7100, outputTokens: 4 },
+          adapterVersion: '2.1.325 (Claude Code)',
+          executionModel: 'claude-test-model',
+        },
+      },
+    });
+
+    const listing = checking({
+      status: 'infrastructure-error',
+      error: 'Claude Code lists the skill name "validate-external-input" itself.',
+      errorCode: 'skill-name-reserved',
+    });
+    await enqueue();
+    const [refused] = await createRunner(handle, {
+      adapters: new Map<string, AgentAdapter>([['mock', listing]]),
+    }).runUntilIdle();
+    expect(refused).toMatchObject({ status: 'failed' });
+    const run = await storedRun(refused?.benchmarkRunId);
+    expect(run).toMatchObject({
+      status: 'error',
+      verdict: 'error',
+      environment: { reservedNameCheck: { errorCode: 'skill-name-reserved' } },
+    });
+    expect(run?.error).toMatch(
+      /^Stopped by the reserved-name check before any agent run \(skill-name-reserved\): /,
+    );
+    expect(
+      (await getBenchmarkRunDetail(handle.db, refused?.benchmarkRunId as string))?.agentRuns,
+    ).toEqual([]);
   }, 60_000);
 
   it('re-validates the baseline when it loads the job and fails it before any run exists', async () => {
