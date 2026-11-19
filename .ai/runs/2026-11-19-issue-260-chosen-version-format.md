@@ -3,7 +3,7 @@ title: Issue 260, the chosen version's format on the artifact page and what "sam
 date: 2026-11-19
 agent: Claude Code / claude-opus-5-5
 trigger: issue #260 (follow-up of #246 / PR #259), taken with the maintainer's approval
-status: in-progress
+status: completed
 branch: feat/issue-260-chosen-version-format
 specs: [SPEC-126, SPEC-101, SPEC-103]
 ---
@@ -88,6 +88,12 @@ Phase B (2026-11-19):
    Storybook story `LatestVersionInAnotherFormat` and detail-view rule 8; e2e in
    `identity.spec.ts` (revert case, both themes, 320 px).
 10. Merged `origin/main` (#287, agent-adapters tests only).
+11. Draft PR #291, with before and after screenshots on `qa-evidence-pr-291`.
+12. `om-auto-review-pr 291` (COMMENT review): `main` had moved (#289), so the PR conflicted in
+    `.ai/lessons.md` (two index entries). Resolved in `85d99d6` by keeping both. The gate passed
+    again on the merged head (format, lint, typecheck, `turbo run test --force`, build,
+    `verify:pack`). No blocker or major; two nits accepted (see Problems). CI passed on
+    `85d99d6`: every check, including the oldest-Node job and the macOS unit tests.
 
 ## Verification
 
@@ -120,6 +126,10 @@ cover `refreshSourceFields` for every provider); an upgrade of a database built 
 CLI itself (simulated by dropping the column, see above).
 
 ## Problems and deviations
+
+- Accepted nit: migration `0011` gives an artifact that is already missing at upgrade time the
+  highest version of its stored format. Its actual last chosen version cannot be known; a rescan
+  that finds it again corrects the column.
 
 - The first reproduction attempt scanned too early: registering a repository does not scan it, so
   the script now scans after every registration.
