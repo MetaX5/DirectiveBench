@@ -36,9 +36,15 @@ export function writeFakeClaude(root: string, mode: FakeClaudeMode): FakeClaude 
   mkdirSync(records, { recursive: true });
   const stream = (name: string) => `'${join(STREAMS, `${name}.ndjson`)}'`;
   const q = (name: string) => `'${join(records, name)}'`;
-  // API Key Mode must report the key as its credential source, as the real CLI does.
+  // API Key Mode must report the key as its credential source, as the real CLI does, and the
+  // session start lists the project skill `pdf` only when the workspace has it installed (a `none`
+  // baseline does not; SPEC-203 §4.1 run-time check, issue 275).
   const replay = (name: string) =>
-    `if [ -n "$ANTHROPIC_API_KEY" ]; then sed 's/"apiKeySource": "none"/"apiKeySource": "ANTHROPIC_API_KEY"/' ${stream(name)}; else cat ${stream(name)}; fi`;
+    [
+      `if [ -n "$ANTHROPIC_API_KEY" ]; then key='s/"apiKeySource": "none"/"apiKeySource": "ANTHROPIC_API_KEY"/'; else key='s/^//'; fi`,
+      `if [ -d .claude/skills/pdf ]; then skill='s/^//'; else skill='/"subtype": "init"/s/"pdf", //g'; fi`,
+      `sed -e "$key" -e "$skill" ${stream(name)}`,
+    ].join('; ');
   const body: Record<FakeClaudeMode, string[]> = {
     skill: [
       'if grep -rqs GOOD .claude/skills; then',

@@ -74,7 +74,8 @@ export const CLAUDE_RESERVED_SKILL_NAMES_CLI_VERSION = '2.1.302';
  *   check, `.ai/runs/2026-10-26-issue-103-live-check.md`; the stream parser already treats it as
  *   another skill).
  * Bundled skills that `disableBundledSkills` removes are not listed in a run and not reserved.
- * A newer `claude` may list other names; the run-time check against `system/init` is a follow-up.
+ * A newer `claude` may list other names: `claudeSkillNameCollision` checks the session's own
+ * `system/init` after the spawn (issue 275).
  */
 export const CLAUDE_RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   // Skills listed with `disableBundledSkills: true`.

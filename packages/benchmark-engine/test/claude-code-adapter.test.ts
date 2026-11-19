@@ -81,7 +81,7 @@ function fakeClaude(root: string, streams: Record<string, string>, shebang = '#!
       'cat > /dev/null',
       "printf '# Report\\n' > output.md",
       // Like the CLI, the session start lists the project skill `pdf` only when it is installed.
-      `if [ -d .claude/skills/pdf ]; then strip=''; else strip='/"subtype": "init"/s/"pdf", //g'; fi`,
+      `if [ -d .claude/skills/pdf ]; then strip='s/^//'; else strip='/"subtype": "init"/s/"pdf", //g'; fi`,
       `if [ -f '${streamDir}'/$n.ndjson ]; then sed "$strip" '${streamDir}'/$n.ndjson; else sed "$strip" '${streamDir}/default.ndjson'; fi`,
       'exit 0',
       '',

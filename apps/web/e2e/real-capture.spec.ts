@@ -114,13 +114,21 @@ function prepare(): { suite: string; bin: string; home: string } {
     ].join('\n'),
   );
   // The session start must list the installed skill, or the adapter stops the run as
-  // `artifact-not-loaded`; the recorded stream names its own skill `pdf`.
+  // `artifact-not-loaded`; the recorded stream names its own skill `pdf`. Like the CLI, it lists
+  // the skill only where it is installed: a `none` baseline whose session lists it is stopped as
+  // `skill-name-reserved` (SPEC-203 §4.1 run-time check, issue 275).
   const deep = join(root, 'deep.ts');
   writeFileSync(deep, DEEP_TS);
+  const recorded = readFileSync(STREAM, 'utf8');
   const stream = join(root, 'stream.ndjson');
+  writeFileSync(stream, recorded.replaceAll('"pdf"', JSON.stringify(DEMO_ARTIFACT)));
+  const baselineStream = join(root, 'baseline-stream.ndjson');
   writeFileSync(
-    stream,
-    readFileSync(STREAM, 'utf8').replaceAll('"pdf"', JSON.stringify(DEMO_ARTIFACT)),
+    baselineStream,
+    recorded
+      .split('\n')
+      .map((line) => (line.includes('"subtype": "init"') ? line.replaceAll('"pdf", ', '') : line))
+      .join('\n'),
   );
   writeFileSync(
     join(bin, 'claude'),
@@ -135,7 +143,7 @@ function prepare(): { suite: string; bin: string; home: string } {
       `printf 'api key: %s\\ngithub token: %s\\n' "$ANTHROPIC_API_KEY" '${PLANTED_TOKEN}' > notes.txt`,
       `printf '%s' '${ADVERSARIAL}' > out.txt`,
       `case "$prompt" in *deep.ts*) cp '${deep}' deep.ts ;; esac`,
-      `cat '${stream}'`,
+      `if [ -d .claude/skills ]; then cat '${stream}'; else cat '${baselineStream}'; fi`,
       '',
     ].join('\n'),
   );
