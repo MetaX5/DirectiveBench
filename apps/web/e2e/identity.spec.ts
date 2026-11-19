@@ -285,7 +285,7 @@ test.describe.serial('exact copies and version lineage (SPEC-126 Phase 1)', () =
 // SPEC-126 Phase 2 (§15, §21 Phase 2 step 3, §11.4 G17): two different skills with the same name
 // in two local repositories stay two artifacts with suffixed slugs, and the list and both artifact
 // pages mark them as possible duplicates of each other (AC-2). A seeded legacy copy with the same
-// content and no occurrence left shows "Same latest content", the "Missing" Badge and the note.
+// content and no occurrence left shows "Same content", the "Missing" Badge and the note.
 
 const DUP_A = 'identity-e2e-dup-a';
 const DUP_B = 'identity-e2e-dup-b';
@@ -421,6 +421,11 @@ test.describe.serial('possible duplicates (SPEC-126 Phase 2)', () => {
          select ?, ?, 1, content_hash, format, primary_file, files, parsed_metadata, ?
            from artifact_versions where artifact_id = ? order by version desc limit 1`,
       ).run(LEGACY.version, LEGACY.id, now, ids[DUP]!);
+      // Its chosen version, as the writers and migration 0011 set it (issue 260).
+      db.prepare('update artifacts set source_version_id = ? where id = ?').run(
+        LEGACY.version,
+        LEGACY.id,
+      );
     });
     await page.goto(`/artifacts/${ids[DUP]}`);
     const card = page.getByTestId('possible-duplicates');
@@ -428,9 +433,9 @@ test.describe.serial('possible duplicates (SPEC-126 Phase 2)', () => {
     await expect(rows).toHaveCount(2);
     const legacy = rows.filter({ hasText: LEGACY.slug });
     await expect(legacy.getByRole('cell').nth(1)).toHaveText('Missing');
-    await expect(legacy.getByRole('cell').nth(2)).toHaveText('Same latest content');
+    await expect(legacy.getByRole('cell').nth(2)).toHaveText('Same content');
     await expect(card.getByTestId('duplicates-note')).toHaveText(
-      'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.',
+      'Same content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.',
     );
     await expectContrast(page, 'possible duplicates card');
 
@@ -696,5 +701,147 @@ test.describe.serial('renames and type changes keep the URL (issue 66)', () => {
     await expect(row.getByRole('cell').nth(1)).toHaveText('skill');
     await page.goto('/artifacts?type=instruction');
     await expect(page.locator(`tr[data-artifact-id="${typed.id}"]`)).toHaveCount(0);
+  });
+});
+
+// Issue 260 (SPEC-126 §11.6 J1 to J3): after a revert at the same path to a version of another
+// format, the header shows the chosen version's type and format with a muted "latest v2: skill-md"
+// Badge, and the Possible duplicates card compares the versions found, not the latest ones.
+const REVERT_A = 'identity-e2e-revert-a';
+const REVERT_B = 'identity-e2e-revert-b';
+const STYLE = 'identity-e2e-style';
+const STYLE_PATH = `.cursor/rules/${STYLE}.mdc`;
+const NOTES = 'identity-e2e-notes';
+// Skills without a frontmatter name are never matched (SPEC-126 A3), so equal copies stay apart.
+const NOTES_X =
+  '---\ndescription: Write release notes.\n---\n# Notes\n\nList user-visible changes.\n';
+const NOTES_Y = '---\ndescription: Write release notes.\n---\n# Notes\n\nList every change.\n';
+const styleRule = (body: string) => `---\nglobs: "*.ts"\n---\n${body}\n`;
+// Its own root (lesson 2026-11-13).
+const revertRoot = realpathSync(mkdtempSync(join(e2eTmpRoot(), 'identity-revert-')));
+
+function writeRevert(repository: string, relPath: string, content: string): void {
+  const path = join(revertRoot, repository, relPath);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
+
+/** The artifact at `path` in `repository`. */
+function revertArtifact(repository: string, path: string): Promise<string> {
+  return withDatabase(
+    (db) =>
+      (
+        db
+          .prepare(
+            `select o.artifact_id as id from artifact_occurrences o
+               join repositories r on r.id = o.repository_id where r.name = ? and o.path = ?`,
+          )
+          .get(repository, path) as { id: string }
+      ).id,
+  );
+}
+
+test.describe.serial('the chosen version is shown and compared (issue 260)', () => {
+  let jobsBefore = new Set<string>();
+
+  test.beforeAll(async () => {
+    jobsBefore = await withDatabase(
+      (db) =>
+        new Set((db.prepare('select id from jobs').all() as { id: string }[]).map((j) => j.id)),
+    );
+  });
+
+  // Leave the shared database as found (lesson 2026-11-10).
+  test.afterAll(async () => {
+    await withDatabase((db) => {
+      const remove = (sql: string, id: string) => db.prepare(sql).run(id);
+      for (const name of [REVERT_A, REVERT_B])
+        remove('delete from repositories where name = ?', name);
+      for (const name of [STYLE, NOTES]) remove('delete from artifacts where name = ?', name);
+      for (const { id } of db.prepare('select id from jobs').all() as { id: string }[]) {
+        if (!jobsBefore.has(id)) remove('delete from jobs where id = ?', id);
+      }
+    });
+    rmSync(revertRoot, { recursive: true, force: true });
+  });
+
+  test('a rule reverted from a skill shows its own format, the latest one muted, and compares what is on disk', async ({
+    page,
+  }) => {
+    // v1: a cursor rule and skill X.
+    writeRevert(REVERT_A, STYLE_PATH, styleRule('Use named exports.'));
+    writeRevert(REVERT_A, `skills/${NOTES}/SKILL.md`, NOTES_X);
+    await registerAt(page, revertRoot, REVERT_A);
+    await scan(page, REVERT_A);
+    // v2: the rule path becomes a directory holding a skill; the skill becomes Y.
+    rmSync(join(revertRoot, REVERT_A, STYLE_PATH));
+    writeRevert(
+      REVERT_A,
+      `${STYLE_PATH}/SKILL.md`,
+      `---\nname: ${STYLE}\ndescription: Style as a skill.\n---\n# Style\n`,
+    );
+    writeRevert(REVERT_A, `skills/${NOTES}/SKILL.md`, NOTES_Y);
+    await scan(page, REVERT_A);
+    await expect(page.getByTestId('scan-status')).toContainText('(0 new, 2 new versions)');
+    // Back to v1 for both.
+    rmSync(join(revertRoot, REVERT_A, STYLE_PATH), { recursive: true });
+    writeRevert(REVERT_A, STYLE_PATH, styleRule('Use named exports.'));
+    writeRevert(REVERT_A, `skills/${NOTES}/SKILL.md`, NOTES_X);
+    await scan(page, REVERT_A);
+    await expect(page.getByTestId('scan-status')).toContainText('(0 new, 0 new versions)');
+    // Another cursor rule of the same name; a copy of Y and a copy of X.
+    writeRevert(REVERT_B, STYLE_PATH, styleRule('Prefer default exports.'));
+    writeRevert(REVERT_B, `one/${NOTES}/SKILL.md`, NOTES_Y);
+    writeRevert(REVERT_B, `two/${NOTES}/SKILL.md`, NOTES_X);
+    await registerAt(page, revertRoot, REVERT_B);
+    await scan(page, REVERT_B);
+
+    const style = await revertArtifact(REVERT_A, STYLE_PATH);
+    const notes = await revertArtifact(REVERT_A, `skills/${NOTES}`);
+    const copyOfY = await revertArtifact(REVERT_B, `one/${NOTES}`);
+    const copyOfX = await revertArtifact(REVERT_B, `two/${NOTES}`);
+
+    // J1: the type and format of v1, and the latest version's format in a muted Badge.
+    await page.goto(`/artifacts/${style}`);
+    await expect(page.getByText('rule', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('cursor-rule', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('latest-format')).toHaveText('latest v2: skill-md');
+    await expect(page.getByText('skill-md', { exact: true })).toHaveCount(0);
+    // The duplicates are the cursor rules, so the card and the format Badge agree.
+    await expect(page.getByTestId('duplicate-row')).toHaveCount(1);
+    await expectContrast(page, 'header with the latest format');
+    // The Parsed metadata line still describes the latest version (J1).
+    await page.goto(`/artifacts/${style}?tab=metadata`);
+    await expect(page.getByText('Latest version (v2) · format skill-md')).toBeVisible();
+    await expect(page.getByTestId('latest-format')).toBeVisible();
+    // An artifact whose latest version is the chosen one shows no muted Badge.
+    await page.goto(`/artifacts/${copyOfX}`);
+    await expect(page.getByText('skill-md', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('latest-format')).toHaveCount(0);
+
+    // J3: the versions found are compared: the copy of X (on disk in both) is the same, the copy
+    // of Y (only the newer, no longer present v2) is not.
+    await page.goto(`/artifacts/${notes}`);
+    const rows = page.getByTestId('duplicate-row');
+    await expect(rows).toHaveCount(2);
+    const contentOf = async (id: string) =>
+      rows
+        .filter({ has: page.locator(`a[href="/artifacts/${id}"]`) })
+        .getByRole('cell')
+        .nth(2);
+    await expect(await contentOf(copyOfX)).toHaveText('Same content');
+    await expect(await contentOf(copyOfY)).toHaveText('Different content');
+    await expect(page.getByTestId('duplicates-note')).toContainText(
+      'Same content does not make them one artifact.',
+    );
+    await expectContrast(page, 'card comparing the chosen versions');
+
+    // 320px: the header Badges wrap without document scroll.
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto(`/artifacts/${style}`);
+    await expect(page.getByTestId('latest-format')).toBeVisible();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    await expectContrast(page, 'header with the latest format at 320px');
+    await page.setViewportSize({ width: 1280, height: 800 });
   });
 });

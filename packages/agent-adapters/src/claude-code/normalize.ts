@@ -340,7 +340,13 @@ export function claudeRunMetadata(
     ),
     mismatchedMessageModels: [...mismatched].sort(),
     flagsHash: conditions.flagsHash,
-    ...(conditions.skillName === undefined ? {} : { installedSkillName: conditions.skillName }),
+    ...(conditions.skillName === undefined
+      ? {}
+      : {
+          installedSkillName: conditions.skillName,
+          // Without both lists a missing name proves nothing (issue 280, Codex round 1).
+          nameListsReported: init !== null && init.skillsListed && init.slashCommandsListed,
+        }),
   };
 }
 

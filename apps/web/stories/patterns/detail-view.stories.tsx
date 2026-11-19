@@ -16,6 +16,10 @@ type Detail = {
   name: string;
   type: string;
   version: number;
+  /** The format of the version found in the item's places (rule 8, SPEC-126 §11.6 J1). */
+  format?: string;
+  /** "latest vN: <format>", only when the latest version has another format (rule 8). */
+  latestFormat?: string;
   repository: string;
   path: string;
   description?: string;
@@ -33,7 +37,7 @@ type Detail = {
 };
 
 const SAME_CONTENT_NOTE =
-  'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
+  'Same content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
 
 const skill: Detail = {
   name: 'validate-external-input',
@@ -76,6 +80,8 @@ function ArtifactDetail({ artifact }: { artifact: Detail | null }) {
         actions={
           <>
             <Badge variant="outline">{artifact.type}</Badge>
+            {artifact.format ? <Badge variant="secondary">{artifact.format}</Badge> : null}
+            {artifact.latestFormat ? <Badge variant="muted">{artifact.latestFormat}</Badge> : null}
             <Badge variant="outline">v{artifact.version}</Badge>
             {artifact.missingNote ? <Badge variant="muted">Missing</Badge> : null}
             {artifact.duplicates ? <Badge variant="outline">Possible duplicate</Badge> : null}
@@ -308,7 +314,8 @@ export const SharedAcrossRepositories: Story = {
 /**
  * Shares its name with other items (rule 7, SPEC-126 §11.4 G3 to G11): a header Badge on every
  * tab, and a card under the occurrences with each one's slug, where it is (or "Missing") and
- * whether its latest content is the same; the note explains why identical copies stay apart.
+ * whether its content is the same (issue 260: the versions found, not the latest ones); the note
+ * explains why identical copies stay apart.
  */
 export const PossibleDuplicates: Story = {
   args: {
@@ -323,7 +330,7 @@ export const PossibleDuplicates: Story = {
           {
             slug: 'review-2',
             repositories: 'acme/agent-skills, client-b',
-            content: 'Same latest content',
+            content: 'Same content',
           },
           { slug: 'review-3', repositories: null, content: 'Different content' },
         ],
@@ -340,9 +347,7 @@ export const PossibleDuplicates: Story = {
       '#review-2',
     );
     await expect(canvas.getByText('Missing', { exact: true })).toBeVisible();
-    await expect(
-      canvas.getByText(/^Same latest content does not make them one artifact/),
-    ).toBeVisible();
+    await expect(canvas.getByText(/^Same content does not make them one artifact/)).toBeVisible();
   },
 };
 
@@ -361,7 +366,7 @@ export const PossibleDuplicatesOverflow: Story = {
               : i === 7
                 ? null
                 : `client-${i + 2}`,
-          content: i === 0 ? 'Same latest content' : 'Different content',
+          content: i === 0 ? 'Same content' : 'Different content',
         })),
         more: {
           text: '5 more are not listed.',
@@ -378,6 +383,36 @@ export const PossibleDuplicatesOverflow: Story = {
     await expect(
       canvas.getByRole('link', { name: 'Search Artifacts for "review"' }),
     ).toHaveAttribute('href', '/artifacts?q=review&type=skill');
+  },
+};
+
+/**
+ * The version found is not the latest (rule 8, SPEC-126 §11.6 J1, issue 260): a cursor rule that
+ * became a skill (v2) and then the rule again. Type and format are the rule's; a muted Badge names
+ * the latest version's format, so Content and Parsed metadata (the latest version) are explained.
+ */
+export const LatestVersionInAnotherFormat: Story = {
+  args: {
+    artifact: {
+      ...skill,
+      name: 'style',
+      type: 'rule',
+      format: 'cursor-rule',
+      latestFormat: 'latest v2: skill-md',
+      version: 2,
+      path: '.cursor/rules/style.mdc',
+      occurrences: [
+        { repository: 'repo-a', path: '.cursor/rules/style.mdc', version: 1, status: 'active' },
+      ],
+      duplicates: {
+        rows: [{ slug: 'style-2', repositories: 'repo-b', content: 'Different content' }],
+      },
+    },
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText('cursor-rule', { exact: true })).toBeVisible();
+    await expect(canvas.getByText('latest v2: skill-md', { exact: true })).toBeVisible();
+    await expect(canvas.queryByText('skill-md', { exact: true })).toBeNull();
   },
 };
 

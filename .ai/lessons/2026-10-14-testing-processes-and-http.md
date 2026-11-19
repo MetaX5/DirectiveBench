@@ -19,6 +19,9 @@ Several false failures happened while verifying the server and CLI during the bo
   process, the process group, or run the built `dist/cli.js` directly.
 - `pkill -f <pattern>` also matches the shell running the command when the pattern appears in
   its own command line — it can kill the agent's shell. Kill by PID instead.
+  (2026-11-19, issue 280) It happened again: `pkill -f "storybook dev -p 4402"` in a compound
+  command killed the agent's own shell (exit 144) before the next command ran. Record the PID
+  when starting a server (`$!` or the port's listener from `ss -ltnp`) and `kill <pid>`.
 - In YAML flow sequences (`[a, b]`) unquoted commas split items. Quote argv elements that contain
   commas, e.g. `'--sniffs=A,B,C'`.
 - (2026-10-16) A child process's environment is not exactly what the parent passed: macOS adds

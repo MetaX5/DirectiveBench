@@ -582,9 +582,9 @@ describe('possible duplicates follow the chosen version (issue 246)', () => {
     await scan(handle, b, [single('.cursor/rules/style.mdc', '---\nglobs: "*.ts"\n---\nOther.\n')]);
     await scan(handle, c, [skill('skills/style', skillMd('style', 'A skill.'))]);
 
-    // The Format column still shows the latest version's format (a separate issue).
+    // The list's format is the chosen version's, like the type (issue 260).
     expect(await duplicateRows(handle)).toEqual([
-      ['style', 'rule', 'skill-md', 1],
+      ['style', 'rule', 'cursor-rule', 1],
       ['style-2', 'rule', 'cursor-rule', 1],
       ['style-3', 'skill', 'skill-md', 0],
     ]);
@@ -604,7 +604,7 @@ describe('possible duplicates follow the chosen version (issue 246)', () => {
     await scan(handle, c, [skill('skills/style', skillMd('style', 'A skill.'))]);
 
     expect(await duplicateRows(handle)).toEqual([
-      ['style', 'skill', 'cursor-rule', 1],
+      ['style', 'skill', 'skill-md', 1],
       ['style-2', 'skill', 'skill-md', 1],
     ]);
     expect(await cardSlugs(handle, 'style')).toEqual(['style-2']);
@@ -629,7 +629,7 @@ describe('possible duplicates follow the chosen version (issue 246)', () => {
     ]);
     await removeRepository(handle, b);
     expect(await duplicateRows(handle)).toEqual([
-      ['style', 'rule', 'skill-md', 1],
+      ['style', 'rule', 'cursor-rule', 1],
       ['style-2', 'rule', 'cursor-rule', 1],
       ['style-3', 'skill', 'skill-md', 0],
     ]);
@@ -649,5 +649,88 @@ describe('possible duplicates follow the chosen version (issue 246)', () => {
       missing: true,
       possibleDuplicates: 1,
     });
+  });
+});
+
+describe('same content compares the chosen versions (issue 260)', () => {
+  const x = skillMd(null, 'List user-visible changes.', 'Write release notes.');
+  const y = skillMd(null, 'List every change.', 'Write release notes.');
+
+  /** `[slug, sameContent]` of the card rows of `slug`'s artifact. */
+  async function contents(handle: DatabaseHandle, slug: string) {
+    const detail = await getArtifactDetail(handle.db, (await bySlug(handle, slug)).id);
+    return detail?.possibleDuplicates.items.map((item) => [item.slug, item.sameContent]);
+  }
+
+  async function sourceVersion(handle: DatabaseHandle, slug: string) {
+    const artifact = await bySlug(handle, slug);
+    const detail = await getArtifactDetail(handle.db, artifact.id);
+    return detail?.versions.find((v) => v.id === artifact.sourceVersionId)?.version;
+  }
+
+  it('compares what the active occurrence holds after a revert, not the newer latest version', async () => {
+    const handle = getHandle();
+    const d = await local(handle, 'd');
+    const e = await local(handle, 'e');
+    const f = await local(handle, 'f');
+    // Skills without a frontmatter name never link (A3), so each copy is its own artifact.
+    await scan(handle, d, [skill('skills/release-notes', x)]); // v1 X
+    await scan(handle, d, [skill('skills/release-notes', y)]); // v2 Y
+    expect(await sourceVersion(handle, 'release-notes')).toBe(2);
+    await scan(handle, d, [skill('skills/release-notes', x)]); // back to v1
+    await scan(handle, e, [skill('skills/release-notes', y)]);
+    await scan(handle, f, [skill('skills/release-notes', x)]);
+
+    expect(await sourceVersion(handle, 'release-notes')).toBe(1);
+    expect(await contents(handle, 'release-notes')).toEqual([
+      ['release-notes-2', false],
+      ['release-notes-3', true],
+    ]);
+    expect(await contents(handle, 'release-notes-2')).toEqual([
+      ['release-notes', false],
+      ['release-notes-3', false],
+    ]);
+    expect(await contents(handle, 'release-notes-3')).toEqual([
+      ['release-notes', true],
+      ['release-notes-2', false],
+    ]);
+  });
+
+  it('keeps the last chosen version of a missing artifact, and moves with a removal (FR-126-23, G13)', async () => {
+    const handle = getHandle();
+    const a = await local(handle, 'a');
+    const b = await local(handle, 'b');
+    const c = await local(handle, 'c');
+    await scan(handle, a, [skill('skills/release-notes', x), single('AGENTS.md', '# A')]); // v1 X
+    await scan(handle, b, [skill('skills/release-notes', y)]); // a separate artifact
+    await scan(handle, c, [skill('skills/release-notes', y)]); // a separate artifact
+    expect(await contents(handle, 'release-notes')).toEqual([
+      ['release-notes-2', false],
+      ['release-notes-3', false],
+    ]);
+    // `release-notes` goes missing: it keeps v1 (X) as its chosen version.
+    await scan(handle, a, [single('AGENTS.md', '# A')]);
+    expect(await sourceVersion(handle, 'release-notes')).toBe(1);
+    expect(await contents(handle, 'release-notes-2')).toEqual([
+      ['release-notes', false],
+      ['release-notes-3', true],
+    ]);
+    // Removing the repository of `release-notes-2` leaves it without a version holder; its last
+    // chosen version stays too.
+    await removeRepository(handle, b);
+    expect(await contents(handle, 'release-notes-3')).toEqual([
+      ['release-notes', false],
+      ['release-notes-2', true],
+    ]);
+  });
+
+  it('sets the chosen version of a bundled example from the version it wrote, a revert included', async () => {
+    const handle = getHandle();
+    const v1 = await importArtifactVersion(handle, artifactInput('# One\n'));
+    const v2 = await importArtifactVersion(handle, artifactInput('# Two\n'));
+    expect((await bySlug(handle, 'validate')).sourceVersionId).toBe(v2.versionId);
+    const back = await importArtifactVersion(handle, artifactInput('# One\n'));
+    expect(back.versionId).toBe(v1.versionId);
+    expect((await bySlug(handle, 'validate')).sourceVersionId).toBe(v1.versionId);
   });
 });

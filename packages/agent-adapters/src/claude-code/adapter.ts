@@ -156,6 +156,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     return this.executable;
   }
 
+  /**
+   * A `skill-md` artifact needs the reserved-name check in an A/B run (SPEC-203 §4.1, ADR-0015):
+   * a session that installed nothing must not list its name, which `run` checks for a request
+   * with no installed paths (issue 275). Other formats have no name the CLI could own.
+   */
+  needsReservedNameCheck(artifact: ArtifactBundle): boolean {
+    return artifact.format === 'skill-md';
+  }
+
   installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact> {
     return installClaudeArtifact(workspace, artifact);
   }

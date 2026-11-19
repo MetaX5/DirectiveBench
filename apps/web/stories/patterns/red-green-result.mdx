@@ -32,6 +32,12 @@ verdict card with the change and the confidence.
    edited from ("edited from v1") only where that is not the number one lower. Source:
    SPEC-126 §11.3 F10 to F12 (`/artifacts/[id]?tab=results`).
 
+7. An A/B run of a skill with Claude Code first runs one session without the skill, the
+   reserved-name check. "Environment and versions" shows it as the "Reserved-name check" fact
+   (passed, cancelled, or the code that stopped the run, then "1 extra session without the skill
+   (not scored)", the duration and the tokens), only for runs that had it. Source: SPEC-203 §4.1,
+   ADR-0015, issue 280.
+
 ## States
 
 <Canvas of={Stories.ImprovedMock} />
@@ -39,3 +45,4 @@ verdict card with the change and the confidence.
 <Canvas of={Stories.Unstable} />
 <Canvas of={Stories.NotComparable} />
 <Canvas of={Stories.DivergedVersions} />
+<Canvas of={Stories.ReservedNameCheck} />

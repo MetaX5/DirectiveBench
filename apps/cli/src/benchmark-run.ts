@@ -11,11 +11,13 @@ import {
   type ClaudeAuthMode,
 } from '@directivebench/agent-adapters';
 import {
+  RESERVED_NAME_CHECK_FAILED,
   snapshotDirectory,
   type PreparedSuite,
   type ScoringSummary,
 } from '@directivebench/benchmark-engine';
 import { slugify } from '@directivebench/core';
+import { z } from 'zod';
 import {
   InvalidBaselineError,
   assignBenchmarkSuite,
@@ -119,6 +121,9 @@ export function planText(input: {
   const { definition } = prepared;
   const model = definition.execution.model;
   const runs = definition.cases.length * definition.execution.repetitions * 2;
+  // An A/B run of a skill first runs one session without it (SPEC-203 §4.1, ADR-0015).
+  const check = resolved.baseline !== null && resolved.candidate.format === 'skill-md';
+  const sessions = runs + (check ? 1 : 0);
   const lines = [
     `Suite:      ${definition.name} (${definition.id}, content ${prepared.contentHash.slice(0, 12)})`,
     `Candidate:  ${candidateLabel(resolved.candidate)} v${resolved.ref.version.version}`,
@@ -127,6 +132,11 @@ export function planText(input: {
     `Auth mode:  ${options.authMode === 'subscription' ? 'Local Subscription Mode (isolation: user-profile)' : 'API Key Mode (isolation: isolated)'}`,
     `Model:      ${model ? `${model.provider}/${model.model}` : 'CLI default (unpinned)'}`,
     `Agent runs: ${runs} (${definition.cases.length} case(s) × ${definition.execution.repetitions} repetition(s) × 2 variants)`,
+    ...(check
+      ? [
+          'Reserved-name check: 1 extra session without the skill before the first agent run (not scored)',
+        ]
+      : []),
   ];
   if (resolved.candidate.format === 'skill-md') {
     // The name the skill is installed and invoked under (FR-118-31, SPEC-203 §4.1, issue 245):
@@ -159,8 +169,8 @@ export function planText(input: {
   lines.push(
     '',
     options.authMode === 'subscription'
-      ? `Cost:       ${runs} Claude Code sessions count against your Claude plan; other runs on the same plan share its rate limits.`
-      : `Cost:       ${runs} Claude Code sessions are billed to your API key.`,
+      ? `Cost:       ${sessions} Claude Code sessions count against your Claude plan; other runs on the same plan share its rate limits.`
+      : `Cost:       ${sessions} Claude Code sessions are billed to your API key.`,
     'Data:       the prompt, the fixture files and the artifact are sent to Anthropic.',
     'Not sandboxed: the agent runs with your user permissions (file tools are confined to the workspace).',
   );
@@ -196,11 +206,44 @@ interface UsageTotals {
   costUsd: number | null;
 }
 
-/** Sums the usage the agent runs reported; a total is null when no run reported it. */
-export function usageTotals(detail: BenchmarkRunDetail): UsageTotals {
+/** The stored outcome of an A/B run's reserved-name check (SPEC-203 §4.1, ADR-0015). */
+const reservedNameCheckSchema = z.object({
+  status: z.string(),
+  errorCode: z.string().nullable(),
+  durationMs: z.number(),
+  usage: z.record(z.string(), z.number()).nullable(),
+  passed: z.boolean(),
+});
+
+/** The reserved-name check as the summary and `--json` report it (issue 280). */
+export interface ReservedNameCheckReport {
+  status: string;
+  errorCode: string | null;
+  durationMs: number;
+  usage: Record<string, number> | null;
+  /** The engine's decision: a completed session that reported its start and name lists. */
+  passed: boolean;
+}
+
+/** The run's reserved-name check, or null when it had none or it cannot be read. */
+function reservedNameCheckOf(environment: unknown): ReservedNameCheckReport | null {
+  const parsed = z.object({ reservedNameCheck: reservedNameCheckSchema }).safeParse(environment);
+  if (!parsed.success) return null;
+  const { status, errorCode, durationMs, usage, passed } = parsed.data.reservedNameCheck;
+  return { status, errorCode, durationMs, usage, passed };
+}
+
+/**
+ * Sums the usage the agent runs and the reserved-name check reported; a total is null when none
+ * reported it.
+ */
+export function usageTotals(
+  detail: BenchmarkRunDetail,
+  check: ReservedNameCheckReport | null,
+): UsageTotals {
   const totals: UsageTotals = { inputTokens: null, outputTokens: null, costUsd: null };
-  for (const run of detail.agentRuns) {
-    const usage = run.usage as Partial<Record<keyof UsageTotals, number>> | null;
+  for (const reported of [...detail.agentRuns.map((run) => run.usage), check?.usage ?? null]) {
+    const usage = reported as Partial<Record<keyof UsageTotals, number>> | null;
     for (const key of ['inputTokens', 'outputTokens', 'costUsd'] as const) {
       const value = usage?.[key];
       if (typeof value === 'number') totals[key] = (totals[key] ?? 0) + value;
@@ -230,6 +273,8 @@ export interface RunReport {
   executionModel: string | null;
   warnings: string[];
   usage: UsageTotals & { cost: 'n/a (subscription)' | 'estimated' | 'not reported' };
+  /** The A/B run's session without the skill (issue 280); null when the run had none. */
+  reservedNameCheck: ReservedNameCheckReport | null;
   error: string | null;
 }
 
@@ -237,7 +282,8 @@ export interface RunReport {
 export function runReport(detail: BenchmarkRunDetail, authMode: ClaudeAuthMode): RunReport {
   const { run } = detail;
   const summary = run.summary as StoredSummary | null;
-  const usage = usageTotals(detail);
+  const reservedNameCheck = reservedNameCheckOf(run.environment);
+  const usage = usageTotals(detail, reservedNameCheck);
   return {
     runId: run.id,
     status: run.status,
@@ -266,6 +312,7 @@ export function runReport(detail: BenchmarkRunDetail, authMode: ClaudeAuthMode):
             ? 'not reported'
             : 'estimated',
     },
+    reservedNameCheck,
     error: run.error,
   };
 }
@@ -290,9 +337,18 @@ export function reportText(report: RunReport): string[] {
     );
   }
   lines.push(`Model:      ${report.executionModel ?? 'not reported'}`);
+  const check = report.reservedNameCheck;
+  if (check) {
+    const session = `1 extra session, not scored, ${(check.durationMs / 1000).toFixed(1)} s`;
+    let outcome: string;
+    if (check.passed) outcome = `passed (${session})`;
+    else if (check.status === 'cancelled') outcome = `cancelled (${session})`;
+    else outcome = `stopped the run (${check.errorCode ?? RESERVED_NAME_CHECK_FAILED}; ${session})`;
+    lines.push(`Reserved-name check: ${outcome}`);
+  }
   const tokens = (value: number | null) => (value === null ? 'not reported' : String(value));
   lines.push(
-    `Tokens:     input ${tokens(report.usage.inputTokens)}, output ${tokens(report.usage.outputTokens)}`,
+    `Tokens:     input ${tokens(report.usage.inputTokens)}, output ${tokens(report.usage.outputTokens)}${check ? ' (including the reserved-name check)' : ''}`,
     `Cost:       ${report.usage.costUsd === null ? report.usage.cost : `$${report.usage.costUsd.toFixed(4)} (estimated)`}`,
   );
   for (const warning of report.warnings) lines.push(`Warning:    ${warning}`);

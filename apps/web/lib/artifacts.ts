@@ -200,9 +200,22 @@ export function occurrenceVersionLabel(
   };
 }
 
+/**
+ * The header's muted Badge text when the latest version's format differs from the chosen
+ * version's, which the format Badge shows (SPEC-126 §11.6 J1, issue 260): "latest v2: skill-md".
+ * Null when they agree, or without a version.
+ */
+export function latestFormatHint(
+  chosenFormat: string | null,
+  latest: { version: number; format: string } | undefined,
+): string | null {
+  if (chosenFormat === null || latest === undefined || latest.format === chosenFormat) return null;
+  return `latest v${latest.version}: ${latest.format}`;
+}
+
 /** The G11 note under the possible-duplicates table (SPEC-126 §11.4). */
 export const SAME_CONTENT_NOTE =
-  'Same latest content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
+  'Same content does not make them one artifact. An identical copy is matched only when it is first found at a path in a local repository, and never for a copy in a GitHub repository, the bundled example or a skill without a name in its frontmatter. Copies recorded before DirectiveBench started matching identical copies also stay separate.';
 
 /** One row of the "Possible duplicates" card (SPEC-126 §11.4 G7 to G9). */
 export interface PossibleDuplicateRow {
@@ -212,7 +225,7 @@ export interface PossibleDuplicateRow {
   href: string;
   /** The repositories with an active occurrence, joined with ", "; null when missing (G8, G13). */
   repositories: string | null;
-  content: 'Same latest content' | 'Different content';
+  content: 'Same content' | 'Different content';
 }
 
 /** The "Possible duplicates" card on an artifact's Overview (SPEC-126 UD-5, §11.4 G4 to G13). */
@@ -220,7 +233,7 @@ export interface PossibleDuplicatesCard {
   rows: PossibleDuplicateRow[];
   /** The line under the table when more exist than are listed (G10). */
   more: { text: string; linkText: string; href: string } | null;
-  /** The G11 note, when a listed row has the same latest content. */
+  /** The G11 note, when a listed row has the same content (issue 260). */
   note: string | null;
 }
 
@@ -250,7 +263,7 @@ export function possibleDuplicatesCard(
     href: artifactHref(item.id),
     repositories:
       item.activeOccurrences === 0 ? null : item.repositories.map((r) => r.name).join(', '),
-    content: item.sameLatestContent ? 'Same latest content' : 'Different content',
+    content: item.sameContent ? 'Same content' : 'Different content',
   }));
   const unlisted = duplicates.total - duplicates.items.length;
   const q = searchPrefix(artifact.name);
@@ -264,7 +277,7 @@ export function possibleDuplicatesCard(
             href: `/artifacts?${new URLSearchParams({ q, type: artifact.type }).toString()}`,
           }
         : null,
-    note: duplicates.items.some((item) => item.sameLatestContent) ? SAME_CONTENT_NOTE : null,
+    note: duplicates.items.some((item) => item.sameContent) ? SAME_CONTENT_NOTE : null,
   };
 }
 

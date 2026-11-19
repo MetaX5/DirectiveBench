@@ -141,6 +141,13 @@ export interface AgentRunMetadata {
    * §4.1, issue 245). Recorded, not compared: the flags hash replaces it with a placeholder.
    */
   installedSkillName?: string;
+  /**
+   * `skill-md` runs only: whether the session start reported the lists of names the agent offers
+   * itself (Claude Code's `system/init` `skills` and `slash_commands`). The reserved-name check
+   * passes only when it did: a name missing from a list that was never reported proves nothing
+   * (SPEC-203 §4.1, issue 280).
+   */
+  nameListsReported?: boolean;
 }
 
 /** Whether the installed skill was loaded and used in one agent run (SPEC-118 FR-118-09). */
@@ -200,6 +207,14 @@ export interface AgentAdapter {
    */
   installArtifact(workspace: WorkspacePin, artifact: ArtifactBundle): Promise<InstalledArtifact>;
   run(request: AgentRunRequest): Promise<AgentRunResult>;
+  /**
+   * Whether an A/B run of `artifact` needs the reserved-name check before its first repetition
+   * (SPEC-203 §4.1, ADR-0015, issue 280): one `run` without anything installed, whose session
+   * must not list the artifact's name itself. Such a run has to report `metadata` with the
+   * session's `executionModel`, which proves the session start was seen, and `nameListsReported`,
+   * which proves the names were listed at all. Absent: never checked (the mock agent).
+   */
+  needsReservedNameCheck?(artifact: ArtifactBundle): boolean;
   /**
    * The ranges of `text` (an output file the agent wrote, or a window of one) that this adapter's
    * own redaction would replace, as UTF-16 offsets with `end` exclusive (SPEC-123 FR-123-60):
