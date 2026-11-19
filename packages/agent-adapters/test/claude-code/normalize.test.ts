@@ -592,6 +592,20 @@ describe('claudeRunMetadata (FR-118-04)', () => {
     });
   });
 
+  it('says whether the session start reported both name lists, for skill runs only (issue 280)', () => {
+    const skillRun = conditions({ skillName: 'pdf' });
+    const parsed = parse('skill-invoked');
+    expect(claudeRunMetadata(parsed, skillRun).nameListsReported).toBe(true);
+    for (const init of [
+      { ...parsed.init!, slashCommandsListed: false },
+      { ...parsed.init!, skillsListed: false },
+    ]) {
+      expect(claudeRunMetadata({ ...parsed, init }, skillRun).nameListsReported).toBe(false);
+    }
+    expect(claudeRunMetadata({ ...parsed, init: null }, skillRun).nameListsReported).toBe(false);
+    expect(claudeRunMetadata(parsed, conditions())).not.toHaveProperty('nameListsReported');
+  });
+
   it('reports a main-conversation message and a later session start on another model', () => {
     expect(
       claudeRunMetadata(parse('model-mismatch'), conditions()).mismatchedMessageModels,

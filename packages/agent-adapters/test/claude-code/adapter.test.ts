@@ -141,6 +141,14 @@ describe('ClaudeCodeAdapter options', () => {
 });
 
 posix('ClaudeCodeAdapter with a fake claude', startsTheFake, () => {
+  it('offers the reserved-name check for a skill only (issue 280, ADR-0015)', () => {
+    const adapter = new ClaudeCodeAdapter({}, {});
+    expect(adapter.needsReservedNameCheck(SKILL)).toBe(true);
+    for (const format of ['claude-md', 'agents-md', 'claude-rule'] as const) {
+      expect(adapter.needsReservedNameCheck(bundle(format, { 'X.md': 'x\n' }))).toBe(false);
+    }
+  });
+
   it('detects the binary on the given PATH with per-mode readiness', async () => {
     const h = harness();
     const detection = await h.adapter().detect();
