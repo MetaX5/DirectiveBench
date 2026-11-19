@@ -93,6 +93,7 @@ Notation: **PK** primary key, **FK** foreign key (`→ table`, on-delete action)
 | name | text NOT NULL | |
 | type | text NOT NULL | `skill` \| `instruction` \| `rule` |
 | format | text | source field: the format of the version the chosen active occurrence holds, like `type` (SPEC-103 FR-103-16, SPEC-126 FR-126-07); the possible-duplicate key with `name` (FR-126-11). Null only for an artifact without a version. Migration `0009`, backfilled (issue 246) |
+| source_version_id | text | source field: the id of the version the chosen active occurrence holds, the version `format` comes from (SPEC-126 FR-126-07); the content the Possible duplicates card compares (FR-126-13, issue 260). No foreign key (circular with `artifact_versions.artifact_id`; versions are deleted only with their artifact). Null only for an artifact without a version. Migration `0011`, backfilled like `format` |
 | description | text | |
 | notes | text | user-managed; never overwritten by sync |
 | tags | json `string[]` NOT NULL default `'[]'` | user-managed (normalized table planned, §7) |
