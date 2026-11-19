@@ -449,6 +449,6 @@ export function formatBytes(size: number): string {
  */
 export function rawViewNotice(content: string): string | null {
   return content.includes('\r')
-    ? 'This file has CR or CRLF line endings. The browser shows them as plain line breaks; the stored content keeps them unchanged.'
+    ? 'This file has CR or CRLF line endings. The browser shows them as plain line breaks; the stored content keeps them unchanged, and Download and Copy give them as stored.'
     : null;
 }
