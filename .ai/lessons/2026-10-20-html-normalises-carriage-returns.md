@@ -26,5 +26,10 @@ CRLF files, and do not "fix" it by encoding CR in the text (that changes what is
 - Say so in the UI: the Content tab shows `rawViewNotice` when the file contains `\r`.
 - Byte-for-byte e2e checks compare `Buffer.from(textContent, 'utf8')` with the file read from disk
   and use LF fixtures; cover leading newlines, tabs and non-ASCII text, which do round-trip.
-- If exact bytes are ever needed in the browser (copy/download), serve them from a dedicated
-  `text/plain` response with `X-Content-Type-Options: nosniff`, not from the DOM.
+- Exact bytes in the browser are served from a dedicated `text/plain` attachment with
+  `X-Content-Type-Options: nosniff` (the Content tab's Download, issue #52) or copied from the
+  string the server passed as a prop (Copy), never read back from the DOM.
+- The normalisation happens only when the HTML parser reads the text. After a client-side
+  navigation React sets the text from the RSC payload, so the same `<pre>` then *does* hold
+  the CR characters (found in issue #52). A test that asserts CR is missing (or present) must
+  load the page as HTML first (`page.goto` or `page.reload`), or it depends on how it got there.
