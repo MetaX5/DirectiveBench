@@ -1,18 +1,26 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { parseMarkdown, type Block, type Inline } from '@/lib/markdown';
+
+/** The in-app href a relative link opens, or null to keep it inert. */
+type LinkResolver = ((destination: string) => string | null) | undefined;
 
 /**
  * Renders untrusted Markdown as React elements only (FR-101-18): every piece of content is a text
  * node, so raw HTML is shown as text and nothing in it can run. Links are real links only for
- * absolute http(s)/mailto URLs (`safeHref`); every other link and every image is inert text.
+ * absolute http(s)/mailto URLs (`safeHref`) and, when `resolveLink` returns an in-app href for it,
+ * for a relative link (the Content tab's sibling files, issue 55); every other link and every image
+ * is inert text.
  */
-export function Markdown({ source }: { source: string }) {
+export function Markdown({ source, resolveLink }: { source: string; resolveLink?: LinkResolver }) {
   return (
-    <div className="space-y-3 text-body leading-relaxed">{renderBlocks(parseMarkdown(source))}</div>
+    <div className="space-y-3 text-body leading-relaxed">
+      {renderBlocks(parseMarkdown(source), resolveLink)}
+    </div>
   );
 }
 
-function renderInlines(nodes: Inline[]): ReactNode[] {
+function renderInlines(nodes: Inline[], resolveLink: LinkResolver): ReactNode[] {
   return nodes.map((node, index) => {
     switch (node.kind) {
       case 'text':
@@ -28,10 +36,18 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
           </code>
         );
       case 'strong':
-        return <strong key={index}>{renderInlines(node.children)}</strong>;
+        return <strong key={index}>{renderInlines(node.children, resolveLink)}</strong>;
       case 'emphasis':
-        return <em key={index}>{renderInlines(node.children)}</em>;
-      case 'link':
+        return <em key={index}>{renderInlines(node.children, resolveLink)}</em>;
+      case 'link': {
+        const internal = node.href ? null : (resolveLink?.(node.destination) ?? null);
+        if (internal) {
+          return (
+            <Link key={index} href={internal} data-sibling-link="" className="underline">
+              {renderInlines(node.children, resolveLink)}
+            </Link>
+          );
+        }
         return node.href ? (
           <a
             key={index}
@@ -40,7 +56,7 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
             rel="noopener noreferrer nofollow"
             className="underline"
           >
-            {renderInlines(node.children)}
+            {renderInlines(node.children, resolveLink)}
           </a>
         ) : (
           <span
@@ -49,9 +65,10 @@ function renderInlines(nodes: Inline[]): ReactNode[] {
             title={`Link not followed: ${node.destination}`}
             className="underline decoration-dotted"
           >
-            {renderInlines(node.children)}
+            {renderInlines(node.children, resolveLink)}
           </span>
         );
+      }
       case 'image':
         return (
           <span
@@ -76,7 +93,7 @@ const headingClasses = {
   6: 'text-body font-medium text-muted-foreground',
 } as const;
 
-function renderBlocks(blocks: Block[]): ReactNode[] {
+function renderBlocks(blocks: Block[], resolveLink: LinkResolver): ReactNode[] {
   return blocks.map((block, index) => {
     switch (block.kind) {
       case 'frontmatter':
@@ -93,12 +110,12 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
         const Tag = `h${block.level}` as const;
         return (
           <Tag key={index} className={headingClasses[block.level]}>
-            {renderInlines(block.children)}
+            {renderInlines(block.children, resolveLink)}
           </Tag>
         );
       }
       case 'paragraph':
-        return <p key={index}>{renderInlines(block.children)}</p>;
+        return <p key={index}>{renderInlines(block.children, resolveLink)}</p>;
       case 'code':
         return (
           <pre
@@ -112,13 +129,13 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
       case 'quote':
         return (
           <blockquote key={index} className="space-y-3 border-l-2 pl-3 text-muted-foreground">
-            {renderBlocks(block.children)}
+            {renderBlocks(block.children, resolveLink)}
           </blockquote>
         );
       case 'list': {
         const items = block.items.map((item, itemIndex) => (
           <li key={itemIndex} className="space-y-2">
-            {renderBlocks(item)}
+            {renderBlocks(item, resolveLink)}
           </li>
         ));
         return block.ordered ? (
@@ -142,7 +159,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
                 <tr className="border-b">
                   {block.header.map((cell, cellIndex) => (
                     <th key={cellIndex} className="px-2 py-1 text-left font-medium">
-                      {renderInlines(cell)}
+                      {renderInlines(cell, resolveLink)}
                     </th>
                   ))}
                 </tr>
@@ -152,7 +169,7 @@ function renderBlocks(blocks: Block[]): ReactNode[] {
                   <tr key={rowIndex} className="border-b">
                     {row.cells.map((cell, cellIndex) => (
                       <td key={cellIndex} className="px-2 py-1 align-top">
-                        {renderInlines(cell)}
+                        {renderInlines(cell, resolveLink)}
                       </td>
                     ))}
                     {row.missing > 0 && (

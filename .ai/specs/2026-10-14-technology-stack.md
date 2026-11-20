@@ -18,7 +18,7 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 
 | Technology | Version line | Rationale |
 |---|---|---|
-| Node.js | engines `>=22.16.0`; the full suite runs on Node 24 (locally and in CI); the CI job `oldest-node` runs the package tests, `pnpm build` and `pnpm verify:pack` on Node 22.16.0 (issue #263) | Built-in `node:sqlite` avoids native modules; the floor is set by the `node:sqlite` APIs actually used. See §3.1. |
+| Node.js | engines `>=22.16.0`; the full suite runs on Node 24 (locally and in CI); the CI job `oldest-node` runs the package, CLI and web unit tests, `pnpm build` and `pnpm verify:pack` on Node 22.16.0 (issues #263, #265, #266) | Built-in `node:sqlite` avoids native modules; the floor is set by the `node:sqlite` APIs actually used. See §3.1. |
 | npm | 11 (bundled with Node 24) | Distribution channel: `npx directivebench`. |
 | pnpm via corepack | 12 (root `packageManager: pnpm@12.11.2`) | Workspaces, strict dependency isolation, fast installs. |
 | Turborepo | 2.11 | Task graph and caching for `build`, `typecheck`, `test`. A cached result must be invalidated by a change in any workspace package the task's package depends on: `build` and `typecheck` depend on `^build` / `^typecheck`; `test` depends on `transit`, a task no package has a script for, whose `dependsOn: ["^transit"]` puts every workspace dependency's files into the `test` hash without running anything or ordering the packages' tests (issue #281). |
@@ -55,7 +55,7 @@ Versions below are the **intended major lines** as of 2026-10-14. Exact versions
 
 - `node:sqlite` is usable without `--experimental-sqlite` from Node 22.13.0.
 - The database client (`packages/database/src/client.ts`) calls `StatementSync#setReturnArrays`, added in Node 22.16.0 / 24.0.0, because Drizzle `sqlite-proxy` expects rows as arrays. Therefore `engines.node` is **`>=22.16.0`** (as declared in the root `package.json`), not `>=22.13.0`.
-- Node 24 runs the full suite. Node 22.16.0 (SQLite 3.49.1) runs the `packages/*` and `apps/cli` unit tests, `pnpm build` and `pnpm verify:pack` in the CI job `oldest-node` ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions)); the `apps/web` unit tests do not pass there yet (issue #266). Node versions between 22.16 and 24 are not tested individually.
+- Node 24 runs the full suite. Node 22.16.0 (SQLite 3.49.1) runs the `packages/*`, `apps/cli` and `apps/web` unit tests, `pnpm build` and `pnpm verify:pack` in the CI job `oldest-node` ([SPEC-012 §8](2026-10-14-testing-strategy.md#8-ci-github-actions)). The web unit tests start the unbuilt highlight worker entry with `--experimental-strip-types` there, because Node strips TypeScript types by default only from 22.18 (issue #266). Node versions between 22.16 and 24 are not tested individually.
 - On Node 22 (every release up to 22.23.5), `node:sqlite` returns a TEXT value only up to its first U+0000; SQLite stores it whole. nodejs/node#61954 fixed the read in Node 24.16.0 and Node 26 only, and Node 22's `StatementSync` cannot read TEXT as bytes. The floor stays 22.16.0; stored text never holds U+0000 instead ([SPEC-006 §1](2026-10-14-database-schema.md#1-conventions), issue 265).
 - The runtime check compares the Node version against 22.16.0 for every command (exit 3); `doctor` additionally feature-detects `node:sqlite` by preparing a statement and calling `setReturnArrays`.
 - `node:sqlite` may emit an `ExperimentalWarning` on some Node versions; if so, the CLI suppresses only that specific warning.

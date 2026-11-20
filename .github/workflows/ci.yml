@@ -128,8 +128,8 @@ jobs:
                 process.exit(1);
               }
             }'
-      - name: Package and CLI tests (database migrations, runner, engine, adapters, core, cli) without coverage
-        run: pnpm --filter "./packages/*" --filter directivebench --no-bail test --coverage.enabled=false
+      - name: Package, CLI and web tests (database migrations, runner, engine, adapters, core, cli, web) without coverage
+        run: pnpm --filter "./packages/*" --filter directivebench --filter @directivebench/web --no-bail test --coverage.enabled=false
       - run: pnpm build
       - name: Packaging verification on the oldest Node (pack, install, demo, serve)
         run: pnpm verify:pack
