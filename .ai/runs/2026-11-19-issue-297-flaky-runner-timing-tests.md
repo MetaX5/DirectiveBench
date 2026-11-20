@@ -77,6 +77,30 @@ expected there, and the extra SIGKILL is harmless); Windows (no process groups; 
 handler only re-signals the child, which is already gone). The cache-sweep race was not caught
 naturally locally, only with the injected delay.
 
+## Base merge (2026-11-20, `om-auto-fix-pr 299`)
+
+PR #299 was `CONFLICTING` after main took #300, #293, #292 and others. Merged `origin/main`
+(2cc16f1) into the branch in a worktree under `.ai/tmp/om-auto-fix-pr/`.
+
+- Conflict: `.ai/lessons.md` only. Both sides added a new 2026-11-19 entry at the top of the
+  index (this PR's process-group SIGKILL lesson; main's turbo-needs-`pnpm`-on-PATH lesson). They
+  are separate lessons, so the merge keeps both lines.
+- No code conflicts. Main's changes near this PR (`test-support/linear-time.ts`,
+  `apps/web/vitest.config.ts`, the Node 22.16 timing lesson) do not touch `git-process.ts` or the
+  runner tests this PR changes.
+
+| Command (after the merge) | Result |
+| --- | --- |
+| `pnpm format:check && pnpm lint && pnpm typecheck` | pass |
+| `pnpm test` (full, load average 30 from parallel agent gates) | fail: three 5 s timeouts in files this PR does not touch (`missing-occurrences`, `output-files`, `claude-code-adapter`) |
+| `pnpm test` in `packages/benchmark-engine` | pass, 100% coverage |
+| `pnpm test` in `packages/runner`, first re-run (load 31) | fail: another untouched test timed out (`hosted-repository-limits`) |
+| `pnpm test` in `packages/runner`, second re-run | pass, 322/322, 100% coverage |
+| `pnpm build && pnpm verify:pack` | pass ("Packaging verification passed") |
+
+The timeouts moved between unrelated tests from run to run and were caused by machine load, not
+by the merge. CI on the merged head is the clean check.
+
 ## Problems and deviations
 
 - `turbo` needs `pnpm` on `PATH`; used a shim in `.ai/tmp/bin297` calling `corepack pnpm`.
