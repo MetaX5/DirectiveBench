@@ -87,6 +87,29 @@ findings. One minor fixed in `fix(runner): document the Windows PATHEXT fallback
 are: the platform stub in the git-lookup test is process-wide inside its `try`/`finally`; an empty
 `PATHEXT` on Windows still finds no git (behaviour unchanged by this PR).
 
+## Base merge (`om-auto-fix-pr 296`, 2026-11-20)
+
+The PR went `CONFLICTING` after main took #283 to #300. `origin/main` (2cc16f1) was merged into
+the branch in a worktree under `.ai/tmp/`. Two conflicts, both additive:
+
+- `.ai/lessons.md`: this PR's Windows lesson and main's turbo/`pnpm` lesson were added at the
+  same place in the index. Both entries kept.
+- `packages/core/test/linear-time.test.ts`: the import list took `MIN_SAMPLE_MS`,
+  `MIN_SAMPLE_TICKS` and `minSampleMsOf` here and `MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK` on main
+  (#292, issue 266). All four imported; both sides' tests stay. `test-support/linear-time.ts`
+  merged cleanly: the tick-based minimum sample (this PR) and the relaxed bound without a thread
+  clock (main) are independent.
+
+`.github/workflows/ci.yml` merged cleanly: the `unit-windows` job sits beside main's jobs,
+including `oldest-node`, unchanged.
+
+| Check (macOS, Node 24.21, after the merge) | Result |
+|---|---|
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | ✅ |
+| `pnpm test` (first run, machine load average 52 on 10 cores from parallel agent gates) | ❌ 4 tests timed out at 5 s in web, runner and benchmark-engine, none in files this PR or the merge touched |
+| `pnpm test --continue --concurrency=2` (as CI runs it) | ✅ every package, 100% coverage in all seven |
+| `pnpm build`, `pnpm verify:pack` | ✅ |
+
 ## Problems and deviations
 
 - The issue's "Done when" is only partly met: three packages still fail on Windows and the job
