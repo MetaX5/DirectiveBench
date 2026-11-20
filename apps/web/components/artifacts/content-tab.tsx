@@ -97,7 +97,7 @@ export function ContentTab({
   };
 
   return (
-    <div className="grid gap-grid lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-grid lg:grid-cols-4">
       <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
