@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONFIG_LOCK_TIMEOUT_MS,
@@ -40,10 +40,11 @@ afterEach(() => {
 
 describe('resolveDataDir', () => {
   it('prefers the flag, then the environment variable', () => {
+    // resolve(): on Windows a rooted path gains the current drive (issue 160).
     expect(resolveDataDir({ flag: '/tmp/a', env: { DIRECTIVEBENCH_DATA_DIR: '/tmp/b' } })).toBe(
-      '/tmp/a',
+      resolve('/tmp/a'),
     );
-    expect(resolveDataDir({ env: { DIRECTIVEBENCH_DATA_DIR: '/tmp/b' } })).toBe('/tmp/b');
+    expect(resolveDataDir({ env: { DIRECTIVEBENCH_DATA_DIR: '/tmp/b' } })).toBe(resolve('/tmp/b'));
   });
 
   it('resolves relative overrides against the working directory', () => {
@@ -52,13 +53,13 @@ describe('resolveDataDir', () => {
 
   it('uses OS conventions', () => {
     expect(resolveDataDir({ env: {}, platform: 'linux', home: '/home/u' })).toBe(
-      '/home/u/.local/share/directivebench',
+      join('/home/u', '.local', 'share', 'directivebench'),
     );
     expect(resolveDataDir({ env: { XDG_DATA_HOME: '/x' }, platform: 'linux', home: '/h' })).toBe(
-      '/x/directivebench',
+      join('/x', 'directivebench'),
     );
     expect(resolveDataDir({ env: {}, platform: 'darwin', home: '/Users/u' })).toBe(
-      '/Users/u/Library/Application Support/directivebench',
+      join('/Users/u', 'Library', 'Application Support', 'directivebench'),
     );
   });
 
@@ -73,7 +74,7 @@ describe('resolveDataDir', () => {
 
   it('defaults to the process environment, platform and home directory', () => {
     vi.stubEnv('DIRECTIVEBENCH_DATA_DIR', '/tmp/from-env');
-    expect(resolveDataDir()).toBe('/tmp/from-env');
+    expect(resolveDataDir()).toBe(resolve('/tmp/from-env'));
 
     const env = { XDG_DATA_HOME: '/xdg', LOCALAPPDATA: '/appdata' };
     expect(resolveDataDir({ env })).toBe(

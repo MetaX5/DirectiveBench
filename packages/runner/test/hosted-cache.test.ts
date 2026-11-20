@@ -50,7 +50,7 @@ let logs: { level: 'info' | 'error'; message: string; fields: RunnerLogFields | 
 let reportedFailures: Set<string>;
 
 beforeEach(async () => {
-  base = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-hosted-cache-')));
+  base = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-hosted-cache-')));
   dataDir = join(base, 'data');
   mkdirSync(dataDir);
   handle = openDatabase(join(dataDir, 'directivebench.db'));

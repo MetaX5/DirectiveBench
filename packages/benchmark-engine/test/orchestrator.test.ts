@@ -411,7 +411,8 @@ describe('setup commands', () => {
     expect(candidate?.workspace).toBe(pins[0]);
     expect(candidate?.workspace).toMatchObject({
       path: expect.stringMatching(/candidate-1[/\\]workspace$/) as string,
-      canonical: realpathSync(candidate?.workspace.path as string),
+      // `.native` expands Windows 8.3 names (RUNNER~1) like the engine's realpath (issue 160).
+      canonical: realpathSync.native(candidate?.workspace.path as string),
     });
     expect(candidate?.scratchDir).toMatch(/candidate-1[/\\]agent$/);
     expect(scratch).toEqual([[], []]);

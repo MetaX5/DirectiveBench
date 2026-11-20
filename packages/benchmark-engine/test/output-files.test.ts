@@ -476,7 +476,14 @@ describe('captureOutputFiles: failures never throw (FR-123-09)', () => {
     symlinkSync(outside, join(ws.pin.path, 'a.txt'));
     expect(
       await capture(ws, { measured: { after, changes: diffManifests(ws.before, after) } }),
-    ).toEqual({ ok: false, reason: 'a.txt could not be read (ELOOP)' });
+    ).toEqual({
+      ok: false,
+      // Windows has no O_NOFOLLOW: the open follows the link and the identity check refuses it.
+      reason:
+        process.platform === 'win32'
+          ? 'a.txt is not the file the manifest listed'
+          : 'a.txt could not be read (ELOOP)',
+    });
   });
 
   it('fails when a directory on the path was replaced by a link', async () => {

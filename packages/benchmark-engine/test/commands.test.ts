@@ -60,7 +60,23 @@ describe('buildCommandEnv (environment allowlist)', () => {
 
 // Variables the operating system adds to every process it starts, whatever the parent passes.
 // macOS (CoreFoundation) sets __CF_USER_TEXT_ENCODING; it does not come from the parent's env.
-const OS_INJECTED_ENV = process.platform === 'darwin' ? ['__CF_USER_TEXT_ENCODING'] : [];
+// Variables the OS or libuv add to a child's explicit environment: macOS adds its text encoding;
+// on Windows libuv adds the variables a process needs to start (issue 160).
+const OS_INJECTED_ENV: Partial<Record<NodeJS.Platform, string[]>> = {
+  darwin: ['__CF_USER_TEXT_ENCODING'],
+  win32: [
+    'HOMEDRIVE',
+    'HOMEPATH',
+    'LOGONSERVER',
+    'SYSTEMDRIVE',
+    'SYSTEMROOT',
+    'TEMP',
+    'USERDOMAIN',
+    'USERNAME',
+    'USERPROFILE',
+    'WINDIR',
+  ],
+};
 
 describe('runCommand', () => {
   it('runs in the given working directory with exactly the given environment', async () => {
@@ -81,7 +97,8 @@ describe('runCommand', () => {
     const parsed = JSON.parse(result.stdout) as { cwd: string; names: string[]; onlyThis: string };
     expect(parsed.cwd).toBe(realpathSync(opts.cwd));
     // Only the explicit environment reaches the child; nothing is inherited from the parent.
-    const names = parsed.names.filter((name) => !OS_INJECTED_ENV.includes(name));
+    const injected = OS_INJECTED_ENV[process.platform] ?? [];
+    const names = parsed.names.filter((name) => !injected.includes(name));
     expect(names.sort()).toEqual(['ONLY_THIS', 'PATH']);
     expect(parsed.onlyThis).toBe('1');
     expect(result.command).toEqual(nodeScript(script));
@@ -309,6 +326,7 @@ describe('runCommand', () => {
     }
     const result = await pending;
     expect(result).toMatchObject({ timedOut: true, cancelled: false, exitCode: null });
-    expect(result.signal).toBe(process.platform === 'win32' ? null : 'SIGTERM');
+    // Node reports the signal it sent on Windows too, where it ends the process outright.
+    expect(result.signal).toBe('SIGTERM');
   });
 });

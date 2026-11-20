@@ -86,7 +86,9 @@ let remotes: string;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-hosted-limits-'));
-  remotes = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-hosted-limits-remotes-')));
+  remotes = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'directivebench-hosted-limits-remotes-')),
+  );
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);
 });

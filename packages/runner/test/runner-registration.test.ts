@@ -24,7 +24,7 @@ let sources: string;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-runner-registration-'));
-  sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-sources-')));
+  sources = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-sources-')));
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);
 });

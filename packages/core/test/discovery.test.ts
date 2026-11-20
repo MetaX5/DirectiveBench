@@ -219,18 +219,22 @@ describe('discoverArtifacts edge cases', () => {
     expect(artifacts[0]!.files[0]!.size).toBe(Buffer.byteLength(content));
   });
 
-  it('ignores entries that are neither files, directories nor links', async () => {
-    await write('skills/x/SKILL.md', SKILL);
-    // A FIFO, not a Unix socket: a socket path is limited to 104 bytes on macOS (108 on Linux)
-    // and a long TMPDIR exceeds it. mkfifo has no such limit and throws instead of hanging.
-    const fifo = join(root, 'skills/x/fifo');
-    execFileSync('mkfifo', [fifo]);
-    expect(lstatSync(fifo).isFIFO()).toBe(true);
-    const result = await discoverArtifacts(root);
-    expect(result.artifacts[0]!.files.map((file) => file.path)).toEqual(['SKILL.md']);
-    expect(result.artifacts[0]!.skipped).toEqual([]);
-    expect(result.scannedFiles).toBe(1);
-  });
+  // Windows has no FIFOs in the file system (issue 160).
+  it.skipIf(process.platform === 'win32')(
+    'ignores entries that are neither files, directories nor links',
+    async () => {
+      await write('skills/x/SKILL.md', SKILL);
+      // A FIFO, not a Unix socket: a socket path is limited to 104 bytes on macOS (108 on Linux)
+      // and a long TMPDIR exceeds it. mkfifo has no such limit and throws instead of hanging.
+      const fifo = join(root, 'skills/x/fifo');
+      execFileSync('mkfifo', [fifo]);
+      expect(lstatSync(fifo).isFIFO()).toBe(true);
+      const result = await discoverArtifacts(root);
+      expect(result.artifacts[0]!.files.map((file) => file.path)).toEqual(['SKILL.md']);
+      expect(result.artifacts[0]!.skipped).toEqual([]);
+      expect(result.scannedFiles).toBe(1);
+    },
+  );
 
   it('does not follow a symlinked directory', async () => {
     await mkdir(join(outside, 'skills/evil'), { recursive: true });
@@ -303,8 +307,12 @@ describe('discoverArtifacts skipDirectories (user-level folders, D05)', () => {
   });
 });
 
+// chmod 000 does not stop Windows from listing a directory, so these run on Linux and macOS only
+// (issue 160).
+const unixPermissions = it.skipIf(process.platform === 'win32');
+
 describe('discoverArtifacts robustness', () => {
-  it('reports an unreadable subdirectory as an error and scans the rest', async () => {
+  unixPermissions('reports an unreadable subdirectory as an error and scans the rest', async () => {
     await write('AGENTS.md', '# Rules\n');
     await write('locked/CLAUDE.md', '# Hidden\n');
     await write('z/CLAUDE.md', '# Visible\n');
@@ -328,100 +336,109 @@ describe('discoverArtifacts robustness', () => {
     }
   });
 
-  it('reports a skill with an unreadable directory inside it as an error, not a partial artifact', async () => {
-    await write('skills/x/SKILL.md', SKILL);
-    await write('skills/x/notes.md', '# Notes\n');
-    await write('skills/x/references/a/api.md', '# API\n');
-    await write('skills/x/references/b/cli.md', '# CLI\n');
-    await write('skills/y/SKILL.md', SKILL);
-    await chmod(join(root, 'skills/x/references/b'), 0o000);
-    await chmod(join(root, 'skills/x/references/a'), 0o000);
-    try {
-      const result = await discoverArtifacts(root);
-      // The readable rest of x (SKILL.md, notes.md) is not returned as a smaller version of x.
-      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
-        'skills/y/SKILL.md',
-      ]);
-      // One error for the skill, naming the first unreadable directory by path.
-      expect(result.errors).toEqual([
-        {
-          path: 'skills/x/SKILL.md',
-          code: 'read-failed',
-          message:
-            'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned (and 1 more directory)',
-        },
-      ]);
-      // The folded directories stay unobserved (SPEC-125 FR-125-03), as does the skill's error.
-      expect(result.unobserved).toEqual([
-        'skills/x/SKILL.md',
-        'skills/x/references/a',
-        'skills/x/references/b',
-      ]);
-    } finally {
-      await chmod(join(root, 'skills/x/references/a'), 0o755);
-      await chmod(join(root, 'skills/x/references/b'), 0o755);
-    }
-  });
+  unixPermissions(
+    'reports a skill with an unreadable directory inside it as an error, not a partial artifact',
+    async () => {
+      await write('skills/x/SKILL.md', SKILL);
+      await write('skills/x/notes.md', '# Notes\n');
+      await write('skills/x/references/a/api.md', '# API\n');
+      await write('skills/x/references/b/cli.md', '# CLI\n');
+      await write('skills/y/SKILL.md', SKILL);
+      await chmod(join(root, 'skills/x/references/b'), 0o000);
+      await chmod(join(root, 'skills/x/references/a'), 0o000);
+      try {
+        const result = await discoverArtifacts(root);
+        // The readable rest of x (SKILL.md, notes.md) is not returned as a smaller version of x.
+        expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+          'skills/y/SKILL.md',
+        ]);
+        // One error for the skill, naming the first unreadable directory by path.
+        expect(result.errors).toEqual([
+          {
+            path: 'skills/x/SKILL.md',
+            code: 'read-failed',
+            message:
+              'Skill skills/x/SKILL.md is incomplete and was not discovered. Cannot read directory skills/x/references/a (EACCES); its files were not scanned (and 1 more directory)',
+          },
+        ]);
+        // The folded directories stay unobserved (SPEC-125 FR-125-03), as does the skill's error.
+        expect(result.unobserved).toEqual([
+          'skills/x/SKILL.md',
+          'skills/x/references/a',
+          'skills/x/references/b',
+        ]);
+      } finally {
+        await chmod(join(root, 'skills/x/references/a'), 0o755);
+        await chmod(join(root, 'skills/x/references/b'), 0o755);
+      }
+    },
+  );
 
-  it('charges an unreadable directory to the deepest skill containing it only', async () => {
-    await write('skills/outer/SKILL.md', SKILL);
-    await write('skills/outer/inner/SKILL.md', SKILL);
-    await write('skills/outer/inner/locked/a.md', 'a');
-    await write('SKILL.md', SKILL);
-    const rootLocked = ['other/locked', 'other/locked-2', 'other/locked-3'];
-    for (const dir of rootLocked) await write(`${dir}/b.md`, 'b');
-    // With a root SKILL.md, every directory outside a deeper skill belongs to the root skill.
-    await chmod(join(root, 'skills/outer/inner/locked'), 0o000);
-    for (const dir of rootLocked) await chmod(join(root, dir), 0o000);
-    try {
-      const result = await discoverArtifacts(root);
-      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
-        'skills/outer/SKILL.md',
-      ]);
-      expect(result.errors.map((error) => [error.path, error.code])).toEqual([
-        ['SKILL.md', 'read-failed'],
-        ['skills/outer/inner/SKILL.md', 'read-failed'],
-      ]);
-      // The first unreadable directory by path is named; the others are counted.
-      expect(result.errors[0]?.message).toBe(
-        'Skill SKILL.md is incomplete and was not discovered. Cannot read directory other/locked (EACCES); its files were not scanned (and 2 more directories)',
-      );
-      // A root SKILL.md with unreadable subdirectories: each of them and both errors, sorted and
-      // without duplicates.
-      expect(result.unobserved).toEqual([
-        'SKILL.md',
-        'other/locked',
-        'other/locked-2',
-        'other/locked-3',
-        'skills/outer/inner/SKILL.md',
-        'skills/outer/inner/locked',
-      ]);
-    } finally {
-      await chmod(join(root, 'skills/outer/inner/locked'), 0o755);
-      for (const dir of rootLocked) await chmod(join(root, dir), 0o755);
-    }
-  });
+  unixPermissions(
+    'charges an unreadable directory to the deepest skill containing it only',
+    async () => {
+      await write('skills/outer/SKILL.md', SKILL);
+      await write('skills/outer/inner/SKILL.md', SKILL);
+      await write('skills/outer/inner/locked/a.md', 'a');
+      await write('SKILL.md', SKILL);
+      const rootLocked = ['other/locked', 'other/locked-2', 'other/locked-3'];
+      for (const dir of rootLocked) await write(`${dir}/b.md`, 'b');
+      // With a root SKILL.md, every directory outside a deeper skill belongs to the root skill.
+      await chmod(join(root, 'skills/outer/inner/locked'), 0o000);
+      for (const dir of rootLocked) await chmod(join(root, dir), 0o000);
+      try {
+        const result = await discoverArtifacts(root);
+        expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual([
+          'skills/outer/SKILL.md',
+        ]);
+        expect(result.errors.map((error) => [error.path, error.code])).toEqual([
+          ['SKILL.md', 'read-failed'],
+          ['skills/outer/inner/SKILL.md', 'read-failed'],
+        ]);
+        // The first unreadable directory by path is named; the others are counted.
+        expect(result.errors[0]?.message).toBe(
+          'Skill SKILL.md is incomplete and was not discovered. Cannot read directory other/locked (EACCES); its files were not scanned (and 2 more directories)',
+        );
+        // A root SKILL.md with unreadable subdirectories: each of them and both errors, sorted and
+        // without duplicates.
+        expect(result.unobserved).toEqual([
+          'SKILL.md',
+          'other/locked',
+          'other/locked-2',
+          'other/locked-3',
+          'skills/outer/inner/SKILL.md',
+          'skills/outer/inner/locked',
+        ]);
+      } finally {
+        await chmod(join(root, 'skills/outer/inner/locked'), 0o755);
+        for (const dir of rootLocked) await chmod(join(root, dir), 0o755);
+      }
+    },
+  );
 
-  it('keeps an unreadable directory that may hold skills as an error of its own', async () => {
-    await write('.agents/skills/pdf/SKILL.md', SKILL);
-    await write('AGENTS.md', '# Rules\n');
-    await chmod(join(root, '.agents/skills'), 0o000);
-    try {
-      const result = await discoverArtifacts(root);
-      expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual(['AGENTS.md']);
-      expect(result.errors).toEqual([
-        {
-          path: '.agents/skills',
-          code: 'read-failed',
-          message: 'Cannot read directory .agents/skills (EACCES); its files were not scanned',
-        },
-      ]);
-    } finally {
-      await chmod(join(root, '.agents/skills'), 0o755);
-    }
-  });
+  unixPermissions(
+    'keeps an unreadable directory that may hold skills as an error of its own',
+    async () => {
+      await write('.agents/skills/pdf/SKILL.md', SKILL);
+      await write('AGENTS.md', '# Rules\n');
+      await chmod(join(root, '.agents/skills'), 0o000);
+      try {
+        const result = await discoverArtifacts(root);
+        expect(result.artifacts.map((artifact) => artifact.primaryPath)).toEqual(['AGENTS.md']);
+        expect(result.errors).toEqual([
+          {
+            path: '.agents/skills',
+            code: 'read-failed',
+            message: 'Cannot read directory .agents/skills (EACCES); its files were not scanned',
+          },
+        ]);
+      } finally {
+        await chmod(join(root, '.agents/skills'), 0o755);
+      }
+    },
+  );
 
-  it('sorts directory and artifact errors together by path', async () => {
+  unixPermissions('sorts directory and artifact errors together by path', async () => {
     await write('a/AGENTS.md', '\0binary');
     await write('b/CLAUDE.md', '# Hidden\n');
     await write('c/AGENTS.md', '\0binary');
@@ -438,7 +455,7 @@ describe('discoverArtifacts robustness', () => {
     }
   });
 
-  it('rethrows when the root itself cannot be listed', async () => {
+  unixPermissions('rethrows when the root itself cannot be listed', async () => {
     await chmod(root, 0o000);
     try {
       await expect(discoverArtifacts(root)).rejects.toThrow(/EACCES/);
