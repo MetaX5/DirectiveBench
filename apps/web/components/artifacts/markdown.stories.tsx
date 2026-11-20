@@ -65,6 +65,33 @@ export const UntrustedContent: Story = {
   },
 };
 
+/**
+ * In the Content tab a relative link to a file of the same version opens it there (issue 55);
+ * a link that escapes the artifact or names a missing file stays inert.
+ */
+export const SiblingLinks: Story = {
+  args: {
+    source:
+      'See [the API reference](references/api.md), [a missing file](references/missing.md) and [a file outside](../other/SKILL.md).',
+    resolveLink: (destination: string) =>
+      destination === 'references/api.md'
+        ? '/artifacts/art_demo?tab=content&file=references%2Fapi.md'
+        : null,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('link', { name: 'the API reference' })).toHaveAttribute(
+      'href',
+      '/artifacts/art_demo?tab=content&file=references%2Fapi.md',
+    );
+    await expect(canvas.getByRole('link', { name: 'the API reference' })).not.toHaveAttribute(
+      'target',
+    );
+    await expect(canvas.queryByRole('link', { name: 'a missing file' })).toBeNull();
+    await expect(canvas.queryByRole('link', { name: 'a file outside' })).toBeNull();
+    await expect(canvasElement.querySelectorAll('[data-inert-link]')).toHaveLength(2);
+  },
+};
+
 /** Empty file: nothing rendered. */
 export const Empty: Story = { args: { source: '' } };
 
