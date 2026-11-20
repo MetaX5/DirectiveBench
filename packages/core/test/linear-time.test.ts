@@ -9,6 +9,7 @@ import {
   LINEAR_TIME_TEST_TIMEOUT_MS,
   linearTimeRatio,
   MAX_LINEAR_RATIO,
+  MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK,
   textBaseline,
 } from '../../../test-support/linear-time';
 
@@ -83,7 +84,10 @@ describe('expectLinearTime', () => {
         baseline: textBaseline,
         size: 16_000,
       };
-      expect(await linearTimeRatio(quadratic)).toBeGreaterThan(MAX_LINEAR_RATIO);
+      // Above the relaxed bound too, so quadratic code fails on Node.js before 23.9 (issue #266).
+      expect(await linearTimeRatio(quadratic)).toBeGreaterThan(
+        MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK,
+      );
       await expect(expectLinearTime(quadratic, 'quadratic')).rejects.toThrow(/quadratic/);
     },
     LINEAR_TIME_TEST_TIMEOUT_MS,
