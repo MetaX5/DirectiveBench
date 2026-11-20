@@ -7,6 +7,10 @@ import { GIT_MAX_STDERR_BYTES, runGitProcess, type GitProcessOptions } from '../
 // `/bin/sh -c <script>` stands in for git: the runner treats both as an argv program.
 const SH = '/bin/sh';
 const posixOnly = it.skipIf(process.platform === 'win32');
+/** Above the readiness wait plus the kill check below, for a loaded runner. */
+const GIT_KILL_TEST_TIMEOUT_MS = 20_000;
+/** git's child outlives every bound of the test unless it is killed. */
+const CHILD_SLEEP_S = 30;
 
 function options(overrides: Partial<GitProcessOptions> = {}): GitProcessOptions {
   return {
@@ -99,6 +103,43 @@ describe('runGitProcess', () => {
     );
     expect(result.timedOut).toBe(true);
   });
+
+  posixOnly(
+    'kills a child that git forked while its group was killed, once git is gone (issue 297)',
+    async () => {
+      // On macOS a process forked while `kill(-pgid, SIGKILL)` runs can miss the signal and keep
+      // the pipes open, so `close` waited for it. Stand in for that race: the first group SIGKILL
+      // reaches only git itself and misses its child.
+      const dir = mkdtempSync(join(tmpdir(), 'directivebench-git-process-'));
+      try {
+        const ready = join(dir, 'ready');
+        const realKill = process.kill.bind(process);
+        let missed = false;
+        vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+          if (signal === 'SIGKILL' && pid < 0 && !missed) {
+            missed = true;
+            return realKill(-pid, signal);
+          }
+          return realKill(pid, signal);
+        });
+        const controller = new AbortController();
+        const pending = runGitProcess(
+          SH,
+          ['-c', `trap "" TERM; sleep ${CHILD_SLEEP_S} & : > "${ready}"; wait`],
+          options({ signal: controller.signal }),
+        );
+        await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 5000 });
+        controller.abort();
+        const result = await pending;
+        expect(missed).toBe(true);
+        // Before the fix, `close` waited for the child's whole sleep and the test timed out.
+        expect(result).toMatchObject({ cancelled: true, exitCode: null });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    GIT_KILL_TEST_TIMEOUT_MS,
+  );
 
   posixOnly('kills git when the job is cancelled', async () => {
     const controller = new AbortController();
@@ -226,8 +267,9 @@ describe('runGitProcess', () => {
       throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
     });
     const result = await runGitProcess(SH, ['-c', 'sleep 5'], options({ timeoutMs: 20 }));
-    // The SIGTERM failed; the SIGKILL after the grace period stopped git.
-    expect(kill).toHaveBeenCalledTimes(2);
+    // The SIGTERM failed; the SIGKILL after the grace period stopped git, and once git exited
+    // its group was killed again (issue 297), which finds the group gone.
+    expect(kill.mock.calls.map(([, signal]) => signal)).toEqual(['SIGTERM', 'SIGKILL', 'SIGKILL']);
     expect(result.timedOut).toBe(true);
   });
 

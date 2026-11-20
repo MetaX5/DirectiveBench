@@ -122,3 +122,9 @@ fixed limit, is flaky on shared runners, where everything can run 10–20× slow
   the test's: every test that starts a child process gets a named timeout
   (`FAKE_CLAUDE_TEST_TIMEOUT_MS`, 30 s) longer than its readiness wait, so a fake that never
   starts still fails with the readiness message, not a generic timeout.
+- Wait for the event of work that runs alongside, not before, the thing you waited for (update
+  2026-11-19, issue 297). `runner-cache-sweep.test.ts` waited for a job to end and then asserted
+  the sweep's `cache-sweep-failed` log at once; `LocalRunner.start()` starts the sweep without
+  delaying the first job, so on a loaded Linux runner the job ended first. A 200 ms delay
+  injected before the sweep's `realpath` reproduces the CI assertion exactly; `vi.waitFor` on the
+  log fixes it.

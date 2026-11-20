@@ -215,10 +215,14 @@ describe('the runner sweeps orphaned caches (SPEC-105 FR-105-19, issue 59 J2)', 
     const runner = createRunner();
     await runner.start();
     await vi.waitFor(async () => expect((await getJob(handle.db, quick))?.status).toBe('failed'));
-    expect(logs).toContainEqual({
-      level: 'error',
-      fields: { event: 'cache-sweep-failed', code: 'ENOTDIR' },
-    });
+    // The sweep runs alongside the job, not before it: on a loaded runner its error can come
+    // after the job ended (issue 297), so wait for the event instead of assuming an order.
+    await vi.waitFor(() =>
+      expect(logs).toContainEqual({
+        level: 'error',
+        fields: { event: 'cache-sweep-failed', code: 'ENOTDIR' },
+      }),
+    );
   });
 });
 
