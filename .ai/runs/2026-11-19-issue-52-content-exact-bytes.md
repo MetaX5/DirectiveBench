@@ -84,6 +84,35 @@ Not verified: switching versions with Download (the fixtures have one version; t
 tested), a real screen reader, hover-state contrast of the new buttons, Safari/Firefox clipboard
 behaviour, the 320px regression red-first (the QA screenshots of the old build are the evidence).
 
+## Merge with main (2026-11-20, `om-auto-fix-pr 294`)
+
+`origin/main` (with PR #293, relative links in the Content tab, issue 55, and PR #300, no sideways
+scroll at 320px, issue 295) merged into the branch. Two conflicts, both additive:
+
+- `apps/web/components/artifacts/content-tab.tsx`: imports only. Kept this PR's
+  `artifactFileHref` import and main's `resolveSiblingLink` added to the `@/lib/markdown` import.
+  The Raw card keeps the Download/Copy row; main's 320px fix (outside this hunk) auto-merged.
+- `.ai/lessons.md`: both new index lines kept (browser QA downloads; turbo needs `pnpm` on PATH).
+
+Auto-merged without conflict and checked by hand: `.ai/specs/2026-10-14-artifact-registry.md`
+(FR-101-18 now carries issue 55; the issue #52 rows, acceptance item and status entry intact,
+no duplicate FR ids).
+
+| Command (merged tree, Node 24.21) | Result |
+| --- | --- |
+| `pnpm format:check`, `pnpm lint`, `pnpm typecheck` | pass |
+| `pnpm test` | first run: two timeouts in `apps/cli` and `packages/runner` (5 s test timeout, machine load average 75 from parallel agents); `pnpm test --continue --concurrency=1`: all pass, 100% coverage everywhere (web 686 tests) |
+| `pnpm build && pnpm verify:pack` | pass |
+| `pnpm test:e2e` | 221 passed (includes `content-download.spec.ts` and main's `content-tab-narrow.spec.ts`) |
+| `pnpm test:storybook` | 354 passed |
+
+Real app (`test-env-up.sh` on port 4494, a seeded three-file skill with a CRLF guide and an
+unbroken 320-character line): a relative link opened the sibling file and the Download href
+followed it; `../x.md` above the root stayed inert; the downloaded guide equals the stored
+string (CRLF kept, `text/plain; charset=utf-8`, `attachment`, `nosniff`); at 320px in light and
+dark the page did not scroll sideways (`scrollWidth` 320), the raw box ended at 288px and Copy said
+"Copied."; no console errors. Environment stopped and its data removed.
+
 ## Problems and deviations
 
 - Temp directories inside a git work tree make the e2e register the work tree as a Local Git
