@@ -18,7 +18,7 @@ import {
   type ContentSelection,
   type FileTreeNode,
 } from '@/lib/artifacts';
-import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath } from '@/lib/markdown';
+import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath, resolveSiblingLink } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 
 type Version = ArtifactDetail['versions'][number];
@@ -87,9 +87,17 @@ export function ContentTab({
   const markdown = isMarkdownPath(file.path);
   const tooLarge = file.content.length > MAX_RENDERED_MARKDOWN_CHARS;
   const crNotice = rawViewNotice(file.content);
+  const paths = new Set(version.files.map((f) => f.path));
+  // A relative link to a file of this version opens it here (issue 55); others stay inert.
+  const resolveLink = (destination: string): string | null => {
+    const path = resolveSiblingLink(file.path, destination, paths);
+    return path === null
+      ? null
+      : artifactHref(artifactId, { tab: 'content', version: version.version, file: path });
+  };
 
   return (
-    <div className="grid gap-grid lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-grid lg:grid-cols-4">
       <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
@@ -162,7 +170,7 @@ export function ContentTab({
                   shows all of it.
                 </p>
               ) : (
-                <Markdown source={file.content} />
+                <Markdown source={file.content} resolveLink={resolveLink} />
               )}
             </div>
           </CardContent>

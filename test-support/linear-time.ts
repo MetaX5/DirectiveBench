@@ -45,6 +45,15 @@ export const LINEAR_SIZE_STEP = 32;
  */
 export const MAX_LINEAR_RATIO = 3.5;
 
+/**
+ * Bound for synchronous code where Node.js has no per-thread CPU clock (before 23.9, so on the
+ * oldest supported Node, 22.16): the process-wide fallback also bills V8's helper threads, and
+ * a linear parser of allocation-heavy input measured up to 6.3 there (2.5 to 6.3 on Node 22.22
+ * with the process clock, 1.7 to 1.9 with the thread clock; issue #266). This bound still fails
+ * quadratic code (30 and above); N^1.5 growth is caught by `MAX_LINEAR_RATIO` on Node 24 (CI).
+ */
+export const MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK = 12;
+
 /** Fastest of this many interleaved samples per series. */
 export const LINEAR_TIME_ROUNDS = 3;
 
@@ -106,10 +115,10 @@ type Clock = () => number;
  * samples of large inputs. `process.threadCpuUsage` exists from Node.js 23.9 (CI runs 24); older
  * versions fall back to the process-wide figure.
  */
-const threadCpuMs: Clock =
-  typeof process.threadCpuUsage === 'function'
-    ? () => cpuMs(process.threadCpuUsage())
-    : () => cpuMs(process.cpuUsage());
+const hasThreadClock = typeof process.threadCpuUsage === 'function';
+const threadCpuMs: Clock = hasThreadClock
+  ? () => cpuMs(process.threadCpuUsage())
+  : () => cpuMs(process.cpuUsage());
 
 /**
  * CPU time of the whole process, in milliseconds, for asynchronous code: file-system work runs on
@@ -151,6 +160,12 @@ async function sample<T>(clock: Clock, fn: (input: T) => unknown, input: T): Pro
 
 /** Growth of `run` from `size ÷ LINEAR_SIZE_STEP` to `size`, divided by the baseline's growth. */
 export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<number> {
+  return (await measureLinearTime(test)).ratio;
+}
+
+async function measureLinearTime<T>(
+  test: LinearTimeCase<T>,
+): Promise<{ ratio: number; bound: number }> {
   // A fractional small size would reach the builder (`'x'.repeat` truncates it, `new Array` throws).
   if (!Number.isInteger(test.size / LINEAR_SIZE_STEP)) {
     throw new Error(
@@ -174,7 +189,8 @@ export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<numbe
   // are probed: an asynchronous baseline measured with the thread clock looked constant (review
   // of PR #121).
   const probes = [test.run(small), test.baseline(small)];
-  const clock = probes.some((probe) => probe instanceof Promise) ? processCpuMs : threadCpuMs;
+  const asynchronous = probes.some((probe) => probe instanceof Promise);
+  const clock = asynchronous ? processCpuMs : threadCpuMs;
   await Promise.all(probes);
   // One warm-up round, discarded: the first calls run before the JIT has optimised the code,
   // which made the first ratio of a process unreliable (a quadratic function measured ~2.5).
@@ -186,10 +202,19 @@ export async function linearTimeRatio<T>(test: LinearTimeCase<T>): Promise<numbe
     }
   }
   const [runSmall, runLarge, baseSmall, baseLarge] = fastest as [number, number, number, number];
-  return runLarge / runSmall / (baseLarge / baseSmall);
+  return {
+    ratio: runLarge / runSmall / (baseLarge / baseSmall),
+    // Asynchronous code is measured with the process clock on every Node.js version.
+    bound:
+      asynchronous || hasThreadClock ? MAX_LINEAR_RATIO : MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK,
+  };
 }
 
-/** Asserts that `run` grows like the linear baseline (normalised ratio below `MAX_LINEAR_RATIO`). */
+/**
+ * Asserts that `run` grows like the linear baseline: normalised ratio below `MAX_LINEAR_RATIO`,
+ * or `MAX_LINEAR_RATIO_WITHOUT_THREAD_CLOCK` for synchronous code on Node.js before 23.9.
+ */
 export async function expectLinearTime<T>(test: LinearTimeCase<T>, label?: string): Promise<void> {
-  expect(await linearTimeRatio(test), label).toBeLessThan(MAX_LINEAR_RATIO);
+  const { ratio, bound } = await measureLinearTime(test);
+  expect(ratio, label).toBeLessThan(bound);
 }

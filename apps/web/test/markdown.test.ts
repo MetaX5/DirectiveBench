@@ -4,6 +4,7 @@ import {
   isMarkdownPath,
   parseInline,
   parseMarkdown,
+  resolveSiblingLink,
   safeHref,
   type Block,
   type Inline,
@@ -45,6 +46,81 @@ describe('safeHref', () => {
     expect(safeHref('/artifacts')).toBeNull();
     expect(safeHref('#section')).toBeNull();
     expect(safeHref('')).toBeNull();
+  });
+});
+
+describe('resolveSiblingLink (issue 55)', () => {
+  const paths = new Set([
+    'SKILL.md',
+    'references/api.md',
+    'references/deep/notes.md',
+    'references/my file.md',
+    'scripts/setup.sh',
+  ]);
+  const resolve = (from: string, destination: string) =>
+    resolveSiblingLink(from, destination, paths);
+
+  it('resolves a relative link to a file of the same version against the linking file', () => {
+    expect(resolve('SKILL.md', 'references/api.md')).toBe('references/api.md');
+    expect(resolve('SKILL.md', './references/api.md')).toBe('references/api.md');
+    expect(resolve('SKILL.md', 'references//./deep/notes.md')).toBe('references/deep/notes.md');
+    expect(resolve('references/api.md', 'deep/notes.md')).toBe('references/deep/notes.md');
+    expect(resolve('references/deep/notes.md', '../api.md')).toBe('references/api.md');
+    expect(resolve('references/deep/notes.md', '../../SKILL.md')).toBe('SKILL.md');
+    expect(resolve('SKILL.md', 'scripts/../references/api.md')).toBe('references/api.md');
+  });
+
+  it('drops a fragment and percent-decodes the path', () => {
+    expect(resolve('SKILL.md', 'references/api.md#usage')).toBe('references/api.md');
+    expect(resolve('SKILL.md', 'references/my%20file.md')).toBe('references/my file.md');
+    expect(resolve('SKILL.md', 'references/my file.md')).toBe('references/my file.md');
+    expect(resolve('SKILL.md', 'references%2Fapi.md')).toBe('references/api.md');
+  });
+
+  it('never follows a link that escapes the root, even when it would come back in', () => {
+    expect(resolve('SKILL.md', '../SKILL.md')).toBeNull();
+    expect(resolve('SKILL.md', '../outside/SKILL.md')).toBeNull();
+    expect(resolve('references/api.md', '../../SKILL.md')).toBeNull();
+    expect(resolve('SKILL.md', '%2e%2e/SKILL.md')).toBeNull();
+    expect(resolve('SKILL.md', '..%2FSKILL.md')).toBeNull();
+  });
+
+  it('never follows absolute paths, URLs, queries, backslashes or control characters', () => {
+    for (const destination of [
+      '/SKILL.md',
+      '//example.com/SKILL.md',
+      '%2FSKILL.md',
+      'file:SKILL.md',
+      'javascript:alert(1)',
+      'https://example.com/references/api.md',
+      'C:references/api.md',
+      'references/api.md?raw=1',
+      'references\\api.md',
+      'references%5Capi.md',
+      'references/api.md%00',
+      'references/\tapi.md',
+      'references/%7Fapi.md',
+      'references/%E0%A4%A.md',
+    ]) {
+      expect(resolve('SKILL.md', destination), destination).toBeNull();
+    }
+  });
+
+  it('keeps links to directories, missing files and the bare fragment inert', () => {
+    for (const destination of [
+      '',
+      '#usage',
+      '.',
+      './',
+      'references',
+      'references/',
+      'references/.',
+      'references/deep/..',
+      'references/API.md',
+      'references/missing.md',
+    ]) {
+      expect(resolve('SKILL.md', destination), destination).toBeNull();
+    }
   });
 });
 

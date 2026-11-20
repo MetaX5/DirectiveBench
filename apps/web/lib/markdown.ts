@@ -55,7 +55,8 @@ const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
  * The URL a link may point to, or null to render it inert. Only absolute `http:`, `https:` and
  * `mailto:` URLs are allowed; the WHATWG URL parser strips the tabs, newlines and leading control
  * characters a browser would, so `java\tscript:` is recognised as `javascript:` and rejected.
- * Relative links are inert too: they are relative to the artifact's repository, not to this app.
+ * Relative links are inert too: they are relative to the artifact's repository, not to this app;
+ * the Content tab opens the ones naming a sibling file itself (`resolveSiblingLink`, issue 55).
  */
 export function safeHref(destination: string): string | null {
   let url: URL;
@@ -65,6 +66,50 @@ export function safeHref(destination: string): string | null {
     return null;
   }
   return SAFE_LINK_PROTOCOLS.has(url.protocol) ? url.href : null;
+}
+
+const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+// eslint-disable-next-line no-control-regex -- control characters are exactly what this rejects
+const CONTROL_OR_BACKSLASH = /[\u0000-\u001f\u007f\\]/;
+
+/**
+ * The manifest path a relative link opens in the Content tab, or null to keep it inert (issue 55,
+ * FR-101-18). The decision is lexical, on the stored manifest only: the destination (without its
+ * `#fragment`) must have no URL scheme, query, backslash or control character, must not be
+ * absolute and must percent-decode; its segments are resolved against the linking file's
+ * directory, a `..` above the artifact's root makes the link inert (never clamped), and the result
+ * must be a file of `paths` exactly. Callers build the href themselves, so the destination never
+ * reaches the page as a URL.
+ */
+export function resolveSiblingLink(
+  fromPath: string,
+  destination: string,
+  paths: ReadonlySet<string>,
+): string | null {
+  const hash = destination.indexOf('#');
+  const target = hash >= 0 ? destination.slice(0, hash) : destination;
+  if (URL_SCHEME.test(target) || target.includes('?')) return null;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    return null; // malformed percent-encoding: the link stays inert
+  }
+  if (decoded.startsWith('/') || CONTROL_OR_BACKSLASH.test(decoded)) return null;
+  const segments = decoded.split('/');
+  // A link ending in `/`, `.` or `..` names a directory, never a file.
+  if (['', '.', '..'].includes(segments.at(-1) as string)) return null;
+  const resolved = fromPath.split('/').slice(0, -1);
+  for (const segment of segments) {
+    if (segment === '..') {
+      if (resolved.length === 0) return null; // escapes the artifact's root
+      resolved.pop();
+    } else if (segment !== '' && segment !== '.') {
+      resolved.push(segment);
+    }
+  }
+  const path = resolved.join('/');
+  return paths.has(path) ? path : null;
 }
 
 export function isMarkdownPath(path: string): boolean {
