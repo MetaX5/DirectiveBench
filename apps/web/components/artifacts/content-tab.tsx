@@ -1,7 +1,9 @@
 import type { ArtifactDetail } from '@directivebench/database';
-import { FileText, Folder } from 'lucide-react';
+import { Download, FileText, Folder } from 'lucide-react';
 import Link from 'next/link';
+import { CopyFileButton } from '@/components/artifacts/copy-file-button';
 import { Markdown } from '@/components/artifacts/markdown';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -18,6 +20,7 @@ import {
   type ContentSelection,
   type FileTreeNode,
 } from '@/lib/artifacts';
+import { artifactFileHref } from '@/lib/artifact-download';
 import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath, resolveSiblingLink } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 
@@ -180,10 +183,28 @@ export function ContentTab({
             <CardTitle>Raw</CardTitle>
             <CardDescription>
               The stored content, exactly as found in the repository. Raw HTML and scripts are shown
-              as text.
+              as text. Download and Copy give it byte for byte.
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-2 flex flex-wrap items-center gap-inline">
+              <Button asChild variant="outline" size="xs">
+                <a
+                  href={artifactFileHref(artifactId, version.version, file.path)}
+                  download
+                  aria-label={`Download ${file.path}`}
+                >
+                  <Download aria-hidden data-icon="inline-start" />
+                  Download
+                </a>
+              </Button>
+              {/* Keyed by file: another file starts with an empty status line. */}
+              <CopyFileButton
+                key={`${version.id}:${file.path}`}
+                content={file.content}
+                path={file.path}
+              />
+            </div>
             {crNotice ? (
               <p className="mb-2 text-ui text-muted-foreground" data-testid="raw-notice">
                 {crNotice}
