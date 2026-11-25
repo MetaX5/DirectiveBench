@@ -1,7 +1,9 @@
 import type { ArtifactDetail } from '@directivebench/database';
-import { FileText, Folder } from 'lucide-react';
+import { Download, FileText, Folder } from 'lucide-react';
 import Link from 'next/link';
+import { CopyFileButton } from '@/components/artifacts/copy-file-button';
 import { Markdown } from '@/components/artifacts/markdown';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -18,7 +20,8 @@ import {
   type ContentSelection,
   type FileTreeNode,
 } from '@/lib/artifacts';
-import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath } from '@/lib/markdown';
+import { artifactFileHref } from '@/lib/artifact-download';
+import { MAX_RENDERED_MARKDOWN_CHARS, isMarkdownPath, resolveSiblingLink } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 
 type Version = ArtifactDetail['versions'][number];
@@ -87,9 +90,17 @@ export function ContentTab({
   const markdown = isMarkdownPath(file.path);
   const tooLarge = file.content.length > MAX_RENDERED_MARKDOWN_CHARS;
   const crNotice = rawViewNotice(file.content);
+  const paths = new Set(version.files.map((f) => f.path));
+  // A relative link to a file of this version opens it here (issue 55); others stay inert.
+  const resolveLink = (destination: string): string | null => {
+    const path = resolveSiblingLink(file.path, destination, paths);
+    return path === null
+      ? null
+      : artifactHref(artifactId, { tab: 'content', version: version.version, file: path });
+  };
 
   return (
-    <div className="grid gap-grid lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-grid lg:grid-cols-4">
       <div className="flex flex-col gap-grid">
         <Card>
           <CardHeader>
@@ -162,7 +173,7 @@ export function ContentTab({
                   shows all of it.
                 </p>
               ) : (
-                <Markdown source={file.content} />
+                <Markdown source={file.content} resolveLink={resolveLink} />
               )}
             </div>
           </CardContent>
@@ -172,10 +183,28 @@ export function ContentTab({
             <CardTitle>Raw</CardTitle>
             <CardDescription>
               The stored content, exactly as found in the repository. Raw HTML and scripts are shown
-              as text.
+              as text. Download and Copy give it byte for byte.
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-2 flex flex-wrap items-center gap-inline">
+              <Button asChild variant="outline" size="xs">
+                <a
+                  href={artifactFileHref(artifactId, version.version, file.path)}
+                  download
+                  aria-label={`Download ${file.path}`}
+                >
+                  <Download aria-hidden data-icon="inline-start" />
+                  Download
+                </a>
+              </Button>
+              {/* Keyed by file: another file starts with an empty status line. */}
+              <CopyFileButton
+                key={`${version.id}:${file.path}`}
+                content={file.content}
+                path={file.path}
+              />
+            </div>
             {crNotice ? (
               <p className="mb-2 text-ui text-muted-foreground" data-testid="raw-notice">
                 {crNotice}

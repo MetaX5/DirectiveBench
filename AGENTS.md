@@ -128,6 +128,10 @@ These rules are not optional. A task is not done until the applicable steps are 
   directories, data directories, servers it started) before it finishes, also after a failure,
   and a subagent brief says so. Tests and scripts that use `os.tmpdir()` remove their
   directories ([lesson](.ai/lessons/2026-10-30-keep-heavy-data-off-tmp.md)).
+- Browser tests and QA agents never download into the user's `~/Downloads`: set the browser's
+  download directory to a folder under `.ai/tmp/` (or check bytes with `fetch()`), list every
+  downloaded file in the report and delete it before finishing
+  ([lesson](.ai/lessons/2026-11-19-browser-qa-downloads-stay-out-of-the-users-downloads.md)).
 - Turn a workflow you repeat often into a skill committed to git
   (`.agents/skills/<name>/SKILL.md`, exposed to Claude Code through a symlink in
   `.claude/skills/`). Check the existing `om-*` skills before writing a new one.

@@ -64,3 +64,10 @@ export function copyStatusMessage(result: CopyResult, hash: string): string {
     ? 'Copied.'
     : `Not copied: the browser blocked the clipboard. Full hash: ${hash}`;
 }
+
+/** The Content tab's Copy result (issue #52): a refused clipboard points at Download. */
+export function copyFileStatusMessage(result: CopyResult): string {
+  return result === 'copied'
+    ? 'Copied.'
+    : 'Not copied: the browser blocked the clipboard. Use Download instead.';
+}

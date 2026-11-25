@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { copyStatusMessage, copyText, firstSeenLabel, shortHash } from '../lib/artifact-versions';
+import {
+  copyFileStatusMessage,
+  copyStatusMessage,
+  copyText,
+  firstSeenLabel,
+  shortHash,
+} from '../lib/artifact-versions';
 
 const hash = '3f2a9c1d0e4b5a6978877665544332211ffeeddccbbaa99887766554433221100';
 const repositories = [
@@ -71,6 +77,15 @@ describe('copyStatusMessage', () => {
     expect(copyStatusMessage('copied', hash)).toBe('Copied.');
     expect(copyStatusMessage('failed', hash)).toBe(
       `Not copied: the browser blocked the clipboard. Full hash: ${hash}`,
+    );
+  });
+});
+
+describe('copyFileStatusMessage (issue #52)', () => {
+  it('confirms a copy and points at Download when the copy failed', () => {
+    expect(copyFileStatusMessage('copied')).toBe('Copied.');
+    expect(copyFileStatusMessage('failed')).toBe(
+      'Not copied: the browser blocked the clipboard. Use Download instead.',
     );
   });
 });
