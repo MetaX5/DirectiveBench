@@ -91,6 +91,7 @@ export function runGitProcess(
     let stderrBytes = 0;
     let closed = false;
     let forceKill: NodeJS.Timeout | undefined;
+    let killed = false;
     let watchTimer: NodeJS.Timeout | undefined;
 
     const sendSignal = (signal: NodeJS.Signals) => {
@@ -106,7 +107,10 @@ export function runGitProcess(
     const terminate = () => {
       if (forceKill) return;
       sendSignal('SIGTERM');
-      forceKill = setTimeout(() => sendSignal('SIGKILL'), options.killGraceMs);
+      forceKill = setTimeout(() => {
+        killed = true;
+        sendSignal('SIGKILL');
+      }, options.killGraceMs);
     };
     const timer = setTimeout(() => {
       result.timedOut = true;
@@ -171,6 +175,12 @@ export function runGitProcess(
       });
       child.stdin.end(options.stdin);
     }
+    // A child git forks while its group is being killed can miss the SIGKILL (seen on macOS) and
+    // keep the pipes open, so `close` would wait for it. Once git itself is gone, kill what is
+    // left of its group again (issue 297).
+    child.on('exit', () => {
+      if (killed) sendSignal('SIGKILL');
+    });
     child.on('close', (code: number | null) => {
       closed = true;
       clearTimeout(timer);
