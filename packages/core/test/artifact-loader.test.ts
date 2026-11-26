@@ -130,17 +130,21 @@ describe('loadLocalArtifact', () => {
     );
   });
 
-  it('ignores entries that are neither files, directories nor links', async () => {
-    await write('skills/x/SKILL.md', SKILL);
-    // A FIFO, not a Unix socket: a socket path is limited to 104 bytes on macOS (108 on Linux)
-    // and a long TMPDIR exceeds it. mkfifo has no such limit and throws instead of hanging.
-    const fifo = join(root, 'skills/x/fifo');
-    execFileSync('mkfifo', [fifo]);
-    expect(lstatSync(fifo).isFIFO()).toBe(true);
-    const loaded = await loadLocalArtifact(root, 'skills/x/SKILL.md');
-    expect(loaded.files.map((file) => file.path)).toEqual(['SKILL.md']);
-    expect(loaded.warnings).toEqual([]);
-  });
+  // Windows has no FIFOs in the file system (issue 160).
+  it.skipIf(process.platform === 'win32')(
+    'ignores entries that are neither files, directories nor links',
+    async () => {
+      await write('skills/x/SKILL.md', SKILL);
+      // A FIFO, not a Unix socket: a socket path is limited to 104 bytes on macOS (108 on Linux)
+      // and a long TMPDIR exceeds it. mkfifo has no such limit and throws instead of hanging.
+      const fifo = join(root, 'skills/x/fifo');
+      execFileSync('mkfifo', [fifo]);
+      expect(lstatSync(fifo).isFIFO()).toBe(true);
+      const loaded = await loadLocalArtifact(root, 'skills/x/SKILL.md');
+      expect(loaded.files.map((file) => file.path)).toEqual(['SKILL.md']);
+      expect(loaded.warnings).toEqual([]);
+    },
+  );
 
   it('keeps parser warnings for skills without metadata', async () => {
     await write('skills/bare/SKILL.md', 'no frontmatter');

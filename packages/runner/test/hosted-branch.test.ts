@@ -62,7 +62,7 @@ let gitLog: string;
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-branch-data-'));
-  remotes = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-branch-remotes-')));
+  remotes = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-branch-remotes-')));
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);
   // A git on PATH that logs every call and runs the real git.

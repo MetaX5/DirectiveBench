@@ -60,7 +60,7 @@ let locked: string[];
 
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'directivebench-missing-data-'));
-  sources = realpathSync(mkdtempSync(join(tmpdir(), 'directivebench-missing-sources-')));
+  sources = realpathSync.native(mkdtempSync(join(tmpdir(), 'directivebench-missing-sources-')));
   locked = [];
   handle = openDatabase(join(dataDir, 'directivebench.db'));
   await migrateDatabase(handle, migrations);

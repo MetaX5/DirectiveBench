@@ -81,8 +81,19 @@ async function isExecutableFile(path: string): Promise<boolean> {
 /** Extensions Windows can start without a shell (Node refuses `.bat`/`.cmd`, CVE-2024-27980). */
 const SPAWNABLE_EXTENSIONS = new Set(['.exe', '.com']);
 
-/** Candidate file names: `git` on POSIX; on Windows (`PATHEXT` set) `git.exe`/`git.com` only. */
-function gitFileNames(pathExt: string | undefined): string[] {
+/**
+ * `PATHEXT` when the environment has none on Windows, where every program has an extension: an
+ * environment of `PATH` alone found no git there (issue 160).
+ */
+const WINDOWS_DEFAULT_PATHEXT = '.COM;.EXE';
+
+/**
+ * Candidate file names: `git` on POSIX; `git.exe`/`git.com` only when `PATHEXT` is set or the
+ * platform is Windows (where a missing `PATHEXT` falls back to `.COM;.EXE`).
+ */
+function gitFileNames(env: NodeJS.ProcessEnv): string[] {
+  const pathExt =
+    env.PATHEXT ?? (process.platform === 'win32' ? WINDOWS_DEFAULT_PATHEXT : undefined);
   if (pathExt === undefined) return ['git'];
   return pathExt
     .split(';')
@@ -97,7 +108,7 @@ function gitFileNames(pathExt: string | undefined): string[] {
  * shipped inside the repository being registered. Returns an absolute path or null.
  */
 export async function findGitExecutable(env: NodeJS.ProcessEnv): Promise<string | null> {
-  const names = gitFileNames(env.PATHEXT);
+  const names = gitFileNames(env);
   for (const directory of absolutePathEntries(env.PATH)) {
     for (const name of names) {
       const candidate = join(directory, name);

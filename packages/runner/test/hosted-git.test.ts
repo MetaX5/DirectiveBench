@@ -129,7 +129,7 @@ describe('CA bundle (issue #61)', () => {
     expect(await resolveCaBundle({})).toEqual({ ok: true, caBundle: null });
     expect(await resolveCaBundle({ GIT_SSL_CAINFO: join(dir, 'link.pem') })).toEqual({
       ok: true,
-      caBundle: realpathSync(bundle),
+      caBundle: realpathSync.native(bundle),
     });
     const base = {
       GIT_SSL_CAINFO: join(dir, 'link.pem'),
@@ -441,7 +441,7 @@ describePosix('hosted git steps with a fake git', { timeout: FAKE_GIT_TEST_TIMEO
       LOCATION,
       'refs/heads/main',
     ]);
-    expect(call?.cwd).toBe(realpathSync(join(dir, 'git-home')));
+    expect(call?.cwd).toBe(realpathSync.native(join(dir, 'git-home')));
     expect(call?.env).not.toHaveProperty('GIT_NO_LAZY_FETCH');
     expect(call?.env).not.toHaveProperty('GIT_DIR');
     expect(call?.env).toMatchObject({

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { cn } from '../lib/utils';
@@ -20,6 +20,11 @@ function sources(dir: string): string[] {
 }
 
 const files = scope.roots.flatMap(sources);
+
+// Report and allowlist paths with `/` on every platform (issue 160: Windows gives `\`).
+function repoPath(file: string): string {
+  return relative(root, file).split(sep).join('/');
+}
 
 // Parsing every checked file with TypeScript takes ~0.2 s alone but over 5 s (vitest's default)
 // on the loaded 2-core CI runner while every package's suite runs in parallel (#149).
@@ -64,7 +69,7 @@ describe('design token usage in app and components', () => {
     it(rule, () => {
       const hits = files.flatMap((file) =>
         checkedText(file, readFileSync(file, 'utf8')).flatMap(([line, text]) =>
-          pattern.test(text) ? [`${relative(root, file)}:${line}`] : [],
+          pattern.test(text) ? [`${repoPath(file)}:${line}`] : [],
         ),
       );
       expect(hits).toEqual([]);
@@ -166,7 +171,7 @@ describe('MDX pages', () => {
 describe('Storybook documentation copy', () => {
   it('contains no en or em dash', () => {
     const storybook = files.filter((file) => {
-      const path = relative(root, file);
+      const path = repoPath(file);
       return /^(?:stories|\.storybook)\//.test(path) || /\.stories\.tsx?$/.test(path);
     });
     expect(storybook.length).toBeGreaterThan(0);
@@ -174,7 +179,7 @@ describe('Storybook documentation copy', () => {
       readFileSync(file, 'utf8')
         .split('\n')
         .flatMap((line, index) =>
-          /[\u2013\u2014]/.test(line) ? [`${relative(root, file)}:${index + 1}`] : [],
+          /[\u2013\u2014]/.test(line) ? [`${repoPath(file)}:${index + 1}`] : [],
         ),
     );
     expect(hits).toEqual([]);
@@ -218,7 +223,7 @@ describe('arbitrary Tailwind values', () => {
     'appear only as documented exceptions (FR-121-5)',
     () => {
       const hits = files.flatMap((file) => {
-        const path = relative(root, file);
+        const path = repoPath(file);
         const source = readFileSync(file, 'utf8');
         const words = file.endsWith('.mdx')
           ? checkedText(file, source).flatMap(([line, text]) =>
@@ -263,7 +268,7 @@ describe('motion', () => {
         .join('\n');
       const transitions = source.match(/(?<![\w:-])transition(?:-[a-z]+)?(?![\w-])/g) ?? [];
       const reduced = source.match(/motion-reduce:transition-none/g) ?? [];
-      return transitions.length > reduced.length ? [relative(root, file)] : [];
+      return transitions.length > reduced.length ? [repoPath(file)] : [];
     });
     expect(hits).toEqual([]);
   });
