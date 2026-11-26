@@ -140,6 +140,33 @@ describe('importCandidates (FR-118-27)', () => {
     expect(cut.map((candidate) => candidate.token)).toEqual(['/etc/hostname']);
   });
 
+  it('reports Windows absolute tokens on every platform (issue 302)', () => {
+    expect(tokens('@C:\\Users\\host\\hostname')).toEqual([
+      'absolute:C:\\Users\\host\\hostname',
+      'absolute:C:\\Users\\host',
+      'absolute:C:\\Users',
+    ]);
+    expect(tokens('@c:/x/y @Z:\\')).toEqual(['absolute:c:/x/y', 'absolute:Z:\\']);
+    expect(tokens('@\\\\server\\share\\f.md @\\x')).toEqual([
+      'absolute:\\\\server\\share\\f.md',
+      'absolute:\\\\server\\share',
+      'absolute:\\\\server',
+      'absolute:\\',
+      'absolute:\\x',
+    ]);
+    // Drive-relative, not a letter, two letters, a bare drive: none of them is absolute.
+    expect(tokens('@C:x @1:\\x @[:\\x @{:/x @CC:\\x @C:')).toEqual([]);
+  });
+
+  it('treats a backslash as a separator for .. segments and shortening (issue 302)', () => {
+    expect(tokens('@a\\..\\b')).toEqual(['relative:a\\..\\b', 'relative:a\\..', 'relative:a']);
+    expect(tokens('@a\\.\\b @a\\\\b')).toEqual([]);
+    const long = 'a'.repeat(IMPORT_TOKEN_MAX_LENGTH);
+    for (const text of [`@C:\\${long}\\..\\etc`, `@C:\\\\${long}`, `@C:\\x\\.\\${long}`]) {
+      expect(candidates(text).at(-1)?.kind, text.slice(0, 12)).toBe('too-long');
+    }
+  });
+
   it(
     'is linear in the input size, also for adversarial runs of @',
     async () => {

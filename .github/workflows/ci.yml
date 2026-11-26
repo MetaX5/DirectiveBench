@@ -78,13 +78,13 @@ jobs:
           pnpm test --concurrency=1
           --filter=@directivebench/core --filter=@directivebench/database
           --filter=@directivebench/benchmark-engine --filter=@directivebench/web
+          --filter=@directivebench/agent-adapters
           -- --coverage.enabled=false
       - name: Packages not yet passing on Windows (reported, not gated)
         continue-on-error: true
         run: >-
           pnpm test --continue --concurrency=1
-          --filter=@directivebench/runner --filter=@directivebench/agent-adapters
-          --filter=directivebench
+          --filter=@directivebench/runner --filter=directivebench
           -- --coverage.enabled=false
 
   build:

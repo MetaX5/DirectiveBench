@@ -1,6 +1,6 @@
 import { constants, type Stats } from 'node:fs';
 import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, posix, relative, resolve, sep } from 'node:path';
 import { canonicalSegment } from './bundle-inspection';
 import { importCandidates, IMPORT_TOKEN_MAX_LENGTH } from './import-tokens';
 import { errorCode, workspacePinIssue, type WorkspacePin } from '../workspace-pin';
@@ -379,7 +379,8 @@ export async function inspectWorkspace(
       const lexical = resolve(physical);
       const givenLexical =
         kind === 'relative' ? resolve(given, dirname(entry.path), token) : lexical;
-      if (kind === 'relative' && hasLinks && posix.normalize(token).startsWith('..')) {
+      // The platform's own `normalize`: on Windows `a\..\..\x` climbs too (issue 302).
+      if (kind === 'relative' && hasLinks && normalize(token).startsWith('..')) {
         reported.add(token);
         outside(
           entry.path,

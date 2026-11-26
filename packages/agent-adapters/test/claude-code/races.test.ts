@@ -89,7 +89,7 @@ describe('inspectWorkspace entry limit', () => {
     const inspected: string[] = [];
     hooks.readdir = (path) => (path === workspace ? Promise.resolve([...names]) : undefined);
     hooks.lstat = (path) => {
-      if (!path.startsWith(`${workspace}/f`)) return undefined;
+      if (!path.startsWith(join(workspace, 'f'))) return undefined;
       inspected.push(path);
       return Promise.resolve(
         Object.assign(Object.create(Object.getPrototypeOf(file)), file, {
@@ -202,6 +202,41 @@ describe('installClaudeArtifact under races', () => {
       });
       await rm(join(workspace, name));
     }
+  });
+
+  it('refuses an existing .claude file before a move that would replace it, as on Windows (issue 302)', async () => {
+    await writeFile(join(workspace, '.claude'), 'file');
+    // Windows `rename` (MoveFileEx) replaces a file at the destination instead of failing.
+    hooks.rename = async (from, to, rename) => {
+      await rm(to, { force: true });
+      return rename(from, to);
+    };
+    await expect(
+      installPinned(workspace, bundle('skill-md', { 'SKILL.md': '---\nname: pdf\n---\n' })),
+    ).rejects.toMatchObject({
+      code: 'artifact-install-conflict',
+      message: expect.stringMatching(/occupied\.$/),
+    });
+    expect((await lstat(join(workspace, '.claude'))).isFile()).toBe(true);
+  });
+
+  it('maps EPERM to a conflict only when the destination exists, as on Windows (issue 302)', async () => {
+    // Windows reports a `rename` onto an existing directory or link as EPERM.
+    hooks.rename = async (_from, to) => {
+      await mkdir(to);
+      return failing('EPERM');
+    };
+    await expect(
+      installPinned(workspace, bundle('skill-md', { 'SKILL.md': 'x' })),
+    ).rejects.toMatchObject({
+      code: 'artifact-install-conflict',
+      message: expect.stringMatching(/occupied \(EPERM\)/),
+    });
+    await rm(join(workspace, '.claude'), { recursive: true });
+    hooks.rename = () => failing('EPERM');
+    await expect(
+      installPinned(workspace, bundle('claude-md', { 'CLAUDE.md': 'x' })),
+    ).rejects.toMatchObject({ code: 'EPERM' });
   });
 
   it('propagates a move error that is not an occupied destination', async () => {

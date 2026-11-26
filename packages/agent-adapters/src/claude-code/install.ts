@@ -102,22 +102,31 @@ const OCCUPIED = new Set(['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR']);
 
 /**
  * Moves every top-level entry of the staging directory into the workspace with `rename`, then
- * checks what landed. `rename` replaces a link at the destination itself instead of following it
- * and fails on a non-empty directory, so a `.claude` that a still-running `setup` process planted
- * (a link, a file or a populated directory) makes the install fail closed and nothing is written
- * outside the workspace.
+ * checks what landed. `CLAUDE.md` and `AGENTS.md` replace the file read before (their new content
+ * is appended to it); an existing `.claude` is refused before the move, because `rename` replaces
+ * a file there on Windows (`MoveFileEx`) and a link everywhere. A `.claude` that a still-running
+ * `setup` process plants between that check and the move (a link, a file or a populated
+ * directory) still makes the install fail closed: `rename` fails on a non-empty directory (`EPERM`
+ * on Windows, which counts only when the destination now exists), and the check after the move
+ * refuses a replaced entry, so nothing is written outside the workspace.
  */
 async function moveIntoPlace(stage: string, workspaceDir: string): Promise<void> {
   for (const name of (await readdir(stage)).sort()) {
+    const destination = join(workspaceDir, name);
+    if (name === '.claude' && (await lstatOrNull(destination)) !== null) {
+      throw conflict(name, 'the destination is occupied');
+    }
     try {
-      await rename(join(stage, name), join(workspaceDir, name));
+      await rename(join(stage, name), destination);
     } catch (error) {
       const code = errorCode(error) as string;
-      if (OCCUPIED.has(code)) throw conflict(name, `the destination is occupied (${code})`);
+      if (OCCUPIED.has(code) || (code === 'EPERM' && (await lstatOrNull(destination)) !== null)) {
+        throw conflict(name, `the destination is occupied (${code})`);
+      }
       throw error;
     }
     // A direct child of the workspace that is a real directory or file (not a link) lies inside it.
-    const landed = await lstat(join(workspaceDir, name));
+    const landed = await lstat(destination);
     const plain = name === '.claude' ? landed.isDirectory() : landed.isFile() && landed.nlink === 1;
     if (!plain || landed.isSymbolicLink())
       throw conflict(name, 'it was replaced after installation');

@@ -1,10 +1,11 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PathEscapeError, resolveInside } from '../src/paths';
 
 describe('resolveInside', () => {
   it('resolves relative paths below the root', () => {
-    expect(resolveInside('/ws', 'a/b')).toBe('/ws/a/b');
-    expect(resolveInside('/ws/', './a/../c')).toBe('/ws/c');
+    expect(resolveInside('/ws', 'a/b')).toBe(resolve('/ws/a/b'));
+    expect(resolveInside('/ws/', './a/../c')).toBe(resolve('/ws/c'));
   });
 
   it('rejects absolute paths and NUL bytes as non-relative', () => {
@@ -19,7 +20,7 @@ describe('resolveInside', () => {
   });
 
   it('accepts names that merely start with two dots', () => {
-    expect(resolveInside('/ws', '..hidden')).toBe('/ws/..hidden');
+    expect(resolveInside('/ws', '..hidden')).toBe(resolve('/ws/..hidden'));
   });
 
   it('throws an error named PathEscapeError', () => {
