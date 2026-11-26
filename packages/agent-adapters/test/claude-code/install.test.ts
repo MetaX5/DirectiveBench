@@ -187,7 +187,8 @@ describe('installClaudeArtifact (SPEC-203 §4.1)', () => {
     const file = join(scratch, 'not-a-directory');
     await writeFile(file, 'x');
     await expect(pinWorkspace(file)).rejects.toThrow(/must be a real directory/);
-    if (process.getuid?.() !== 0) {
+    // Root searches every directory, and Windows ignores POSIX mode bits.
+    if (process.getuid?.() !== 0 && process.platform !== 'win32') {
       // A workspace that cannot be searched: reading CLAUDE.md fails with EACCES, not a conflict.
       await chmod(workspace, 0o600);
       try {

@@ -10,10 +10,12 @@ export const IMPORT_TOKEN_MAX_LENGTH = 4096;
 /**
  * A path an `@` import could name that needs a file system check (SPEC-118 FR-118-27):
  *
- * - `absolute` — starts with `/`;
+ * - `absolute` — starts with `/`, or is a Windows absolute path on every platform (issue 302): a
+ *   drive letter followed by `:\` or `:/`, or a leading `\` (a UNC `\\server\share` path or one
+ *   rooted on the current drive);
  * - `home` — `~` or `~/…`, resolved against the agent's `HOME`;
- * - `relative` — relative to the containing file and containing a `..` segment (a relative token
- *   without one stays below its file's directory and is never reported);
+ * - `relative` — relative to the containing file and containing a `..` segment, after `/` or
+ *   `\` (a relative token without one stays below its file's directory and is never reported);
  * - `too-long` — longer than {@link IMPORT_TOKEN_MAX_LENGTH} but possibly shorter once normalised
  *   (`token` holds its first characters only).
  */
@@ -24,6 +26,7 @@ export interface ImportCandidate {
 
 const AT = 0x40;
 const BACKSLASH = 0x5c;
+const COLON = 0x3a;
 const DOT = 0x2e;
 const SLASH = 0x2f;
 const SPACE = 0x20;
@@ -70,6 +73,24 @@ function withMarkdownCuts(token: string): string[] {
     if (MARKDOWN_CUTS.has(token.charCodeAt(index))) variants.push(token.slice(0, index));
   }
   return variants;
+}
+
+/**
+ * Whether `path` is absolute on POSIX or on Windows (issue 302): it starts with `/` or `\` (UNC
+ * or rooted on the current drive), or with a drive letter, `:` and a separator.
+ */
+function isAbsolute(path: string): boolean {
+  const first = path.charCodeAt(0);
+  const letter = first | 0x20;
+  const separator = path.charCodeAt(2);
+  return (
+    first === SLASH ||
+    first === BACKSLASH ||
+    (letter >= 0x61 &&
+      letter <= 0x7a &&
+      path.charCodeAt(1) === COLON &&
+      (separator === SLASH || separator === BACKSLASH))
+  );
 }
 
 /** JavaScript's `\s`: what a regular expression in Claude Code would treat as whitespace. */
@@ -141,23 +162,28 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
     TRAILING_PUNCTUATION.has(code(index));
   for (let index = end - 1; index >= start; index -= 1) {
     const current = code(index);
+    const next = code(index + 1);
+    // A lone backslash is a path separator on Windows, so it counts like `/` below (issue 302).
+    const separator = current === SLASH || (current === BACKSLASH && next !== SPACE);
     if (current === BACKSLASH) {
       // An escaped space becomes one character; a lone backslash is kept (and cuts a variant).
-      if (code(index + 1) === SPACE) {
+      if (next === SPACE) {
         seenShortening = true;
       } else {
         loneBackslash = index;
         loneBackslashPunctuation = trailingPunctuationStart(index);
       }
-    } else if (current === SLASH) {
-      const next = code(index + 1);
-      if (next === SLASH || (next === DOT && segmentEnds(index + 2))) seenShortening = true;
+    } else if (current === AT && index + 1 < end) {
+      yield* tokenCandidates(index + 1);
+    }
+    if (separator) {
+      if (next === SLASH || next === BACKSLASH || (next === DOT && segmentEnds(index + 2))) {
+        seenShortening = true;
+      }
       if (next === DOT && code(index + 2) === DOT && segmentEnds(index + 3)) {
         seenShortening = true;
         seenDotDot = true;
       }
-    } else if (current === AT && index + 1 < end) {
-      yield* tokenCandidates(index + 1);
     }
     if (MARKDOWN_CUTS.has(current)) {
       secondCut = nearestCut;
@@ -178,7 +204,8 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
         afterTilde === wordPunctuation ||
         afterTilde === loneBackslash ||
         afterTilde === loneBackslashPunctuation);
-    const kind: ImportCandidate['kind'] = first === SLASH ? 'absolute' : home ? 'home' : 'relative';
+    const absolute = isAbsolute(text.slice(tokenStart, Math.min(tokenStart + 3, end)));
+    const kind: ImportCandidate['kind'] = absolute ? 'absolute' : home ? 'home' : 'relative';
     // A relative token without a `..` segment cannot leave its file's directory (O(1) per `@`).
     if (kind === 'relative' && !startsWithDotDot && !seenDotDot) return;
     const ends = new Set([end, Math.max(wordPunctuation, tokenStart)]);
@@ -211,8 +238,13 @@ function* wordCandidates(text: string, start: number, end: number): Generator<Im
         variants = spellings.flatMap(withMarkdownCuts);
       }
       for (const token of variants) {
-        // A `~` followed only by punctuation is home only once the punctuation is stripped.
-        if (yielded.has(token) || (kind === 'home' && token !== '~' && !token.startsWith('~/'))) {
+        // A `~` followed only by punctuation is home only once the punctuation is stripped, and a
+        // drive letter cut before its separator (`C:`, `C`) is no absolute path.
+        if (
+          yielded.has(token) ||
+          (kind === 'home' && token !== '~' && !token.startsWith('~/')) ||
+          (kind === 'absolute' && !isAbsolute(token))
+        ) {
           continue;
         }
         yielded.add(token);

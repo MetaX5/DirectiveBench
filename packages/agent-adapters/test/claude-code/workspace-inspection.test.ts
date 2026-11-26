@@ -35,6 +35,9 @@ import { bundle, inspectPinned, installPinned } from './helpers';
 /** Timeout for the heavier tests: they take well under a second alone, but CI runs every package on 2 cores. */
 const LOADED_RUNNER_TIMEOUT_MS = 60_000;
 
+/** A case that relies on POSIX file system features; each use says which one Windows lacks. */
+const posixOnly = it.skipIf(process.platform === 'win32');
+
 let scratch: string;
 let workspace: string;
 let home: string;
@@ -161,14 +164,16 @@ describe('inspectWorkspace: Claude Code configuration (FR-118-06, AC-16, AC-26)'
     ]);
   });
 
-  it('fails closed on a directory it cannot list', async () => {
+  // Windows ignores POSIX mode bits, so chmod cannot make an entry unreadable there.
+  posixOnly('fails closed on a directory it cannot list', async () => {
     if (process.getuid?.() === 0) return; // root reads every directory
     await put('locked/inner.md', 'x');
     await chmod(join(workspace, 'locked'), 0o000);
     expect(summary(await inspect())).toEqual(['workspace-contains-claude-config locked']);
   });
 
-  it('fails closed on a workspace root it cannot list', async () => {
+  // Windows ignores POSIX mode bits, so chmod cannot make an entry unreadable there.
+  posixOnly('fails closed on a workspace root it cannot list', async () => {
     if (process.getuid?.() === 0) return; // root reads every directory
     await chmod(workspace, 0o000);
     try {
@@ -310,37 +315,43 @@ describe('inspectWorkspace: imports and links (FR-118-27, AC-27)', () => {
     expect(summary(await inspect())).toEqual([`workspace-imports-outside CLAUDE.md ${hostFile}`]);
   });
 
-  it('refuses a hard-linked file and a special file', async () => {
+  it('refuses a hard-linked file', async () => {
     await link(hostFile, join(workspace, 'hard.md'));
-    execFileSync('mkfifo', [join(workspace, 'pipe')]);
-    const findings = await inspect();
-    expect(summary(findings)).toEqual([
-      'workspace-imports-outside hard.md',
-      'workspace-imports-outside pipe',
-    ]);
-    expect(findings[1]?.detail).toMatch(/not a regular file/);
+    expect(summary(await inspect())).toEqual(['workspace-imports-outside hard.md']);
   });
 
-  it('fails closed on a file it cannot read and a target whose existence is unknown', async () => {
-    if (process.getuid?.() === 0) return; // root reads every file
-    await put('secret.md', 'x');
-    await chmod(join(workspace, 'secret.md'), 0o000);
-    await mkdir(join(scratch, 'sealed'));
-    await put('CLAUDE.md', `@${join(scratch, 'sealed', 'x')}\n`);
-    await chmod(join(scratch, 'sealed'), 0o000);
-    try {
-      const findings = await inspect();
-      expect(summary(findings)).toEqual([
-        `workspace-imports-outside CLAUDE.md ${join(scratch, 'sealed', 'x')}`,
-        'workspace-imports-outside secret.md',
-      ]);
-      expect(findings[0]?.detail).toMatch(/cannot be determined \(EACCES\)/);
-      expect(findings[1]?.detail).toMatch(/cannot be read \(EACCES\)/);
-    } finally {
-      await chmod(join(scratch, 'sealed'), 0o700);
-      await chmod(join(workspace, 'secret.md'), 0o600);
-    }
+  // Windows has no named pipes in the file system (`mkfifo`), so there is no special file to plant.
+  posixOnly('refuses a special file', async () => {
+    execFileSync('mkfifo', [join(workspace, 'pipe')]);
+    const findings = await inspect();
+    expect(summary(findings)).toEqual(['workspace-imports-outside pipe']);
+    expect(findings[0]?.detail).toMatch(/not a regular file/);
   });
+
+  // Windows ignores POSIX mode bits, so chmod cannot make an entry unreadable there.
+  posixOnly(
+    'fails closed on a file it cannot read and a target whose existence is unknown',
+    async () => {
+      if (process.getuid?.() === 0) return; // root reads every file
+      await put('secret.md', 'x');
+      await chmod(join(workspace, 'secret.md'), 0o000);
+      await mkdir(join(scratch, 'sealed'));
+      await put('CLAUDE.md', `@${join(scratch, 'sealed', 'x')}\n`);
+      await chmod(join(scratch, 'sealed'), 0o000);
+      try {
+        const findings = await inspect();
+        expect(summary(findings)).toEqual([
+          `workspace-imports-outside CLAUDE.md ${join(scratch, 'sealed', 'x')}`,
+          'workspace-imports-outside secret.md',
+        ]);
+        expect(findings[0]?.detail).toMatch(/cannot be determined \(EACCES\)/);
+        expect(findings[1]?.detail).toMatch(/cannot be read \(EACCES\)/);
+      } finally {
+        await chmod(join(scratch, 'sealed'), 0o700);
+        await chmod(join(workspace, 'secret.md'), 0o600);
+      }
+    },
+  );
 });
 
 describe('inspectWorkspace: limits (FR-118-27)', () => {

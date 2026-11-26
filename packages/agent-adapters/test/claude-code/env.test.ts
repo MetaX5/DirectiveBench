@@ -1,4 +1,4 @@
-import { delimiter } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildClaudeEnv, claudeAuthProfile, ClaudeCodeError } from '../../src/claude-code';
 
@@ -81,7 +81,7 @@ describe('buildClaudeEnv', () => {
       LANG: 'C.UTF-8',
       HOME: '/run/home',
       USERPROFILE: '/run/home',
-      CLAUDE_CONFIG_DIR: '/run/home/.claude',
+      CLAUDE_CONFIG_DIR: join('/run/home', '.claude'),
       TMPDIR: '/run/tmp',
       TEMP: '/run/tmp',
       TMP: '/run/tmp',
