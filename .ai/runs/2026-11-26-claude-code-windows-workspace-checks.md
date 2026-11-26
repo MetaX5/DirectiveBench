@@ -3,7 +3,7 @@ title: Claude Code workspace checks on Windows (issue 302)
 date: 2026-11-26
 agent: Claude Code / claude-opus-5-5
 trigger: user request ("bierzemy #302"), om-auto-fix-issue 302
-status: in-progress
+status: completed
 branch: fix/issue-302-windows-workspace-checks
 specs: [SPEC-118, SPEC-203, SPEC-012]
 ---
@@ -71,7 +71,8 @@ PR → review → CI on Windows.
   2 new `races` tests fail against the old `install.ts`. Both pass with the fix.
 - `pnpm --filter @directivebench/agent-adapters test`: 405 passed, 2 skipped, 100% coverage.
 - Full gate (`pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:pack`, Linux, Node 24): exit 0; core 354, agent-adapters 405 (+2 skipped), database 392, benchmark-engine 542, runner 322, cli 216, web 686 tests, 100% coverage; packaging verification passed.
-- Windows: _pending_ (the PR's `Unit tests (Windows)` job).
+- Windows: `Unit tests (Windows)` on PR #306 passed with `agent-adapters` in the gated step: 285 passed, 123 skipped ([run 45837275637](https://github.com/MetaX5/DirectiveBench/actions/runs/45837275637/job/139969566626)). Every other check on the PR passed too (Linux and macOS 100% coverage, oldest Node, e2e, Storybook, build and pack, CodeQL).
+- Not verified: a real Windows machine and the real `claude` CLI on Windows (non-goal). The skipped Windows cases are not counted one by one, and the run of the Windows-only climb test is inferred from `it.runIf(win32)`, not from a per-test log line.
 
 ## Problems and deviations
 
