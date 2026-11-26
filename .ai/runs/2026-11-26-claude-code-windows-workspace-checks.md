@@ -58,6 +58,13 @@ PR → review → CI on Windows.
 5. `.github/workflows/ci.yml`: `agent-adapters` moved into the gated Windows step; SPEC-012 §8
    text updated.
 
+## Review
+
+- Self-review (`om-code-review`, round 1) found one more Windows gap: the symbolic-link climb guard in
+  `workspace-inspection.ts` used `posix.normalize`, so on Windows `a\..\..\x` in a workspace with links
+  was not refused. Now the platform `normalize` (identical on Linux/macOS); a Windows-only test
+  (`it.runIf(win32)`) covers it in the Windows CI job.
+
 ## Verification
 
 - Red first (Linux): the 2 new `import-tokens` tests fail against the old `import-tokens.ts`; the

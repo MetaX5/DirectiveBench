@@ -300,6 +300,22 @@ describe('inspectWorkspace: imports and links (FR-118-27, AC-27)', () => {
     expect(findings[0]?.detail).toMatch(/symbolic links/);
   });
 
+  // Only Windows reads `\` as a separator, so only there does this token climb (issue 302).
+  it.runIf(process.platform === 'win32')(
+    'refuses a climbing relative import written with backslashes when links exist (Windows)',
+    async () => {
+      await put('deep/dir/CLAUDE.md', '@x\\..\\..\\sibling.md\n');
+      await put('deep/sibling.md', 's');
+      await symlink('deep/dir/CLAUDE.md', join(workspace, 'shallow.md'));
+      const findings = await inspect();
+      // The cut variant `x\..\..` climbs as well, so it may be reported beside the whole token.
+      expect(summary(findings)).toContain(
+        'workspace-imports-outside deep/dir/CLAUDE.md x\\..\\..\\sibling.md',
+      );
+      for (const finding of findings) expect(finding.detail).toMatch(/symbolic links/);
+    },
+  );
+
   it('cuts a long token in the finding to 200 characters', async () => {
     const deep = join(host, 'd'.repeat(150), 'e'.repeat(150));
     await mkdir(dirname(deep), { recursive: true });
